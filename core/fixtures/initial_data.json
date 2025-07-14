@@ -1,0 +1,11 @@
+[
+  { "model": "core.role", "pk": 1, "fields": { "name": "Client" } },
+  { "model": "core.role", "pk": 2, "fields": { "name": "Master" } },
+  { "model": "core.role", "pk": 3, "fields": { "name": "Admin" } },
+
+  { "model": "core.appointmentstatus", "pk": 1, "fields": { "name": "booked" } },
+  { "model": "core.appointmentstatus", "pk": 2, "fields": { "name": "confirmed" } },
+
+  { "model": "core.paymentstatus", "pk": 1, "fields": { "name": "pending" } },
+  { "model": "core.paymentstatus", "pk": 2, "fields": { "name": "paid" } }
+]

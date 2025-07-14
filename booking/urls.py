@@ -1,24 +1,31 @@
 """
-URL configuration for booking project.
+URL configuration for the *booking* project.
 
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/5.2/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+Определяет корневые маршруты сайта и подключает URL‑конфиги
+приложений.
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
+from django.views.generic import RedirectView
+
 from core.autocomplete import ServiceAutocomplete
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('autocomplete/service/', ServiceAutocomplete.as_view(), name='service-autocomplete'),
+    # --- административная панель ---
+    path("admin/", admin.site.urls),
+
+    # --- публичная часть / кабинеты пользователей ---
+    # Если приложение *accounts* находится в пакете booking.accounts,
+    # замените на "booking.accounts.urls".
+    path("accounts/", include("accounts.urls", namespace="accounts")),
+
+    # --- вспомогательные сервис‑эндпойнты ---
+    path(
+        "autocomplete/service-master/",
+        ServiceAutocomplete.as_view(),
+        name="service-master-autocomplete",
+    ),
+
+    # --- корневой URL: переадресуем на страницу логина ---
+    path("", RedirectView.as_view(pattern_name="accounts:login", permanent=False)),
 ]
