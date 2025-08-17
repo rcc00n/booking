@@ -312,21 +312,25 @@ class MasterAvailabilityAdmin(ExportCsvMixin, MasterSelectorMixing, admin.ModelA
     export_fields = ["master", "start_time", "end_time", "reason"]
 
     def has_add_permission(self, request):
-        return request.user.has_perm("core.add_masteravailability")
+        if request.user.is_superuser or request.user.is_staff:
+            return True
+        return hasattr(request.user, "master_profile")
 
     def has_change_permission(self, request, obj=None):
-        if not request.user.has_perm("core.change_masteravailability"):
-            return False
-        if obj is None or not hasattr(request.user, "master_profile") or request.user.is_superuser:
+        if request.user.is_superuser or request.user.is_staff:
             return True
-        return obj.master_id == request.user.id
+        if hasattr(request.user, "master_profile"):
+            # список — разрешаем открыть; конкретный объект — только свой
+            return True if obj is None else (obj.master_id == request.user.id)
+        return False
 
+    # --- удаление: только свои (админ/стфф — любые)
     def has_delete_permission(self, request, obj=None):
-        if not request.user.has_perm("core.delete_masteravailability"):
-            return False
-        if obj is None or not hasattr(request.user, "master_profile") or request.user.is_superuser:
+        if request.user.is_superuser or request.user.is_staff:
             return True
-        return obj.master_id == request.user.id
+        if hasattr(request.user, "master_profile"):
+            return True if obj is None else (obj.master_id == request.user.id)
+        return False
 
     # --- только свои time off ---
     def get_queryset(self, request):
@@ -334,13 +338,18 @@ class MasterAvailabilityAdmin(ExportCsvMixin, MasterSelectorMixing, admin.ModelA
         if hasattr(request.user, "master_profile") and not request.user.is_superuser:
             return qs.filter(master=request.user)
         return qs
+    def get_form(self, request, obj=None, **kwargs):
+        BaseForm = super().get_form(request, obj, **kwargs)
 
-    # --- мастер фиксируется для мастера ---
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if db_field.name == "master" and hasattr(request.user, "master_profile") and not request.user.is_superuser:
-            kwargs["queryset"] = CustomUserDisplay.objects.filter(id=request.user.id)
-            kwargs["initial"] = request.user.id
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+        class WrappedForm(BaseForm):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                # Только для мастеров (не суперюзеров/стффа)
+                if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+                    if "master" in self.fields:
+                        # визуально фиксируем поле
+                        self.fields["master"].disabled = True
+        return WrappedForm
 
     def get_changeform_initial_data(self, request):
         initial = super().get_changeform_initial_data(request)
@@ -358,7 +367,8 @@ class MasterAvailabilityAdmin(ExportCsvMixin, MasterSelectorMixing, admin.ModelA
                 pass
         if const_master:
             initial["master"] = const_master
-
+        if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+            initial["master"] = request.user.id
 
         return initial
 
@@ -378,8 +388,7 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
         time_str = request.GET.get("time")
         const_master = request.GET.get("master")
 
-        if hasattr(request.user, "master_profile") and not request.user.is_superuser:
-            initial["master"] = request.user.id
+
 
         if date_str and time_str:
             try:
@@ -390,7 +399,8 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
                 pass
         if const_master:
             initial["master"] = const_master
-
+        if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+            initial["master"] = request.user.id
 
         return initial
 
@@ -405,27 +415,41 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
                     if last_status:
                         form.base_fields['status'].initial = last_status.status
                 kwargs_inner['user'] = request.user
-                return form(*args, **kwargs_inner)
+                f = form(*args, **kwargs_inner)
+                if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+
+                    f.fields['master'].disabled = True  # только UI; защита — в save_model
+                return f
 
         return WrappedForm
 
     # --- права ---
     def has_add_permission(self, request):
-        return request.user.has_perm("core.add_appointment")
+        if request.user.is_superuser or request.user.is_staff:
+            return True
+        if hasattr(request.user, "master_profile"):
+            return True   # разрешаем мастеру создавать
+        return False
 
     def has_change_permission(self, request, obj=None):
-        if not request.user.has_perm("core.change_appointment"):
-            return False
-        if obj is None or not hasattr(request.user, "master_profile") or request.user.is_superuser:
+        # админ → всё
+        if request.user.is_superuser or request.user.is_staff:
             return True
-        return obj.master_id == request.user.id
+        # мастер → только свои записи
+        if hasattr(request.user, "master_profile"):
+            if obj is None:
+                return True  # список доступен
+            return obj.master_id == request.user.id
+        return False
 
     def has_delete_permission(self, request, obj=None):
-        if not request.user.has_perm("core.delete_appointment"):
-            return False
-        if obj is None or not hasattr(request.user, "master_profile") or request.user.is_superuser:
+        if request.user.is_superuser or request.user.is_staff:
             return True
-        return obj.master_id == request.user.id
+        if hasattr(request.user, "master_profile"):
+            if obj is None:
+                return True
+            return obj.master_id == request.user.id
+        return False
 
     # --- только свои записи мастеру ---
     def get_queryset(self, request):
@@ -460,10 +484,8 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
 
         appointments = Appointment.objects.select_related('client', 'service', 'master')
 
-        if hasattr(request.user, "master_profile"):
-            masters = CustomUserDisplay.objects.filter(id=request.user.id)
-        else:
-            masters = CustomUserDisplay.objects.filter(
+
+        masters = CustomUserDisplay.objects.filter(
                 id__in=appointments.values_list('master_id', flat=True)
             ).distinct()
         start_of_day = make_aware(datetime.combine(selected_date, datetime.min.time()))
@@ -530,10 +552,9 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
 
         return response
     def save_model(self, request, obj, form, change):
-        super().save_model(request, obj, form, change)
         if hasattr(request.user, "master_profile") and not request.user.is_superuser:
-            if obj.master_id is None:
-                obj.master = request.user
+            obj.master = request.user
+        super().save_model(request, obj, form, change)
 
 
 # -----------------------------
