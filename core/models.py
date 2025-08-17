@@ -248,11 +248,11 @@ class Appointment(models.Model):
                 master__master_profile__room=master_profile.room,
                 start_time__lt=this_end,
                 start_time__gte=self.start_time - timedelta(hours=3)
-            ).exclude(id=self.id)
+            ).exclude(id=self.id).exclude(appointmentstatushistory__status=cancelled_status)
 
             for appt in overlapping_room:
                 appt_end = appt.start_time + timedelta(minutes=appt.service.duration_min)
-                if self.start_time < appt_end and this_end > appt.start_time:
+                if self.start_time < appt_end and this_end > appt.start_time :
                     raise ValidationError({
                         "start_time": f"Room '{master_profile.room}' is occupied at this time."
                     })

@@ -5,7 +5,7 @@
         <tr>
             <th class="time-col"></th>
             {% for master in masters %}
-                <th class="master-col">
+                <th class="master-col" colspan="2">
                     <div class="master-header">
                         <div class="initials-circle">
                             {{ master.first_name|slice:":1" }}{{ master.last_name|slice:":1" }}
@@ -18,6 +18,7 @@
             {% endfor %}
         </tr>
         </thead>
+
         <tbody>
         {% for row in calendar_table %}
             <tr>
@@ -26,23 +27,29 @@
                         {{ row.time|string_to_ampm }}
                     {% endif %}
                 </td>
-                {% for cell in row.cells %}
-                    {% if cell.skip %}
-                        {# ничего не рендерим, пропускаем #}
 
-                    {% elif cell.unavailable %}
-                        <td rowspan="{{ cell.rowspan }}" class="unavailable-cell"
+                {% for cell in row.cells %}
+                    {# 1) продолжающиеся ячейки (rowspan) — не рендерим #}
+                    {% if cell.skip %}
+                        {# nothing #}
+
+                        {# 2) недоступность мастера: всегда двухколоночная #}
+                    {% elif cell.unavailable or cell.kind == 'unavailable' %}
+                        <td rowspan="{{ cell.rowspan }}" colspan="{{ cell.colspan|default:2 }}" class="unavailable-cell {% if cell.kind == 'unavailable_right' %}lane-right{% endif %}"
                             data-reason="{{ cell.reason }}"
                             data-start="{{ cell.start }}"
                             data-end="{{ cell.end }}"
                             data-until="{{ cell.until }}"
                             data-id="{{ cell.availability_id }}">
-                            <div>{{ cell.html }}</div>
+                            <div>{{ cell.html|safe }}</div>
                         </td>
 
-                    {% elif cell.rowspan > 1 %}
-                        <td rowspan="{{ cell.rowspan }}" class="event"
-                            onclick="window.location.href='/admin/core/appointment/{{cell.appt_id}}/change/'"
+                        {# 3) событие (апойтмент): активный = 2 колонки, отменённый = 1 колонка #}
+                    {% elif cell.kind == 'appt_active' or cell.kind == 'appt_cancelled' or cell.appointment %}
+                        <td rowspan="{{ cell.rowspan|default:1 }}"
+                            colspan="{% if cell.status == 'Cancelled' %}1{% else %}{{ cell.colspan|default:2 }}{% endif %}"
+                            class="event {% if cell.kind == 'appt_cancelled' %}lane-left{% elif cell.kind == 'appt_active_right' %}lane-right{% endif %}"
+                            onclick="window.location.href='/admin/core/appointment/{{ cell.appt_id }}/change/'"
                             data-client="{{ cell.client }}"
                             data-phone="{{ cell.phone }}"
                             data-service="{{ cell.service }}"
@@ -53,29 +60,31 @@
                             data-price="{{ cell.price }}"
                             data-discount="{{ cell.discount }}"
                             data-pricedisc="{{ cell.price_discounted }}">
-                            <div style="background-color: {{ cell.background }}; {% if cell.status == "Cancelled" %} opacity: 50%; {% endif %} position: relative;">
-                                {% if cell.discount != "" or cell.price != cell.price_discounted %}
-                                    <div style="
-                                        position: absolute;
-                                        top: 4px;
-                                        right: 6px;
-                                        background: rgba(255,64,129,0.6);
-                                        color: white;
-                                        font-size: 15px;
-                                        font-weight: bold;
-                                        border-radius: 4px;
-                                        padding: 2px 4px;
-                                    ">
-                                        %
-                                    </div>
+                            <div class="event-inner"
+                                 style="background-color: {{ cell.background }}; {% if cell.status == 'Cancelled' %}opacity:.6;{% endif %} position:relative;">
+
+                                {# Show discount badge only if NOT cancelled and discount present #}
+                                {% if cell.status != "Cancelled" %}
+                                    {% if cell.discount or cell.price != cell.price_discounted %}
+                                        <div style="
+            position:absolute; top:4px; right:6px;
+            background:rgba(255,64,129,.6); color:#fff;
+            font-size:15px; font-weight:bold; border-radius:4px; padding:2px 4px;">
+                                            %
+                                        </div>
+                                    {% endif %}
                                 {% endif %}
+
                                 {{ cell.html|safe }}
                             </div>
                         </td>
 
+                        {# 4) свободные ячейки: по умолчанию 2 колонки; свободная половинка рядом с Cancelled — 1 колонка #}
                     {% else %}
-                        <td>
-                            <div class="calendar-cell"
+                        <td rowspan="{{ cell.rowspan|default:1 }}"
+                            colspan="{% if cell.kind == 'free_half' %}1{% else %}{{ cell.colspan|default:2 }}{% endif %}"
+                        class="{% if cell.kind == 'free_half' and cell.lane == 'left' %}lane-left{% endif %}{% if cell.kind == 'free_half' and cell.lane == 'right' %} lane-right{% endif %}">
+                            <div class="calendar-cell "
                                  data-time="{{ row.time|string_to_ampm }}"
                                  data-time-label="{{ row.time|string_to_ampm }}"
                                  data-master="{{ cell.master_id }}"

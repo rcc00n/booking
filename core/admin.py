@@ -459,18 +459,7 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
         payment_statuses = PaymentStatus.objects.all()
 
         appointments = Appointment.objects.select_related('client', 'service', 'master')
-        cancelled_status = AppointmentStatus.objects.filter(name="Cancelled").first()
-        if not request.GET.get("status"):
-            appointments = appointments.exclude(
-                appointmentstatushistory__status=cancelled_status
-            )
-        else:
-            # Если выбран какой-либо статус
-            selected_status = request.GET.get("status")
-            if str(cancelled_status.id) != selected_status:
-                appointments = appointments.exclude(
-                    appointmentstatushistory__status=cancelled_status
-                )
+
         if hasattr(request.user, "master_profile"):
             masters = CustomUserDisplay.objects.filter(id=request.user.id)
         else:
@@ -847,158 +836,379 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
     master_ids = [m.id for m in masters]
     MASTER_COLORS = dict(zip(master_ids, cycle(COLOR_PALETTE)))
 
-
+    # сетка времени
     while time_pointer <= end_time:
         slot_times.append(time_pointer.strftime('%H:%M'))
         time_pointer += timedelta(minutes=15)
 
-    slot_map = {}
-    skip_map = {}
+    two_col_map = {}
+    cancel_lanes = {}   # cancel_lanes[mid][lane][time]
+    skip_two = {}       # skip двухколоночных (active/unavailable)
+    skip_lane = {}      # skip одноколоночных по дорожкам (cancelled и перенос вправо)
 
-    # --- Appointments ---
+    for m in masters:
+        mid = m.id
+        two_col_map[mid] = {}
+        cancel_lanes[mid] = {0: {}, 1: {}}
+        skip_two[mid] = {}
+        skip_lane[mid] = {0: {}, 1: {}}
+
+    # статус Cancelled
+    cancelled_status = AppointmentStatus.objects.filter(name="Cancelled").first()
+    cancelled_id = getattr(cancelled_status, "id", None)
+
+    # === APPOINTMENTS ===
     for appt in appointments:
-        local_start = localtime(appt.start_time)
-        if local_start.date() != selected_date:
-            continue  # 💥 вот тут должен быть continue до skip_map
+        start_local = localtime(appt.start_time)
+        if start_local.date() != selected_date:
+            continue
 
-        master_id = appt.master_id
-        time_key = local_start.strftime('%H:%M')
-        duration = appt.service.duration_min + appt.service.extra_time_min
-        rowspan = max(1, duration // 15)
+        mid = appt.master_id
+        slot_key = start_local.strftime('%H:%M')
+        total_min = (appt.service.duration_min or 0) + (appt.service.extra_time_min or 0)
+        rowspan = max(1, (-(-total_min // 15)))  # ceil
 
-        slot_map.setdefault(master_id, {})
-        skip_map.setdefault(master_id, {})
+        last_status = appt.appointmentstatushistory_set.order_by('-set_at').first()
+        is_cancelled = (last_status and last_status.status_id == cancelled_id)
 
-        slot_map[master_id][time_key] = {
-            "appointment": appt,
-            "rowspan": rowspan,
-        }
+        if not is_cancelled:
+            two_col_map[mid][slot_key] = {
+                "kind": "appt_active",
+                "rowspan": rowspan,
+                "colspan": 2,
+                "appt": appt,
+            }
+            for i in range(rowspan):
+                t = (start_local + timedelta(minutes=15 * i)).strftime('%H:%M')
+                skip_two[mid][t] = True
+        else:
+            lane0_busy = skip_lane[mid][0].get(slot_key) or (slot_key in cancel_lanes[mid][0])
+            lane = 0 if not lane0_busy else 1
+            cancel_lanes[mid][lane][slot_key] = {
+                "kind": "appt_cancelled",
+                "rowspan": rowspan,
+                "colspan": 1,
+                "appt": appt,
+            }
+            for i in range(rowspan):
+                t = (start_local + timedelta(minutes=15 * i)).strftime('%H:%M')
+                skip_lane[mid][lane][t] = True
 
-        for i in range(1, rowspan):
-            t = local_start + timedelta(minutes=i * 15)
-            skip_map[master_id][t.strftime('%H:%M')] = True
-
-    # --- Vacations / Breaks ---
-
-    availability_map = {}
-
+    # === AVAILABILITY (перерывы) ===
     for period in availabilities:
-        master_id = int(getattr(period.master, "id", period.master))
+        mid = int(getattr(period.master, "id", period.master))
         start = localtime(period.start_time)
         end = localtime(period.end_time)
+        if start.date() > selected_date or end.date() < selected_date:
+            continue
 
-        if start.date() <= selected_date <= end.date():
-            day_start = datetime.combine(selected_date, time(8, 0)).replace(tzinfo=start.tzinfo)
-            day_end = datetime.combine(selected_date, time(21, 15)).replace(tzinfo=end.tzinfo)
+        day_start = datetime.combine(selected_date, time(8, 0)).replace(tzinfo=start.tzinfo)
+        day_end = datetime.combine(selected_date, time(21, 15)).replace(tzinfo=start.tzinfo)
+        block_start = max(start, day_start)
+        block_end = min(end, day_end)
+        if block_start >= block_end:
+            continue
 
-            block_start = max(start, day_start)
-            block_end = min(end, day_end)
+        minutes = int((block_end - block_start).total_seconds() // 60)
+        rowsp = max(1, (-(-minutes // 15)))  # ceil
+        slot_key = block_start.strftime('%H:%M')
 
-            total_minutes = int((block_end - block_start).total_seconds() // 60)
-            rowspan = max(1, total_minutes // 15)
+        if slot_key not in two_col_map[mid]:
+            two_col_map[mid][slot_key] = {
+                "kind": "unavailable",
+                "rowspan": rowsp,
+                "colspan": 2,
+                "reason": period.get_reason_display(),
+                "from": block_start.strftime("%I:%M%p").lstrip('0'),
+                "to": block_end.strftime("%I:%M%p").lstrip('0'),
+                "until": period.end_time.strftime("%d %b %Y"),
+                "availability_id": period.id,
+            }
+            for i in range(rowsp):
+                t = (block_start + timedelta(minutes=15 * i)).strftime('%H:%M')
+                skip_two[mid][t] = True
+            # чтобы рядом с брейком не появлялись половинки
+            for lane in (0, 1):
+                for i in range(rowsp):
+                    t = (block_start + timedelta(minutes=15 * i)).strftime('%H:%M')
+                    skip_lane[mid][lane][t] = True
 
-            # Найдём слот начала: ближайший к block_start
-            slot_str = block_start.strftime('%H:%M')
-            i = bisect_left(slot_times, slot_str)
-            available_slots = slot_times[i:i+rowspan]
-
-            # Найдём первый незанятый слот для отрисовки Vacation
-            skip_map.setdefault(master_id, {})
-            slot_map_for_master = slot_map.get(master_id, {})
-            availability_map.setdefault(master_id, {})
-
-            start_slot = None
-            for candidate in available_slots:
-                if candidate not in skip_map[master_id] and candidate not in slot_map_for_master:
-                    start_slot = candidate
-                    break
-
-            if start_slot:
-
-                availability_map[master_id][start_slot] = {
-                    "rowspan": rowspan,
-                    "reason": period.reason,
-                    "start": block_start.strftime("%I:%M%p").lstrip('0'),
-                    "end": block_end.strftime("%I:%M%p").lstrip('0'),
-                    "until": period.end_time.strftime("%d %b %Y"),
-                    "availability_id": period.id,
-                }
-
-            # Помечаем все остальные как skip
-            for j in range(rowspan):
-                t = block_start + timedelta(minutes=j * 15)
-                skip_key = t.strftime('%H:%M')
-                skip_map[master_id][skip_key] = True
-
-    # --- Table build ---
-
+    # === финальная сборка ===
     calendar_table = []
-    for time_index, time_str in enumerate(slot_times):
+
+    for time_str in slot_times:
         row = {"time": time_str, "cells": []}
+
         for master in masters:
-            master_id = master.id
+            mid = master.id
 
+            # 1) старт двухколоночной?
+            if time_str in two_col_map[mid]:
+                cell = two_col_map[mid][time_str]
 
-            if master_id in slot_map and time_str in slot_map[master_id]:
-                data = slot_map[master_id][time_str]
-                appt = data["appointment"]
-                appt_promocode = getattr(appt, 'appointmentpromocode', None)
+                # Проверка пересечения с отменённой слева по любому слоту этого диапазона
+                try:
+                    start_idx = slot_times.index(time_str)
+                except ValueError:
+                    start_idx = 0
+                span_times = slot_times[start_idx:start_idx + cell["rowspan"]]
+                overlaps_cancel_left = any(skip_lane[mid][0].get(t) for t in span_times)
 
-                local_start = localtime(appt.start_time)
-                local_end = local_start + timedelta(minutes=appt.service.duration_min) + timedelta(minutes=appt.service.extra_time_min)
-                last_status = appt.appointmentstatushistory_set.order_by('-set_at').first()
-                status_name = last_status.status.name if last_status else "Unknown"
-                row["cells"].append({
-                    "html": f"""
-                                        <div>
-                                            <div style="font-size:1.8vh;">
-                                                {local_start.strftime('%I:%M').lstrip('0')} – {local_end.strftime('%I:%M').lstrip('0')}
-                                                <strong>{escape(appt.client.get_full_name())}</strong>
-                                            </div>
-                                            <div style="font-size:1.8vh;">
-                                                {escape(appt.service.name)}
-                                            </div>
-                                        </div>
-                                    """,
-                    "rowspan": data["rowspan"],
-                    "appt_id": appt.id,
-                    "appointment": appt,
-                    "client": escape(appt.client.get_full_name()),
-                    "phone": escape("+1 " + getattr(appt.client.userprofile, "phone", "")),
-                    "service": escape(appt.service.name),
-                    "status": status_name,
-                    "master": escape(master.get_full_name()),
-                    "time_label": f"{local_start.strftime('%I:%M%p').lstrip('0')} - {local_end.strftime('%I:%M%p').lstrip('0')}",
-                    "duration": f"{appt.service.duration_min}min",
-                    "discount": f"-{appt_promocode.promocode.discount_percent}" if appt_promocode else "",
-                    "price_discounted": f"${appt.service.get_discounted_price()}",
-                    "price": f"${appt.service.base_price}",
-                    "background": MASTER_COLORS.get(master_id),
-                })
+                if not overlaps_cancel_left:
+                    if cell["kind"] == "appt_active":
+                        appt = cell["appt"]
+                        s = localtime(appt.start_time)
+                        e = s + timedelta(minutes=(appt.service.duration_min or 0) + (appt.service.extra_time_min or 0))
+                        appt_promocode = getattr(appt, 'appointmentpromocode', None)
+                        last_status = appt.appointmentstatushistory_set.order_by('-set_at').first()
+                        status_name = last_status.status.name if last_status else "Unknown"
+                        local_start = localtime(appt.start_time)
+                        local_end = local_start + timedelta(minutes=appt.service.duration_min) + timedelta(minutes=appt.service.extra_time_min)
 
-            elif master_id in availability_map and time_str in availability_map[master_id]:
-                data = availability_map[master_id][time_str]
-                row["cells"].append({
-                    "html": data["reason"].capitalize(),
-                    "rowspan": data["rowspan"],
-                    "unavailable": True,
-                    "reason": data["reason"],
-                    "start": data["start"],
-                    "end": data["end"],
-                    "until": data["until"],
-                    "availability_id": data["availability_id"],
-                })
-            elif master_id in skip_map and time_str in skip_map[master_id]:
-                row["cells"].append({"skip": True})
-            else:
-                row["cells"].append({
-                    "html": '',
-                    "rowspan": 1,
-                    "master_id": master_id,
-                })
+                        row["cells"].append({
+                            "rowspan": cell["rowspan"],
+                            "colspan": 2,
+                            "kind": "appt_active",
+                            "appt_id": appt.id,
+                            "html": f"""
+                                <div>
+                                  <div style="font-size:1.8vh;">
+                                    {s.strftime('%I:%M').lstrip('0')} – {e.strftime('%I:%M').lstrip('0')}
+                                    <strong>{escape(appt.client.get_full_name() or appt.client.username)}</strong>
+                                  </div>
+                                  <div style="font-size:1.8vh;">
+                                    {escape(appt.service.name)}
+                                    {"<span style='margin-left:.4rem;color:#0a7a3b'>−%d%%</span>" % appt_promocode.promocode.discount_percent if appt_promocode else ""}
+                                  </div>
+                                </div>
+                            """,
+                            "background": MASTER_COLORS.get(mid),
+                            "appointment": appt,
+                            "client": escape(appt.client.get_full_name()),
+                            "phone": escape("+1 " + getattr(appt.client.userprofile, "phone", "")),
+                            "service": escape(appt.service.name),
+                            "status": status_name,
+                            "master": escape(master.get_full_name()),
+                            "time_label": f"{local_start.strftime('%I:%M%p').lstrip('0')} - {local_end.strftime('%I:%M%p').lstrip('0')}",
+                            "duration": f"{appt.service.duration_min}min",
+                            "discount": f"-{apppromocode.promocode.discount_percent}" if (apppromocode := appt_promocode) else "",
+                            "price_discounted": f"${appt.service.get_discounted_price()}",
+                            "price": f"${appt.service.base_price}",
+                        })
+                    else:
+                        row["cells"].append({
+                            "rowspan": cell["rowspan"],
+                            "colspan": 2,
+                            "kind": "unavailable",
+                            "availability_id": cell["availability_id"],
+                            "html": f"""
+                                <div style="opacity:.85">
+                                  {escape(cell["reason"])}<br>
+                                  <small>{escape(cell["from"])}–{escape(cell["to"])}</small>
+                                </div>
+                            """,
+                            "unavailable": True,
+                            "reason": cell["reason"],
+                            "start": cell["from"],
+                            "end": cell["to"],
+                            "until": cell["until"],
+                        })
+                    continue
 
+                # есть пересечение → переносим актив/брейк вправо на весь его диапазон
+                for t in span_times:
+                    skip_lane[mid][1][t] = True  # правая дорожка занята этим блоком
+
+                # слева — отменённая (если стартует сейчас) или свободная половинка
+                c0 = cancel_lanes[mid][0].get(time_str)
+                if c0:
+                    appt = c0["appt"]
+                    s = localtime(appt.start_time)
+                    e = s + timedelta(minutes=(appt.service.duration_min or 0) + (appt.service.extra_time_min or 0))
+                    appt_promocode = getattr(appt, 'appointmentpromocode', None)
+                    last_status = appt.appointmentstatushistory_set.order_by('-set_at').first()
+                    status_name = last_status.status.name if last_status else "Unknown"
+                    local_start = localtime(appt.start_time)
+                    local_end = local_start + timedelta(minutes=appt.service.duration_min) + timedelta(minutes=appt.service.extra_time_min)
+
+                    row["cells"].append({
+                        "rowspan": c0["rowspan"],
+                        "colspan": 1,
+                        "kind": "appt_cancelled",
+                        "appt_id": appt.id,
+                        "html": f"""
+                            <div style="opacity:.7">
+                              <div style="font-size:1.8vh;">
+                                {s.strftime('%I:%M').lstrip('0')} – {e.strftime('%I:%M').lstrip('0')}
+                                <strong>{escape(appt.client.get_full_name() or appt.client.username)}</strong>
+                              </div>
+                              <div style="font-size:1.8vh;">{escape(appt.service.name)} (Cancelled)</div>
+                            </div>
+                        """,
+                        "background": MASTER_COLORS.get(mid),
+                        "appointment": appt,
+                        "client": escape(appt.client.get_full_name()),
+                        "phone": escape("+1 " + getattr(appt.client.userprofile, "phone", "")),
+                        "service": escape(appt.service.name),
+                        "status": status_name,
+                        "master": escape(master.get_full_name()),
+                        "time_label": f"{local_start.strftime('%I:%M%p').lstrip('0')} - {local_end.strftime('%I:%M%p').lstrip('0')}",
+                        "duration": f"{appt.service.duration_min}min",
+                        "discount": f"-{apppromocode.promocode.discount_percent}" if (apppromocode := appt_promocode) else "",
+                        "price_discounted": f"${appt.service.get_discounted_price()}",
+                        "price": f"${appt.service.base_price}",
+                    })
+                elif not skip_lane[mid][0].get(time_str):
+                    row["cells"].append({
+                        "rowspan": 1,
+                        "colspan": 1,
+                        "kind": "free_half",
+                        "master_id": mid,
+                        "html": "",
+                        "lane": "left"
+                    })
+
+                # справа — весь блок как одна половинка
+                if cell["kind"] == "appt_active":
+                    appt = cell["appt"]
+                    s = localtime(appt.start_time)
+                    e = s + timedelta(minutes=(appt.service.duration_min or 0) + (appt.service.extra_time_min or 0))
+                    appt_promocode = getattr(appt, 'appointmentpromocode', None)
+                    last_status = appt.appointmentstatushistory_set.order_by('-set_at').first()
+                    status_name = last_status.status.name if last_status else "Unknown"
+                    local_start = localtime(appt.start_time)
+                    local_end = local_start + timedelta(minutes=appt.service.duration_min) + timedelta(minutes=appt.service.extra_time_min)
+
+                    row["cells"].append({
+                        "rowspan": cell["rowspan"],
+                        "colspan": 1,
+                        "kind": "appt_active_right",
+                        "appt_id": appt.id,
+                        "html": f"""
+                            <div>
+                              <div style="font-size:1.8vh;">
+                                {s.strftime('%I:%M').lstrip('0')} – {e.strftime('%I:%M').lstrip('0')}
+                                <strong>{escape(appt.client.get_full_name() or appt.client.username)}</strong>
+                              </div>
+                              <div style="font-size:1.8vh;">
+                                {escape(appt.service.name)}
+                                {"<span style='margin-left:.4rem;color:#0a7a3b'>−%d%%</span>" % appt_promocode.promocode.discount_percent if appt_promocode else ""}
+                              </div>
+                            </div>
+                        """,
+                        "background": MASTER_COLORS.get(mid),
+                        "appointment": appt,
+                        "client": escape(appt.client.get_full_name()),
+                        "phone": escape("+1 " + getattr(appt.client.userprofile, "phone", "")),
+                        "service": escape(appt.service.name),
+                        "status": status_name,
+                        "master": escape(master.get_full_name()),
+                        "time_label": f"{local_start.strftime('%I:%M%p').lstrip('0')} - {local_end.strftime('%I:%M%p').lstrip('0')}",
+                        "duration": f"{appt.service.duration_min}min",
+                        "discount": f"-{appt_promocode.promocode.discount_percent}" if appt_promocode else "",
+                        "price_discounted": f"${appt.service.get_discounted_price()}",
+                        "price": f"${appt.service.base_price}",
+                    })
+                else:
+                    row["cells"].append({
+                        "rowspan": cell["rowspan"],
+                        "colspan": 1,
+                        "kind": "unavailable_right",
+                        "availability_id": cell["availability_id"],
+                        "html": f"""
+                            <div style="opacity:.85">
+                              {escape(cell["reason"])}<br>
+                              <small>{escape(cell["from"])}–{escape(cell["to"])}</small>
+                            </div>
+                        """,
+                        "unavailable": True,
+                        "reason": cell["reason"],
+                        "start": cell["from"],
+                        "end": cell["to"],
+                        "until": cell["until"],
+                    })
+                continue  # к следующему мастеру
+
+            # 2) LANE-режим — проверяем ДО skip_two!
+            lane0_start = time_str in cancel_lanes[mid][0]
+            lane0_skip = bool(skip_lane[mid][0].get(time_str))   # тянется Cancelled слева
+            lane1_skip = bool(skip_lane[mid][1].get(time_str))   # тянется актив/брейк справа (перенос)
+            lane_mode = lane0_start or lane0_skip or lane1_skip
+
+            if lane_mode:
+                # левая половинка
+                c0 = cancel_lanes[mid][0].get(time_str)
+                if c0:
+                    appt = c0["appt"]
+                    s = localtime(appt.start_time)
+                    e = s + timedelta(minutes=(appt.service.duration_min or 0) + (appt.service.extra_time_min or 0))
+                    appt_promocode = getattr(appt, 'appointmentpromocode', None)
+                    last_status = appt.appointmentstatushistory_set.order_by('-set_at').first()
+                    status_name = last_status.status.name if last_status else "Unknown"
+                    local_start = localtime(appt.start_time)
+                    local_end = local_start + timedelta(minutes=appt.service.duration_min) + timedelta(minutes=appt.service.extra_time_min)
+                    row["cells"].append({
+                        "rowspan": c0["rowspan"],
+                        "colspan": 1,
+                        "kind": "appt_cancelled",
+                        "appt_id": appt.id,
+                        "html": f"""
+                            <div style="opacity:.7">
+                              <div style="font-size:1.8vh;">
+                                {s.strftime('%I:%M').lstrip('0')} – {e.strftime('%I:%M').lstrip('0')}
+                                <strong>{escape(appt.client.get_full_name() or appt.client.username)}</strong>
+                              </div>
+                              <div style="font-size:1.8vh;">{escape(appt.service.name)} (Cancelled)</div>
+                            </div>
+                        """,
+                        "background": MASTER_COLORS.get(mid),
+                        "appointment": appt,
+                        "client": escape(appt.client.get_full_name()),
+                        "phone": escape("+1 " + getattr(appt.client.userprofile, "phone", "")),
+                        "service": escape(appt.service.name),
+                        "status": status_name,
+                        "master": escape(master.get_full_name()),
+                        "time_label": f"{local_start.strftime('%I:%M%p').lstrip('0')} - {local_end.strftime('%I:%M%p').lstrip('0')}",
+                        "duration": f"{appt.service.duration_min}min",
+                        "discount": f"-{apppromocode.promocode.discount_percent}" if (apppromocode := appt_promocode) else "",
+                        "price_discounted": f"${appt.service.get_discounted_price()}",
+                        "price": f"${appt.service.base_price}",
+                    })
+                elif not lane0_skip:
+                    row["cells"].append({
+                        "rowspan": 1,
+                        "colspan": 1,
+                        "kind": "free_half",
+                        "master_id": mid,
+                        "html": "",
+                        "lane": "left"
+                    })
+
+                # правая половинка
+                if not lane1_skip:
+                    row["cells"].append({
+                        "rowspan": 1,
+                        "colspan": 1,
+                        "kind": "free_half",
+                        "master_id": mid,
+                        "html": "",
+                        "lane": "right"
+                    })
+                continue
+
+            # 3) только теперь — обычный skip двухколоночной (продолжение)
+            if skip_two[mid].get(time_str):
+                continue
+
+            # 4) дефолтная пустая двухколоночная
+            row["cells"].append({
+                "rowspan": 1,
+                "colspan": 2,
+                "kind": "free",
+                "master_id": mid,
+                "html": "",
+            })
 
         calendar_table.append(row)
 
     return calendar_table
-
