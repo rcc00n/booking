@@ -70,7 +70,7 @@ class UserProfile(models.Model):
     birth_date = models.DateField(null=True, blank=True)
 
     # === NEW ===
-    address = models.TextField(blank=True)                         # одна строка/много строк — на твой вкус
+    address = models.TextField(max_length=32, blank=True)                         # одна строка/много строк — на твой вкус
     email_marketing_consent = models.BooleanField(default=False)   # согласие на рассылки
     email_marketing_consented_at = models.DateTimeField(null=True, blank=True)
     how_heard = models.CharField(max_length=32, choices=HowHeard.choices, blank=True)

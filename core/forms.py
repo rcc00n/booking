@@ -98,6 +98,21 @@ class CustomUserCreationForm(UserCreationForm):
     last_name = forms.CharField(required=True)
     phone = forms.CharField(required=True)
     birth_date = forms.DateField(required=False, widget=forms.SelectDateWidget(years=range(1950, 2030)))
+    # новые поля
+    address = forms.CharField(
+        required=False,
+        label="Address",
+        widget=forms.Textarea(attrs={"rows": 1})
+    )
+    email_marketing_consent = forms.BooleanField(
+        required=False,
+        label="Agreed for marketing emails"
+    )
+    how_heard = forms.ChoiceField(
+        required=False,
+        label="How did you hear about us?",
+        choices=[("", "—")] + list(HowHeard.choices)
+    )
 
 
     class Meta:
@@ -107,7 +122,7 @@ class CustomUserCreationForm(UserCreationForm):
             'phone', 'birth_date',
             'password1', 'password2',
             'is_staff', 'is_active', 'is_superuser',
-            'groups'
+            'groups', "address", "email_marketing_consent"
         ]
 
     def save(self, commit=True):
@@ -124,9 +139,16 @@ class CustomUserCreationForm(UserCreationForm):
         # Create or update UserProfile
         phone = self.cleaned_data.get('phone')
         birth_date = self.cleaned_data.get('birth_date')
+        address = self.cleaned_data.get('address')
+        how_heard = self.cleaned_data.get('how_heard')
+        email_marketing_consent = self.cleaned_data.get('email_marketing_consent')
         profile, created = UserProfile.objects.get_or_create(user=user)
         profile.phone = phone
         profile.birth_date = birth_date
+        profile.address = address
+        profile.how_heard = how_heard
+        profile.set_marketing_consent(email_marketing_consent)
+
         profile.save()
 
         client_role, _ = Role.objects.get_or_create(name="Client")
@@ -159,7 +181,20 @@ class CustomUserChangeForm(UserChangeForm):
     last_name = forms.CharField(required=False)
     phone = forms.CharField(required=True)
     birth_date = forms.DateField(required=False, widget=forms.SelectDateWidget(years=range(1950, 2030)))
-
+    address = forms.CharField(
+        required=False,
+        label="Address",
+        widget=forms.Textarea(attrs={"rows": 1})
+    )
+    email_marketing_consent = forms.BooleanField(
+        required=False,
+        label="Agreed for marketing emails"
+    )
+    how_heard = forms.ChoiceField(
+        required=False,
+        label="How did you hear about us?",
+        choices=[("", "—")] + list(HowHeard.choices)
+    )
 
     files = forms.FileField(
         required=False,
@@ -179,6 +214,9 @@ class CustomUserChangeForm(UserChangeForm):
             'groups',
             'user_permissions',
             'password',
+            'address',
+            'how_heard',
+            'email_marketing_consent',
             'files'
         ]
 
@@ -191,6 +229,9 @@ class CustomUserChangeForm(UserChangeForm):
         if self.instance and hasattr(self.instance, 'userprofile'):
             self.fields['phone'].initial = self.instance.userprofile.phone
             self.fields['birth_date'].initial = self.instance.userprofile.birth_date
+            self.fields['address'].initial = self.instance.userprofile.address
+            self.fields['how_heard'].initial = self.instance.userprofile.how_heard
+            self.fields['email_marketing_consent'].initial = self.instance.userprofile.email_marketing_consent
 
 
     def save(self, commit=True):
@@ -203,11 +244,17 @@ class CustomUserChangeForm(UserChangeForm):
         user.save()
 
         # Update profile
-        phone = self.cleaned_data.get('phone', '')
+        phone = self.cleaned_data.get('phone', "")
         birth_date = self.cleaned_data.get('birth_date', None)
-        profile, _ = UserProfile.objects.get_or_create(user=user)
+        address = self.cleaned_data.get('address', "")
+        how_heard = self.cleaned_data.get('how_heard', None)
+        email_marketing_consent = self.cleaned_data.get('email_marketing_consent', False)
+        profile, created = UserProfile.objects.get_or_create(user=user)
         profile.phone = phone
         profile.birth_date = birth_date
+        profile.address = address
+        profile.how_heard = how_heard
+        profile.set_marketing_consent(email_marketing_consent)
         profile.save()
 
 
@@ -245,7 +292,11 @@ class MasterCreateFullForm(forms.ModelForm):
 
     password1 = forms.CharField(widget=forms.PasswordInput, required=False)
     password2 = forms.CharField(widget=forms.PasswordInput, required=False)
-
+    address = forms.CharField(
+        required=False,
+        label="Address",
+        widget=forms.Textarea(attrs={"rows": 1})
+    )
     class Meta:
         model = MasterProfile
         fields = ['profession', 'bio', 'work_start', 'work_end', 'room']
@@ -266,12 +317,14 @@ class MasterCreateFullForm(forms.ModelForm):
             # Заполняем initial для полей пользователя
             self.fields['username'].initial = user.username
             self.fields['email'].initial = user.email
+
             self.fields['first_name'].initial = user.first_name
             self.fields['last_name'].initial = user.last_name
             # self.fields['room'].initial = user.room
 
             if hasattr(user, 'userprofile'):
                 self.fields['phone'].initial = user.userprofile.phone
+                self.fields['address'].initial = user.userprofile.address
                 self.fields['birth_date'].initial = user.userprofile.birth_date
 
     def clean_password2(self):
@@ -320,7 +373,8 @@ class MasterCreateFullForm(forms.ModelForm):
             UserProfile.objects.create(
                 user=user,
                 phone=self.cleaned_data.get('phone'),
-
+                address=self.cleaned_data.get('address'),
+                email_marketing_consent=True,
                 birth_date=self.cleaned_data.get('birth_date')
             )
 

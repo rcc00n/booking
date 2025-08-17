@@ -56,7 +56,7 @@ def custom_index(request):
     confirmed_count = upcoming.filter(appointmentstatushistory__status=confirmed).count()
     cancelled_count = upcoming.filter(appointmentstatushistory__status=cancelled).count()
 
-    top_services = Service.objects.annotate(count=Count("appointment")).order_by("-count")[:5]
+    top_services = Service.objects.annotate(count=Count("appointment")).order_by("-count")[:3]
 
     master_role = Role.objects.filter(name="Master").first()
 
@@ -173,11 +173,14 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     """
     add_form = CustomUserCreationForm
     form = CustomUserChangeForm
-    export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'user_roles','is_staff', 'is_superuser', 'is_active']
+    export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'user_roles', 'is_staff', 'is_superuser', 'is_active', 'source']
 
     def get_export_row(self, obj):
         phone = obj.userprofile.phone if hasattr(obj, 'userprofile') else ''
         birth_date = obj.userprofile.birth_date if hasattr(obj, 'userprofile') else ''
+        address = obj.userprofile.address if hasattr(obj, 'userprofile') else ''
+        source = obj.userprofile.source if hasattr(obj, 'userprofile') else ''
+        consent = obj.userprofile.email_marketing_consent if hasattr(obj, 'userprofile') else ''
         roles = ", ".join([ur.role.name for ur in obj.userrole_set.all()])
 
         return [
@@ -187,29 +190,32 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             obj.last_name,
             phone,
             birth_date,
+            address,
             roles,
             obj.is_staff,
             obj.is_superuser,
             obj.is_active,
+            source,
+            consent
         ]
     # Fields shown when adding a new user
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('username', 'email', 'first_name', 'last_name', 'phone', 'birth_date',
-                       'password1', 'password2', 'is_staff', 'is_active', 'is_superuser'),
+            'fields': ('username', 'email', 'first_name', 'last_name', 'phone', 'address','birth_date',
+                       'password1', 'password2', 'is_staff', 'is_active', 'is_superuser', 'email_marketing_consent', 'how_heard'),
         }),
     )
 
     # Fields shown in user list
     list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'user_roles', 'send_notify_button')
-    list_filter = ('is_staff', 'is_superuser', 'is_active', RoleFilter)
+    list_filter = ('is_staff', 'is_superuser', 'is_active', RoleFilter, 'userprofile__how_heard')
     search_fields = ('username', 'email', 'first_name', 'last_name', 'userprofile__phone')
 
     # Field layout when editing a user
     fieldsets = (
         (None, {'fields': ('username', 'email', 'password')}),
-        ('Personal Info', {'fields': ('first_name', 'last_name', 'phone', 'birth_date')}),
+        ('Personal Info', {'fields': ('first_name', 'last_name', 'phone', 'birth_date', 'address', 'how_heard', 'email_marketing_consent')}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Files', {'fields': ('files',)}),
     )
@@ -743,11 +749,12 @@ admin.site.register(PaymentStatus)
 class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
     add_form = MasterCreateFullForm
     readonly_fields = ['password_display']
-    export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","profession", 'bio',"work_start", "work_end", "room", "is_staff", "is_superuser", 'is_active']
+    export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","address", "profession", 'bio',"work_start", "work_end", "room", "is_staff", "is_superuser", 'is_active']
 
     def get_export_row(self, obj):
         phone = obj.user.userprofile.phone if hasattr(obj, 'user') else ''
         birth_date = obj.user.userprofile.birth_date if hasattr(obj, 'user') else ''
+        address = obj.user.userprofile.address if hasattr(obj, 'user') else ''
 
 
         return [
@@ -757,6 +764,7 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
             obj.user.username,
             phone,
             birth_date,
+            address,
             obj.profession,
             obj.bio,
             obj.work_start,
