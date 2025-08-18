@@ -10,6 +10,7 @@ from django.db.models import Sum, Count
 from itertools import cycle
 from django.utils.timezone import localtime, datetime, make_aware, localdate
 from django.utils.html import escape
+from django.shortcuts import redirect
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.contrib.auth.models import Permission
@@ -218,6 +219,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         ('Personal Info', {'fields': ('first_name', 'last_name', 'phone', 'birth_date', 'address', 'how_heard', 'email_marketing_consent')}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Files', {'fields': ('files',)}),
+        ('Notes', {'fields': ('notes',)})
     )
 
     def get_fieldsets(self, request, obj=None):
@@ -567,6 +569,7 @@ class AppointmentStatusHistoryAdmin(ExportCsvMixin,admin.ModelAdmin):
     """
     exclude = ('set_by',)
     list_display = ('appointment', 'status', 'set_by', 'set_at')
+    list_filter = ('appointment','set_by')
     export_fields = ['appointment', 'status', 'set_by', 'set_at']
     def has_delete_permission(self, request, obj=None):
         # Суперадмин может всегда
@@ -615,11 +618,21 @@ class AppointmentPrepaymentAdmin(ExportCsvMixin,admin.ModelAdmin):
 # Hidden Proxy Admin for CustomUserDisplay
 # -----------------------------
 @admin.register(CustomUserDisplay)
-class CustomUserAdmin(admin.ModelAdmin):
+class CustomUserDisplayAdmin(admin.ModelAdmin):
+    def response_change(self, request, obj):
+        if "_from_appointment" in request.GET:
+            return redirect("admin:core_appointment_changelist")
+        return super().response_change(request, obj)
 
-    def get_model_perms(self, request):
-        # Hide from admin index
-        return {}
+    def response_delete(self, request, obj_display, obj_id):
+        if "_from_appointment" in request.GET:
+            return redirect("admin:core_appointment_changelist")
+        return super().response_delete(request, obj_display, obj_id)
+
+    def response_post_save_change(self, request, obj):
+        if "_from_appointment" in request.GET:
+            return redirect("admin:core_appointment_changelist")
+        return super().response_post_save_change(request, obj)
 
 
 # -----------------------------
@@ -755,6 +768,9 @@ admin.site.register(ServiceCategory)
 admin.site.register(PrepaymentOption)
 admin.site.register(PaymentStatus)
 
+
+
+
 @admin.register(MasterProfile)
 class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
     add_form = MasterCreateFullForm
@@ -820,6 +836,16 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
         )
     password_display.short_description = "Password"
 
+    def has_change_permission(self, request, obj=None):
+        if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+            return False
+        return super().has_delete_permission(request, obj)
+
     def get_name(self, obj):
         return obj.user.get_full_name() or obj.user.username
 
@@ -836,9 +862,28 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
             "view_appointment", "add_appointment", "change_appointment", "delete_appointment",
             # MasterAvailability (time off)
             "view_masteravailability", "add_masteravailability", "change_masteravailability", "delete_masteravailability",
+
+            "view_user", "view_userprofile", "view_customuserdisplay", "change_userprofile_notes"
         ]
         perms = Permission.objects.filter(codename__in=needed)
         user.user_permissions.add(*perms)
+
+        ct_proxy = ContentType.objects.get_for_model(CustomUserDisplay)
+        try:
+            p_view_proxy = Permission.objects.get(content_type=ct_proxy, codename="view_customuserdisplay")
+            user.user_permissions.add(p_view_proxy)
+        except Permission.DoesNotExist:
+            pass  # миграции ещё не применены — не падаем
+
+        # (не обязательно, но можно) право на просмотр профилей клиентов
+        ct_profile = ContentType.objects.get_for_model(UserProfile)
+        try:
+            p_view_profile = Permission.objects.get(content_type=ct_profile, codename="view_userprofile")
+            user.user_permissions.add(p_view_profile)
+        except Permission.DoesNotExist:
+            pass
+
+        user.save()
 
 
 def get_price_html(service):

@@ -31,6 +31,9 @@ class CustomUserDisplay(User):
     """
     class Meta:
         proxy = True
+        # permissions = [
+        #     ("view_customuserdisplay", "Can view user (proxy)"),
+        # ]
 
     def __str__(self):
         full_name = self.get_full_name()
@@ -74,6 +77,7 @@ class UserProfile(models.Model):
     email_marketing_consent = models.BooleanField(default=False)   # согласие на рассылки
     email_marketing_consented_at = models.DateTimeField(null=True, blank=True)
     how_heard = models.CharField(max_length=32, choices=HowHeard.choices, blank=True)
+    notes = models.TextField(blank=True, null=True)
 
     def set_marketing_consent(self, value: bool):
         """Удобный метод: при выставлении True заполнит timestamp, при снятии — очистит."""

@@ -38,6 +38,7 @@ class AppointmentForm(forms.ModelForm):
         # Обнови instance перед вызовом clean()
         instance.master = cleaned_data.get("master")
         instance.start_time = cleaned_data.get("start_time")
+        print(instance.start_time)
         instance.service = cleaned_data.get("service")
         promocode_str = cleaned_data.get("promocode")
         service = cleaned_data.get("service")
@@ -113,6 +114,7 @@ class CustomUserCreationForm(UserCreationForm):
         label="How did you hear about us?",
         choices=[("", "—")] + list(HowHeard.choices)
     )
+    notes = forms.CharField(required=False, widget=forms.Textarea)
 
 
     class Meta:
@@ -122,7 +124,8 @@ class CustomUserCreationForm(UserCreationForm):
             'phone', 'birth_date',
             'password1', 'password2',
             'is_staff', 'is_active', 'is_superuser',
-            'groups', "address", "email_marketing_consent"
+            'groups', "address", "email_marketing_consent",
+            "notes"
         ]
 
     def save(self, commit=True):
@@ -142,12 +145,14 @@ class CustomUserCreationForm(UserCreationForm):
         address = self.cleaned_data.get('address')
         how_heard = self.cleaned_data.get('how_heard')
         email_marketing_consent = self.cleaned_data.get('email_marketing_consent')
+        notes = self.cleaned_data.get('notes')
         profile, created = UserProfile.objects.get_or_create(user=user)
         profile.phone = phone
         profile.birth_date = birth_date
         profile.address = address
         profile.how_heard = how_heard
         profile.set_marketing_consent(email_marketing_consent)
+        profile.notes = notes
 
         profile.save()
 
@@ -156,9 +161,6 @@ class CustomUserCreationForm(UserCreationForm):
 
         return user
 
-    def clean(self):
-        # Optional debug print to inspect cleaned data
-        print(self.cleaned_data)
 
     def clean_phone(self):
         phone = self.cleaned_data.get('phone')
@@ -195,7 +197,7 @@ class CustomUserChangeForm(UserChangeForm):
         label="How did you hear about us?",
         choices=[("", "—")] + list(HowHeard.choices)
     )
-
+    notes = forms.CharField(required=False, widget=forms.Textarea)
     files = forms.FileField(
         required=False,
         widget=forms.ClearableFileInput(attrs={'multiple': False}),
@@ -217,6 +219,7 @@ class CustomUserChangeForm(UserChangeForm):
             'address',
             'how_heard',
             'email_marketing_consent',
+            'notes',
             'files'
         ]
 
@@ -232,6 +235,7 @@ class CustomUserChangeForm(UserChangeForm):
             self.fields['address'].initial = self.instance.userprofile.address
             self.fields['how_heard'].initial = self.instance.userprofile.how_heard
             self.fields['email_marketing_consent'].initial = self.instance.userprofile.email_marketing_consent
+            self.fields['notes'].initial = self.instance.userprofile.notes
 
 
     def save(self, commit=True):
@@ -248,12 +252,15 @@ class CustomUserChangeForm(UserChangeForm):
         birth_date = self.cleaned_data.get('birth_date', None)
         address = self.cleaned_data.get('address', "")
         how_heard = self.cleaned_data.get('how_heard', None)
+        notes = self.cleaned_data.get('notes', None)
+
         email_marketing_consent = self.cleaned_data.get('email_marketing_consent', False)
         profile, created = UserProfile.objects.get_or_create(user=user)
         profile.phone = phone
         profile.birth_date = birth_date
         profile.address = address
         profile.how_heard = how_heard
+        profile.notes = notes
         profile.set_marketing_consent(email_marketing_consent)
         profile.save()
 
@@ -267,9 +274,6 @@ class CustomUserChangeForm(UserChangeForm):
             )
         return user
 
-    def clean(self):
-        # Optional debug print to inspect cleaned data
-        print(self.cleaned_data)
 
     def clean_phone(self):
         phone = self.cleaned_data.get('phone')
