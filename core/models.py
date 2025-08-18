@@ -38,6 +38,10 @@ class CustomUserDisplay(User):
     def __str__(self):
         full_name = self.get_full_name()
         return full_name if full_name else self.username
+    @property
+    def notes(self) -> str:
+        # безопасно вернёт '' если профиля/поля нет
+        return getattr(getattr(self, 'userprofile', None), 'notes', '')
 
 
 class UserRole(models.Model):
@@ -89,7 +93,9 @@ class UserProfile(models.Model):
             self.email_marketing_consented_at = None
             
     def __str__(self):
-        return f"{self.user} Profile"
+        return f"{self.get_full_name()} "
+    def get_full_name(self):
+        return f"{self.user.get_full_name()}"
 
 # --- 2. SERVICES ---
 
@@ -203,7 +209,7 @@ class Appointment(models.Model):
     Represents a scheduled appointment between a client and a master for a service.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    client = models.ForeignKey(CustomUserDisplay, on_delete=models.CASCADE, related_name='appointments_as_client')
+    client = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='appointments_as_client')
     master = models.ForeignKey(CustomUserDisplay, on_delete=models.CASCADE, related_name='appointments_as_master')
     service = models.ForeignKey(Service, on_delete=models.CASCADE)
     start_time = models.DateTimeField()

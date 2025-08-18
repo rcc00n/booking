@@ -768,6 +768,45 @@ admin.site.register(ServiceCategory)
 admin.site.register(PrepaymentOption)
 admin.site.register(PaymentStatus)
 
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    # Явно перечислим поля на форме
+    fields = (
+        "user",
+        "phone",
+        "birth_date",
+        "address",
+        "how_heard",
+        "email_marketing_consent",
+        "notes",     # единственное редактируемое поле для мастера
+    )
+
+    def get_readonly_fields(self, request, obj=None):
+        # Для мастера — все поля read-only, кроме 'notes'
+        if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+            # Берём список всех полей формы и исключаем 'notes'
+            all_fields = list(self.fields) if self.fields else [f.name for f in self.model._meta.fields]
+            return [f for f in all_fields if f != "notes"]
+        return super().get_readonly_fields(request, obj)
+
+    # Мастер может открывать и менять (только notes)
+    def has_change_permission(self, request, obj=None):
+        if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+            return True
+        return super().has_change_permission(request, obj)
+
+    # Мастеру — нельзя создавать профили
+    def has_add_permission(self, request):
+        if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+            return False
+        return super().has_add_permission(request)
+
+    # Мастеру — нельзя удалять профили
+    def has_delete_permission(self, request, obj=None):
+        if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+            return False
+        return super().has_delete_permission(request, obj)
+
 
 
 
@@ -863,7 +902,7 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
             # MasterAvailability (time off)
             "view_masteravailability", "add_masteravailability", "change_masteravailability", "delete_masteravailability",
 
-            "view_user", "view_userprofile", "view_customuserdisplay", "change_userprofile_notes"
+             "view_userprofile", "change_userprofile"
         ]
         perms = Permission.objects.filter(codename__in=needed)
         user.user_permissions.add(*perms)
@@ -1051,7 +1090,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                             "background": MASTER_COLORS.get(mid),
                             "appointment": appt,
                             "client": escape(appt.client.get_full_name()),
-                            "phone": escape("+1 " + getattr(appt.client.userprofile, "phone", "")),
+                            "phone": escape("+1 " + getattr(appt.client, "phone", "")),
                             "service": escape(appt.service.name),
                             "status": status_name,
                             "master": escape(master.get_full_name()),
@@ -1165,7 +1204,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                         "background": MASTER_COLORS.get(mid),
                         "appointment": appt,
                         "client": escape(appt.client.get_full_name()),
-                        "phone": escape("+1 " + getattr(appt.client.userprofile, "phone", "")),
+                        "phone": escape("+1 " + getattr(appt.client, "phone", "")),
                         "service": escape(appt.service.name),
                         "status": status_name,
                         "master": escape(master.get_full_name()),
@@ -1230,7 +1269,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                         "background": MASTER_COLORS.get(mid),
                         "appointment": appt,
                         "client": escape(appt.client.get_full_name()),
-                        "phone": escape("+1 " + getattr(appt.client.userprofile, "phone", "")),
+                        "phone": escape("+1 " + getattr(appt.client, "phone", "")),
                         "service": escape(appt.service.name),
                         "status": status_name,
                         "master": escape(master.get_full_name()),

@@ -38,7 +38,6 @@ class AppointmentForm(forms.ModelForm):
         # Обнови instance перед вызовом clean()
         instance.master = cleaned_data.get("master")
         instance.start_time = cleaned_data.get("start_time")
-        print(instance.start_time)
         instance.service = cleaned_data.get("service")
         promocode_str = cleaned_data.get("promocode")
         service = cleaned_data.get("service")
