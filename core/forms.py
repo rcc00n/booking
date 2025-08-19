@@ -1,5 +1,6 @@
 from dal import autocomplete
 from django import forms
+from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import UserCreationForm, UserChangeForm
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.core.exceptions import ValidationError
@@ -71,13 +72,14 @@ class AppointmentForm(forms.ModelForm):
             )
 
         new_status = self.cleaned_data['status']
-
+        profile = getattr(self.user, "userprofile", None)
+        print(self.user)
         latest = instance.appointmentstatushistory_set.order_by('-set_at').first()
         if not latest or latest.status != new_status:
             AppointmentStatusHistory.objects.create(
                 appointment=instance,
                 status=new_status,
-                set_by=self.user
+                set_by=profile
             )
 
         return instance
@@ -156,7 +158,7 @@ class CustomUserCreationForm(UserCreationForm):
         profile.save()
 
         client_role, _ = Role.objects.get_or_create(name="Client")
-        UserRole.objects.get_or_create(user=user, role=client_role)
+        UserRole.objects.get_or_create(user=profile, role=client_role)
 
         return user
 
@@ -309,7 +311,8 @@ class MasterCreateFullForm(forms.ModelForm):
 
         # Если редактируем — заменяем пароли на read-only поле
         if self.instance and self.instance.pk:
-            user = self.instance.user
+            user_profile = self.instance.user
+            user = user_profile.user  # сам Django User
             self.fields['password'] = ReadOnlyPasswordHashField(label="Password")
             self.initial['password'] = user.password
 
@@ -320,15 +323,12 @@ class MasterCreateFullForm(forms.ModelForm):
             # Заполняем initial для полей пользователя
             self.fields['username'].initial = user.username
             self.fields['email'].initial = user.email
-
             self.fields['first_name'].initial = user.first_name
             self.fields['last_name'].initial = user.last_name
-            # self.fields['room'].initial = user.room
 
-            if hasattr(user, 'userprofile'):
-                self.fields['phone'].initial = user.userprofile.phone
-                self.fields['address'].initial = user.userprofile.address
-                self.fields['birth_date'].initial = user.userprofile.birth_date
+            self.fields['phone'].initial = user_profile.phone
+            self.fields['address'].initial = user_profile.address
+            self.fields['birth_date'].initial = user_profile.birth_date
 
     def clean_password2(self):
         # Только если создаём
@@ -361,7 +361,8 @@ class MasterCreateFullForm(forms.ModelForm):
     def save(self, commit=True):
         if not self.instance.pk:
             # Создание нового пользователя
-            user = CustomUserDisplay.objects.create_user(
+            User = get_user_model()
+            user = User.objects.create_user(
                 username=self.cleaned_data['username'],
                 email=self.cleaned_data['email'],
                 password=self.cleaned_data['password1'],
@@ -373,7 +374,7 @@ class MasterCreateFullForm(forms.ModelForm):
             user.save()
 
             # Профиль пользователя
-            UserProfile.objects.create(
+            user_profile = UserProfile.objects.create(
                 user=user,
                 phone=self.cleaned_data.get('phone'),
                 address=self.cleaned_data.get('address'),
@@ -388,23 +389,25 @@ class MasterCreateFullForm(forms.ModelForm):
 
             # Профиль мастера
             master = super().save(commit=False)
-            master.user = user
+            master.user = user_profile
             if commit:
                 master.save()
             return master
 
         else:
             # Редактирование мастера
-            user = self.instance.user
+            user_profile = self.instance.user
+            user = user_profile.user
+
             user.username = self.cleaned_data['username']
             user.email = self.cleaned_data['email']
             user.first_name = self.cleaned_data['first_name']
             user.last_name = self.cleaned_data['last_name']
             user.save()
 
-            profile, _ = UserProfile.objects.get_or_create(user=user)
-            profile.phone = self.cleaned_data.get('phone')
-            profile.birth_date = self.cleaned_data.get('birth_date')
-            profile.save()
+            user_profile.phone = self.cleaned_data.get('phone')
+            user_profile.address = self.cleaned_data.get('address')
+            user_profile.birth_date = self.cleaned_data.get('birth_date')
+            user_profile.save()
 
             return super().save(commit=commit)

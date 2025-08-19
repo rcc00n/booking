@@ -53,7 +53,7 @@ class ClientRegistrationForm(UserCreationForm):
         required=False, label="I agree to receive e-mail updates and offers"
     )
 
-    class Meta:
+    class Meta(UserCreationForm.Meta):
         model = CustomUserDisplay
         fields = (
             "username", "email", "phone",
@@ -131,7 +131,7 @@ class ClientRegistrationForm(UserCreationForm):
 
             # роль «Client»
             client_role, _ = Role.objects.get_or_create(name="Client")
-            user.userrole_set.get_or_create(role=client_role)
+            profile.userrole_set.get_or_create(role=client_role)
 
         return user
 
@@ -184,15 +184,13 @@ class ClientProfileForm(forms.Form):
         super().__init__(*args, **kwargs)
 
         # Префиллим текущими значениями профиля (если форма открывается GET'ом)
-        try:
-            prof = self.user.userprofile
+        prof = getattr(self.user, "userprofile", None)
+        if prof:
             self.fields["phone"].initial = prof.phone
             self.fields["birth_date"].initial = prof.birth_date
             self.fields["address"].initial = prof.address
             self.fields["how_heard"].initial = prof.how_heard
             self.fields["email_marketing_consent"].initial = prof.email_marketing_consent
-        except UserProfile.DoesNotExist:
-            pass
 
         self.fields["first_name"].initial = self.user.first_name
         self.fields["last_name"].initial = self.user.last_name
@@ -223,13 +221,13 @@ class ClientProfileForm(forms.Form):
         return phone_e164
 
     def save(self):
-        u = self.user
-        u.first_name = self.cleaned_data.get("first_name", "") or ""
-        u.last_name  = self.cleaned_data.get("last_name", "") or ""
-        u.email      = self.cleaned_data["email"]
-        u.save(update_fields=["first_name", "last_name", "email"])
+        self.user.first_name = self.cleaned_data.get("first_name", "") or ""
+        self.user.last_name  = self.cleaned_data.get("last_name", "") or ""
+        self.user.email      = self.cleaned_data["email"]
+        self.user.save(update_fields=["first_name", "last_name", "email"])
 
-        prof, _ = UserProfile.objects.get_or_create(user=u)
+        # Обновляем/создаём UserProfile
+        prof, _ = UserProfile.objects.get_or_create(user=self.user)
         prof.phone      = self.cleaned_data["phone"]              # уже E.164
         prof.birth_date = self.cleaned_data.get("birth_date") or None
         prof.address    = self.cleaned_data.get("address", "") or ""
@@ -243,4 +241,4 @@ class ClientProfileForm(forms.Form):
             "phone", "birth_date", "address", "how_heard",
             "email_marketing_consent", "email_marketing_consented_at",
         ])
-        return u
+        return self.user

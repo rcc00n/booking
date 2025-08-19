@@ -11,7 +11,7 @@ import json
 
 from core.models import (
     Appointment, ServiceCategory, Service, CustomUserDisplay,
-    AppointmentStatusHistory
+    AppointmentStatusHistory, MasterProfile, UserProfile
 )
 from core.services.booking import (
     get_available_slots, get_service_masters,
@@ -56,7 +56,7 @@ def public_mainmenu(request):
         ctx["profile"] = getattr(user, "userprofile", None)
         ctx["appointments"] = (
             Appointment.objects
-            .filter(client=user)
+            .filter(client=user.userprofile)
             .select_related("service", "master")
             .order_by("-start_time")
         )
@@ -75,7 +75,6 @@ def api_availability(request):
     service_id = request.GET.get("service")
     date_str = request.GET.get("date")
     master_id = request.GET.get("master")
-
     if not service_id or not date_str:
         from django.http import HttpResponseBadRequest
         return HttpResponseBadRequest("service and date required")
@@ -87,7 +86,7 @@ def api_availability(request):
         return HttpResponseBadRequest("invalid date")
 
     day_dt = _tz_aware(datetime(day.year, day.month, day.day, 12, 0))
-    master_obj = get_object_or_404(CustomUserDisplay, pk=master_id) if master_id else None
+    master_obj = get_object_or_404(MasterProfile, pk=master_id) if master_id else None
     slots_map = get_available_slots(service, day_dt, master=master_obj)
 
     masters_qs = [master_obj] if master_obj else list(get_service_masters(service))
@@ -99,7 +98,7 @@ def api_availability(request):
     for m in masters_qs:
         resp["masters"].append({
             "id": m.id,
-            "name": m.get_full_name() or m.username,
+            "name": m.user.get_full_name() or m.user.username,
             "slots": [s.isoformat() for s in slots_map.get(m.id, [])]
         })
     from django.http import JsonResponse
@@ -124,7 +123,7 @@ def api_book(request):
         return HttpResponseBadRequest("service, master, start_time required")
 
     service = get_object_or_404(Service, pk=service_id)
-    master  = get_object_or_404(CustomUserDisplay, pk=master_id)
+    master  = get_object_or_404(MasterProfile, pk=master_id)
 
     if not get_service_masters(service).filter(pk=master.pk).exists():
         from django.http import HttpResponseBadRequest
@@ -140,7 +139,7 @@ def api_book(request):
 
     pay_status = get_default_payment_status()
     appt = Appointment(
-        client=request.user,
+        client=request.user.userprofile,
         master=master,
         service=service,
         start_time=start_dt,
@@ -153,7 +152,7 @@ def api_book(request):
     AppointmentStatusHistory.objects.create(
         appointment=appt,
         status=initial_status,
-        set_by=request.user,
+        set_by=request.user.userprofile
     )
 
     from django.http import JsonResponse
@@ -162,7 +161,7 @@ def api_book(request):
         "appointment": {
             "id": str(appt.pk),
             "service": service.name,
-            "master": master.get_full_name() or master.username,
+            "master": master.user.get_full_name() or master.user.username,
             "start_time": appt.start_time.isoformat(),
         }
     }, status=201)
@@ -188,7 +187,8 @@ def _status(name: str) -> AppointmentStatus:
 def api_appointment_cancel(request, appt_id):
     appt = get_object_or_404(Appointment.objects.select_related("client", "service", "master"), pk=appt_id)
     # только владелец или staff
-    if not (request.user.is_staff or appt.client_id == request.user.id):
+
+    if not (request.user.is_staff or appt.client_id == request.user.userprofile.id):
         return HttpResponseForbidden("not allowed")
 
     cancelled = _status("Cancelled")
@@ -200,7 +200,7 @@ def api_appointment_cancel(request, appt_id):
         AppointmentStatusHistory.objects.create(
             appointment=appt,
             status=cancelled,
-            set_by=request.user,
+            set_by=request.user.userprofile,
         )
     return JsonResponse({"ok": True})
 
@@ -213,7 +213,7 @@ def api_appointment_reschedule(request, appt_id):
     Меняет время (и по желанию мастера) с валидацией Appointment.clean().
     """
     appt = get_object_or_404(Appointment.objects.select_related("client", "service", "master"), pk=appt_id)
-    if not (request.user.is_staff or appt.client_id == request.user.id):
+    if not (request.user.is_staff or appt.client_id == request.user.userprofile.id):
         return HttpResponseForbidden("not allowed")
 
     try:
@@ -236,7 +236,7 @@ def api_appointment_reschedule(request, appt_id):
     # смена мастера (опционально)
     master_id = payload.get("master")
     if master_id:
-        new_master = get_object_or_404(CustomUserDisplay, pk=master_id)
+        new_master = get_object_or_404(MasterProfile, pk=master_id)
         # мастер должен уметь услугу
         if not ServiceMaster.objects.filter(service=appt.service, master=new_master).exists():
             return HttpResponseBadRequest("master can't perform this service")
@@ -252,13 +252,13 @@ def api_appointment_reschedule(request, appt_id):
         AppointmentStatusHistory.objects.create(
             appointment=appt,
             status=_status("Rescheduled"),
-            set_by=request.user,
+            set_by=request.user.userprofile,
         )
 
     return JsonResponse({"ok": True, "appointment": {
         "id": str(appt.pk),
         "start_time": appt.start_time.isoformat(),
-        "master": appt.master.get_full_name() or appt.master.username
+        "master": appt.master.user.get_full_name() or appt.master.user.username
     }})
 
 

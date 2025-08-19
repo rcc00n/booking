@@ -31,9 +31,7 @@ class CustomUserDisplay(User):
     """
     class Meta:
         proxy = True
-        # permissions = [
-        #     ("view_customuserdisplay", "Can view user (proxy)"),
-        # ]
+
 
     def __str__(self):
         full_name = self.get_full_name()
@@ -44,33 +42,13 @@ class CustomUserDisplay(User):
         return getattr(getattr(self, 'userprofile', None), 'notes', '')
 
 
-class UserRole(models.Model):
-    """
-    Links a user to a specific role with a timestamp of when the role was assigned.
-    """
-    user = models.ForeignKey(CustomUserDisplay, on_delete=models.CASCADE)
-    role = models.ForeignKey(Role, on_delete=models.CASCADE)
-    assigned_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('user', 'role')
-
-    def __str__(self):
-        return f"{self.user} → {self.role.name}"
-
-class ClientSource(models.Model):
-    source = models.CharField()
-
-    def __str__(self):
-        return f"{self.source}%"
-
 class HowHeard(models.TextChoices):
     GOOGLE = "google", "Google search"
     INSTAGRAM = "instagram", "Instagram"
     TIKTOK = "tiktok", "TikTok"
     FRIEND = "friend", "Friends/Family"
     OTHER = "other", "Other"
-    
+
 class UserProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     phone = models.CharField(max_length=32, unique=True)
@@ -91,11 +69,36 @@ class UserProfile(models.Model):
         elif not value and self.email_marketing_consent:
             self.email_marketing_consent = False
             self.email_marketing_consented_at = None
-            
-    def __str__(self):
-        return f"{self.get_full_name()} "
+
     def get_full_name(self):
         return f"{self.user.get_full_name()}"
+    def __str__(self):
+        return f"{self.get_full_name()} "
+
+
+class UserRole(models.Model):
+    """
+    Links a user to a specific role with a timestamp of when the role was assigned.
+    """
+    user = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
+    role = models.ForeignKey(Role, on_delete=models.CASCADE)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'role')
+
+    def __str__(self):
+        return f"{self.user} → {self.role.name}"
+
+class ClientSource(models.Model):
+    source = models.CharField()
+
+    def __str__(self):
+        return f"{self.source}%"
+
+
+    
+
 
 # --- 2. SERVICES ---
 
@@ -162,7 +165,7 @@ class MasterProfile(models.Model):
     """
     Дополнительная информация о мастере: профессия, график работы, цвет и т.д.
     """
-    user = models.OneToOneField(CustomUserDisplay, on_delete=models.CASCADE, related_name="master_profile")
+    user = models.OneToOneField(UserProfile, on_delete=models.CASCADE, related_name="master_profile")
     profession = models.CharField(max_length=100, blank=True)
     bio = models.TextField(blank=True)
     room = models.ForeignKey(MasterRoom, on_delete=models.CASCADE, blank=True, null=True)
@@ -171,13 +174,19 @@ class MasterProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.get_full_name()}"
+    @property
+    def initials(self):
+        parts = self.user.get_full_name().strip().split()
+        if len(parts) >= 2:
+            return parts[0][0] + parts[1][0]
+        return self.user.get_full_name()[:2]
 
 class ServiceMaster(models.Model):
     """
     Connects a specific service with a master who can perform it.
     """
     service = models.ForeignKey(Service, on_delete=models.CASCADE)
-    master = models.ForeignKey(CustomUserDisplay, on_delete=models.CASCADE)
+    master = models.ForeignKey(MasterProfile, on_delete=models.CASCADE)
 
     def __str__(self):
         return f"{self.master} → {self.service.name}"
@@ -210,7 +219,7 @@ class Appointment(models.Model):
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     client = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='appointments_as_client')
-    master = models.ForeignKey(CustomUserDisplay, on_delete=models.CASCADE, related_name='appointments_as_master')
+    master = models.ForeignKey(MasterProfile, on_delete=models.CASCADE, related_name='appointments_as_master')
     service = models.ForeignKey(Service, on_delete=models.CASCADE)
     start_time = models.DateTimeField()
     payment_status = models.ForeignKey(PaymentStatus, on_delete=models.CASCADE)
@@ -318,7 +327,7 @@ class AppointmentStatusHistory(models.Model):
     """
     appointment = models.ForeignKey(Appointment, on_delete=models.CASCADE)
     status = models.ForeignKey(AppointmentStatus, on_delete=models.CASCADE)
-    set_by = models.ForeignKey(CustomUserDisplay, on_delete=models.CASCADE)
+    set_by = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
     set_at = models.DateTimeField(auto_now_add=True)
 
 # --- 4. PAYMENTS ---
@@ -367,7 +376,7 @@ class ClientFile(models.Model):
         (ADMIN, 'Admin'),
     ]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(CustomUserDisplay, on_delete=models.CASCADE)
+    user = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
     file = models.FileField(upload_to='client_files/', storage=S3Boto3Storage()) # stored in S3!
     file_type = models.CharField(max_length=50, editable=False)
     uploaded_at = models.DateTimeField(auto_now_add=True)
@@ -397,7 +406,7 @@ class Notification(models.Model):
     Supports email and SMS channels.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(CustomUserDisplay, on_delete=models.CASCADE)
+    user = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
     appointment = models.ForeignKey(Appointment, on_delete=models.SET_NULL, null=True, blank=True)
     channel = models.CharField(max_length=10, choices=[('email', 'Email'), ('sms', 'SMS')])
     message = models.TextField()
@@ -442,7 +451,7 @@ class MasterAvailability(models.Model):
         (BREAK, 'Break'),
     ]
 
-    master = models.ForeignKey(CustomUserDisplay, on_delete=models.CASCADE)
+    master = models.ForeignKey(MasterProfile, on_delete=models.CASCADE)
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()
     reason = models.CharField(

@@ -378,6 +378,9 @@ html, body {
 .calendar-table td[colspan="1"].lane-left{
     border-right: 0 !important;
 }
+.calendar-table td[colspan="1"].unavailable-left{
+    border-right: 0 !important;
+}
 .calendar-table tbody tr:nth-child(4n) {
     border-bottom: 2px solid rgba(153, 153, 153, 0.47);
 }

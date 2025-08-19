@@ -73,7 +73,7 @@ def _master_day_work_window(mp: MasterProfile, day: datetime) -> Slot:
     we = _tz_aware(datetime(day.year, day.month, day.day, end_t.hour, end_t.minute))
     return ws, we
 
-def _appointment_intervals(master: CustomUserDisplay, day: datetime) -> List[Slot]:
+def _appointment_intervals(master: MasterProfile, day: datetime) -> List[Slot]:
     """
     Интервалы занятости по существующим записям мастера на указанную дату.
     Исключаем отменённые.
@@ -86,7 +86,6 @@ def _appointment_intervals(master: CustomUserDisplay, day: datetime) -> List[Slo
         .filter(master=master, start_time__gte=start_day, start_time__lt=end_day)
         .select_related("service")
     )
-
     # исключаем отменённые (если есть статус 'Cancelled')
     cancelled = AppointmentStatus.objects.filter(name__iexact="Cancelled").first()
     if cancelled:
@@ -99,7 +98,7 @@ def _appointment_intervals(master: CustomUserDisplay, day: datetime) -> List[Slo
         blocks.append((ap_start, ap_start + dur))
     return blocks
 
-def _timeoff_intervals(master: CustomUserDisplay, day: datetime) -> List[Slot]:
+def _timeoff_intervals(master: MasterProfile, day: datetime) -> List[Slot]:
     """
     Интервалы отпусков/перерывов мастера на дату.
     """
@@ -112,17 +111,19 @@ def _timeoff_intervals(master: CustomUserDisplay, day: datetime) -> List[Slot]:
     )
     return [(p.start_time, p.end_time) for p in qs]
 
-def get_service_masters(service: Service) -> CustomUserDisplay:
+def get_service_masters(service: Service):
     """
     Список мастеров, которые умеют выполнять услугу.
     """
+
     master_ids = ServiceMaster.objects.filter(service=service).values_list("master_id", flat=True)
-    return CustomUserDisplay.objects.filter(id__in=master_ids).select_related("master_profile")
+
+    return MasterProfile.objects.filter(id__in=master_ids).select_related("user")
 
 def get_available_slots(
     service: Service,
     day: datetime,
-    master: Optional[CustomUserDisplay] = None,
+    master: Optional[MasterProfile] = None,
     step_minutes: int = 15
 ) -> Dict[int, List[datetime]]:
     """
@@ -130,23 +131,23 @@ def get_available_slots(
     Учитывает рабочее окно, существующие записи и периоды недоступности.
     """
     total_minutes = (service.duration_min or 0) + (service.extra_time_min or 0)
-    day = day.astimezone(get_current_timezone())
 
+    day = day.astimezone(get_current_timezone())
     masters = [master] if master else list(get_service_masters(service))
 
     result: Dict[int, List[datetime]] = {}
     for m in masters:
-        mp: Optional[MasterProfile] = getattr(m, "master_profile", None)
-        if not mp:
-            continue
 
-        work_s, work_e = _master_day_work_window(mp, day)
+
+        work_s, work_e = _master_day_work_window(m, day)
         if work_s >= work_e:
             continue
 
         blocks = _appointment_intervals(m, day) + _timeoff_intervals(m, day)
+
         free = _intervals_subtract((work_s, work_e), blocks)
         slots = _gen_slots_in_intervals(free, total_minutes=total_minutes, step_minutes=step_minutes)
+
         if slots:
             result[m.id] = slots
         else:

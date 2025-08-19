@@ -6,7 +6,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.contrib import admin
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Q
 from itertools import cycle
 from django.utils.timezone import localtime, datetime, make_aware, localdate
 from django.utils.html import escape
@@ -14,6 +14,8 @@ from django.shortcuts import redirect
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.contrib.auth.models import Permission
+from django.db.models.functions import Coalesce
+from django.db.models import DecimalField, Value
 from django.contrib.contenttypes.models import ContentType
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -37,7 +39,13 @@ def custom_index(request):
     week = [today + timedelta(days=i) for i in range(7)]
     appointments_qs = Appointment.objects.filter(start_time__date__range=[week_ago, today])
     payments_qs = Payment.objects.filter(appointment__start_time__date__range=[week_ago, today])
-    is_master = request.user.userrole_set.filter(role__name="Master", user__is_superuser=False).exists()
+    is_master = (
+            hasattr(request.user, "userprofile")
+            and request.user.userprofile.userrole_set.filter(
+        role__name="Master",
+        user__user__is_superuser=False,  # ← добавили ещё один __user
+    ).exists()
+    )
     chart_data = []
     total_sales = 0
     for i in range(7):
@@ -63,10 +71,12 @@ def custom_index(request):
 
     today = timezone.now().date()
     first_day = today.replace(day=1)
-    masters = CustomUserDisplay.objects.filter(userrole__role=master_role).annotate(
+    masters = MasterProfile.objects.filter(
+        user__userrole__role=master_role
+    ).annotate(
         total=Sum(
             "appointments_as_master__service__base_price",
-            filter=models.Q(appointments_as_master__start_time__date__gte=first_day)
+            filter=Q(appointments_as_master__start_time__date__gte=first_day)
         )
     )
 
@@ -79,7 +89,7 @@ def custom_index(request):
         start_time__gte=timezone.now()
     )
     if is_master:
-        today_appointments = today_appointments.filter(master=request.user)
+        today_appointments = today_appointments.filter(master=request.user.masterprofile)
 
     today_appointments = today_appointments.order_by("start_time")
 
@@ -182,7 +192,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         address = obj.userprofile.address if hasattr(obj, 'userprofile') else ''
         source = obj.userprofile.source if hasattr(obj, 'userprofile') else ''
         consent = obj.userprofile.email_marketing_consent if hasattr(obj, 'userprofile') else ''
-        roles = ", ".join([ur.role.name for ur in obj.userrole_set.all()])
+        roles = ", ".join([ur.role.name for ur in obj.userprofile.userrole_set.all()])
 
         return [
             obj.username,
@@ -262,7 +272,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             user_id = data.get("user_id")
             message = data.get("message")
 
-            user = CustomUserDisplay.objects.filter(id=user_id).first()
+            user = UserProfile.objects.filter(id=user_id).first()
             if user:
                 Notification.objects.create(
                     user=user,
@@ -279,7 +289,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 
     @admin.display(description="Roles")
     def user_roles(self, instance):
-        roles = instance.userrole_set.select_related('role').all()
+        roles = instance.userprofile.userrole_set.select_related('role').all()
         return ", ".join([ur.role.name for ur in roles]) if roles else "-"
 
 
@@ -290,24 +300,24 @@ admin.site.register(User, CustomUserAdmin)
 # -----------------------------
 # Mixin to filter users who have the "Master" role
 # -----------------------------
-class MasterSelectorMixing:
-    """
-    Restricts 'master' foreign key fields to users who have the 'Master' role.
-    """
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if db_field.name == "master":
-            master_role = Role.objects.filter(name="Master").first()
-            if master_role:
-                master_user_ids = UserRole.objects.filter(role=master_role).values_list('user_id', flat=True)
-                kwargs["queryset"] = CustomUserDisplay.objects.filter(id__in=master_user_ids)
-            else:
-                kwargs["queryset"] = User.objects.none()
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+# class MasterSelectorMixing:
+#     """
+#     Restricts 'master' foreign key fields to users who have the 'Master' role.
+#     """
+#     def formfield_for_foreignkey(self, db_field, request, **kwargs):
+#         if db_field.name == "master":
+#             master_role = Role.objects.filter(name="Master").first()
+#             if master_role:
+#                 master_user_ids = UserRole.objects.filter(role=master_role).values_list('user_id', flat=True)
+#                 kwargs["queryset"] = CustomUserDisplay.objects.filter(id__in=master_user_ids)
+#             else:
+#                 kwargs["queryset"] = User.objects.none()
+#         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 
 @admin.register(MasterAvailability)
-class MasterAvailabilityAdmin(ExportCsvMixin, MasterSelectorMixing, admin.ModelAdmin):
+class MasterAvailabilityAdmin(ExportCsvMixin, admin.ModelAdmin):
     list_display = ("master", "start_time", "end_time", "reason")
     list_filter = ("master",)
     search_fields = ("master__first_name", "master__last_name", "reason")
@@ -323,7 +333,7 @@ class MasterAvailabilityAdmin(ExportCsvMixin, MasterSelectorMixing, admin.ModelA
             return True
         if hasattr(request.user, "master_profile"):
             # список — разрешаем открыть; конкретный объект — только свой
-            return True if obj is None else (obj.master_id == request.user.id)
+            return True if obj is None else (obj.master_id == request.user.master_profile.id)
         return False
 
     # --- удаление: только свои (админ/стфф — любые)
@@ -331,14 +341,14 @@ class MasterAvailabilityAdmin(ExportCsvMixin, MasterSelectorMixing, admin.ModelA
         if request.user.is_superuser or request.user.is_staff:
             return True
         if hasattr(request.user, "master_profile"):
-            return True if obj is None else (obj.master_id == request.user.id)
+            return True if obj is None else (obj.master_id == request.user.master_profile.id)
         return False
 
     # --- только свои time off ---
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         if hasattr(request.user, "master_profile") and not request.user.is_superuser:
-            return qs.filter(master=request.user)
+            return qs.filter(master=request.user.master_profile)
         return qs
     def get_form(self, request, obj=None, **kwargs):
         BaseForm = super().get_form(request, obj, **kwargs)
@@ -370,7 +380,7 @@ class MasterAvailabilityAdmin(ExportCsvMixin, MasterSelectorMixing, admin.ModelA
         if const_master:
             initial["master"] = const_master
         if hasattr(request.user, "master_profile") and not request.user.is_superuser:
-            initial["master"] = request.user.id
+            initial["master"] = request.user.master_profile.id
 
         return initial
 
@@ -379,7 +389,7 @@ class MasterAvailabilityAdmin(ExportCsvMixin, MasterSelectorMixing, admin.ModelA
 # Appointment Admin
 # -----------------------------
 @admin.register(Appointment)
-class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
+class AppointmentAdmin(admin.ModelAdmin):
     change_list_template = "admin/appointments_calendar.html"
     form = AppointmentForm
     fields = ['client', 'master', 'service', 'start_time', 'payment_status', 'status']
@@ -402,7 +412,7 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
         if const_master:
             initial["master"] = const_master
         if hasattr(request.user, "master_profile") and not request.user.is_superuser:
-            initial["master"] = request.user.id
+            initial["master"] = request.user.master_profile.id
 
         return initial
 
@@ -410,18 +420,20 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
         form = super().get_form(request, obj, **kwargs)
 
         class WrappedForm(form):
-            def __new__(cls, *args, **kwargs_inner):
-                form.base_fields['status'] = forms.ModelChoiceField(queryset=AppointmentStatus.objects.all(), required=False, label='Appointment status')
+            def __init__(self, *args, **kwargs_inner):
+                kwargs_inner["user"] = request.user
+                super().__init__(*args, **kwargs_inner)
+
+                # выставить initial статуса для редактирования
                 if obj:
                     last_status = obj.appointmentstatushistory_set.order_by('-set_at').first()
                     if last_status:
-                        form.base_fields['status'].initial = last_status.status
-                kwargs_inner['user'] = request.user
-                f = form(*args, **kwargs_inner)
-                if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+                        self.fields['status'].initial = last_status.status
 
-                    f.fields['master'].disabled = True  # только UI; защита — в save_model
-                return f
+                # мастеру – заблокировать поле master
+                if hasattr(request.user, "master_profile") and not request.user.is_superuser:
+                    if "master" in self.fields:
+                        self.fields["master"].disabled = True
 
         return WrappedForm
 
@@ -441,7 +453,7 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
         if hasattr(request.user, "master_profile"):
             if obj is None:
                 return True  # список доступен
-            return obj.master_id == request.user.id
+            return obj.master_id == request.user.master_profile.id
         return False
 
     def has_delete_permission(self, request, obj=None):
@@ -450,21 +462,21 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
         if hasattr(request.user, "master_profile"):
             if obj is None:
                 return True
-            return obj.master_id == request.user.id
+            return obj.master_id == request.user.master_profile.id
         return False
 
     # --- только свои записи мастеру ---
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         if hasattr(request.user, "master_profile") and not request.user.is_superuser:
-            return qs.filter(master=request.user)
+            return qs.filter(master=request.user.master_profile)
         return qs
 
     # --- поле master фиксируем для мастера ---
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "master" and hasattr(request.user, "master_profile") and not request.user.is_superuser:
-            kwargs["queryset"] = CustomUserDisplay.objects.filter(id=request.user.id)
-            kwargs["initial"] = request.user.id
+            kwargs["queryset"] = MasterProfile.objects.filter(id=request.user.masterprofile.id)
+            kwargs["initial"] = request.user.masterprofile.id
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
@@ -487,7 +499,7 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
         appointments = Appointment.objects.select_related('client', 'service', 'master')
 
 
-        masters = CustomUserDisplay.objects.filter(
+        masters = MasterProfile.objects.filter(
                 id__in=appointments.values_list('master_id', flat=True)
             ).distinct()
         start_of_day = make_aware(datetime.combine(selected_date, datetime.min.time()))
@@ -555,7 +567,7 @@ class AppointmentAdmin(MasterSelectorMixing, admin.ModelAdmin):
         return response
     def save_model(self, request, obj, form, change):
         if hasattr(request.user, "master_profile") and not request.user.is_superuser:
-            obj.master = request.user
+            obj.master = request.user.master_profile
         super().save_model(request, obj, form, change)
 
 
@@ -581,7 +593,10 @@ class AppointmentStatusHistoryAdmin(ExportCsvMixin,admin.ModelAdmin):
         return False
     def save_model(self, request, obj, form, change):
         if not obj.set_by_id:
-            obj.set_by = request.user
+            profile = getattr(request.user, "userprofile", None)
+            if profile is None:
+                profile, _ = UserProfile.objects.get_or_create(user=request.user)
+            obj.set_by = profile
         super().save_model(request, obj, form, change)
 
 
@@ -597,8 +612,8 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
     list_filter = ('method',)
     export_fields = ['appointment', 'amount', 'method']
     search_fields = (
-        'appointment__client__first_name', 'appointment__client__last_name',
-        'appointment__master__first_name', 'appointment__master__last_name',
+        'appointment__client__user__first_name', 'appointment__client__user__last_name',
+        'appointment__master__user__first_name', 'appointment__master__user__last_name',
         'appointment__service__name',
     )
 
@@ -639,7 +654,7 @@ class CustomUserDisplayAdmin(admin.ModelAdmin):
 # Service Master Admin
 # -----------------------------
 @admin.register(ServiceMaster)
-class ServiceMasterAdmin(ExportCsvMixin, MasterSelectorMixing, admin.ModelAdmin):
+class ServiceMasterAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     Admin interface to assign masters to services.
     """
@@ -651,7 +666,7 @@ class ServiceMasterAdmin(ExportCsvMixin, MasterSelectorMixing, admin.ModelAdmin)
 # Service Admin
 # -----------------------------
 @admin.register(Service)
-class ServiceAdmin(ExportCsvMixin,MasterSelectorMixing, admin.ModelAdmin):
+class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     Admin interface for services.
     """
@@ -669,7 +684,7 @@ class NotificationAdmin(admin.ModelAdmin):
     """
     list_display = ('user', 'appointment', 'channel', 'short_message')
     list_filter = (('sent_at', DateFieldListFilter), 'channel')
-    search_fields = ('user__first_name', 'user__last_name', 'appointment__service__name')
+    search_fields = ('user__user__first_name', 'user__user__last_name', 'appointment__service__name')
     ordering = ['-sent_at']
 
     @admin.display(description="message")
@@ -694,7 +709,7 @@ class ClientFileAdmin(admin.ModelAdmin):
     readonly_fields = ('file_type',)  # 👈 делаем только для чтения
     exclude = ('file_type',)  # 👈 скрываем из формы создания
     list_filter = (('uploaded_at', DateFieldListFilter), 'file_type')
-    search_fields = ('user__first_name', 'user__last_name')
+    search_fields = ('user__user__first_name', 'user__user__last_name')
     ordering = ['-uploaded_at']
 
 
@@ -705,7 +720,7 @@ class ClientFileAdmin(admin.ModelAdmin):
 @admin.register(ClientReview)
 class ClientReviewAdmin(ExportCsvMixin ,admin.ModelAdmin):
     list_display = ("appointment", "get_client", "get_master", "rating", "created_at")
-    search_fields = ("appointment__client__first_name", "appointment__client__last_name", "comment")
+    search_fields = ("appointment__client__user__first_name", "appointment__client__user__last_name", "comment")
     list_filter = ("rating", "created_at")
     export_fields = ["appointment", "get_client", "get_master", "rating", "created_at"]
     @admin.display(description="Client")
@@ -714,7 +729,7 @@ class ClientReviewAdmin(ExportCsvMixin ,admin.ModelAdmin):
 
     @admin.display(description="Master")
     def get_master(self, obj):
-        return obj.appointment.master.get_full_name()
+        return obj.appointment.master.user.get_full_name()
 
 
 #-----------------------------
@@ -781,6 +796,21 @@ class UserProfileAdmin(admin.ModelAdmin):
         "notes",     # единственное редактируемое поле для мастера
     )
 
+    def response_change(self, request, obj):
+        if "_from_appointment" in request.GET:
+            return redirect("admin:core_appointment_changelist")
+        return super().response_change(request, obj)
+
+    def response_delete(self, request, obj_display, obj_id):
+        if "_from_appointment" in request.GET:
+            return redirect("admin:core_appointment_changelist")
+        return super().response_delete(request, obj_display, obj_id)
+
+    def response_post_save_change(self, request, obj):
+        if "_from_appointment" in request.GET:
+            return redirect("admin:core_appointment_changelist")
+        return super().response_post_save_change(request, obj)
+
     def get_readonly_fields(self, request, obj=None):
         # Для мастера — все поля read-only, кроме 'notes'
         if hasattr(request.user, "master_profile") and not request.user.is_superuser:
@@ -788,6 +818,7 @@ class UserProfileAdmin(admin.ModelAdmin):
             all_fields = list(self.fields) if self.fields else [f.name for f in self.model._meta.fields]
             return [f for f in all_fields if f != "notes"]
         return super().get_readonly_fields(request, obj)
+
 
     # Мастер может открывать и менять (только notes)
     def has_change_permission(self, request, obj=None):
@@ -892,7 +923,7 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
         # 1. Забираем все текущие разрешения
-        user = obj.user
+        user = obj.user.user
         user.user_permissions.clear()
 
         # 2. Добавляем только view_appointment
@@ -1079,7 +1110,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                                 <div>
                                   <div style="font-size:1.8vh;">
                                     {s.strftime('%I:%M').lstrip('0')} – {e.strftime('%I:%M').lstrip('0')}
-                                    <strong>{escape(appt.client.get_full_name() or appt.client.username)}</strong>
+                                    <strong>{escape(appt.client.get_full_name() or appt.client.user.username)}</strong>
                                   </div>
                                   <div style="font-size:1.8vh;">
                                     {escape(appt.service.name)}
@@ -1093,7 +1124,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                             "phone": escape("+1 " + getattr(appt.client, "phone", "")),
                             "service": escape(appt.service.name),
                             "status": status_name,
-                            "master": escape(master.get_full_name()),
+                            "master": escape(master),
                             "time_label": f"{local_start.strftime('%I:%M%p').lstrip('0')} - {local_end.strftime('%I:%M%p').lstrip('0')}",
                             "duration": f"{appt.service.duration_min}min",
                             "discount": f"-{apppromocode.promocode.discount_percent}" if (apppromocode := appt_promocode) else "",
@@ -1145,7 +1176,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                             <div style="opacity:.7">
                               <div style="font-size:1.8vh;">
                                 {s.strftime('%I:%M').lstrip('0')} – {e.strftime('%I:%M').lstrip('0')}
-                                <strong>{escape(appt.client.get_full_name() or appt.client.username)}</strong>
+                                <strong>{escape(appt.client.get_full_name() or appt.client.user.username)}</strong>
                               </div>
                               <div style="font-size:1.8vh;">{escape(appt.service.name)} (Cancelled)</div>
                             </div>
@@ -1153,10 +1184,10 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                         "background": MASTER_COLORS.get(mid),
                         "appointment": appt,
                         "client": escape(appt.client.get_full_name()),
-                        "phone": escape("+1 " + getattr(appt.client.userprofile, "phone", "")),
+                        "phone": escape("+1 " + getattr(appt.client, "phone", "")),
                         "service": escape(appt.service.name),
                         "status": status_name,
-                        "master": escape(master.get_full_name()),
+                        "master": escape(master.user.get_full_name()),
                         "time_label": f"{local_start.strftime('%I:%M%p').lstrip('0')} - {local_end.strftime('%I:%M%p').lstrip('0')}",
                         "duration": f"{appt.service.duration_min}min",
                         "discount": f"-{apppromocode.promocode.discount_percent}" if (apppromocode := appt_promocode) else "",
@@ -1193,7 +1224,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                             <div>
                               <div style="font-size:1.8vh;">
                                 {s.strftime('%I:%M').lstrip('0')} – {e.strftime('%I:%M').lstrip('0')}
-                                <strong>{escape(appt.client.get_full_name() or appt.client.username)}</strong>
+                                <strong>{escape(appt.client.get_full_name() or appt.client.user.username)}</strong>
                               </div>
                               <div style="font-size:1.8vh;">
                                 {escape(appt.service.name)}
@@ -1207,7 +1238,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                         "phone": escape("+1 " + getattr(appt.client, "phone", "")),
                         "service": escape(appt.service.name),
                         "status": status_name,
-                        "master": escape(master.get_full_name()),
+                        "master": escape(master.user.get_full_name()),
                         "time_label": f"{local_start.strftime('%I:%M%p').lstrip('0')} - {local_end.strftime('%I:%M%p').lstrip('0')}",
                         "duration": f"{appt.service.duration_min}min",
                         "discount": f"-{appt_promocode.promocode.discount_percent}" if appt_promocode else "",
@@ -1261,7 +1292,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                             <div style="opacity:.7">
                               <div style="font-size:1.8vh;">
                                 {s.strftime('%I:%M').lstrip('0')} – {e.strftime('%I:%M').lstrip('0')}
-                                <strong>{escape(appt.client.get_full_name() or appt.client.username)}</strong>
+                                <strong>{escape(appt.client.get_full_name() or appt.client.user.username)}</strong>
                               </div>
                               <div style="font-size:1.8vh;">{escape(appt.service.name)} (Cancelled)</div>
                             </div>
@@ -1272,7 +1303,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                         "phone": escape("+1 " + getattr(appt.client, "phone", "")),
                         "service": escape(appt.service.name),
                         "status": status_name,
-                        "master": escape(master.get_full_name()),
+                        "master": escape(master.user.get_full_name()),
                         "time_label": f"{local_start.strftime('%I:%M%p').lstrip('0')} - {local_end.strftime('%I:%M%p').lstrip('0')}",
                         "duration": f"{appt.service.duration_min}min",
                         "discount": f"-{apppromocode.promocode.discount_percent}" if (apppromocode := appt_promocode) else "",

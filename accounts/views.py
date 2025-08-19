@@ -19,6 +19,7 @@ from core.models import (
     Service,
     Appointment,
     AppointmentStatusHistory,
+    UserProfile
 )
 
 from .forms import (
@@ -44,8 +45,12 @@ class RoleBasedLoginView(LoginView):
         if user.is_staff or user.is_superuser:
             return reverse("admin:index")
 
+        try:
+            up = user.userprofile
+        except UserProfile.DoesNotExist:
+            return super().get_success_url()
         role_names = set(
-            user.userrole_set.select_related("role").values_list("role__name", flat=True)
+            up.userrole_set.select_related("role").values_list("role__name", flat=True)
         )
         if "Master" in role_names:
             return reverse("master_dashboard")
@@ -112,7 +117,7 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         # все записи клиента (для статистики/истории)
         qs = (
             Appointment.objects
-            .filter(client=user)
+            .filter(client=getattr(user, "userprofile", None))
             .select_related("service", "master")
             .annotate(current_status=Subquery(latest_status))
             .order_by("-start_time")
@@ -180,7 +185,7 @@ class ClientAppointmentsListView(RoleRequiredMixin, ListView):
     def get_queryset(self):
         return (
             Appointment.objects
-            .filter(client=self.request.user)
+            .filter(client=self.request.user.userprofile)
             .select_related("service", "master")
             .order_by("-start_time")
         )
