@@ -66,7 +66,17 @@ class UserProfile(models.Model):
     personal_discount_percent = models.PositiveSmallIntegerField(default=0,
                                                                  help_text="personal client's discount, % (0–100)",
                                                                  validators=[MinValueValidator(0), MaxValueValidator(100)])
+    health_conditions = models.JSONField(default=dict, blank=True)
 
+    def health_summary(self) -> str:
+        """Короткое суммирующее описание для UI."""
+        hc = self.health_conditions or {}
+        parts = []
+        if hc.get("allergies"): parts.append(f"Allergies: {', '.join(hc['allergies'])}")
+        if hc.get("medications"): parts.append(f"Medications: {', '.join(hc['medications'])}")
+        if hc.get("contraindications"): parts.append(f"Contraindications: {', '.join(hc['contraindications'])}")
+        if hc.get("notes"): parts.append(f"Notes: {hc['notes']}")
+        return " | ".join(parts) or "—"
 
     def set_marketing_consent(self, value: bool):
         """Удобный метод: при выставлении True заполнит timestamp, при снятии — очистит."""
@@ -651,7 +661,7 @@ class PromoCode(models.Model):
         return self.code
 
 class AppointmentPromoCode(models.Model):
-    appointment = models.OneToOneField(Appointment, on_delete=models.CASCADE)
+    appointment = models.OneToOneField(Appointment, on_delete=models.CASCADE, related_name="promocodes")
     promocode = models.ForeignKey(PromoCode, on_delete=models.CASCADE)
 
     def clean(self):

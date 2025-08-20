@@ -11,6 +11,22 @@ from django.db.models import Prefetch
 from django.contrib.auth.password_validation import validate_password
 from .models import *
 
+
+HEALTH_CHRONIC_CHOICES = [
+    ("asthma", "Asthma"),
+    ("diabetes", "Diabetes"),
+    ("hypertension", "Hypertension"),
+    ("thyroid", "Thyroid disorder"),
+]
+
+HEALTH_CONTRA_CHOICES = [
+    ("fever", "Fever / Infection"),
+    ("wounds", "Open wounds / Cuts"),
+    ("pregnancy", "Pregnancy"),
+    ("allergy_unknown", "Allergy to unknown agents"),
+]
+
+
 # -----------------------------
 # Appointment Form
 # -----------------------------
@@ -98,7 +114,67 @@ class AppointmentForm(forms.ModelForm):
 # Custom User Creation Form
 # -----------------------------
 
-class CustomUserCreationForm(UserCreationForm):
+class HealthFieldsMixin(forms.Form):
+    """
+    Миксин превращает JSON из UserProfile.health в набор отдельных полей формы
+    и обратно, чтобы админке/формам было удобно.
+    """
+    has_allergies = forms.BooleanField(required=False, label="Allergies")
+    allergies_text = forms.CharField(required=False, label="Allergy details", widget=forms.Textarea(attrs={"rows": 2}))
+
+    chronic_conditions = forms.MultipleChoiceField(
+        required=False, choices=HEALTH_CHRONIC_CHOICES,
+        label="Chronic conditions",
+        widget=forms.CheckboxSelectMultiple
+    )
+
+    medications = forms.CharField(required=False, label="Current medications", widget=forms.Textarea(attrs={"rows": 2}))
+    pregnant = forms.BooleanField(required=False, label="Pregnancy")
+    skin_sensitivity = forms.ChoiceField(
+        required=False, label="Skin sensitivity",
+        choices=[("", "—"), ("low", "Low"), ("normal", "Normal"), ("high", "High")]
+    )
+    recent_procedures = forms.CharField(required=False, label="Recent procedures", widget=forms.Textarea(attrs={"rows": 2}))
+    contraindications = forms.MultipleChoiceField(
+        required=False, choices=HEALTH_CONTRA_CHOICES,
+        label="Contraindications",
+        widget=forms.CheckboxSelectMultiple
+    )
+    health_notes = forms.CharField(required=False, label="Health notes", widget=forms.Textarea(attrs={"rows": 2}))
+
+    # --- helpers ---
+    def _health_from_initial(self, user_instance):
+        prof = getattr(user_instance, "userprofile", None)
+        return (getattr(prof, "health_conditions", None) or {}) if prof else {}
+
+    def _set_health_initials(self, user_instance):
+        data = self._health_from_initial(user_instance)
+        self.fields["has_allergies"].initial = bool(data.get("has_allergies"))
+        self.fields["allergies_text"].initial = data.get("allergies_text", "")
+        self.fields["chronic_conditions"].initial = data.get("chronic_conditions", [])
+        self.fields["medications"].initial = data.get("medications", "")
+        self.fields["pregnant"].initial = bool(data.get("pregnant"))
+        self.fields["skin_sensitivity"].initial = data.get("skin_sensitivity", "")
+        self.fields["recent_procedures"].initial = data.get("recent_procedures", "")
+        self.fields["contraindications"].initial = data.get("contraindications", [])
+        self.fields["health_notes"].initial = data.get("health_notes", "")
+
+    def _collect_health_payload(self):
+        # Нормализуем в «плоский» JSON (только нужные ключи)
+        cd = self.cleaned_data
+        return {
+            "has_allergies": bool(cd.get("has_allergies")),
+            "allergies_text": cd.get("allergies_text", "").strip(),
+            "chronic_conditions": cd.get("chronic_conditions") or [],
+            "medications": cd.get("medications", "").strip(),
+            "pregnant": bool(cd.get("pregnant")),
+            "skin_sensitivity": cd.get("skin_sensitivity") or "",
+            "recent_procedures": cd.get("recent_procedures", "").strip(),
+            "contraindications": cd.get("contraindications") or [],
+            "health_notes": cd.get("health_notes", "").strip(),
+        }
+
+class CustomUserCreationForm(HealthFieldsMixin, UserCreationForm):
     """
     Custom user creation form with additional fields:
     - Email, phone, birth date, and roles
@@ -169,6 +245,7 @@ class CustomUserCreationForm(UserCreationForm):
         profile.set_marketing_consent(email_marketing_consent)
         profile.notes = notes
 
+        profile.health_conditions = self._collect_health_payload()
         profile.save()
 
         client_role, _ = Role.objects.get_or_create(name="Client")
@@ -186,7 +263,7 @@ class CustomUserCreationForm(UserCreationForm):
 # Custom User Change Form
 # -----------------------------
 
-class CustomUserChangeForm(UserChangeForm):
+class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
     """
     Custom form for editing existing users in the admin.
     - Pre-fills UserProfile fields (phone, birth_date)
@@ -239,7 +316,8 @@ class CustomUserChangeForm(UserChangeForm):
             'email_marketing_consent',
             'notes',
             'files',
-            'personal_discount_percent'
+            'personal_discount_percent',
+
 
         ]
 
@@ -250,6 +328,7 @@ class CustomUserChangeForm(UserChangeForm):
         super().__init__(*args, **kwargs)
 
         if self.instance and hasattr(self.instance, 'userprofile'):
+            self._set_health_initials(self.instance)
             self.fields['personal_discount_percent'].initial = (
                     self.instance.userprofile.personal_discount_percent or 0
             )
@@ -286,6 +365,7 @@ class CustomUserChangeForm(UserChangeForm):
         profile.notes = notes
         profile.personal_discount_percent = self.cleaned_data.get('personal_discount_percent') or 0
         profile.set_marketing_consent(email_marketing_consent)
+        profile.health_conditions = self._collect_health_payload()
         profile.save()
 
 
@@ -511,5 +591,6 @@ class MasterCreateFullForm(forms.ModelForm):
                 # admin сама проглотит inline-css? Обычно лучше внешний файл.
             )
         }
+
 
 

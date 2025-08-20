@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% load static %}
+{% block content %}
+    <style>
+        :root{--bg:#f4f5f7;--card:#ffffff;--ink:#1e293b;--muted:#64748b;--ring:#cbd5e1;--brand:#1F5C3A;--brand-200:#e6f1eb}
+        .page{max-width:960px;margin:24px auto;padding:0 16px}
+        .hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+        .title{font-weight:800;color:var(--ink)}
+        .meta{color:var(--muted);font-size:.92rem}
+        .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;border-radius:10px;padding:10px 14px;font-weight:700;text-decoration:none}
+        .btn:hover{background:#f8fafc}
+        .card{background:var(--card);border:1px solid var(--ring);border-radius:16px;padding:20px;box-shadow:0 4px 14px rgba(2,6,23,.06)}
+        .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+        @media (max-width:800px){.grid{grid-template-columns:1fr}}
+        .item{border:1px dashed var(--ring);border-radius:12px;padding:12px 14px;min-height:64px;background:#fff}
+        .item h3{margin:0 0 6px 0;color:var(--ink);font-size:1rem}
+        .muted{color:var(--muted)}
+        .chips{display:flex;gap:8px;flex-wrap:wrap}
+        .chip{background:var(--brand-200);color:#0f3d27;padding:6px 10px;border-radius:999px;font-weight:700;font-size:.85rem}
+        .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+    </style>
+
+    <div class="page">
+        <div class="hdr">
+            <div>
+                <div class="meta">Client Portal</div>
+                <h1 class="title">Your health info</h1>
+            </div>
+            <div class="actions">
+                <a class="btn" href="{% url 'dashboard' %}">Home</a>
+                <a class="btn" href="{% url 'health-edit' %}">Edit</a>
+            </div>
+        </div>
+
+        <div class="card">
+            {% with h=profile.health_conditions %}
+                {% if h %}
+                    <div class="grid">
+                        <div class="item">
+                            <h3>Allergies</h3>
+                            {% if h.allergies %}
+                                <div class="chips">{% for a in h.allergies %}<span class="chip">{{ a }}</span>{% endfor %}</div>
+                            {% else %}<div class="muted">—</div>{% endif %}
+                        </div>
+                        <div class="item">
+                            <h3>Medications</h3>
+                            {% if h.medications %}
+                                <div class="chips">{% for m in h.medications %}<span class="chip">{{ m }}</span>{% endfor %}</div>
+                            {% else %}<div class="muted">—</div>{% endif %}
+                        </div>
+                        <div class="item">
+                            <h3>Contraindications</h3>
+                            {% if h.contraindications %}
+                                <div class="chips">{% for c in h.contraindications %}<span class="chip">{{ c }}</span>{% endfor %}</div>
+                            {% else %}<div class="muted">—</div>{% endif %}
+                        </div>
+                        <div class="item">
+                            <h3>Chronic illnesses</h3>
+                            {% if h.chronic %}
+                                <div class="chips">{% for c in h.chronic %}<span class="chip">{{ c }}</span>{% endfor %}</div>
+                            {% else %}<div class="muted">—</div>{% endif %}
+                        </div>
+                        <div class="item" style="grid-column:1/-1">
+                            <h3>Surgeries</h3>
+                            {% if h.surgeries %}
+                                <div class="chips">{% for s in h.surgeries %}<span class="chip">{{ s }}</span>{% endfor %}</div>
+                            {% else %}<div class="muted">—</div>{% endif %}
+                        </div>
+                        <div class="item" style="grid-column:1/-1">
+                            <h3>Notes</h3>
+                            <div class="{% if not h.notes %}muted{% endif %}">{{ h.notes|default:"—" }}</div>
+                        </div>
+                    </div>
+                    <div class="muted" style="margin-top:12px">Consent saved at: {{ h.consent_at|default:"—" }}</div>
+                {% else %}
+                    <p class="muted">No data yet. Please fill in your health info.</p>
+                    <div class="actions"><a class="btn" href="{% url 'health-edit' %}">Fill the form</a></div>
+                {% endif %}
+            {% endwith %}
+        </div>
+    </div>
+{% endblock %}

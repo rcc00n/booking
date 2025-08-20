@@ -16,3 +16,5 @@ def string_to_ampm(value):
     except (ValueError, TypeError) as e:
         print(e)
         return value  # вернёт как есть, если формат некорректен
+
+

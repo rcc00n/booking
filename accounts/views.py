@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import LoginView
 from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse, HttpResponse
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.views.generic import TemplateView, ListView
 from django.views.generic.edit import CreateView
@@ -24,7 +25,7 @@ from core.models import (
 
 from .forms import (
     ClientRegistrationForm,
-    ClientProfileForm,
+    ClientProfileForm, HealthConditionsForm,
 )
 
 
@@ -212,3 +213,32 @@ class ClientRegisterView(CreateView):
 
     def get_success_url(self):
         return f"{reverse('login')}?registered=1"
+
+@login_required
+def health_edit(request):
+    profile = getattr(request.user, "userprofile", None)
+    if not profile:
+        # На всякий – создадим профиль
+        from core.models import UserProfile
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    if request.method == "POST":
+        form = HealthConditionsForm(request.POST)
+        if form.is_valid():
+            data = form.to_json()
+            data["consent_at"] = timezone.now().isoformat()
+            profile.health_conditions = data
+            profile.save()
+            return redirect("health-view")
+    else:
+        form = HealthConditionsForm()
+        form.load_initial_from_json(profile.health_conditions or {})
+    return render(request, "client/health_edit.html", {"form": form})
+
+@login_required
+def health_view(request):
+    profile = getattr(request.user, "userprofile", None)
+    if not profile:
+        from core.models import UserProfile
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    return render(request, "client/health_view.html", {"profile": profile})

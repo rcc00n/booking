@@ -29,3 +29,5 @@ class MasterRoleFilter(SimpleListFilter):
                 master_ids = UserRole.objects.filter(role=master_role).values_list("user_id", flat=True)
                 return queryset.filter(id__in=master_ids)
         return queryset
+
+

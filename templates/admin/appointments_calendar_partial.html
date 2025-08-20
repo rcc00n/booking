@@ -62,18 +62,6 @@
                             <div class="event-inner"
                                  style="background-color: {{ cell.background }}; {% if cell.status == 'Cancelled' %}opacity:.6;{% endif %} position:relative;">
 
-                                {# Show discount badge only if NOT cancelled and discount present #}
-                                {% if cell.status != "Cancelled" %}
-                                    {% if  cell.base_price != cell.final_price %}
-                                        <div style="
-            position:absolute; top:4px; right:6px;
-            background:rgba(255,64,129,.6); color:#fff;
-            font-size:15px; font-weight:bold; border-radius:4px; padding:2px 4px;">
-                                            %
-                                        </div>
-                                    {% endif %}
-                                {% endif %}
-
                                 {{ cell.html|safe }}
                             </div>
                         </td>

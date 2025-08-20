@@ -242,3 +242,38 @@ class ClientProfileForm(forms.Form):
             "email_marketing_consent", "email_marketing_consented_at",
         ])
         return self.user
+
+class HealthConditionsForm(forms.Form):
+    allergies = forms.CharField(
+        required=False, widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Comma-separated: e.g. Lidocaine, Pollen"})
+    )
+    medications = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
+    contraindications = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
+    chronic = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
+    surgeries = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
+    notes = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+
+    def _split_csv(self, s: str):
+        return [x.strip() for x in s.split(",") if x.strip()] if s else []
+
+    def to_json(self):
+        cd = self.cleaned_data
+        return {
+            "allergies": self._split_csv(cd.get("allergies")),
+            "medications": self._split_csv(cd.get("medications")),
+            "contraindications": self._split_csv(cd.get("contraindications")),
+            "chronic": self._split_csv(cd.get("chronic")),
+            "surgeries": self._split_csv(cd.get("surgeries")),
+            "notes": cd.get("notes") or "",
+        }
+
+    def load_initial_from_json(self, data: dict):
+        def join_csv(v): return ", ".join(v) if isinstance(v, (list, tuple)) else (v or "")
+        self.initial.update({
+            "allergies": join_csv(data.get("allergies")),
+            "medications": join_csv(data.get("medications")),
+            "contraindications": join_csv(data.get("contraindications")),
+            "chronic": join_csv(data.get("chronic")),
+            "surgeries": join_csv(data.get("surgeries")),
+            "notes": data.get("notes", ""),
+        })

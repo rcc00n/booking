@@ -217,6 +217,16 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             'fields': ('username', 'email', 'first_name', 'last_name', 'phone', 'address','birth_date',
                        'password1', 'password2', 'is_staff', 'is_active', 'is_superuser', 'email_marketing_consent', 'how_heard'),
         }),
+        ('Health', {
+            'classes': ('collapse', 'wide'),
+            'fields': (
+                'has_allergies', 'allergies_text',
+                'chronic_conditions', 'medications',
+                'pregnant', 'skin_sensitivity',
+                'recent_procedures', 'contraindications',
+                'health_notes',
+            ),
+        }),
     )
 
     # Fields shown in user list
@@ -230,7 +240,17 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         ('Personal Info', {'fields': ('first_name', 'last_name', 'phone', 'birth_date', 'address', 'how_heard', 'email_marketing_consent')}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Files', {'fields': ('files',)}),
-        ('Notes', {'fields': ('notes',)})
+        ('Notes', {'fields': ('notes',)}),
+        ('Health', {
+            'classes': ('collapse', 'wide'),
+            'fields': (
+                'has_allergies', 'allergies_text',
+                'chronic_conditions', 'medications',
+                'pregnant', 'skin_sensitivity',
+                'recent_procedures', 'contraindications',
+                'health_notes',
+            ),
+        }),
     )
 
     def get_queryset(self, request):
@@ -260,6 +280,28 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 
     def birth_date(self, instance):
         return instance.userprofile.birth_date if hasattr(instance, 'userprofile') else '-'
+
+    def _maybe_redirect_back(self, request, response):
+        """
+        Если пришли из Appointment (по нашему параметру _from_appointment),
+        вернёмся на календарь визитов.
+        """
+        if "_from_appointment" in request.GET or "_from_appointment" in request.POST:
+
+            return redirect(reverse("admin:core_appointment_changelist"))
+        return response
+
+    def response_add(self, request, obj, post_url_continue=None):
+        resp = super().response_add(request, obj, post_url_continue)
+        return self._maybe_redirect_back(request, resp)
+
+    def response_change(self, request, obj):
+        resp = super().response_change(request, obj)
+        return self._maybe_redirect_back(request, resp)
+
+    def response_delete(self, request, obj_display, obj_id):
+        resp = super().response_delete(request, obj_display, obj_id)
+        return self._maybe_redirect_back(request, resp)
 
     @admin.display(description="")
     def send_notify_button(self, obj):
@@ -455,6 +497,34 @@ class AppointmentAdmin(admin.ModelAdmin):
                 if hasattr(request.user, "master_profile") and not request.user.is_superuser:
                     if "master" in self.fields:
                         self.fields["master"].disabled = True
+                if "client" in self.fields:
+                # уберём стандартные related-кнопки (оставим обычный Select/Autocomplete)
+                    self.fields["client"].widget.can_add_related = False
+                    self.fields["client"].widget.can_change_related = False
+                    self.fields["client"].widget.can_view_related = False
+                    self.fields["client"].widget.can_delete_related = False
+
+                # построим ссылки в auth.User admin (у тебя он зарегистрирован как CustomUserAdmin)
+                    add_url = reverse("admin:auth_user_add") + "?_from_appointment=1"
+                    change_url = ""
+                    if obj and getattr(obj, "client_id", None):
+                        # client -> UserProfile -> user (auth.User.id)
+                        try:
+                            user_id = obj.client.user.id
+                            change_url = reverse("admin:auth_user_change", args=[user_id]) + "?_from_appointment=1"
+                        except Exception:
+                            change_url = ""
+
+                    # красивый блок под полем
+                    extra_html = f"""
+                    <div style="margin-top:.4rem; display:flex; gap:.5rem; flex-wrap:wrap;">
+                      <a class="button" href="{add_url}">+ Create Profile</a>
+                      {f'<a class="button" href="{change_url}">View Profile</a>' if change_url else ''}
+                    </div>
+                    """
+                    # аккуратно допишем к help_text (не трогая label/виджет)
+                    cur_help = self.fields["client"].help_text or ""
+                    self.fields["client"].help_text = mark_safe(cur_help + extra_html)
 
         return WrappedForm
 
@@ -501,8 +571,6 @@ class AppointmentAdmin(admin.ModelAdmin):
             kwargs["initial"] = request.user.masterprofile.id
 
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
-
 
 
     def changelist_view(self, request, extra_context=None):
@@ -1029,6 +1097,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
         final_price = appt.final_price if getattr(appt, "final_price", None) is not None else base_price
 
         return {
+
             "s_local": s_local,
             "e_local": e_local,
             "status": status_name,
@@ -1042,15 +1111,19 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
             "final_price": f"${final_price}",
         }
 
-    def _cell_html_appt(meta, show_cancelled=False):
+    def _cell_html_appt(appt, meta,show_cancelled=False):
         # Один HTML для активной и отменённой (различается прозрачность/текст)
         cancelled_suffix = " (Cancelled)" if show_cancelled else ""
         opacity = ".7" if show_cancelled else "1"
+
+        corner = _corner_badges_html(appt, getattr(appt, "promocodes", None))
         return f"""
-            <div style="opacity:{opacity}">
+        {corner}
+            <div style="opacity:{opacity}; ">
+            
               <div style="font-size:1.8vh;">
                 {meta['s_local'].strftime('%I:%M').lstrip('0')} – {meta['e_local'].strftime('%I:%M').lstrip('0')}
-                <strong>{meta['client_label']}</strong>
+                <strong>{meta['client_label']}</strong> 
               </div>
               <div style="font-size:1.8vh;">
                 {meta['service_label']}{cancelled_suffix}
@@ -1065,7 +1138,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
             "colspan": colspan,
             "kind": kind,
             "appt_id": appt.id,
-            "html": _cell_html_appt(meta, show_cancelled=show_cancelled),
+            "html": _cell_html_appt(meta=meta, appt=appt, show_cancelled=show_cancelled),
             "background": bg,
             "appointment": appt,
             "client": meta["client_label"],
@@ -1348,3 +1421,58 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
         calendar_table.append(row)
 
     return calendar_table
+
+def _health_flag_info(appt):
+    """
+    True/False + (url|""), title — нужно ли показывать флаг здоровья.
+    Поддерживает и profile.health, и profile.health_conditions.
+    """
+    prof = getattr(appt, "client", None)
+    if not prof:
+        return False, "", ""
+
+    hc = getattr(prof, "health", None) or getattr(prof, "health_conditions", None) or {}
+
+    def _to_str(v):
+        if isinstance(v, (list, tuple)):
+            return ", ".join(map(str, v))
+        return (v or "").strip()
+
+    has_all = bool(hc.get("has_allergies")) or bool(_to_str(hc.get("allergies")))
+    has_med = bool(_to_str(hc.get("medications")))
+    has_ctr = bool(_to_str(hc.get("contraindications")))
+
+    if not (has_all or has_med or has_ctr):
+        return False, "", ""
+
+    try:
+        url = reverse("health-view-master", args=[prof.id])
+    except NoReverseMatch:
+        url = ""
+
+    return True, url, "Есть важные данные в анкете здоровья — нажмите, чтобы посмотреть"
+
+def _corner_badges_html(appt, appt_promocode):
+    """
+    Возвращает HTML «уголка» со значками (скидка + здоровье).
+    Вызываем внутри карточки визита, у родителя должен быть position:relative.
+    """
+    # скидка
+    promo_html = ""
+    if appt_promocode or appt.final_price != appt.service.base_price:
+        promo_html = "<span class='badge badge--promo' title='Applied discount'>%</span>"
+
+    # здоровье
+    show_flag, flag_url, flag_title = _health_flag_info(appt)
+    health_html = ""
+    if show_flag:
+        ico = "⚕️"  # можно заменить на 🩺
+        if flag_url:
+            health_html = f'<a class="badge badge--health" href="{flag_url}" title="{flag_title}">{ico}</a>'
+        else:
+            health_html = f'<span class="badge badge--health" title="{flag_title}">{ico}</span>'
+
+    if not promo_html and not health_html:
+        return ""
+
+    return f"<div class='corner-badges'>{promo_html}{health_html}</div>"
