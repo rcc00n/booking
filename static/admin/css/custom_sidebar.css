@@ -109,7 +109,7 @@ margin-left: 0 !important;
 }
 
 .icon-sidebar .dropdown.open .submenu {
-    max-height: 53.7vh; /* Должно быть достаточно для всех вложенных элементов */
+    max-height: 58.7vh; /* Должно быть достаточно для всех вложенных элементов */
     padding-top: 0.5vh;
 }
 .icon-sidebar .submenu li a {

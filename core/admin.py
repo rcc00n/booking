@@ -298,22 +298,6 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
 
-# -----------------------------
-# Mixin to filter users who have the "Master" role
-# -----------------------------
-# class MasterSelectorMixing:
-#     """
-#     Restricts 'master' foreign key fields to users who have the 'Master' role.
-#     """
-#     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-#         if db_field.name == "master":
-#             master_role = Role.objects.filter(name="Master").first()
-#             if master_role:
-#                 master_user_ids = UserRole.objects.filter(role=master_role).values_list('user_id', flat=True)
-#                 kwargs["queryset"] = CustomUserDisplay.objects.filter(id__in=master_user_ids)
-#             else:
-#                 kwargs["queryset"] = User.objects.none()
-#         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 
@@ -822,6 +806,7 @@ admin.site.register(MasterRoom)
 admin.site.register(ServiceCategory)
 admin.site.register(PrepaymentOption)
 admin.site.register(PaymentStatus)
+admin.site.register(CancellationReason)
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
