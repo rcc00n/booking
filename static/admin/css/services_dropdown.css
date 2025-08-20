@@ -1,0 +1,68 @@
+/* Контейнер (details) */
+.srv-dd {
+    width: 100%;                 /* Адаптивная ширина */
+    max-width: 100%;
+    display: block;
+    border: 1px solid #DEDEDE;
+    border-radius: 12px;
+    background: #fff;
+}
+
+/* Summary — заголовок кликabельный */
+.srv-dd__summary {
+    list-style: none;
+    cursor: pointer;
+    padding: .8rem 1rem;
+    display: flex;
+    align-items: baseline;
+    gap: .6rem;
+}
+.srv-dd__summary::-webkit-details-marker { display: none; }
+
+.srv-dd__title { font-weight: 700; color: #204029; }
+.srv-dd__hint  { color: #666; font-size: .9rem; }
+
+/* Панель со списком — одна широкая колонка, прокрутка */
+.srv-dd__panel {
+    border-top: 1px solid #F0F0F0;
+    padding: .6rem .8rem .9rem;
+    max-height: min(60vh, 520px);   /* ПРОКРУТКА */
+    overflow: auto;
+}
+
+/* Группа (категория) */
+.srv-dd__group { margin-top: .6rem; }
+.srv-dd__group-title {
+    font-weight: 800;
+    color: #204029;
+    background: #DAD3C1;
+    border-radius: 8px;
+    padding: .35rem .5rem;
+    margin-bottom: .35rem;
+    position: sticky; top: 0;    /* прилипающий подзаголовок при прокрутке */
+}
+
+/* Список чекбоксов — одна колонка */
+.srv-dd__list {
+    display: grid;
+    grid-template-columns: 1fr;  /* ОДНА широкая колонка */
+    gap: .25rem;
+}
+
+/* Элемент списка */
+.srv-dd__item {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .45rem .5rem;
+    border-radius: 8px;
+}
+.srv-dd__item:hover {
+    background: #F6F6F6;
+}
+
+.srv-dd__item input[type="checkbox"] {
+    width: 1.05rem; height: 1.05rem;
+}
+
+/* Адаптивная ширина: ничего особого не нужно — 100% по контейнеру админки */

@@ -1,0 +1,170 @@
+{# core/templates/core/widget/service_dropdown.html #}
+<div class="srvdd" data-srvdd>
+    <button type="button" class="srvdd__btn" aria-expanded="false">
+        {{ widget.attrs.placeholder|default:"Select services" }}
+        <span class="srvdd__chev" aria-hidden="true">▾</span>
+    </button>
+
+    <!-- Панель с анимацией по max-height -->
+    <div class="srvdd__panel" data-panel aria-hidden="true" style="max-height:0">
+        <div class="srvdd__panelInner" data-panel-inner>
+            <div class="srvdd__search">
+                <input type="search" class="srvdd__searchInput" placeholder="Поиск услуги…" aria-label="Search services">
+            </div>
+
+            <div class="srvdd__list" data-list role="group" aria-label="Services">
+                {% for group_name, group, index in widget.optgroups %}
+                    <section class="srvdd__group" data-group>
+                        <h4 class="srvdd__groupTitle" data-group-title>{{ group_name|default:"Без категории" }}</h4>
+                        <ul class="srvdd__ul">
+                            {% for option in group %}
+                                <li class="srvdd__li" data-item data-text="{{ option.label|lower|escape }}">
+                                    <label class="srvdd__item">
+                                        <input type="checkbox"
+                                               name="{{ widget.name }}"
+                                               value="{{ option.value }}"
+                                               {% if option.selected %}checked{% endif %}
+                                                {% include "django/forms/widgets/attrs.html" with widget=option %}
+                                        >
+                                        <span class="srvdd__label">{{ option.label }}</span>
+                                    </label>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    </section>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .srvdd{width:min(1100px,100%)}
+    .srvdd__btn{
+        width:100%; text-align:left; padding:.75rem 1rem;
+        border:1px solid #DAD3C1; border-radius:.75rem; background:#fff;
+        font-weight:700; display:flex; justify-content:space-between; align-items:center;
+    }
+    .srvdd__chev{transition:transform .25s ease}
+    .srvdd__btn[aria-expanded="true"] .srvdd__chev{transform:rotate(180deg)}
+
+    /* ПЛАВНОЕ раскрытие/закрытие панели */
+    .srvdd__panel{
+        overflow:hidden;
+        transition:max-height .28s ease;
+        border:1px solid #DAD3C1; border-radius:.9rem; margin-top:.5rem; background:#fff;
+    }
+    .srvdd__panelInner{max-height:60vh; display:flex; flex-direction:column}
+
+    .srvdd__search{
+        padding:.6rem; border-bottom:1px solid #eee; position:sticky; top:0; background:#fff; z-index:2
+    }
+    .srvdd__searchInput{
+        width:100%; padding:.65rem .75rem; border:1px solid #DEDEDE; border-radius:.6rem; font-size:.95rem
+    }
+    .srvdd__panel[aria-hidden="true"]{
+        border-width:0;     /* ← не рисуем тонкую линию */
+        margin-top:0;       /* ← чтобы не оставался зазор под кнопкой */
+    }
+    .srvdd__list{ overflow:auto; padding:.5rem; }
+    .srvdd__group{ padding:.35rem .25rem .85rem; }
+    .srvdd__groupTitle{
+        font-weight:800; color:#204029; background:#F7F5EF; border:1px solid #E8E3D3;
+        padding:.35rem .6rem; border-radius:.45rem; margin:.4rem .25rem .6rem; position:sticky; top:.5rem; z-index:1
+    }
+    .srvdd__ul{ list-style:none; margin:0; padding:0; }
+    .srvdd__item{
+        display:flex; align-items:flex-start; gap:.6rem; padding:.45rem .55rem;
+        border-radius:.55rem; transition:background .18s ease, box-shadow .18s ease
+    }
+    .srvdd__item:hover{ background:#FAFAF7; box-shadow: inset 0 0 0 1px #EFEBD9; }
+    .srvdd__label{ line-height:1.35; }
+
+    .srvdd__group[data-hidden="1"]{ display:none }
+    .srvdd__li[data-hidden="1"]{ display:none }
+</style>
+
+<script>
+    (function(){
+        // --- НАДЁЖНЫЙ ПОИСК КОРНЯ: ищем ближайший [data-srvdd] перед <script> ---
+        const scriptEl = document.currentScript;
+        let root = scriptEl.previousElementSibling;
+        while (root && !root.hasAttribute('data-srvdd')) root = root.previousElementSibling;
+        if (!root) {
+            // запасной вариант: ищем в пределах текущей формы
+            root = scriptEl.closest('form')?.querySelector('[data-srvdd]') || document.querySelector('[data-srvdd]');
+        }
+        if (!root) return; // ничего не делаем, если контейнер не найден
+
+        const btn   = root.querySelector('.srvdd__btn');
+        const panel = root.querySelector('[data-panel]');
+        const inner = root.querySelector('[data-panel-inner]');
+        const input = root.querySelector('.srvdd__searchInput');
+        const groups= [...root.querySelectorAll('[data-group]')];
+
+        let isOpen = false;
+
+        function openPanel(){
+            // Переход 0px -> контентная высота
+            panel.setAttribute('aria-hidden','false');
+            // гарантируем стартовую точку анимации
+            panel.style.maxHeight = '0px';
+            // следующий кадр — ставим нужную высоту
+            requestAnimationFrame(()=>{
+                panel.style.maxHeight = inner.scrollHeight + 'px';
+            });
+            btn.setAttribute('aria-expanded','true');
+            isOpen = true;
+            setTimeout(()=> input && input.focus(), 30);
+        }
+
+        function closePanel(){
+            // фиксируем текущую высоту, затем сворачиваем к 0
+            panel.style.maxHeight = inner.scrollHeight + 'px';
+            requestAnimationFrame(()=>{
+                panel.style.maxHeight = '0px';
+                panel.setAttribute('aria-hidden','true');
+                btn.setAttribute('aria-expanded','false');
+                isOpen = false;
+            });
+        }
+
+        btn.addEventListener('click', ()=> isOpen ? closePanel() : openPanel());
+
+        // Закрытие по клику вне
+        document.addEventListener('click', (e)=>{
+            if(!isOpen) return;
+            if(!root.contains(e.target)) closePanel();
+        });
+
+        // Закрытие по Esc
+        document.addEventListener('keydown', (e)=>{
+            if(isOpen && e.key === 'Escape') closePanel();
+        });
+
+        // Пересчёт высоты на ресайз/изменение контента
+        const onResize = ()=> { if(isOpen) panel.style.maxHeight = inner.scrollHeight + 'px'; };
+        window.addEventListener('resize', onResize);
+
+        // ---- ЖИВОЙ ПОИСК ----
+        const deb = (fn,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};};
+        const filter = deb(()=>{
+            const q = (input.value||'').trim().toLowerCase();
+            groups.forEach(g=>{
+                const items = [...g.querySelectorAll('[data-item]')];
+                let visible = 0;
+                items.forEach(li=>{
+                    const text = li.getAttribute('data-text') || '';
+                    const hit  = !q || text.includes(q);
+                    li.setAttribute('data-hidden', hit ? '0' : '1');
+                    if(hit) visible++;
+                });
+                g.setAttribute('data-hidden', visible ? '0' : '1');
+            });
+            // обновляем целевую высоту, чтобы transition оставался плавным
+            if(isOpen) panel.style.maxHeight = inner.scrollHeight + 'px';
+        }, 120);
+
+        input.addEventListener('input', filter);
+    })();
+</script>

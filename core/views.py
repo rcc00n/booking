@@ -11,7 +11,7 @@ import json
 
 from core.models import (
     Appointment, ServiceCategory, Service, CustomUserDisplay,
-    AppointmentStatusHistory, MasterProfile, UserProfile
+    AppointmentStatusHistory, MasterProfile, UserProfile, CancellationReason
 )
 from core.services.booking import (
     get_available_slots, get_service_masters,
@@ -191,6 +191,16 @@ def api_appointment_cancel(request, appt_id):
     if not (request.user.is_staff or appt.client_id == request.user.userprofile.id):
         return HttpResponseForbidden("not allowed")
 
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        payload = {}
+
+    reason_id = payload.get("reason_id")
+    reason_obj = None
+    if reason_id:
+        reason_obj = CancellationReason.objects.filter(pk=reason_id).first()
+
     cancelled = _status("Cancelled")
     # уже отменена?
     if appt.appointmentstatushistory_set.filter(status=cancelled).exists():
@@ -201,6 +211,7 @@ def api_appointment_cancel(request, appt_id):
             appointment=appt,
             status=cancelled,
             set_by=request.user.userprofile,
+            cancellation_reason=reason_obj,
         )
     return JsonResponse({"ok": True})
 

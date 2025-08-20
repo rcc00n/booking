@@ -1,9 +1,13 @@
+from pathlib import Path
+
 from dal import autocomplete
 from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import UserCreationForm, UserChangeForm
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
-from django.core.exceptions import ValidationError
+from django.template import TemplateDoesNotExist, engines
+from django.utils.safestring import mark_safe
+from django.db.models import Prefetch
 from django.contrib.auth.password_validation import validate_password
 from .models import *
 
@@ -285,6 +289,9 @@ class CustomUserChangeForm(UserChangeForm):
             raise forms.ValidationError("User with such phone number already exists.")
         return phone
 
+class ServicesDropdown(forms.CheckboxSelectMultiple):
+    template_name = "widget/service_dropdown.html"
+
 
 class MasterCreateFullForm(forms.ModelForm):
     # Общие поля
@@ -295,6 +302,16 @@ class MasterCreateFullForm(forms.ModelForm):
     phone = forms.CharField(required=True)
     birth_date = forms.DateField(required=False, widget=forms.SelectDateWidget(years=range(1950, 2030)))
 
+    services = forms.ModelMultipleChoiceField(
+        label="Services",
+        required=False,
+        queryset=Service.objects.select_related("category").order_by("category__name", "name"),
+        widget=ServicesDropdown(attrs={
+            "id": "id_services_dropdown",
+            "placeholder": "Select services"
+        }),
+    )
+
     password1 = forms.CharField(widget=forms.PasswordInput, required=False)
     password2 = forms.CharField(widget=forms.PasswordInput, required=False)
     address = forms.CharField(
@@ -304,13 +321,19 @@ class MasterCreateFullForm(forms.ModelForm):
     )
     class Meta:
         model = MasterProfile
-        fields = ['profession', 'bio', 'work_start', 'work_end', 'room']
+        fields = ['profession', 'bio', 'work_start', 'work_end', 'room', 'services']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         # Если редактируем — заменяем пароли на read-only поле
         if self.instance and self.instance.pk:
+
+            current_ids = ServiceMaster.objects.filter(
+                master=self.instance
+            ).values_list('service_id', flat=True)
+            self.fields['services'].initial = list(current_ids)
+
             user_profile = self.instance.user
             user = user_profile.user  # сам Django User
             self.fields['password'] = ReadOnlyPasswordHashField(label="Password")
@@ -329,6 +352,20 @@ class MasterCreateFullForm(forms.ModelForm):
             self.fields['phone'].initial = user_profile.phone
             self.fields['address'].initial = user_profile.address
             self.fields['birth_date'].initial = user_profile.birth_date
+        cats = (ServiceCategory.objects
+                .order_by("name")
+                .prefetch_related("service_set"))
+        choices = []
+        for cat in cats:
+            opts = [(str(s.pk), s.name) for s in cat.service_set.all()]
+            if opts:
+                choices.append((cat.name, opts))
+        # Неотнесённые к категории — в конец
+        uncategorized = Service.objects.filter(category__isnull=True).order_by("name")
+        if uncategorized.exists():
+            choices.append(("Other", [(str(s.pk), s.name) for s in uncategorized]))
+
+        self.fields["services"].choices = choices
 
     def clean_password2(self):
         # Только если создаём
@@ -359,6 +396,16 @@ class MasterCreateFullForm(forms.ModelForm):
         return phone
 
     def save(self, commit=True):
+        """
+       На создании:
+         - создаём User, UserProfile, MasterProfile (как и раньше)
+         - создаём связи ServiceMaster по отмеченным услугам
+
+       На редактировании:
+         - обновляем User / UserProfile (как и раньше)
+         - синхронизируем ServiceMaster: добавляем новые, удаляем снятые
+       """
+        selected_services = list(self.cleaned_data.get('services') or [])
         if not self.instance.pk:
             # Создание нового пользователя
             User = get_user_model()
@@ -392,9 +439,15 @@ class MasterCreateFullForm(forms.ModelForm):
             master.user = user_profile
             if commit:
                 master.save()
+
+            ServiceMaster.objects.bulk_create([
+                ServiceMaster(service=s, master=master) for s in selected_services
+            ], ignore_conflicts=True)
+
             return master
 
         else:
+            master = super().save(commit=False)
             # Редактирование мастера
             user_profile = self.instance.user
             user = user_profile.user
@@ -410,4 +463,34 @@ class MasterCreateFullForm(forms.ModelForm):
             user_profile.birth_date = self.cleaned_data.get('birth_date')
             user_profile.save()
 
-            return super().save(commit=commit)
+            current_ids = set(ServiceMaster.objects.filter(
+                master=master
+            ).values_list('service_id', flat=True))
+            new_ids = set(s.id for s in selected_services)
+
+            to_add_ids = new_ids - current_ids
+            to_del_ids = current_ids - new_ids
+
+            if to_add_ids:
+                add_map = {s.id: s for s in selected_services if s.id in to_add_ids}
+                ServiceMaster.objects.bulk_create(
+                    [ServiceMaster(service=add_map[sid], master=master) for sid in to_add_ids],
+                    ignore_conflicts=True
+                )
+            if to_del_ids:
+                ServiceMaster.objects.filter(master=master, service_id__in=to_del_ids).delete()
+
+
+            return master
+
+    class Media:
+        # Небольшая косметика для чекбоксов (опционально)
+        css = {
+            'all': (
+                # можно положить этот CSS в static и подключить здесь
+                # пример встроенного мини-CSS:
+                # admin сама проглотит inline-css? Обычно лучше внешний файл.
+            )
+        }
+
+

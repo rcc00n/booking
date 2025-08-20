@@ -79,7 +79,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'booking.wsgi.application'
 
-
+# FORM_RENDERER = 'django.forms.renderers.TemplatesSetting'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 

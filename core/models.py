@@ -6,6 +6,8 @@ import uuid
 from django.core.exceptions import ValidationError
 from datetime import timedelta, time
 import os
+
+from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 from django.utils.timezone import localtime
 from core.validators import clean_phone
@@ -188,6 +190,12 @@ class ServiceMaster(models.Model):
     service = models.ForeignKey(Service, on_delete=models.CASCADE)
     master = models.ForeignKey(MasterProfile, on_delete=models.CASCADE)
 
+    class Meta:
+        unique_together = ('service', 'master')   # ← важно
+        indexes = [
+            models.Index(fields=['master', 'service']),
+        ]
+
     def __str__(self):
         return f"{self.master} → {self.service.name}"
 
@@ -321,6 +329,15 @@ class Appointment(models.Model):
                                   f"({work_end_dt.strftime('%H:%M')})."
                 })
 
+class CancellationReason(models.Model):
+    """
+    Справочник причин отмены записи
+    """
+    name = models.CharField(max_length=100, unique=True)
+
+    def __str__(self):
+        return self.name
+
 class AppointmentStatusHistory(models.Model):
     """
     Tracks status changes for appointments, including who made the change and when.
@@ -329,6 +346,14 @@ class AppointmentStatusHistory(models.Model):
     status = models.ForeignKey(AppointmentStatus, on_delete=models.CASCADE)
     set_by = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
     set_at = models.DateTimeField(auto_now_add=True)
+
+    cancellation_reason = models.ForeignKey(
+        "CancellationReason",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        help_text="Reason for cancelling if status is 'Cancelled'"
+    )
 
 # --- 4. PAYMENTS ---
 
@@ -473,13 +498,33 @@ class MasterAvailability(models.Model):
 
         if not self.master or not self.start_time or not self.end_time:
             return  # Не валидируем, если что-то не заполнено
+        cancelled = AppointmentStatus.objects.filter(name__iexact="Cancelled").first()
 
         # Найдём все записи мастера, которые пересекаются с отпуском
-        overlapping_appointments = Appointment.objects.filter(
-            master=self.master,
-            start_time__lt=self.end_time,
-            start_time__gte=self.start_time - timedelta(hours=3)  # захватываем буфер
-        )
+        if cancelled:
+            last_status = (
+                AppointmentStatusHistory.objects
+                .filter(appointment=OuterRef("pk"))
+                .order_by("-set_at")
+                .values("status_id")[:1]
+            )
+
+            overlapping_appointments = (
+                Appointment.objects
+                .annotate(last_status=Subquery(last_status))
+                .filter(
+                    master=self.master,
+                    start_time__lt=self.end_time,
+                    start_time__gte=self.start_time - timedelta(hours=3),
+                )
+                .exclude(last_status=cancelled.id)  # убираем отменённые
+            )
+        else:
+            overlapping_appointments = Appointment.objects.filter(
+                master=self.master,
+                start_time__lt=self.end_time,
+                start_time__gte=self.start_time - timedelta(hours=3),
+            )
 
         for appt in overlapping_appointments:
             appt_end = appt.start_time + timedelta(minutes=appt.service.duration_min)
