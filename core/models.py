@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.contrib.auth.models import User
 import uuid
@@ -7,7 +8,7 @@ from django.core.exceptions import ValidationError
 from datetime import timedelta, time
 import os
 
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Subquery, Sum
 from django.utils import timezone
 from django.utils.timezone import localtime
 from core.validators import clean_phone
@@ -62,6 +63,10 @@ class UserProfile(models.Model):
     email_marketing_consented_at = models.DateTimeField(null=True, blank=True)
     how_heard = models.CharField(max_length=32, choices=HowHeard.choices, blank=True)
     notes = models.TextField(blank=True, null=True)
+    personal_discount_percent = models.PositiveSmallIntegerField(default=0,
+                                                                 help_text="personal client's discount, % (0–100)",
+                                                                 validators=[MinValueValidator(0), MaxValueValidator(100)])
+
 
     def set_marketing_consent(self, value: bool):
         """Удобный метод: при выставлении True заполнит timestamp, при снятии — очистит."""
@@ -76,6 +81,43 @@ class UserProfile(models.Model):
         return f"{self.user.get_full_name()}"
     def __str__(self):
         return f"{self.get_full_name()} "
+
+        # ── агрегаты по платежам
+    def total_spent_usd(self) -> Decimal:
+        """
+        Сумма оплаченных визитов (по модели Payment).
+        Если у тебя аудит «завершения» идёт по статусу Appointment/PaymentStatus — можно ужесточить фильтры ниже.
+        """
+        return (
+                Payment.objects
+                .filter(appointment__client=self)
+                # Если хочешь ограничить только оплатами со статусом Paid:
+                # .filter(appointment__payment_status__name__iexact="Paid")
+                .aggregate(total=Sum("amount"))["total"]
+                or Decimal("0")
+        )
+
+    @property
+    def client_status(self) -> str:
+        """
+        Ранги:
+        1) New Client — если дата регистрации < 30 дней назад
+        2) Regular Client — иначе
+        3) VIP — если total_spent > 1000
+        4) Super VIP — если total_spent > 3000
+        Логика приоритетов: финансовые ранги старше календарных.
+        """
+        spent = self.total_spent_usd()
+        if spent >= Decimal("3000"):
+            return "Super VIP"
+        if spent >= Decimal("1000"):
+            return "VIP"
+
+        joined = getattr(self.user, "date_joined", None)
+        if joined:
+            # date_joined — у auth.User; сравниваем с now()
+            return "New Client" if (timezone.now() - joined).days < 30 else "Regular Client"
+        return "Regular Client"
 
 
 class UserRole(models.Model):
@@ -97,9 +139,6 @@ class ClientSource(models.Model):
 
     def __str__(self):
         return f"{self.source}%"
-
-
-    
 
 
 # --- 2. SERVICES ---
@@ -171,8 +210,6 @@ class MasterProfile(models.Model):
     profession = models.CharField(max_length=100, blank=True)
     bio = models.TextField(blank=True)
     room = models.ForeignKey(MasterRoom, on_delete=models.CASCADE, blank=True, null=True)
-    work_start = models.TimeField(default="08:00")
-    work_end = models.TimeField(default="21:00")
 
     def __str__(self):
         return f"{self.user.get_full_name()}"
@@ -182,6 +219,29 @@ class MasterProfile(models.Model):
         if len(parts) >= 2:
             return parts[0][0] + parts[1][0]
         return self.user.get_full_name()[:2]
+
+class MasterWorkDay(models.Model):
+    WEEKDAYS = [
+        (0, "Monday"),
+        (1, "Tuesday"),
+        (2, "Wednesday"),
+        (3, "Thursday"),
+        (4, "Friday"),
+        (5, "Saturday"),
+        (6, "Sunday"),
+    ]
+
+    master = models.ForeignKey(MasterProfile, on_delete=models.CASCADE, related_name="workdays")
+    weekday = models.IntegerField(choices=WEEKDAYS)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+
+    class Meta:
+        unique_together = ("master", "weekday")
+        ordering = ["weekday"]
+
+    def __str__(self):
+        return f"{self.get_weekday_display()} {self.start_time}–{self.end_time}"
 
 class ServiceMaster(models.Model):
     """
@@ -231,6 +291,8 @@ class Appointment(models.Model):
     service = models.ForeignKey(Service, on_delete=models.CASCADE)
     start_time = models.DateTimeField()
     payment_status = models.ForeignKey(PaymentStatus, on_delete=models.CASCADE)
+    final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
+    discount_source = models.CharField(max_length=20, blank=True, default="", editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -270,57 +332,51 @@ class Appointment(models.Model):
 
             # --- 🔒 Проверка пересечения по комнате ---
         master_profile = getattr(self.master, "master_profile", None)
-        if master_profile and master_profile.room:
-            overlapping_room = Appointment.objects.filter(
-                master__master_profile__room=master_profile.room,
-                start_time__lt=this_end,
-                start_time__gte=self.start_time - timedelta(hours=3)
-            ).exclude(id=self.id).exclude(appointmentstatushistory__status=cancelled_status)
 
-            for appt in overlapping_room:
-                appt_end = appt.start_time + timedelta(minutes=appt.service.duration_min)
-                if self.start_time < appt_end and this_end > appt.start_time :
-                    raise ValidationError({
-                        "start_time": f"Room '{master_profile.room}' is occupied at this time."
-                    })
-        # Проверка на отпуск / отгулы
-        unavailable_periods = MasterAvailability.objects.filter(master=self.master)
-
-        for period in unavailable_periods:
-            if self.start_time < period.end_time and this_end > period.start_time:
-                raise ValidationError({"start_time": "This appointment falls within the master's time off or vacation."})
-
-        master_profile = getattr(self.master, "master_profile", None)
         if master_profile and self.start_time:
             local_start_dt = localtime(self.start_time)
 
-            # длительность услуги с учётом extra_time_min
+        # длительность услуги
             extra_min = self.service.extra_time_min or 0
             total_minutes = self.service.duration_min + extra_min
             local_end_dt = local_start_dt + timedelta(minutes=total_minutes)
 
-            # рабочее окно мастера на ДАННУЮ дату
-            ws: time = master_profile.work_start
-            we: time = master_profile.work_end
+            weekday = local_start_dt.weekday()  # 0=Пн, 6=Вс
+            workday = master_profile.workdays.filter(weekday=weekday).first()
 
-            work_start_dt = local_start_dt.replace(hour=ws.hour, minute=ws.minute, second=0, microsecond=0)
-            work_end_dt   = local_start_dt.replace(hour=we.hour, minute=we.minute, second=0, microsecond=0)
+            if not workday:
+                raise ValidationError({
+                    "start_time": f"У мастера нет рабочих часов на {local_start_dt.strftime('%A')}."
+                })
 
-            # Если смена «через полночь» (например, 22:00–06:00), расширяем конец на следующий день
+            # строим datetime начала/конца рабочего окна
+            work_start_dt = local_start_dt.replace(
+                hour=workday.start_time.hour,
+                minute=workday.start_time.minute,
+                second=0,
+                microsecond=0,
+            )
+            work_end_dt = local_start_dt.replace(
+                hour=workday.end_time.hour,
+                minute=workday.end_time.minute,
+                second=0,
+                microsecond=0,
+            )
+
+            # поддержка "через полночь"
             if work_end_dt <= work_start_dt:
                 work_end_dt += timedelta(days=1)
-                # если встреча начинается после полуночи (т.е. до work_end), тоже считаем её «следующим днём»
                 if local_end_dt <= work_start_dt:
                     local_end_dt += timedelta(days=1)
                 if local_start_dt <= work_start_dt:
                     local_start_dt += timedelta(days=1)
 
-            # 1) старт раньше начала смены
+                # 1) старт раньше начала смены
             if local_start_dt < work_start_dt:
                 raise ValidationError({
                     "start_time": f"Start time ({local_start_dt.strftime('%H:%M')}) earlier than masters shift starts git st "
                                   f"({work_start_dt.strftime('%H:%M')})."
-                })
+            })
 
             # 2) конец позже конца смены
             if local_end_dt > work_end_dt:
@@ -614,3 +670,56 @@ class AppointmentPromoCode(models.Model):
                 "promocode": "This Service already has a discount. Promocode can't be applied"
             })
 
+def get_effective_discount_percent(service: Service, client: UserProfile | None, promocode: PromoCode | None = None) -> int:
+    """
+    Возвращает максимальный процент скидки из:
+    - активной скидки на услугу (ServiceDiscount)
+    - персональной скидки клиента (UserProfile.personal_discount_percent)
+    - промокода (если передан и валиден)
+    """
+    percents = [0]
+
+    # скидка на услугу
+    disc = service.get_active_discount()
+    if disc:
+        percents.append(int(disc.discount_percent))
+
+    # персональная скидка клиента
+    if client and client.personal_discount_percent:
+        percents.append(int(client.personal_discount_percent))
+
+    # промокод (опционально)
+    if promocode:
+        percents.append(int(promocode.discount_percent))
+
+    return max(percents)
+
+
+def get_price_for(service: Service, client: UserProfile | None, promocode: PromoCode | None = None) -> Decimal:
+    """
+    Итоговая цена для клиента с учётом лучшего источника скидки.
+    """
+    base = service.base_price
+    best = Decimal(get_effective_discount_percent(service, client, promocode))
+    price = (base * (Decimal(100) - best) / Decimal(100)).quantize(Decimal("0.01"))
+    return price
+
+def detect_discount_source(service, client, promocode):
+    """Возвращает строку-источник: 'personal' | 'promocode' | 'service' | ''"""
+    # проценты по источникам
+    # скидка услуги
+    disc = service.get_active_discount()
+    s = int(getattr(disc, "discount_percent", 0) or 0)
+    # персональная
+    p = int(getattr(client, "personal_discount_percent", 0) or 0)
+    # промокод
+    pr = int(getattr(promocode, "discount_percent", 0) or 0)
+
+    general = max(s, pr)
+    if p > general:
+        return "personal"
+    if pr >= s and pr > 0:
+        return "promocode"
+    if s > 0:
+        return "service"
+    return ""

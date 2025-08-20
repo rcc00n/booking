@@ -75,6 +75,12 @@ class AppointmentForm(forms.ModelForm):
                 discount_applied=discount
             )
 
+        client_profile = instance.client
+        instance.final_price = get_price_for(instance.service, client_profile, promocode.promocode if promocode else None)
+
+
+        instance.discount_source = detect_discount_source(service=instance.service, client=client_profile, promocode=promocode)
+
         new_status = self.cleaned_data['status']
         profile = getattr(self.user, "userprofile", None)
         print(self.user)
@@ -104,6 +110,9 @@ class CustomUserCreationForm(UserCreationForm):
     last_name = forms.CharField(required=True)
     phone = forms.CharField(required=True)
     birth_date = forms.DateField(required=False, widget=forms.SelectDateWidget(years=range(1950, 2030)))
+    personal_discount_percent = forms.IntegerField(
+        required=False, min_value=0, max_value=100, initial=0, label="Personal discount, %"
+    )
     # новые поля
     address = forms.CharField(
         required=False,
@@ -130,7 +139,7 @@ class CustomUserCreationForm(UserCreationForm):
             'password1', 'password2',
             'is_staff', 'is_active', 'is_superuser',
             'groups', "address", "email_marketing_consent",
-            "notes"
+            "notes", 'personal_discount_percent'
         ]
 
     def save(self, commit=True):
@@ -156,6 +165,7 @@ class CustomUserCreationForm(UserCreationForm):
         profile.birth_date = birth_date
         profile.address = address
         profile.how_heard = how_heard
+        profile.personal_discount_percent = self.cleaned_data.get('personal_discount_percent') or 0
         profile.set_marketing_consent(email_marketing_consent)
         profile.notes = notes
 
@@ -188,6 +198,9 @@ class CustomUserChangeForm(UserChangeForm):
     last_name = forms.CharField(required=False)
     phone = forms.CharField(required=True)
     birth_date = forms.DateField(required=False, widget=forms.SelectDateWidget(years=range(1950, 2030)))
+    personal_discount_percent = forms.IntegerField(
+        required=False, min_value=0, max_value=100, label="Personal discount, %"
+    )
     address = forms.CharField(
         required=False,
         label="Address",
@@ -225,7 +238,9 @@ class CustomUserChangeForm(UserChangeForm):
             'how_heard',
             'email_marketing_consent',
             'notes',
-            'files'
+            'files',
+            'personal_discount_percent'
+
         ]
 
     def __init__(self, *args, **kwargs):
@@ -235,6 +250,9 @@ class CustomUserChangeForm(UserChangeForm):
         super().__init__(*args, **kwargs)
 
         if self.instance and hasattr(self.instance, 'userprofile'):
+            self.fields['personal_discount_percent'].initial = (
+                    self.instance.userprofile.personal_discount_percent or 0
+            )
             self.fields['phone'].initial = self.instance.userprofile.phone
             self.fields['birth_date'].initial = self.instance.userprofile.birth_date
             self.fields['address'].initial = self.instance.userprofile.address
@@ -266,6 +284,7 @@ class CustomUserChangeForm(UserChangeForm):
         profile.address = address
         profile.how_heard = how_heard
         profile.notes = notes
+        profile.personal_discount_percent = self.cleaned_data.get('personal_discount_percent') or 0
         profile.set_marketing_consent(email_marketing_consent)
         profile.save()
 
@@ -321,7 +340,7 @@ class MasterCreateFullForm(forms.ModelForm):
     )
     class Meta:
         model = MasterProfile
-        fields = ['profession', 'bio', 'work_start', 'work_end', 'room', 'services']
+        fields = ['profession', 'bio', 'room', 'services']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

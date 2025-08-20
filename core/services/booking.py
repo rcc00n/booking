@@ -66,11 +66,15 @@ def _master_day_work_window(mp: MasterProfile, day: datetime) -> Slot:
     """
     Рабочее окно мастера на день (без учёта отпусков), tz-aware.
     """
-    start_t: time = mp.work_start or time(8, 0)
-    end_t: time = mp.work_end or time(21, 0)
-    day = day.astimezone(get_current_timezone())
-    ws = _tz_aware(datetime(day.year, day.month, day.day, start_t.hour, start_t.minute))
-    we = _tz_aware(datetime(day.year, day.month, day.day, end_t.hour, end_t.minute))
+    weekday = day.weekday()
+    workday = mp.workdays.filter(weekday=weekday).first()
+    if not workday:
+        return None, None  # в этот день мастер не работает
+
+    ws = _tz_aware(datetime(day.year, day.month, day.day,
+                            workday.start_time.hour, workday.start_time.minute))
+    we = _tz_aware(datetime(day.year, day.month, day.day,
+                            workday.end_time.hour, workday.end_time.minute))
     return ws, we
 
 def _appointment_intervals(master: MasterProfile, day: datetime) -> List[Slot]:
@@ -137,7 +141,7 @@ def get_available_slots(
 
     result: Dict[int, List[datetime]] = {}
     for m in masters:
-
+    #TODO change master work_s work_e accordingly to each day. It is the same for all days now. Needs to be changed to each day separately
 
         work_s, work_e = _master_day_work_window(m, day)
         if work_s >= work_e:

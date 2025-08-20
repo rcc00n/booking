@@ -193,21 +193,15 @@ function showTooltip(box) {
     const status = box.dataset.status || "";
     const duration = box.dataset.duration || "";
     const price = box.dataset.price || "";
-    const price_discounted = box.dataset.pricedisc || "";
-    const discount = box.dataset.discount || "";
+    const final = box.dataset.final || "";
     const master = box.dataset.master || "";
 
     const firstLetter = client.trim().charAt(0).toUpperCase();
-    if (price === price_discounted) {
-        let floatNumber = parseFloat(price.replace(/[^0-9.]/g, '')); // 150.00
-        let intNumber = Math.round(floatNumber); // 150
-        let final_price = 0;
-        if(discount === ""){
-            final_price = intNumber;
-        }
-        else {
-            final_price = intNumber * (1 - parseInt(discount)/(-1*100));
-        }
+    if (price === final) {
+        // let floatNumber = parseFloat(price.replace(/[^0-9.]/g, '')); // 150.00
+        // let intNumber = Math.round(floatNumber); // 150
+
+
 
         tooltip.innerHTML = `
         <div class="tooltip-card">
@@ -226,7 +220,7 @@ function showTooltip(box) {
 
                 <div class="tooltip-footer">
                     <div class="tooltip-service">${service}</div>
-                    <div class="tooltip-price">$${final_price}</div>
+                    <div class="tooltip-price">${price}</div>
                 </div>
                 <div class="tooltip-meta">${master} · ${duration}</div>
             </div>
@@ -234,8 +228,8 @@ function showTooltip(box) {
     `;
     }
     else {
-        let floatNumber = parseFloat(price_discounted.replace(/[^0-9.]/g, ''));
-        let intNumber = Math.round(floatNumber);
+        // let floatNumber = parseFloat(price_discounted.replace(/[^0-9.]/g, ''));
+        // let intNumber = Math.round(floatNumber);
 
         tooltip.innerHTML = `
         <div class="tooltip-card">
@@ -256,7 +250,7 @@ function showTooltip(box) {
                     <div class="tooltip-service">${service}</div>
                     <div>
                     <div class="tooltip-price" style="opacity: 0.5; text-decoration: line-through;">${price}</div>
-                    <div class="tooltip-price">$${intNumber * (1 - discount/(-1*100))}</div>
+                    <div class="tooltip-price">${final}</div>
                     </div>
                 </div>
                 <div class="tooltip-meta">${master} · ${duration}</div>

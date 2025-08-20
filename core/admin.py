@@ -220,18 +220,27 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     )
 
     # Fields shown in user list
-    list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'user_roles', 'send_notify_button')
+    list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'user_roles', 'client_status_col')
     list_filter = ('is_staff', 'is_superuser', 'is_active', RoleFilter, 'userprofile__how_heard')
     search_fields = ('username', 'email', 'first_name', 'last_name', 'userprofile__phone')
 
     # Field layout when editing a user
     fieldsets = (
-        (None, {'fields': ('username', 'email', 'password')}),
+        (None, {'fields': ('username', 'email', 'password', 'personal_discount_percent')}),
         ('Personal Info', {'fields': ('first_name', 'last_name', 'phone', 'birth_date', 'address', 'how_heard', 'email_marketing_consent')}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Files', {'fields': ('files',)}),
         ('Notes', {'fields': ('notes',)})
     )
+
+    def get_queryset(self, request):
+        # чтобы не ловить N+1
+        return super().get_queryset(request).select_related('userprofile')
+
+    @admin.display(description="Status")
+    def client_status_col(self, obj):
+        up = getattr(obj, 'userprofile', None)
+        return getattr(up, 'client_status', '-') if up else '-'
 
     def get_fieldsets(self, request, obj=None):
         # Allow Django to use default fieldsets logic
@@ -403,7 +412,8 @@ class MasterAvailabilityAdmin(ExportCsvMixin, admin.ModelAdmin):
 class AppointmentAdmin(admin.ModelAdmin):
     change_list_template = "admin/appointments_calendar.html"
     form = AppointmentForm
-    fields = ['client', 'master', 'service', 'start_time', 'payment_status', 'status']
+    fields = ['client', 'master', 'service', 'start_time', 'payment_status', 'status', 'final_price', 'discount_source']
+    readonly_fields = ("final_price", "discount_source")
     def get_changeform_initial_data(self, request):
         initial = super().get_changeform_initial_data(request)
 
@@ -818,8 +828,14 @@ class UserProfileAdmin(admin.ModelAdmin):
         "address",
         "how_heard",
         "email_marketing_consent",
-        "notes",     # единственное редактируемое поле для мастера
+        "notes",
+        "personal_discount_percent",
+         # единственное редактируемое поле для мастера
     )
+
+    @admin.display(description="Status")
+    def client_status_col(self, obj):
+        return obj.client_status
 
     def response_change(self, request, obj):
         if "_from_appointment" in request.GET:
@@ -863,14 +879,16 @@ class UserProfileAdmin(admin.ModelAdmin):
             return False
         return super().has_delete_permission(request, obj)
 
-
-
+class MasterWorkDayInline(admin.TabularInline):
+    model = MasterWorkDay
+    extra = 7  # сразу 7 строк для всех дней
 
 @admin.register(MasterProfile)
 class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
+    inlines = [MasterWorkDayInline]
     add_form = MasterCreateFullForm
     readonly_fields = ['password_display']
-    export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","address", "profession", 'bio',"work_start", "work_end", "room", "is_staff", "is_superuser", 'is_active']
+    export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","address", "profession", 'bio', "room", "is_staff", "is_superuser", 'is_active']
 
     def get_export_row(self, obj):
         phone = obj.user.userprofile.phone if hasattr(obj, 'user') else ''
@@ -898,7 +916,7 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
     form = MasterCreateFullForm  # на редактирование тоже можно оставить ту же
 
 
-    list_display = ("get_name", "room", "profession", "work_start", "work_end")
+    list_display = ("get_name", "room", "profession")
 
     def get_fieldsets(self, request, obj=None):
         form = self.form(instance=obj if obj else None)
@@ -993,21 +1011,6 @@ def get_price_html(service):
     return format_html("<strong>${}</strong>", service.base_price)
 
 def createTable(selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities):
-    def createTable(selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities):
-        """
-        Строит таблицу расписания для дня:
-          - две колонки на мастера (левая/правая полоса)
-          - активные/отменённые записи
-          - тайм‑офф (перерывы/отпуска)
-        Исправления:
-          • Тайм‑офф больше НЕ помечает дорожки в skip_lane → корректный colspan=2.
-          • Дублирующийся код формирования ячеек вынесен в хелперы.
-        """
-    from itertools import cycle
-    from datetime import datetime, timedelta, time
-    from django.utils.timezone import localtime
-    from django.utils.html import escape
-
     COLOR_PALETTE = ["#E4D08A", "#EDC2A2", "#CEAEC6", "#A3C1C9", "#C3CEA3", "#E7B3C3"]
     master_ids = [m.id for m in masters]
     MASTER_COLORS = dict(zip(master_ids, cycle(COLOR_PALETTE)))
@@ -1017,30 +1020,32 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
         s_local = localtime(appt.start_time)
         total_min = (appt.service.duration_min or 0) + (appt.service.extra_time_min or 0)
         e_local = s_local + timedelta(minutes=total_min)
-        appt_promocode = getattr(appt, "appointmentpromocode", None)
         last_status = appt.appointmentstatushistory_set.order_by("-set_at").first()
         status_name = last_status.status.name if last_status else "Unknown"
+
+        # --- ТОЛЬКО цены ---
+        base_price = appt.service.base_price
+        # final_price берём из модели Appointment; если пусто — показываем базовую
+        final_price = appt.final_price if getattr(appt, "final_price", None) is not None else base_price
+
         return {
             "s_local": s_local,
             "e_local": e_local,
             "status": status_name,
-            "promo": appt_promocode,
             "master_label": escape(str(master_obj)),
             "client_label": escape(appt.client.get_full_name() or appt.client.user.username),
             "service_label": escape(appt.service.name),
             "time_label": f"{s_local.strftime('%I:%M%p').lstrip('0')} - {e_local.strftime('%I:%M%p').lstrip('0')}",
             "duration_label": f"{appt.service.duration_min}min",
-            "discount_label": (f"-{appt_promocode.promocode.discount_percent}"
-                               if appt_promocode else ""),
-            "price_discounted": f"${appt.service.get_discounted_price()}",
-            "price": f"${appt.service.base_price}",
+            # ↓ только эти два поля передаём в шаблон
+            "base_price": f"${base_price}",
+            "final_price": f"${final_price}",
         }
 
     def _cell_html_appt(meta, show_cancelled=False):
         # Один HTML для активной и отменённой (различается прозрачность/текст)
         cancelled_suffix = " (Cancelled)" if show_cancelled else ""
         opacity = ".7" if show_cancelled else "1"
-        promo_html = ""
         return f"""
             <div style="opacity:{opacity}">
               <div style="font-size:1.8vh;">
@@ -1049,7 +1054,6 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
               </div>
               <div style="font-size:1.8vh;">
                 {meta['service_label']}{cancelled_suffix}
-                {promo_html}
               </div>
             </div>
         """
@@ -1065,15 +1069,15 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
             "background": bg,
             "appointment": appt,
             "client": meta["client_label"],
-            "phone": escape("+1 " + getattr(appt.client, "phone", "")),
+            "phone": escape(getattr(appt.client, "phone", "")),
             "service": meta["service_label"],
             "status": meta["status"],
             "master": meta["master_label"],
             "time_label": meta["time_label"],
             "duration": meta["duration_label"],
-            "discount": meta["discount_label"],
-            "price_discounted": meta["price_discounted"],
-            "price": meta["price"],
+            # ↓ только эти два ключа оставляем для шаблона
+            "base_price": meta["base_price"],
+            "final_price": meta["final_price"],
         }
 
     def _make_unavail_cell(kind, rowsp, colspan, avail_id, reason, from_s, to_s, until_s):
@@ -1154,7 +1158,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                 t = (start_local + timedelta(minutes=15 * i)).strftime("%H:%M")
                 skip_lane[mid][lane][t] = True
 
-    # ───── тайм‑офф (перерывы/отпуска) ─────────────────────────────────────────
+    # ───── тайм-офф (перерывы/отпуска) ─────────────────────────────────────────
     for period in availabilities:
         mid = int(getattr(period.master, "id", period.master))
         start = localtime(period.start_time)
@@ -1173,7 +1177,6 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
         rowsp = max(1, (-(-minutes // 15)))  # ceil
         slot_key = block_start.strftime("%H:%M")
 
-        # ВАЖНО: НЕ занимаем skip_lane для тайм‑офф (раньше это заставляло colspan=1)
         if slot_key not in two_col_map[mid]:
             two_col_map[mid][slot_key] = {
                 "kind": "unavailable",
@@ -1188,7 +1191,6 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
             for i in range(rowsp):
                 t = (block_start + timedelta(minutes=15 * i)).strftime("%H:%M")
                 skip_two[mid][t] = True  # только блокируем двухколоночные
-            # Больше НЕ трогаем skip_lane → тайм‑офф рисуется как полноценный блок на 2 колонки.
 
     # ───── финальная сборка строк ──────────────────────────────────────────────
     calendar_table = []
@@ -1211,7 +1213,6 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                 span_times = slot_times[start_idx:start_idx + cell["rowspan"]]
                 overlaps_cancel_left = any(skip_lane[mid][0].get(t) for t in span_times)
 
-                # если нет пересечения — рисуем как полноценный 2‑колоночный блок
                 if not overlaps_cancel_left:
                     if cell["kind"] == "appt_active":
                         row["cells"].append(
@@ -1296,7 +1297,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, appointments,
                     )
                 continue  # к следующему мастеру
 
-            # 2) lane‑режим — проверяем ДО skip_two!
+            # 2) lane-режим — проверяем ДО skip_two!
             lane0_start = time_str in cancel_lanes[mid][0]
             lane0_skip = bool(skip_lane[mid][0].get(time_str))   # тянется отменённая слева
             lane1_skip = bool(skip_lane[mid][1].get(time_str))   # тянется перенесённый вправо блок
