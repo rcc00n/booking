@@ -66,6 +66,10 @@
                         {{ form.allergies|add_class:"textarea" }}
                     </div>
                     <div class="field">
+                        <label class="label" for="{{ form.gender.id_for_label }}">Gender</label>
+                        {{ form.gender|add_class:"input" }}
+                    </div>
+                    <div class="field">
                         <label class="label" for="{{ form.medications.id_for_label }}">Medications</label>
                         {{ form.medications|add_class:"textarea" }}
                     </div>

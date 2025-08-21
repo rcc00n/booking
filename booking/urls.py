@@ -11,6 +11,7 @@ from django.urls import path, include
 from core.autocomplete import ServiceAutocomplete
 from django.views.generic import RedirectView
 from core.views import service_search
+from core.admin import stats_view
 from accounts.views import health_view, health_edit
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -19,6 +20,7 @@ urlpatterns = [
     path("accounts/", include("accounts.urls")),
 
     path("autocomplete/service/", ServiceAutocomplete.as_view(), name="service-autocomplete"),
+    path("admin/stats/", admin.site.admin_view(stats_view), name="admin-stats"),
 
      path("", RedirectView.as_view(pattern_name="client-dashboard", permanent=False)),
     # Ничего из core тут не монтируем, чтобы не перехватывать /accounts/

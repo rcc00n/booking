@@ -11,7 +11,7 @@ import os
 from django.db.models import OuterRef, Subquery, Sum
 from django.utils import timezone
 from django.utils.timezone import localtime
-from core.validators import clean_phone
+from core.validators import clean_phone, clean_ab_postal_code
 from django.conf import settings
 
 
@@ -53,6 +53,11 @@ class HowHeard(models.TextChoices):
     OTHER = "other", "Other"
 
 class UserProfile(models.Model):
+    SOURCE_CHOICES = [
+        ("online", "Online (self-registered)"),
+        ("offline", "Offline (created by admin)"),
+    ]
+
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     phone = models.CharField(max_length=32, unique=True)
     birth_date = models.DateField(null=True, blank=True)
@@ -67,6 +72,22 @@ class UserProfile(models.Model):
                                                                  help_text="personal client's discount, % (0–100)",
                                                                  validators=[MinValueValidator(0), MaxValueValidator(100)])
     health_conditions = models.JSONField(default=dict, blank=True)
+    postal_code = models.CharField(
+        max_length=6,
+        blank=True,
+        help_text="Alberta postal code, 6 chars (e.g. T2X1A1)"
+    )
+    source = models.CharField(
+        max_length=10,
+        choices=SOURCE_CHOICES,
+        default="online",   # по умолчанию считаем, что онлайн
+        editable=False,
+    )
+    def save(self, *args, **kwargs):
+        # Нормализуем индекс (uppercase, без пробелов). Пустое — ок.
+        if self.postal_code:
+            self.postal_code = clean_ab_postal_code(self.postal_code)
+        super().save(*args, **kwargs)
 
     def health_summary(self) -> str:
         """Короткое суммирующее описание для UI."""

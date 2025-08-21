@@ -103,7 +103,7 @@
                     <thead><tr><th>Team member</th><th>This month</th></tr></thead>
                     <tbody>
                     {% for m in top_masters %}
-                        <tr><td>{{ m.get_full_name }}</td><td>CA$ {{ m.total|floatformat:2 }}</td></tr>
+                        <tr><td>{{ m.user.get_full_name }}</td><td>CA$ {{ m.total|floatformat:2 }}</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>

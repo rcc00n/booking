@@ -43,6 +43,14 @@
                             {% else %}<div class="muted">—</div>{% endif %}
                         </div>
                         <div class="item">
+                            <h3>Gender</h3>
+                            {% if h.gender %}
+                                <span class="chip">{{ h.gender|title }}</span>
+                            {% else %}
+                                <div class="muted">—</div>
+                            {% endif %}
+                        </div>
+                        <div class="item">
                             <h3>Medications</h3>
                             {% if h.medications %}
                                 <div class="chips">{% for m in h.medications %}<span class="chip">{{ m }}</span>{% endfor %}</div>

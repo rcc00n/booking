@@ -66,7 +66,7 @@ def custom_index(request):
     confirmed_count = upcoming.filter(appointmentstatushistory__status=confirmed).count()
     cancelled_count = upcoming.filter(appointmentstatushistory__status=cancelled).count()
 
-    top_services = Service.objects.annotate(count=Count("appointment")).order_by("-count")[:3]
+    top_services = Service.objects.annotate(count=Count("appointment")).order_by("-count")[:10]
 
     master_role = Role.objects.filter(name="Master").first()
 
@@ -81,7 +81,7 @@ def custom_index(request):
         )
     )
 
-    top_masters = sorted(masters, key=lambda m: m.total or 0, reverse=True)[:3]
+    top_masters = sorted(masters, key=lambda m: m.total or 0, reverse=True)[:10]
 
 
     recent_appointments = Appointment.objects.select_related("client", "master", "service").order_by("-start_time")[:20]
@@ -185,12 +185,12 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     """
     add_form = CustomUserCreationForm
     form = CustomUserChangeForm
-    export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'user_roles', 'is_staff', 'is_superuser', 'is_active', 'source']
+    export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'postal_code', 'user_roles', 'is_staff', 'is_superuser', 'is_active', 'source']
 
     def get_export_row(self, obj):
         phone = obj.userprofile.phone if hasattr(obj, 'userprofile') else ''
         birth_date = obj.userprofile.birth_date if hasattr(obj, 'userprofile') else ''
-        address = obj.userprofile.address if hasattr(obj, 'userprofile') else ''
+        postal_code = obj.userprofile.postal_code if hasattr(obj, 'userprofile') else ''
         source = obj.userprofile.source if hasattr(obj, 'userprofile') else ''
         consent = obj.userprofile.email_marketing_consent if hasattr(obj, 'userprofile') else ''
         roles = ", ".join([ur.role.name for ur in obj.userprofile.userrole_set.all()])
@@ -202,7 +202,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             obj.last_name,
             phone,
             birth_date,
-            address,
+            postal_code,
             roles,
             obj.is_staff,
             obj.is_superuser,
@@ -214,13 +214,14 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('username', 'email', 'first_name', 'last_name', 'phone', 'address','birth_date',
+            'fields': ('username', 'email', 'first_name', 'last_name', 'phone', 'postal_code','birth_date',
                        'password1', 'password2', 'is_staff', 'is_active', 'is_superuser', 'email_marketing_consent', 'how_heard'),
         }),
         ('Health', {
             'classes': ('collapse', 'wide'),
             'fields': (
                 'has_allergies', 'allergies_text',
+                'gender',
                 'chronic_conditions', 'medications',
                 'pregnant', 'skin_sensitivity',
                 'recent_procedures', 'contraindications',
@@ -237,14 +238,14 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     # Field layout when editing a user
     fieldsets = (
         (None, {'fields': ('username', 'email', 'password', 'personal_discount_percent')}),
-        ('Personal Info', {'fields': ('first_name', 'last_name', 'phone', 'birth_date', 'address', 'how_heard', 'email_marketing_consent')}),
+        ('Personal Info', {'fields': ('first_name', 'last_name', 'phone', 'birth_date', 'postal_code', 'how_heard', 'email_marketing_consent')}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Files', {'fields': ('files',)}),
         ('Notes', {'fields': ('notes',)}),
         ('Health', {
             'classes': ('collapse', 'wide'),
             'fields': (
-                'has_allergies', 'allergies_text',
+                'has_allergies', 'allergies_text', 'gender',
                 'chronic_conditions', 'medications',
                 'pregnant', 'skin_sensitivity',
                 'recent_procedures', 'contraindications',
@@ -451,11 +452,27 @@ class MasterAvailabilityAdmin(ExportCsvMixin, admin.ModelAdmin):
 # Appointment Admin
 # -----------------------------
 @admin.register(Appointment)
-class AppointmentAdmin(admin.ModelAdmin):
+class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
     change_list_template = "admin/appointments_calendar.html"
     form = AppointmentForm
     fields = ['client', 'master', 'service', 'start_time', 'payment_status', 'status', 'final_price', 'discount_source']
     readonly_fields = ("final_price", "discount_source")
+    export_fields = ["id", "client", "master", "service", "final_price","start_time", "discount_source", "payment_status", 'status']
+
+    def get_export_row(self, obj):
+        last_status = obj.appointmentstatushistory_set.order_by("-set_at").first()
+        status_name = last_status.status.name if last_status else ""
+        return [
+            str(obj.id),
+            str(obj.client),
+            str(obj.master),
+            obj.service.name,
+            obj.final_price,
+            obj.start_time,
+            obj.discount_source,
+            obj.payment_status.name,
+            status_name,
+        ]
     def get_changeform_initial_data(self, request):
         initial = super().get_changeform_initial_data(request)
 
@@ -893,7 +910,7 @@ class UserProfileAdmin(admin.ModelAdmin):
         "user",
         "phone",
         "birth_date",
-        "address",
+        "postal_code",
         "how_heard",
         "email_marketing_consent",
         "notes",
@@ -956,12 +973,12 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
     inlines = [MasterWorkDayInline]
     add_form = MasterCreateFullForm
     readonly_fields = ['password_display']
-    export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","address", "profession", 'bio', "room", "is_staff", "is_superuser", 'is_active']
+    export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","postal_code", "profession", 'bio', "room", "is_staff", "is_superuser", 'is_active']
 
     def get_export_row(self, obj):
         phone = obj.user.userprofile.phone if hasattr(obj, 'user') else ''
         birth_date = obj.user.userprofile.birth_date if hasattr(obj, 'user') else ''
-        address = obj.user.userprofile.address if hasattr(obj, 'user') else ''
+        postal_code = obj.user.userprofile.postal_code if hasattr(obj, 'user') else ''
 
 
         return [
@@ -971,7 +988,7 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
             obj.user.username,
             phone,
             birth_date,
-            address,
+            postal_code,
             obj.profession,
             obj.bio,
             obj.work_start,
@@ -1066,6 +1083,82 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
 
         user.save()
 
+def stats_view(request):
+    """Страница статистики в админке: фильтры + графики/таблицы."""
+    # ---- фильтры из GET ----
+    # date_from/date_to в формате YYYY-MM-DD
+    df = request.GET.get("date_from")
+    dt = request.GET.get("date_to")
+    today = localdate()
+    # диапазон по умолчанию — последние 30 дней
+    start = datetime.strptime(df, "%Y-%m-%d").date() if df else today - timedelta(days=29)
+    end = datetime.strptime(dt, "%Y-%m-%d").date() if dt else today
+
+    # базовые выборки за диапазон
+    appts = Appointment.objects.filter(start_time__date__range=[start, end])
+    pays  = Payment.objects.filter(appointment__start_time__date__range=[start, end])
+
+    # график: продажи и число визитов по дням
+    days = (end - start).days + 1
+    series = []
+    total_sales = 0
+    for i in range(days):
+        day = start + timedelta(days=i)
+        sales = pays.filter(appointment__start_time__date=day).aggregate(total=Sum("amount"))["total"] or 0
+        appts_count = appts.filter(start_time__date=day).count()
+        total_sales += float(sales)
+        series.append({"day": day.strftime("%Y-%m-%d"), "sales": float(sales), "appointments": appts_count})
+
+    # статусы для сверки (как на главной)
+    confirmed = AppointmentStatus.objects.filter(name="Confirmed").first()
+    cancelled = AppointmentStatus.objects.filter(name="Cancelled").first()
+
+    # KPI по диапазону
+    total_appts = appts.count()
+    confirmed_appts = appts.filter(appointmentstatushistory__status=confirmed).count() if confirmed else 0
+    cancelled_appts = appts.filter(appointmentstatushistory__status=cancelled).count() if cancelled else 0
+
+    # топ‑услуги и топ‑мастера (аналогично вашей логике)
+    top_services = (
+        Service.objects
+        .annotate(count=Count("appointment", filter=Q(appointment__start_time__date__range=[start, end])))
+        .order_by("-count")[:10]
+    )
+
+    master_role = Role.objects.filter(name="Master").first()
+    masters = MasterProfile.objects.filter(user__userrole__role=master_role).annotate(
+        total=Sum(
+            "appointments_as_master__service__base_price",
+            filter=Q(appointments_as_master__start_time__date__range=[start, end])
+        )
+    )
+    top_masters = sorted(masters, key=lambda m: m.total or 0, reverse=True)[:10]
+
+    ctx = admin.site.each_context(request)
+    ctx.update({
+        "page_title": "Статистика",
+        "date_from": start.strftime("%Y-%m-%d"),
+        "date_to": end.strftime("%Y-%m-%d"),
+        "series": series,
+        "total_sales": total_sales,
+        "total_appts": total_appts,
+        "confirmed_appts": confirmed_appts,
+        "cancelled_appts": cancelled_appts,
+        "top_services": top_services,
+        "top_masters": top_masters,
+    })
+    return TemplateResponse(request, "admin/stats.html", ctx)
+
+
+def _inject_admin_urls(original_get_urls):
+    def get_urls():
+        my = [
+            path("stats/", admin.site.admin_view(stats_view), name="stats"),
+        ]
+        return my + original_get_urls()
+    return get_urls
+
+admin.site.get_urls = _inject_admin_urls(admin.site.get_urls)
 
 def get_price_html(service):
     discount = service.get_active_discount()

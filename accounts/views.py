@@ -202,8 +202,12 @@ class ClientRegisterView(CreateView):
 
     def form_valid(self, form):
         form.save()
+        user = form.save()
         if self.request.headers.get("x-requested-with") == "XMLHttpRequest":
             return HttpResponse("OK")
+        if hasattr(user, "userprofile"):
+            user.userprofile.source = "online"
+            user.userprofile.save(update_fields=["source"])
         return super().form_valid(form)
 
     def form_invalid(self, form):

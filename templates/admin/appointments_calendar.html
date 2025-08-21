@@ -45,6 +45,14 @@
             </div>
 
             <div class="calendar-right">
+
+                {% if export_url %}
+                    <button onclick='window.location.href="{{ export_url }}"' class="add-appointment-btn" style="text-decoration:none; width:13vh; margin-right: 1vh;">
+                        Export CSV
+                    </button>
+                {% endif %}
+
+
                 <div class="add-dropdown">
                     <button id="addDropdownBtn" class="add-appointment-btn">Add <span id="arrow">▾</span></button>
                     <div id="addDropdownMenu" class="add-dropdown-menu hidden">

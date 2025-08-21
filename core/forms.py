@@ -121,7 +121,11 @@ class HealthFieldsMixin(forms.Form):
     """
     has_allergies = forms.BooleanField(required=False, label="Allergies")
     allergies_text = forms.CharField(required=False, label="Allergy details", widget=forms.Textarea(attrs={"rows": 2}))
-
+    gender = forms.ChoiceField(
+        required=False,
+        label="Gender",
+        choices=[("", "—"), ("male", "Male"), ("female", "Female"), ("other", "Other")]
+    )
     chronic_conditions = forms.MultipleChoiceField(
         required=False, choices=HEALTH_CHRONIC_CHOICES,
         label="Chronic conditions",
@@ -149,6 +153,7 @@ class HealthFieldsMixin(forms.Form):
 
     def _set_health_initials(self, user_instance):
         data = self._health_from_initial(user_instance)
+        self.fields["gender"].initial = data.get("gender", "")
         self.fields["has_allergies"].initial = bool(data.get("has_allergies"))
         self.fields["allergies_text"].initial = data.get("allergies_text", "")
         self.fields["chronic_conditions"].initial = data.get("chronic_conditions", [])
@@ -165,6 +170,7 @@ class HealthFieldsMixin(forms.Form):
         return {
             "has_allergies": bool(cd.get("has_allergies")),
             "allergies_text": cd.get("allergies_text", "").strip(),
+            "gender": cd.get("gender") or "",
             "chronic_conditions": cd.get("chronic_conditions") or [],
             "medications": cd.get("medications", "").strip(),
             "pregnant": bool(cd.get("pregnant")),
@@ -190,11 +196,13 @@ class CustomUserCreationForm(HealthFieldsMixin, UserCreationForm):
         required=False, min_value=0, max_value=100, initial=0, label="Personal discount, %"
     )
     # новые поля
-    address = forms.CharField(
+    postal_code = forms.CharField(
         required=False,
-        label="Address",
-        widget=forms.Textarea(attrs={"rows": 1})
+        label="Postal code (AB)",
+        max_length=6,
+        widget=forms.TextInput(attrs={"placeholder": "T2X1A1"})
     )
+
     email_marketing_consent = forms.BooleanField(
         required=False,
         label="Agreed for marketing emails"
@@ -214,10 +222,12 @@ class CustomUserCreationForm(HealthFieldsMixin, UserCreationForm):
             'phone', 'birth_date',
             'password1', 'password2',
             'is_staff', 'is_active', 'is_superuser',
-            'groups', "address", "email_marketing_consent",
+            'groups', "postal_code", "email_marketing_consent",
             "notes", 'personal_discount_percent'
         ]
-
+    def clean_postal_code(self):
+        val = self.cleaned_data.get("postal_code", "").strip()
+        return clean_ab_postal_code(val) if val else ""
     def save(self, commit=True):
         """
         Overridden save method to:
@@ -246,6 +256,10 @@ class CustomUserCreationForm(HealthFieldsMixin, UserCreationForm):
         profile.notes = notes
 
         profile.health_conditions = self._collect_health_payload()
+        profile.postal_code = self.cleaned_data.get('postal_code', "")
+
+        if created and not hasattr(self, "is_client_register"):
+            profile.source = "offline"
         profile.save()
 
         client_role, _ = Role.objects.get_or_create(name="Client")
@@ -278,10 +292,11 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
     personal_discount_percent = forms.IntegerField(
         required=False, min_value=0, max_value=100, label="Personal discount, %"
     )
-    address = forms.CharField(
+    postal_code = forms.CharField(
         required=False,
-        label="Address",
-        widget=forms.Textarea(attrs={"rows": 1})
+        label="Postal code (AB)",
+        max_length=6,
+        widget=forms.TextInput(attrs={"placeholder": "T2X1A1"})
     )
     email_marketing_consent = forms.BooleanField(
         required=False,
@@ -311,7 +326,7 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
             'groups',
             'user_permissions',
             'password',
-            'address',
+            'postal_code',
             'how_heard',
             'email_marketing_consent',
             'notes',
@@ -329,16 +344,20 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
 
         if self.instance and hasattr(self.instance, 'userprofile'):
             self._set_health_initials(self.instance)
+            up = self.instance.userprofile
             self.fields['personal_discount_percent'].initial = (
                     self.instance.userprofile.personal_discount_percent or 0
             )
             self.fields['phone'].initial = self.instance.userprofile.phone
             self.fields['birth_date'].initial = self.instance.userprofile.birth_date
-            self.fields['address'].initial = self.instance.userprofile.address
             self.fields['how_heard'].initial = self.instance.userprofile.how_heard
             self.fields['email_marketing_consent'].initial = self.instance.userprofile.email_marketing_consent
             self.fields['notes'].initial = self.instance.userprofile.notes
+            self.fields['postal_code'].initial = getattr(up, 'postal_code', "")
 
+    def clean_postal_code(self):
+        val = self.cleaned_data.get("postal_code", "").strip()
+        return clean_ab_postal_code(val) if val else ""
 
     def save(self, commit=True):
         """
@@ -366,6 +385,7 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         profile.personal_discount_percent = self.cleaned_data.get('personal_discount_percent') or 0
         profile.set_marketing_consent(email_marketing_consent)
         profile.health_conditions = self._collect_health_payload()
+        profile.postal_code = self.cleaned_data.get('postal_code', "")
         profile.save()
 
 
@@ -413,10 +433,11 @@ class MasterCreateFullForm(forms.ModelForm):
 
     password1 = forms.CharField(widget=forms.PasswordInput, required=False)
     password2 = forms.CharField(widget=forms.PasswordInput, required=False)
-    address = forms.CharField(
+    postal_code = forms.CharField(
         required=False,
-        label="Address",
-        widget=forms.Textarea(attrs={"rows": 1})
+        label="Postal code",
+        max_length=6,
+        widget=forms.TextInput(attrs={"placeholder": "T2X1A1"})
     )
     class Meta:
         model = MasterProfile
@@ -449,7 +470,7 @@ class MasterCreateFullForm(forms.ModelForm):
             self.fields['last_name'].initial = user.last_name
 
             self.fields['phone'].initial = user_profile.phone
-            self.fields['address'].initial = user_profile.address
+            self.fields['postal_code'].initial = getattr(user_profile, 'postal_code', "")
             self.fields['birth_date'].initial = user_profile.birth_date
         cats = (ServiceCategory.objects
                 .order_by("name")
@@ -523,7 +544,7 @@ class MasterCreateFullForm(forms.ModelForm):
             user_profile = UserProfile.objects.create(
                 user=user,
                 phone=self.cleaned_data.get('phone'),
-                address=self.cleaned_data.get('address'),
+                postal_code=self.cleaned_data.get('postal_code') or "",
                 email_marketing_consent=True,
                 birth_date=self.cleaned_data.get('birth_date')
             )
@@ -558,7 +579,7 @@ class MasterCreateFullForm(forms.ModelForm):
             user.save()
 
             user_profile.phone = self.cleaned_data.get('phone')
-            user_profile.address = self.cleaned_data.get('address')
+            user_profile.postal_code = self.cleaned_data.get('postal_code') or ""
             user_profile.birth_date = self.cleaned_data.get('birth_date')
             user_profile.save()
 

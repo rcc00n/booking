@@ -1,0 +1,78 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+{% block title %}Статистика{% endblock %}
+
+{% block content %}
+    <h1>📊 Статистика</h1>
+
+    <form method="get" class="module aligned" style="margin-bottom:1rem;">
+        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
+            <label>From: <input type="date" name="date_from" value="{{ date_from }}"></label>
+            <label>To: <input type="date" name="date_to" value="{{ date_to }}"></label>
+            <button type="submit" class="button">Apply</button>
+            <a href="{% url 'admin-stats' %}" class="button">Reset</a>
+        </div>
+    </form>
+
+    <div class="dashboard">
+        <div class="module">
+            <h3>Total sales</h3>
+            <p><strong>${{ total_sales }}</strong></p>
+        </div>
+        <div class="module">
+            <h3>Appointments</h3>
+            <p><strong>{{ total_appts }}</strong> (✅ {{ confirmed_appts }}, ❌ {{ cancelled_appts }})</p>
+        </div>
+    </div>
+
+    <div class="module">
+        <h3>Sales & Appointments by day</h3>
+        <canvas id="chart1"></canvas>
+    </div>
+
+    <div class="module">
+        <h3>Top services</h3>
+        <ol>
+            {% for s in top_services %}
+                <li>{{ s.name }} — {{ s.count|default:0 }}</li>
+            {% empty %}<li>—</li>{% endfor %}
+        </ol>
+    </div>
+
+    <div class="module">
+        <h3>Top masters (by sum of base prices)</h3>
+        <ol>
+            {% for m in top_masters %}
+                <li>{{ m.user.get_full_name }} — ${{ m.total|default:0 }}</li>
+            {% empty %}<li>—</li>{% endfor %}
+        </ol>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        const series = {{ series|safe }};
+        const labels = series.map(p => p.day);
+        const sales = series.map(p => p.sales);
+        const appts = series.map(p => p.appointments);
+
+        const ctx = document.getElementById('chart1').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {label:'Sales', data: sales, yAxisID:'y1' },
+                    {label:'Appointments', data: appts, yAxisID:'y2' }
+                ]
+            },
+            options: {
+                responsive: true,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    y1: { type: 'linear', position: 'left' },
+                    y2: { type: 'linear', position: 'right', grid: { drawOnChartArea: false } }
+                }
+            }
+        });
+    </script>
+{% endblock %}
