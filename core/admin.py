@@ -231,7 +231,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     )
 
     # Fields shown in user list
-    list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'user_roles', 'client_status_col')
+    list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'source', 'client_status_col')
     list_filter = ('is_staff', 'is_superuser', 'is_active', RoleFilter, 'userprofile__how_heard')
     search_fields = ('username', 'email', 'first_name', 'last_name', 'userprofile__phone')
 
@@ -261,7 +261,12 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     @admin.display(description="Status")
     def client_status_col(self, obj):
         up = getattr(obj, 'userprofile', None)
-        return getattr(up, 'client_status', '-') if up else '-'
+        return getattr(up, 'client_status', '-') if up else ('-')
+
+    @admin.display(description="Source")
+    def source(self, obj):
+        up = getattr(obj, 'userprofile', None)
+        return getattr(up, 'source', '-') if up else '-'
 
     def get_fieldsets(self, request, obj=None):
         # Allow Django to use default fieldsets logic

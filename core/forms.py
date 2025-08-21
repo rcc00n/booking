@@ -242,14 +242,12 @@ class CustomUserCreationForm(HealthFieldsMixin, UserCreationForm):
         # Create or update UserProfile
         phone = self.cleaned_data.get('phone')
         birth_date = self.cleaned_data.get('birth_date')
-        address = self.cleaned_data.get('address')
         how_heard = self.cleaned_data.get('how_heard')
         email_marketing_consent = self.cleaned_data.get('email_marketing_consent')
         notes = self.cleaned_data.get('notes')
         profile, created = UserProfile.objects.get_or_create(user=user)
         profile.phone = phone
         profile.birth_date = birth_date
-        profile.address = address
         profile.how_heard = how_heard
         profile.personal_discount_percent = self.cleaned_data.get('personal_discount_percent') or 0
         profile.set_marketing_consent(email_marketing_consent)
@@ -371,7 +369,6 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         # Update profile
         phone = self.cleaned_data.get('phone', "")
         birth_date = self.cleaned_data.get('birth_date', None)
-        address = self.cleaned_data.get('address', "")
         how_heard = self.cleaned_data.get('how_heard', None)
         notes = self.cleaned_data.get('notes', None)
 
@@ -379,7 +376,6 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         profile, created = UserProfile.objects.get_or_create(user=user)
         profile.phone = phone
         profile.birth_date = birth_date
-        profile.address = address
         profile.how_heard = how_heard
         profile.notes = notes
         profile.personal_discount_percent = self.cleaned_data.get('personal_discount_percent') or 0
