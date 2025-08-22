@@ -13,16 +13,23 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import sys
 from decouple import config, Csv
+import environ
+import os
+
+env = environ.Env(
+    DEBUG=(bool, False)
+)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-95j^j)=1j1+##1@=pp0q(@i65_&(q@_9rjod19i02qh(nry%-c'
+SECRET_KEY = env("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -34,6 +41,7 @@ ALLOWED_HOSTS = []
 
 INSTALLED_APPS = [
     'phonenumbers',
+    'anymail',
     'accounts',
     'core',
     'dal',
@@ -141,8 +149,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 
 # AWS credentials
-AWS_ACCESS_KEY_ID = 'AKIAQCVSVAFK5ORP5EJH'
-AWS_SECRET_ACCESS_KEY = 'kzCeudgh7WN57v7nRtaWJ8WlaPR252mR/F6xRK55'
+
 AWS_S3_SIGNATURE_NAME  = 's3v4'
 # Your S3 bucket name
 AWS_STORAGE_BUCKET_NAME = 'malvatest1'
@@ -156,8 +163,36 @@ AWS_DEFAULT_ACL = None
 # Optional: Specify custom domain (if you use CloudFront or static hosting)
 # AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
 
+AWS_ACCESS_KEY_ID=env("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY=env("AWS_SECRET_ACCESS_KEY")
+
 # Media URL for S3
 MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.ca-central-1.amazonaws.com/'
+
+EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
+ANYMAIL = {
+    "SENDGRID_API_KEY": env("SENDGRID_API_KEY"),
+}
+DEFAULT_FROM_EMAIL=env("DEFAULT_FROM_EMAIL")
+SERVER_EMAIL=env("SERVER_EMAIL")
+
+  # для административных уведомлений
+# хороший дефолт, чтобы Django формировал абсолютные ссылки в письмах:
+
+# --- Celery ---
+CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
+CELERY_RESULT_BACKEND = default="redis://127.0.0.1:6379/1"
+CELERY_TIMEZONE = "America/Edmonton"
+CELERY_ENABLE_UTC = True
+
+# Периодический запуск: каждые 5 минут — одна задача сама решит, кому слать 48h и 3h
+from celery.schedules import crontab
+CELERY_BEAT_SCHEDULE = {
+    "send-appointment-reminders-every-5min": {
+        "task": "core.tasks.send_appointment_reminders",
+        "schedule": crontab(minute="*/5"),
+    },
+}
 
 JAZZMIN_SETTINGS = {
     "site_title": "Malva Admin",

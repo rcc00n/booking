@@ -511,42 +511,49 @@ class ClientFile(models.Model):
 
 # --- 7. NOTIFICATIONS ---
 
+
 class Notification(models.Model):
     """
     Represents a notification sent to a user regarding an appointment.
     Supports email and SMS channels.
     """
+    REM_48H = "reminder_48h"
+    REM_3H  = "reminder_3h"
+    OTHER   = "other"
+
+    KIND_CHOICES = [
+        (REM_48H, "Reminder 48h"),
+        (REM_3H,  "Reminder 3h"),
+        (OTHER,   "Other"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
-    appointment = models.ForeignKey(Appointment, on_delete=models.SET_NULL, null=True, blank=True)
+    appointment = models.ForeignKey(Appointment, on_delete=models.CASCADE, null=True, blank=True)
     channel = models.CharField(max_length=10, choices=[('email', 'Email'), ('sms', 'SMS')])
+    kind = models.CharField(max_length=32, choices=KIND_CHOICES, default=OTHER)
+
     message = models.TextField()
     sent_at = models.DateTimeField(auto_now_add=True)
 
-    def save(self, *args, **kwargs):
-        """
-        Triggers message sending based on the selected channel (email or SMS).
-        """
-        is_new = self._state.adding
-        super().save(*args, **kwargs)
+    # Новые поля для учёта отправок
+    provider = models.CharField(max_length=32, default="sendgrid", blank=True)
+    provider_message_id = models.CharField(max_length=128, blank=True, default="")
+    status = models.CharField(max_length=20, default="sent")  # sent | failed
+    error = models.TextField(blank=True, default="")
 
-        if is_new:
-            if self.channel == 'email':
-                self.send_email()
-            elif self.channel == 'sms':
-                self.send_sms()
+    class Meta:
+        constraints = [
+            # Не допускаем дубликатов напоминаний одного вида для одной записи
+            models.UniqueConstraint(
+                fields=["appointment", "kind", "channel"],
+                name="uniq_notification_per_kind_channel"
+            )
+        ]
 
-    def send_email(self):
-        """
-        Stub: logic to send an email message to the user.
-        """
-        print(f"[EMAIL] To {self.user}: {self.message}")
+    def __str__(self):
+        return f"{self.get_kind_display()} → {self.user} ({self.channel})"
 
-    def send_sms(self):
-        """
-        Stub: logic to send an SMS message to the user.
-        """
-        print(f"[SMS] To {self.user}: {self.message}")
 
 # --- 8. MASTERS ---
 

@@ -99,7 +99,6 @@ class AppointmentForm(forms.ModelForm):
 
         new_status = self.cleaned_data['status']
         profile = getattr(self.user, "userprofile", None)
-        print(self.user)
         latest = instance.appointmentstatushistory_set.order_by('-set_at').first()
         if not latest or latest.status != new_status:
             AppointmentStatusHistory.objects.create(

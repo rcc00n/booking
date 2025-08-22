@@ -115,6 +115,7 @@ ipython_config.py
 # Environments
 env.json
 .env
+*.env
 .venv
 env/
 venv/
