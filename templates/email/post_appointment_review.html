@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<body style="font-family:Inter,Arial,sans-serif;color:#333;line-height:1.6">
+<h2>How was your visit?</h2>
+<p>Hello, {{ client_name }}!</p>
+<p>We hope you enjoyed your <strong>{{ service_name }}</strong> with {{ master_name }} on {{ start_local }}.</p>
+{% if review_url %}
+    <p>Please take a minute to share your feedback:</p>
+    <p>
+        <a href="{{ review_url }}" style="display:inline-block;padding:10px 16px;border-radius:6px;background:#111827;color:#fff;text-decoration:none">
+            Leave a review
+        </a>
+    </p>
+{% else %}
+    <p>Please reply to this email with your feedback — we value your opinion!</p>
+{% endif %}
+<p style="color:#6b7280">Malva Booking</p>
+</body>
+</html>

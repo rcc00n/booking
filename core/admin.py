@@ -820,6 +820,17 @@ class NotificationAdmin(admin.ModelAdmin):
         return ' '.join(words[:10]) + ('...' if len(words) > 10 else '')
 
 
+@admin.register(ReminderSchedule)
+class ReminderScheduleAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active", "offset_amount", "offset_unit", "email_template", "email_subject", "slug")
+    list_filter  = ("is_active", "offset_unit")
+    search_fields = ("name", "slug", "email_subject", "email_template")
+    fields = (
+        "name", "slug", "is_active",
+        "offset_amount", "offset_unit",
+        "email_subject", "email_template",
+    )
+
 # -----------------------------
 # Client File Admin
 # -----------------------------

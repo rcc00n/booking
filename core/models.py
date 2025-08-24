@@ -554,6 +554,55 @@ class Notification(models.Model):
     def __str__(self):
         return f"{self.get_kind_display()} → {self.user} ({self.channel})"
 
+class ReminderSchedule(models.Model):
+    """
+    Global reminder rule you can manage in Admin.
+    Example: 2 days before, or 3 hours before.
+    """
+    UNIT_HOURS = "hours"
+    UNIT_DAYS  = "days"
+    UNIT_CHOICES = [
+        (UNIT_HOURS, "Hours"),
+        (UNIT_DAYS,  "Days"),
+    ]
+
+    name = models.CharField(max_length=64, help_text="Visible name, e.g. '48h' or '3 hours before'")
+    is_active = models.BooleanField(default=True)
+
+    offset_amount = models.PositiveIntegerField(help_text="How many hours/days before start")
+    offset_unit   = models.CharField(max_length=8, choices=UNIT_CHOICES, default=UNIT_HOURS)
+
+    # E-mail presentation
+    email_subject = models.CharField(max_length=200, default="Appointment reminder")
+    email_template = models.CharField(
+        max_length=200,
+        default="email/appointment_reminder.html",
+        help_text="Django template path"
+    )
+
+    # Optional: unique marker to guarantee idempotency (used in Notification.message prefix)
+    slug = models.SlugField(max_length=64, unique=True, help_text="Used for deduplication, e.g. 'rem-48h'")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-is_active", "offset_unit", "offset_amount", "name"]
+
+    def __str__(self):
+        unit = "h" if self.offset_unit == self.UNIT_HOURS else "d"
+        return f"{self.name} ({self.offset_amount}{unit})"
+
+    def get_timedelta(self):
+        from datetime import timedelta
+        if self.offset_unit == self.UNIT_DAYS:
+            return timedelta(days=self.offset_amount)
+        return timedelta(hours=self.offset_amount)
+
+    def remaining_label(self):
+        # Human label like "2 days" or "3 hours"
+        unit = "day" if self.offset_unit == self.UNIT_DAYS else "hour"
+        n = self.offset_amount
+        return f"{n} {unit}{'' if n == 1 else 's'}"
 
 # --- 8. MASTERS ---
 

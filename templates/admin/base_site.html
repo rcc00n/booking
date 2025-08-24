@@ -81,11 +81,18 @@
 
                     </ul>
                 </li>
-                <li>
-                    <a href="{% url 'admin:core_notification_changelist' %}">
+                <li class="dropdown">
+                    <a href="javascript:void(0);" onclick="toggleDropdown(this)">
                         <img src="{% static 'admin/icons/notifications.png' %}" alt="Settings">
-                        <span class="sidebar-label">Notifications</span>
+                        <span class="sidebar-label">Notifications
+                        <span class="dropdown-arrow"> <img src="{% static 'admin/icons/arrow.png' %}" alt="Pointer"> </span>
+                        </span>
                     </a>
+                    <ul class="submenu">
+                        <li><a href="{% url 'admin:core_notification_changelist' %}">Notifications</a></li>
+                        <li><a href="{% url 'admin:core_reminderschedule_changelist' %}">Reminder Schedule</a></li>
+
+                    </ul>
                 </li>
                 <li>
                     <a href="{% url 'admin:core_clientfile_changelist' %}">

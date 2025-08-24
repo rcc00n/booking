@@ -9,7 +9,7 @@ https://docs.djangoproject.com/en/5.2/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
-
+from datetime import timedelta
 from pathlib import Path
 import sys
 from decouple import config, Csv
@@ -168,6 +168,7 @@ AWS_SECRET_ACCESS_KEY=env("AWS_SECRET_ACCESS_KEY")
 
 # Media URL for S3
 MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.ca-central-1.amazonaws.com/'
+REVIEW_FORM_URL = "https://your-domain.tld/review/{appointment_id}/"
 
 EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
 ANYMAIL = {
@@ -186,11 +187,10 @@ CELERY_TIMEZONE = "America/Edmonton"
 CELERY_ENABLE_UTC = True
 
 # Периодический запуск: каждые 5 минут — одна задача сама решит, кому слать 48h и 3h
-from celery.schedules import crontab
 CELERY_BEAT_SCHEDULE = {
-    "send-appointment-reminders-every-5min": {
-        "task": "core.tasks.send_appointment_reminders",
-        "schedule": crontab(minute="*/5"),
+    "run-all-schedulers-every-5-min": {
+        "task": "core.tasks.run_all_schedulers",
+        "schedule": timedelta(minutes=5),
     },
 }
 
