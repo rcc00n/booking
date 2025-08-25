@@ -414,6 +414,28 @@ class Appointment(models.Model):
                     "start_time": f"The appointment ends at ({local_end_dt.strftime('%H:%M')}) which is later then master's end of shift "
                                   f"({work_end_dt.strftime('%H:%M')})."
                 })
+    def _compute_pricing(self) -> None:
+        """
+        Вычисляет final_price и discount_source, выбирая ЛУЧШИЙ %
+        из персональной скидки клиента, скидки на услугу и промокода.
+        """
+        # Промокод привязан OneToOne как related_name="promocodes"
+        promo_rel = getattr(self, "promocodes", None)
+        promocode = getattr(promo_rel, "promocode", None) if promo_rel else None
+
+        # Считаем только когда есть сервис и клиент
+        if self.service_id and self.client_id:
+            self.final_price = get_price_for(self.service, self.client, promocode)
+            self.discount_source = detect_discount_source(self.service, self.client, promocode) or ""
+        else:
+            # Если по каким-то причинам сервис/клиент ещё не проставлены,
+            # оставляем значения как есть (None / "")
+            pass
+
+    def save(self, *args, **kwargs):
+        # Считаем ВСЕГДА перед сохранением (и на create, и на update)
+        self._compute_pricing()
+        super().save(*args, **kwargs)
 
 class CancellationReason(models.Model):
     """
@@ -517,13 +539,21 @@ class Notification(models.Model):
     Represents a notification sent to a user regarding an appointment.
     Supports email and SMS channels.
     """
-    REM_48H = "reminder_48h"
-    REM_3H  = "reminder_3h"
+    REM_D = "reminder_days"
+    REM_H  = "reminder_hours"
     OTHER   = "other"
+    CREATED = "created"
+    UPDATED = "updated"
+    DELETED = "deleted"
+    STATUS  = "status"      # смена статуса (в т.ч. Cancelled)
 
     KIND_CHOICES = [
-        (REM_48H, "Reminder 48h"),
-        (REM_3H,  "Reminder 3h"),
+        (REM_D, "Reminder Days"),
+        (REM_H,  "Reminder Hours"),
+        (CREATED, "Appointment created"),
+        (UPDATED, "Appointment updated"),
+        (DELETED, "Appointment deleted"),
+        (STATUS,  "Appointment status changed"),
         (OTHER,   "Other"),
     ]
 

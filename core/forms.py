@@ -91,11 +91,6 @@ class AppointmentForm(forms.ModelForm):
                 discount_applied=discount
             )
 
-        client_profile = instance.client
-        instance.final_price = get_price_for(instance.service, client_profile, promocode.promocode if promocode else None)
-
-
-        instance.discount_source = detect_discount_source(service=instance.service, client=client_profile, promocode=promocode)
 
         new_status = self.cleaned_data['status']
         profile = getattr(self.user, "userprofile", None)
@@ -503,7 +498,7 @@ class MasterCreateFullForm(forms.ModelForm):
 
         if self.instance.pk:
             # если редактируем, исключаем текущего пользователя
-            qs = qs.exclude(user=self.instance.user)
+            qs = qs.exclude(user=self.instance.user.user)
 
         if qs.exists():
             raise forms.ValidationError("This phone number is already registered!")

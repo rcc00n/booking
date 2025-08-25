@@ -679,8 +679,11 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
 
         return response
     def save_model(self, request, obj, form, change):
+        # если мастер — подставим своего
         if hasattr(request.user, "master_profile") and not request.user.is_superuser:
             obj.master = request.user.master_profile
+
+        # объект ещё не сохранён; final_price/discount_source уже выставлены формой
         super().save_model(request, obj, form, change)
 
 

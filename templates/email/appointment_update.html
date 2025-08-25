@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<body style="font-family: Arial, sans-serif;">
+<h2>Hello {{ client_name }}!</h2>
+
+{% if action == 'created' %}
+    <p>Your appointment has been <b>booked</b>.</p>
+{% elif action == 'updated' %}
+    <p>Your appointment was <b>updated</b>.</p>
+{% elif action == 'deleted' %}
+    <p>Your appointment was <b>cancelled</b>.</p>
+{% else %}
+    <p>Your appointment was updated.</p>
+{% endif %}
+
+<p>
+    <b>Service:</b> {{ service_name }}<br>
+    <b>Master:</b> {{ master_name }}<br>
+    <b>Date & Time:</b> {{ start_local }}
+</p>
+
+{% if action == 'updated' and changes %}
+    <h3>What changed</h3>
+    <table cellpadding="8" cellspacing="0" border="1" style="border-collapse: collapse;">
+        <tr>
+            <th align="left">Field</th>
+            <th align="left">Old</th>
+            <th align="left">New</th>
+        </tr>
+        {% for label, old, new in changes %}
+            <tr>
+                <td>{{ label }}</td>
+                <td>{{ old }}</td>
+                <td>{{ new }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+{% endif %}
+</body>
+</html>

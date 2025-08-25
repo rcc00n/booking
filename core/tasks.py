@@ -18,35 +18,28 @@ from core.models import (
     AppointmentStatusHistory,
     Notification,
     UserProfile,
-    ReminderSchedule
+    ReminderSchedule,
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Optional import of custom schedules (admin-configurable). Fallback is used if
-# the model doesn't exist in your project yet.
+# Конфигурация
 # ──────────────────────────────────────────────────────────────────────────────
 
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Configuration
-# ──────────────────────────────────────────────────────────────────────────────
-
-# Beat/cron jitter tolerance (± minutes around target time)
+# Допуск по времени (минут) для выборки окон при кроне
 WINDOW_MINUTES = 15
 
-# Fallback: static offsets if ReminderSchedule model is not available.
+# Фолбэк, если в БД нет ReminderSchedule
 FALLBACK_REMINDER_OFFSETS = [
     timedelta(days=2),
     timedelta(hours=3),
 ]
 
-# Optional: review link pattern; e.g., "https://your-domain.tld/review/{appointment_id}/"
+# Необязательный шаблон ссылки на отзыв
 REVIEW_URL_PATTERN: Optional[str] = getattr(settings, "REVIEW_FORM_URL", None)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Utilities
+# Утилиты: почта/рендер/идемпотентность/база выборки
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _send_email(to_email: str, subject: str, text: str, html: str, *, tag: str | None = None):
@@ -59,16 +52,33 @@ def _send_email(to_email: str, subject: str, text: str, html: str, *, tag: str |
     msg.attach_alternative(html, "text/html")
     try:
         if tag:
-            msg.tags = [tag]
+            msg.tags = [tag]  # если бэкенд поддерживает
     except Exception:
         pass
     msg.send()
 
 
+def _safe_render(template_name: str, ctx: dict, fallback_subject: str) -> tuple[str, str]:
+    """
+    Пробуем отрендерить HTML‑шаблон; если его нет — делаем минимальный HTML.
+    Возвращает (html, text_fоллбэк).
+    """
+    try:
+        html = render_to_string(template_name, ctx)
+    except Exception:
+        html = (
+            f"<!doctype html><html><body>"
+            f"<h2>{fallback_subject}</h2>"
+            f"<p>Hello, {ctx.get('client_name','')}!</p>"
+            f"</body></html>"
+        )
+    text = ctx.get("text_fallback", fallback_subject)
+    return html, text
+
+
 def _base_queryset_for_window(target_start, target_end):
     """
-    Pick appointments whose start_time lands in the window and exclude those
-    whose *latest* status is Cancelled.
+    Выборка записей, которые начинаются в окне, с исключением последних статусов = Cancelled.
     """
     last_status_subq = (AppointmentStatusHistory.objects
                         .filter(appointment_id=OuterRef("pk"))
@@ -92,7 +102,7 @@ def _base_queryset_for_window(target_start, target_end):
 
 
 def _label_for_offset(ahead: timedelta) -> str:
-    """Generate idempotence label: e.g., 2d, 3h, 30m."""
+    """Человеко‑читаемая метка для идемпотентности: 2d/3h/30m."""
     total_sec = int(ahead.total_seconds())
     days = total_sec // 86400
     if days >= 1:
@@ -104,13 +114,23 @@ def _label_for_offset(ahead: timedelta) -> str:
     return f"{minutes}m"
 
 
+def _kind_for_label(label: str) -> str:
+    """
+    Привязываем напоминания к фиксированным KIND, чтобы не конфликтовать с UniqueConstraint.
+    Любые «нестандартные» слоты кладём в OTHER, но в нём пишем update_or_create.
+    """
+    norm = label.strip().lower()
+    if norm in ("48h", "2d", "2д", "48ч"):
+        return Notification.REM_D
+    if norm in ("3h", "3ч"):
+        return Notification.REM_H
+    return Notification.OTHER
+
+
 def _humanize_remaining(delta) -> tuple[str, str]:
-    """
-    Returns (remaining_text, subject_suffix).
-    < 24h → show hours (ceil); otherwise → days (ceil).
-    """
+    """Возвращает (оставшееся_время_текстом, суффикс_для_темы)."""
     total_sec = max(int(delta.total_seconds()), 0)
-    hours_up = ceil(total_sec / 3600)  # 0..∞
+    hours_up = ceil(total_sec / 3600)
     if hours_up < 24:
         remaining = f"{hours_up} {'hour' if hours_up == 1 else 'hours'}"
         return remaining, f"in {remaining}"
@@ -119,55 +139,54 @@ def _humanize_remaining(delta) -> tuple[str, str]:
     return remaining, f"in {remaining}"
 
 
-def _already_sent(appt: Appointment, marker_prefix: str) -> bool:
+def _already_sent(appt: Appointment, kind: str, marker_prefix: str | None = None) -> bool:
     """
-    Idempotence check for Notification.message prefix — last 7 days.
-    Example prefixes: "[REM-2D]", "[REM-3H]", "[REVIEW-REQ]".
+    Идемпотентность: для напоминаний — по KIND; при желании можно дополнить префиксом.
     """
+    qs = Notification.objects.filter(appointment=appt, channel="email", kind=kind)
+    if marker_prefix:
+        qs = qs.filter(message__startswith=marker_prefix)
     week_ago = timezone.now() - timedelta(days=7)
-    return Notification.objects.filter(
-        appointment=appt,
-        channel="email",
-        message__startswith=marker_prefix,
-        sent_at__gte=week_ago
-    ).exists()
+    return qs.filter(sent_at__gte=week_ago).exists()
 
 
-def _record_notification(appt: Appointment, client: UserProfile, marker_prefix: str, text_body: str):
-    Notification.objects.create(
+def _record_notification(
+        *, appt: Appointment, client: UserProfile, kind: str, message: str, marker_prefix: str | None = None
+) -> None:
+    """
+    Безопасная запись Notification:
+    - для REM_* используем get_or_create (строго одна запись на appointment/kind/channel);
+    - для OTHER — update_or_create (чтобы не ловить IntegrityError).
+    """
+    base_kwargs = dict(
         user=client,
         appointment=appt,
         channel="email",
-        message=f"{marker_prefix} {text_body}",
+        kind=kind,
     )
 
-
-def _safe_render(template_name: str, ctx: dict, fallback_subject: str) -> tuple[str, str]:
-    """
-    Try to render HTML template; if missing, fallback to a minimal HTML string.
-    Returns (html, text_fallback).
-    """
-    try:
-        html = render_to_string(template_name, ctx)
-    except Exception:
-        html = (
-            f"<!doctype html><html><body>"
-            f"<h2>{fallback_subject}</h2>"
-            f"<p>Hello, {ctx.get('client_name','')}!</p>"
-            f"</body></html>"
+    if kind in (Notification.REM_D, Notification.REM_H):
+        Notification.objects.get_or_create(
+            defaults={"message": f"{marker_prefix + ' ' if marker_prefix else ''}{message}",
+                      "status": "sent"},
+            **base_kwargs,
         )
-    text = ctx.get("text_fallback", fallback_subject)
-    return html, text
+    else:
+        Notification.objects.update_or_create(
+            defaults={"message": f"{marker_prefix + ' ' if marker_prefix else ''}{message}",
+                      "status": "sent"},
+            **base_kwargs,
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Reminder emails (pre-appointment)
+# Напоминания до визита
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _render_reminder(ctx: dict[str, str]) -> tuple[str, str, str]:
     """
-    Universal reminder renderer (English).
-    Template: templates/email/appointment_reminder.html
+    Универсальный рендер напоминаний (EN).
+    Шаблон: templates/email/appointment_reminder.html
     """
     subject = f"Reminder: your appointment {ctx['subject_suffix']}"
     ctx["text_fallback"] = (
@@ -186,6 +205,7 @@ def _process_reminder_window(now, ahead: timedelta, label: str) -> int:
     qs = _base_queryset_for_window(start, end)
 
     marker_prefix = f"[REM-{label.upper()}]"
+    kind = _kind_for_label(label)
     sent = 0
 
     for appt in qs:
@@ -193,7 +213,7 @@ def _process_reminder_window(now, ahead: timedelta, label: str) -> int:
         email = (client.user.email or "").strip()
         if not email:
             continue
-        if _already_sent(appt, marker_prefix):
+        if _already_sent(appt, kind=kind, marker_prefix=marker_prefix):
             continue
 
         start_local = timezone.localtime(appt.start_time).strftime("%d %b %Y, %H:%M")
@@ -209,34 +229,30 @@ def _process_reminder_window(now, ahead: timedelta, label: str) -> int:
         subject, text, html = _render_reminder(ctx)
         try:
             _send_email(email, subject, text, html, tag="appointment-reminder")
-            _record_notification(appt, client, marker_prefix, text)
+            _record_notification(appt=appt, client=client, kind=kind, message=text, marker_prefix=marker_prefix)
             sent += 1
         except Exception as e:
-            Notification.objects.create(
-                user=client, appointment=appt, channel="email",
-                message=f"{marker_prefix}[FAILED] {text}\n{e}",
+            Notification.objects.update_or_create(
+                user=client, appointment=appt, channel="email", kind=kind,
+                defaults={"message": f"{marker_prefix}[FAILED] {text}\n{e}", "status": "failed", "error": str(e)},
             )
     return sent
 
 
 def _iter_schedules() -> list[tuple[timedelta, str]]:
     """
-    Returns a list of (offset_timedelta, slug/label) either from ReminderSchedule
-    (admin-configurable) or fallback constants.
+    Берём (offset, label) из ReminderSchedule (если есть) или из фолбэка.
     """
     result: list[tuple[timedelta, str]] = []
     if ReminderSchedule:
         try:
-            # Expecting model API: .get_timedelta() and .slug or .label
             for sch in ReminderSchedule.objects.filter(is_active=True):
                 ahead = sch.get_timedelta()
-                # slug is used in idempotency marker; if absent, derive from timedelta
                 slug = getattr(sch, "slug", None) or _label_for_offset(ahead)
                 result.append((ahead, slug))
         except Exception:
             pass
     if not result:
-        # fallback
         for td in FALLBACK_REMINDER_OFFSETS:
             result.append((td, _label_for_offset(td)))
     return result
@@ -245,8 +261,8 @@ def _iter_schedules() -> list[tuple[timedelta, str]]:
 @shared_task(name="core.tasks.send_appointment_reminders")
 def send_appointment_reminders() -> dict:
     """
-    Beat-friendly task: checks each schedule window and sends
-    reminders to those who haven't received that offset yet.
+    Запуск по крону: проверяет каждый конфиг и рассылает,
+    не задевая уже отосланные окна.
     """
     now = timezone.now()
     counters = {}
@@ -256,7 +272,7 @@ def send_appointment_reminders() -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Post-appointment: auto-complete + review request (~1 hour after end)
+# После визита: автозавершение + запрос отзыва
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _get_status(name: str) -> Optional[AppointmentStatus]:
@@ -277,8 +293,8 @@ def _latest_status_name_subquery():
 
 def _set_completed_if_finished(now) -> int:
     """
-    Mark as Completed any appointments that have ended in the last 3 days,
-    whose latest status is neither Cancelled nor Completed.
+    Ставит Completed тем визитам, что уже завершились (последние 3 дня),
+    если последний статус не Cancelled/Completed.
     """
     completed = _get_status("Completed")
     cancelled_name = (AppointmentStatus.objects
@@ -301,7 +317,7 @@ def _set_completed_if_finished(now) -> int:
         if last_name == "completed" or (cancelled_name and last_name == cancelled_name.lower()):
             continue
         if _appointment_end_dt(appt) <= now:
-            profile = appt.client  # who sets the status; safe default
+            profile = appt.client
             AppointmentStatusHistory.objects.create(
                 appointment=appt,
                 status=completed,
@@ -324,10 +340,9 @@ def _render_review_email(ctx: dict[str, str]) -> tuple[str, str, str]:
 
 def _send_review_requests(now) -> int:
     """
-    Send review requests ~1 hour after appointment end.
-    Uses ±WINDOW_MINUTES to tolerate cron jitter.
+    Отправляем запросы на отзыв ~через 1 час после конца визита.
     """
-    # Window around "ended ~ 1 hour ago"
+    # окно вокруг «закончился ~ час назад»
     start = now - timedelta(hours=1, minutes=WINDOW_MINUTES)
     end = now - timedelta(hours=1) + timedelta(minutes=WINDOW_MINUTES)
 
@@ -347,7 +362,7 @@ def _send_review_requests(now) -> int:
     sent = 0
 
     for appt in qs:
-        # Skip cancelled
+        # пропускаем отменённые
         if cancelled_name and (appt.last_status_name or "").lower() == cancelled_name.lower():
             continue
 
@@ -355,7 +370,10 @@ def _send_review_requests(now) -> int:
         if not (start <= end_dt <= end):
             continue
 
-        if _already_sent(appt, marker_prefix):
+        # для запросов отзыва используем kind=OTHER, но update_or_create — без дублей
+        kind = Notification.OTHER
+
+        if _already_sent(appt, kind=kind, marker_prefix=marker_prefix):
             continue
 
         client = appt.client
@@ -382,12 +400,12 @@ def _send_review_requests(now) -> int:
         subject, text, html = _render_review_email(ctx)
         try:
             _send_email(email, subject, text, html, tag="post-appointment-review")
-            _record_notification(appt, client, marker_prefix, text)
+            _record_notification(appt=appt, client=client, kind=kind, message=text, marker_prefix=marker_prefix)
             sent += 1
         except Exception as e:
-            Notification.objects.create(
-                user=client, appointment=appt, channel="email",
-                message=f"{marker_prefix}[FAILED] {text}\n{e}",
+            Notification.objects.update_or_create(
+                user=client, appointment=appt, channel="email", kind=kind,
+                defaults={"message": f"{marker_prefix}[FAILED] {text}\n{e}", "status": "failed", "error": str(e)},
             )
 
     return sent
@@ -396,9 +414,9 @@ def _send_review_requests(now) -> int:
 @shared_task(name="core.tasks.post_appointment_status_and_reviews")
 def post_appointment_status_and_reviews() -> dict:
     """
-    Beat-friendly task:
-      1) Auto-completes finished appointments (unless Cancelled).
-      2) Sends review requests ~1 hour after end.
+    Крон‑задача:
+      1) авто‑ставит Completed, когда визит завершился;
+      2) шлёт запрос на отзыв через ~1 час после окончания.
     """
     now = timezone.now()
     auto_completed = _set_completed_if_finished(now)
@@ -407,18 +425,70 @@ def post_appointment_status_and_reviews() -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Single entry point for Celery Beat
+# Единая точка входа для Celery Beat
 # ──────────────────────────────────────────────────────────────────────────────
 
 @shared_task(name="core.tasks.run_all_schedulers")
 def run_all_schedulers() -> dict:
     """
-    If your Beat currently runs only one task, point it here.
-    This will:
-      - send pre-appointment reminders
-      - auto-complete finished appointments
-      - send post-appointment review requests
+    Удобная «обёртка» для Beat: вызывает все внутренние планировщики.
     """
     res1 = send_appointment_reminders()
     res2 = post_appointment_status_and_reviews()
     return {"reminders": res1, "post_appointment": res2}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Точечные задачи (для вызова из сигналов/вьюх)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@shared_task(name="core.tasks.send_cancellation_email")
+def send_cancellation_email(appointment_id: str, reason: str | None = None) -> bool:
+    """
+    Отправить письмо клиенту об отмене записи.
+    Рекомендуется вызывать из сигнала после фиксации статуса Cancelled
+    (post_save AppointmentStatusHistory), а не при удалении записи.
+    """
+    appt = Appointment.objects.select_related("client__user", "master__user", "service").filter(id=appointment_id).first()
+    if not appt:
+        return False
+
+    client = appt.client
+    email = (client.user.email or "").strip()
+    if not email:
+        return False
+
+    start_local = timezone.localtime(appt.start_time).strftime("%d %b %Y, %H:%M")
+    subject = "Your appointment has been cancelled"
+    ctx = {
+        "client_name": client.user.get_full_name() or client.user.username,
+        "service_name": appt.service.name,
+        "master_name": appt.master.user.get_full_name() or appt.master.user.username,
+        "start_local": start_local,
+        "cancellation_reason": reason or "",
+        "text_fallback": (
+                f"Hello, {client.user.get_full_name() or client.user.username}!\n\n"
+                f"Your appointment for {appt.service.name} with {appt.master.user.get_full_name() or appt.master.user.username} "
+                f"on {start_local} has been cancelled."
+                + (f"\nReason: {reason}" if reason else "")
+        ),
+    }
+    html, text = _safe_render("email/appointment_cancelled.html", ctx, subject)
+
+    # kind=OTHER, но с update_or_create — не создаём дубликаты
+    kind = Notification.OTHER
+    marker_prefix = "[CANCELLED]"
+
+    if _already_sent(appt, kind=kind, marker_prefix=marker_prefix):
+        return True
+
+    try:
+        _send_email(email, subject, text, html, tag="appointment-cancelled")
+        _record_notification(appt=appt, client=client, kind=kind, message=text, marker_prefix=marker_prefix)
+        return True
+    except Exception as e:
+        Notification.objects.update_or_create(
+            user=client, appointment=appt, channel="email", kind=kind,
+            defaults={"message": f"{marker_prefix}[FAILED] {text}\n{e}", "status": "failed", "error": str(e)},
+        )
+        return False

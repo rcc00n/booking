@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Appointment Cancelled</title>
+    <style>
+        body { font-family: Arial, sans-serif; background:#f8f8f8; padding:20px; }
+        .card {
+            max-width:600px; margin:0 auto; background:#fff; border-radius:8px;
+            padding:24px; box-shadow:0 2px 6px rgba(0,0,0,0.1);
+        }
+        h2 { color:#d50000; margin-top:0; }
+        p { font-size:15px; line-height:1.5; color:#333; }
+        .details {
+            background:#f3f3f3; border-radius:6px; padding:12px; margin:20px 0;
+            font-size:14px;
+        }
+        .footer {
+            font-size:13px; color:#888; text-align:center; margin-top:24px;
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h2>Your appointment has been cancelled</h2>
+
+    <p>Hello {{ client_name }},</p>
+    <p>
+        We’d like to inform you that your appointment has been cancelled.
+        Please review the details below:
+    </p>
+
+    <div class="details">
+        <p><strong>Service:</strong> {{ service_name }}</p>
+        <p><strong>Master:</strong> {{ master_name }}</p>
+        <p><strong>Date &amp; Time:</strong> {{ start_local }}</p>
+        {% if cancellation_reason %}
+            <p><strong>Reason:</strong> {{ cancellation_reason }}</p>
+        {% endif %}
+    </div>
+
+    <p>If you’d like, you can book a new appointment using our online booking system.</p>
+
+    <div class="footer">
+        &mdash; Malva Health &amp; Beauty Team
+    </div>
+</div>
+</body>
+</html>
