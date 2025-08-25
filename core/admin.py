@@ -232,7 +232,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 
     # Fields shown in user list
     list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'source', 'client_status_col')
-    list_filter = ('is_staff', 'is_superuser', 'is_active', RoleFilter, 'userprofile__how_heard')
+    list_filter = ('is_superuser', 'userprofile__how_heard', ClientStatusFilter)
     search_fields = ('username', 'email', 'first_name', 'last_name', 'userprofile__phone')
 
     # Field layout when editing a user

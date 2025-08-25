@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Dict, Any, List, Tuple
-
+from .utils.sms import send_sms
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db.models.signals import pre_save, post_save, post_delete
@@ -223,6 +223,23 @@ def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs
         )
         _send_email(email, subject, text, html, tag="appointment-created")
         _notify_once(instance.id, client, message=f"[CREATED] {text}")
+
+        sms_body = f"Your appointment is booked: {service_name} with {master_name} on {start_local}"
+        sid = send_sms(client.phone, sms_body)
+
+        Notification.objects.update_or_create(
+            user=client,
+            appointment=instance,
+            channel="sms",
+            kind=Notification.CREATED,
+            defaults={
+                "message": sms_body,
+                "provider": "twilio",
+                "provider_message_id": sid or "",
+                "status": "sent" if sid else "failed",
+                "error": "" if sid else "twilio returned no SID",
+            },
+        )
         return
 
     # Обновление: сравним снапшот
@@ -257,6 +274,22 @@ def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs
     )
     _send_email(email, subject, text, html, tag="appointment-updated")
     _notify_once(instance.id, client, message=f"[UPDATED]\n{text}")
+
+    sms_body = f"Your appointment was updated:\n{diff_text}"
+    sid = send_sms(client.phone, sms_body)
+    Notification.objects.update_or_create(
+        user=client,
+        appointment=instance,
+        channel="sms",
+        kind=Notification.UPDATED,
+        defaults={
+            "message": sms_body,
+            "provider": "twilio",
+            "provider_message_id": sid or "",
+            "status": "sent" if sid else "failed",
+            "error": "" if sid else "twilio returned no SID",
+        },
+    )
 
 
 

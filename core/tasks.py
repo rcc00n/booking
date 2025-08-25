@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 from math import ceil
 from typing import Optional
-
+from .utils.sms import send_sms
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
@@ -247,6 +247,17 @@ def _process_reminder_window(now, ahead: timedelta, label: str) -> int:
         try:
             _send_email(email, subject, text, html, tag="appointment-reminder")
             _record_notification(appt=appt, client=client, kind=kind, message=text, marker_prefix=marker_prefix)
+            sid = send_sms(client.phone, text)
+            Notification.objects.update_or_create(
+                user=client, appointment=appt, channel="sms", kind=kind,
+                defaults={
+                    "message": text,
+                    "provider": "twilio",
+                    "provider_message_id": sid or "",
+                    "status": "sent" if sid else "failed",
+                    "error": "" if sid else "twilio returned no SID",
+                },
+            )
             sent += 1
         except Exception as e:
             Notification.objects.update_or_create(
@@ -418,6 +429,17 @@ def _send_review_requests(now) -> int:
         try:
             _send_email(email, subject, text, html, tag="post-appointment-review")
             _record_notification(appt=appt, client=client, kind=kind, message=text, marker_prefix=marker_prefix)
+            sid = send_sms(client.phone, text)
+            Notification.objects.update_or_create(
+                user=client, appointment=appt, channel="sms", kind=kind,
+                defaults={
+                    "message": text,
+                    "provider": "twilio",
+                    "provider_message_id": sid or "",
+                    "status": "sent" if sid else "failed",
+                    "error": "" if sid else "twilio returned no SID",
+                },
+            )
             sent += 1
         except Exception as e:
             Notification.objects.update_or_create(
@@ -502,6 +524,17 @@ def send_cancellation_email(appointment_id: str, reason: str | None = None) -> b
     try:
         _send_email(email, subject, text, html, tag="appointment-cancelled")
         _record_notification(appt=appt, client=client, kind=kind, message=text, marker_prefix=marker_prefix)
+        sid = send_sms(client.phone, text)
+        Notification.objects.update_or_create(
+            user=client, appointment=appt, channel="sms", kind=kind,
+            defaults={
+                "message": text,
+                "provider": "twilio",
+                "provider_message_id": sid or "",
+                "status": "sent" if sid else "failed",
+                "error": "" if sid else "twilio returned no SID",
+            },
+        )
         return True
     except Exception as e:
         Notification.objects.update_or_create(

@@ -194,6 +194,10 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
+TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = env("TWILIO_AUTH_TOKEN")
+TWILIO_FROM_NUMBER = env("TWILIO_FROM_NUMBER")
+
 JAZZMIN_SETTINGS = {
     "site_title": "Malva Admin",
     "site_header": "Malva Health & Beauty",
