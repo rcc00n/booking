@@ -11,7 +11,7 @@ from django.db.models.signals import pre_save, post_save, post_delete
 from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.timezone import localtime
-
+from .tasks import send_cancellation_email
 from .models import (
     Appointment,
     AppointmentStatusHistory,
@@ -259,37 +259,80 @@ def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs
     _notify_once(instance.id, client, message=f"[UPDATED]\n{text}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# post_delete: рассылка «удалено»
-# ──────────────────────────────────────────────────────────────────────────────
 
-# @receiver(post_delete, sender=Appointment)
-# def appointment_post_delete(sender, instance: Appointment, **kwargs):
-#     """
-#     Используем post_delete (а не pre_delete), чтобы у объекта был валидный pk и доступ к связям.
-#     """
-#     client = instance.client
-#     email = (client.user.email or "").strip()
-#     from django.utils.timezone import localtime
-#     start_local = localtime(instance.start_time).strftime("%d %b %Y, %H:%M")
-#     master_name = instance.master.user.get_full_name() or instance.master.user.username
-#     service_name = instance.service.name
-#
-#     subject = "Your appointment was deleted"
-#     text = (
-#         f"Hello, {client.user.get_full_name() or client.user.username}!\n\n"
-#         f"The appointment was deleted:\n"
-#         f"Service: {service_name}\nMaster: {master_name}\nWhen: {start_local}\n"
-#     )
-#     html = (
-#         f"<!doctype html><html><body>"
-#         f"<h2>Your appointment was deleted</h2>"
-#         f"<p>Service: <b>{service_name}</b><br>"
-#         f"Master: <b>{master_name}</b><br>"
-#         f"When: <b>{start_local}</b></p>"
-#         f"</body></html>"
-#     )
-#
-#     _send_email(email, subject, text, html, tag="appointment-deleted")
-#     # Важно: работаем по appointment_id, чтобы не передавать «несохранённый» объект в фильтры
-#     _notify_once(instance.id, client, message=f"[DELETED] {text}")
+def _is_cancelled_status(status_obj) -> bool:
+    """
+    Универсальная проверка: имя/код/slug содержит 'cancel'.
+    Поддерживает варианты 'Cancelled'/'Canceled'/'Cancel'.
+    """
+    if not status_obj:
+        return False
+    name = (getattr(status_obj, "name", "") or "").lower()
+    code = (getattr(status_obj, "code", "") or "").lower()
+    slug = (getattr(status_obj, "slug", "") or "").lower()
+    return ("cancel" in name) or (code in {"cancel", "canceled", "cancelled"}) or (slug in {"cancel", "canceled", "cancelled"})
+
+
+@receiver(post_save, sender=AppointmentStatusHistory)
+def on_status_history_created(sender, instance: AppointmentStatusHistory, created, **kwargs):
+    """
+    Отправляем e-mail клиенту, когда создаётся запись истории со статусом 'cancelled'.
+    Защищаемся от повторных отправок через Notification (если у вас такая модель есть).
+    """
+    if not created:
+        return
+
+    if not _is_cancelled_status(getattr(instance, "status", None)):
+        return
+
+    appt_id = instance.appointment_id
+
+    # Антидублирование, если у вас заведена таблица уведомлений
+    if Notification.objects.filter(appointment_id=appt_id, kind=Notification.CANCELLED, channel="email").exists():
+        return
+
+    # Отправка (Celery task)
+    send_cancellation_email.delay(appointment_id=appt_id)
+    print("Email Sent!!")
+    user = getattr(instance.appointment, "client", None)
+    # Опционально: помечаем, что уведомление отправлено (если у вас так принято)
+    Notification.objects.create(
+        user=user,
+        appointment_id=appt_id,
+        kind=Notification.CANCELLED,
+        channel="email",
+        message="Appointment cancelled email queued",
+        provider="sendgrid",   # если у вас есть это поле
+        status="sent",
+    )
+
+
+# (Необязательно, но полезно)
+# Если в проекте статус меняется напрямую у Appointment, а не всегда через History:
+@receiver(pre_save, sender=Appointment)
+def on_appointment_status_changing(sender, instance: Appointment, **kwargs):
+    """
+    Если статус у Appointment меняется напрямую, отлавливаем смену на cancelled.
+    (Работает только когда объект уже существует)
+    """
+    if not instance.pk:
+        return
+
+    try:
+        prev = Appointment.objects.get(pk=instance.pk)
+    except Appointment.DoesNotExist:
+        return
+
+    old_status = getattr(prev, "status", None)
+    new_status = getattr(instance, "status", None)
+
+    if new_status and (new_status != old_status) and _is_cancelled_status(new_status):
+        # Отправляем только если ещё не отправляли (через Notification)
+        if not Notification.objects.filter(appointment_id=instance.id, kind=Notification.CANCELLED, channel="email").exists():
+            send_cancellation_email.delay(appointment_id=instance.id, kind="cancelled")
+            Notification.objects.create(
+                appointment=instance,
+                kind=Notification.CANCELLED,
+                channel="email",
+                message="Appointment cancelled email queued (direct status change)",
+            )

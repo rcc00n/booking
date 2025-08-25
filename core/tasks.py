@@ -37,6 +37,23 @@ FALLBACK_REMINDER_OFFSETS = [
 # Необязательный шаблон ссылки на отзыв
 REVIEW_URL_PATTERN: Optional[str] = getattr(settings, "REVIEW_FORM_URL", None)
 
+TEMPLATE_MAP = {
+    "created": {
+        "subject": "emails/appointment_created_subject.txt",
+        "html": "emails/appointment_created.html",
+        "text": "emails/appointment_created.txt",
+    },
+    "updated": {
+        "subject": "emails/appointment_updated_subject.txt",
+        "html": "emails/appointment_updated.html",
+        "text": "emails/appointment_updated.txt",
+    },
+    "cancelled": {  # <— ДОБАВИЛИ
+        "subject": "emails/appointment_cancelled_subject.txt",
+        "html": "emails/appointment_cancelled.html",
+        "text": "emails/appointment_cancelled.txt",
+    },
+}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Утилиты: почта/рендер/идемпотентность/база выборки

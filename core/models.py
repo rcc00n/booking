@@ -544,7 +544,7 @@ class Notification(models.Model):
     OTHER   = "other"
     CREATED = "created"
     UPDATED = "updated"
-    DELETED = "deleted"
+    CANCELLED = "cancelled"
     STATUS  = "status"      # смена статуса (в т.ч. Cancelled)
 
     KIND_CHOICES = [
@@ -552,7 +552,7 @@ class Notification(models.Model):
         (REM_H,  "Reminder Hours"),
         (CREATED, "Appointment created"),
         (UPDATED, "Appointment updated"),
-        (DELETED, "Appointment deleted"),
+        (CANCELLED, "Appointment cancelled"),
         (STATUS,  "Appointment status changed"),
         (OTHER,   "Other"),
     ]
