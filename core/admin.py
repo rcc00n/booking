@@ -1142,6 +1142,32 @@ def _cancel_no_show_names() -> list[str]:
                .values_list("name", flat=True).first()) or "No_Show"
     return [cancelled, no_show]
 
+def _client_source_aggregation(qs):
+    # пробуем client__source, если его нет — client__how_heard
+    try:
+        rows = (
+            qs.values("client__source")
+            .annotate(
+                revenue=Coalesce(Sum("final_price"), Value(Decimal("0"))),
+                appts=Count("id"),
+                clients=Count("client_id", distinct=True),
+            )
+            .order_by("-revenue")
+        )
+        # нормализуем ключ + подпись
+        return [{"label": (r["client__source"] or "unknown"), **{k: r[k] for k in ("revenue","appts","clients")}} for r in rows]
+    except FieldError:
+        rows = (
+            qs.values("client__how_heard")
+            .annotate(
+                revenue=Coalesce(Sum("final_price"), Value(Decimal("0"))),
+                appts=Count("id"),
+                clients=Count("client_id", distinct=True),
+            )
+            .order_by("-revenue")
+        )
+        return [{"label": (r["client__how_heard"] or "unknown"), **{k: r[k] for k in ("revenue","appts","clients")}} for r in rows]
+
 # ──────────────────────────────────────────────────────────────────────────────
 # view
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1276,7 +1302,139 @@ def stats_view(request: HttpRequest) -> HttpResponse:
         "promocode": [daily[d]["promocode"] for d in daily],
         "none": [daily[d]["none"] for d in daily],
     }
+    client_source_stats = _client_source_aggregation(base_q)
 
+    #   для графика: просто горизонтальная колонка по revenue
+    src_labels = [r["label"] for r in client_source_stats]
+    src_revenue = [float(r["revenue"]) for r in client_source_stats]
+
+    # 1) Определяем поля и choices
+    src_attr = "source"
+    how_attr = "how_heard"
+
+    try:
+        src_field = UserProfile._meta.get_field("source")
+    except Exception:
+        src_attr = "how_heard"   # если нет source — используем how_heard как общий источник
+        src_field = UserProfile._meta.get_field(how_attr)
+
+    # choices для source / how_heard
+    src_choices: list[tuple[str, str]] = list(getattr(src_field, "choices", [])) or []
+    try:
+        how_field = UserProfile._meta.get_field(how_attr)
+        how_choices: list[tuple[str, str]] = list(getattr(how_field, "choices", [])) or []
+    except Exception:
+        how_choices = []
+
+    # гарантия наличия "unknown"
+    if ("unknown", "Unknown") not in src_choices:
+        src_choices.append(("unknown", "Unknown"))
+    if how_choices and ("unknown", "Unknown") not in how_choices:
+        how_choices.append(("unknown", "Unknown"))
+
+    src_path = f"client__{src_attr}"
+    how_path = f"client__{how_attr}"
+
+    def _norm(v):
+        return ("" if v is None else str(v)).strip()
+
+    def _is_online(src_val: str) -> bool:
+        return _norm(src_val).lower() == "online"
+
+    # 2) Строим «расширенный» список категорий для графика/таблицы
+    #    - все source (offline/marketing/…)
+    #    - для online — каждая опция how_heard стаёт отдельной категорией: "online::<how>"
+    expanded_categories: list[tuple[str, str]] = []  # (key, label)
+
+    for s_val, s_label in src_choices:
+        if _is_online(s_val) and how_choices:
+            for h_val, h_label in how_choices:
+                expanded_categories.append((f"online::{h_val}", f"{s_label} — {h_label}"))
+        else:
+            expanded_categories.append((s_val, s_label))
+
+    # 3) Дневная агрегация revenue по (day, source[, how_heard])
+    rows = (
+        base_q
+        .annotate(day=F("start_time__date"))
+        .values("day", src_path, how_path)  # how_path вернёт None, если поля нет
+        .annotate(total=Coalesce(Sum("final_price"), Value(Decimal("0"))))
+    )
+
+    # ось X — каждый день
+    days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    labels = [d.isoformat() for d in days]
+    label_index = {s: i for i, s in enumerate(labels)}
+
+    # серии с нулями под все категории (в заданном порядке)
+    series = {key: [0.0] * len(labels) for (key, _lbl) in expanded_categories}
+
+    def _key_for_row(src_val, how_val) -> str:
+        """Возвращает ключ категории для строки агрегации."""
+        s = _norm(src_val) or "unknown"
+        if _is_online(s) and how_choices:
+            h = _norm(how_val) or "unknown"
+            return f"online::{h}"
+        return s or "unknown"
+
+    for r in rows:
+        d = r["day"].isoformat() if hasattr(r["day"], "isoformat") else str(r["day"])
+        j = label_index.get(d)
+        if j is None:
+            continue
+        key = _key_for_row(r.get(src_path), r.get(how_path))
+        if key not in series:
+            # если попалась новая опция how_heard — добавим в конец
+            label = key
+            if key.startswith("online::"):
+                h_val = key.split("::", 1)[1]
+                # найдём красивую метку для how_heard
+                h_label = next((lbl for val, lbl in how_choices if val == h_val), h_val.title().replace("_", " "))
+                s_label = next((lbl for val, lbl in src_choices if _is_online(val)), "Online")
+                label = f"{s_label} — {h_label}"
+            expanded_categories.append((key, label))
+            series[key] = [0.0] * len(labels)
+        series[key][j] = float(r["total"])
+
+    # 4) Табличные totals по периоду (revenue, appts, clients) — ПОД ВСЕ категории, включая нулевые
+    totals = {key: {"revenue": 0.0, "appts": 0, "clients": set()} for key, _ in expanded_categories}
+
+    rows_total = (
+        base_q
+        .values(src_path, how_path, "client_id")
+        .annotate(
+            revenue=Coalesce(Sum("final_price"), Value(Decimal("0"))),
+            appts=Count("id"),
+        )
+    )
+    for r in rows_total:
+        key = _key_for_row(r.get(src_path), r.get(how_path))
+        t = totals.setdefault(key, {"revenue": 0.0, "appts": 0, "clients": set()})
+        t["revenue"] += float(r["revenue"])
+        t["appts"] += int(r["appts"])
+        if r.get("client_id"):
+            t["clients"].add(r["client_id"])
+
+    # превращаем set в число и подготавливаем список для шаблона в порядке expanded_categories
+    client_source_table = [
+        {
+            "key": key,
+            "label": label,
+            "revenue": round(totals[key]["revenue"], 2),
+            "appts": totals[key]["appts"],
+            "clients": len(totals[key]["clients"]),
+        }
+        for key, label in expanded_categories
+    ]
+
+    # 5) Данные для Chart.js
+    client_source_stacked = {
+        "labels": labels,
+        "datasets": [
+            {"key": key, "label": label, "data": series[key]}
+            for key, label in expanded_categories
+        ],
+    }
     context = {
         "title": "Statistics",
         "start": start,
@@ -1293,6 +1451,18 @@ def stats_view(request: HttpRequest) -> HttpResponse:
         "promo_breakdown": list(promo_breakdown),
         "chart": chart,
     }
+    context.update({
+        "client_source_stats": client_source_stats,
+        "client_source_chart": {
+            "labels": src_labels,
+            "revenue": src_revenue,
+        }
+    })
+
+    context.update({
+        "client_source_stacked": client_source_stacked,
+        "client_source_table": client_source_table,
+    })
     return render(request, "admin/statistics.html", context)
 
 def _inject_admin_urls(original_get_urls):

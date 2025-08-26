@@ -118,6 +118,41 @@
                 <div class="small" style="margin-top:6px">Period: {{ start }} – {{ end }}</div>
             </div>
         </div>
+        <div class="grid-2">
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Revenue by client source</h3>
+                    <div class="legend" id="srcLegend"></div>
+                </div>
+                <div class="panel-body" style="height:320px">
+                    <canvas id="sourceStacked"></canvas>
+                    <div class="small" style="margin-top:6px">Period: {{ start }} – {{ end }}</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header"><h3>Client sources (totals)</h3></div>
+                <div class="panel-body">
+                    <table class="table">
+                        <thead>
+                        <tr><th>Source</th><th>Revenue</th><th>Appointments</th><th>Clients</th></tr>
+                        </thead>
+                        <tbody>
+                        {% for r in client_source_table %}
+                            <tr>
+                                <td>{{ r.label }}</td>
+                                <td>CA$ {{ r.revenue }}</td>
+                                <td>{{ r.appts }}</td>
+                                <td>{{ r.clients }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="4" class="muted">No data</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
         <div class="grid-2">
             <div class="panel">
@@ -329,6 +364,63 @@
             chips.forEach(ch => ch.addEventListener('click', () => setRange(ch.dataset.q)));
             [startI, endI].forEach(el => el.addEventListener('change', highlightActive));
             highlightActive();
+        })();
+        (function bootSourceStacked(){
+            function draw(){
+                if (typeof Chart === 'undefined'){ return setTimeout(draw, 80); }
+
+                const cfg = {{ client_source_stacked|safe }};
+                const labels = cfg.labels;
+
+                const PALETTE = ['#9CA3AF','#6366F1','#A78BFA','#F59E0B','#FACC15','#34D399','#60A5FA','#EC4899','#10B981','#F87171','#22D3EE','#F472B6'];
+                const datasets = cfg.datasets.map((ds, i) => ({
+                    label: ds.label,
+                    data: ds.data,
+                    stack: 'rev-by-source',
+                    backgroundColor: PALETTE[i % PALETTE.length],
+                    key: ds.key,
+                    borderWidth: 0
+                }));
+
+                const ctx = document.getElementById('sourceStacked').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        scales: {
+                            x: { stacked: true, grid: { display: false } },
+                            y: { stacked: true, beginAtZero: true }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                mode: 'index', intersect: false,
+                                callbacks: {
+                                    title(items){
+                                        if(!items?.length) return '';
+                                        const total = items.reduce((s,i)=> s + (i.parsed.y || 0), 0);
+                                        const day = items[0].label;
+                                        return `${day} — Total CA$ ${total.toLocaleString(undefined,{maximumFractionDigits:2})}`;
+                                    },
+                                    label(ctx){
+                                        const v = ctx.parsed.y || 0;
+                                        if (!v) return; // пустые строки не показываем
+                                        return ` ${ctx.dataset.label}  CA$ ${v.toLocaleString(undefined,{maximumFractionDigits:2})}`;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Легенда из datasets (цвет + подпись)
+                const legend = document.getElementById('srcLegend');
+                legend.innerHTML = datasets.map(ds =>
+                    `<span><i style="background:${ds.backgroundColor}"></i>${ds.label}</span>`
+                ).join('');
+            }
+            draw();
         })();
     </script>
 {% endblock %}

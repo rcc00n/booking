@@ -54,8 +54,8 @@ class HowHeard(models.TextChoices):
 
 class UserProfile(models.Model):
     SOURCE_CHOICES = [
-        ("online", "Online (self-registered)"),
-        ("offline", "Offline (created by admin)"),
+        ("online", "Online"),
+        ("offline", "Offline"),
     ]
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
