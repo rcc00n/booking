@@ -7,13 +7,16 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.contrib import admin
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count, Q, F
 from itertools import cycle
-from django.utils.timezone import localtime, datetime, make_aware, localdate
+from django.utils.timezone import localtime, datetime, make_aware, localdate, get_current_timezone
 from django.utils.html import escape
 from django.shortcuts import redirect
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
+from datetime import date, timedelta
+from django.contrib.admin.views.decorators import staff_member_required
+from django.http import HttpRequest, HttpResponse
 from django.contrib.auth.models import Permission
 from django.db.models.functions import Coalesce
 from django.db.models import DecimalField, Value
@@ -25,6 +28,7 @@ import json
 import csv
 from django.urls import path, reverse, NoReverseMatch
 from django.http import HttpResponse
+from django.shortcuts import render
 from .filters import *
 from .models import *
 from .forms import *
@@ -1102,72 +1106,194 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
 
         user.save()
 
-def stats_view(request):
-    """Страница статистики в админке: фильтры + графики/таблицы."""
-    # ---- фильтры из GET ----
-    # date_from/date_to в формате YYYY-MM-DD
-    df = request.GET.get("date_from")
-    dt = request.GET.get("date_to")
-    today = localdate()
-    # диапазон по умолчанию — последние 30 дней
-    start = datetime.strptime(df, "%Y-%m-%d").date() if df else today - timedelta(days=29)
-    end = datetime.strptime(dt, "%Y-%m-%d").date() if dt else today
 
-    # базовые выборки за диапазон
-    appts = Appointment.objects.filter(start_time__date__range=[start, end])
-    pays  = Payment.objects.filter(appointment__start_time__date__range=[start, end])
+TZ = get_current_timezone()
 
-    # график: продажи и число визитов по дням
-    days = (end - start).days + 1
-    series = []
-    total_sales = 0
-    for i in range(days):
-        day = start + timedelta(days=i)
-        sales = pays.filter(appointment__start_time__date=day).aggregate(total=Sum("amount"))["total"] or 0
-        appts_count = appts.filter(start_time__date=day).count()
-        total_sales += float(sales)
-        series.append({"day": day.strftime("%Y-%m-%d"), "sales": float(sales), "appointments": appts_count})
 
-    # статусы для сверки (как на главной)
-    confirmed = AppointmentStatus.objects.filter(name="Confirmed").first()
-    cancelled = AppointmentStatus.objects.filter(name="Cancelled").first()
+# ──────────────────────────────────────────────────────────────────────────────
+# helpers
+# ──────────────────────────────────────────────────────────────────────────────
 
-    # KPI по диапазону
-    total_appts = appts.count()
-    confirmed_appts = appts.filter(appointmentstatushistory__status=confirmed).count() if confirmed else 0
-    cancelled_appts = appts.filter(appointmentstatushistory__status=cancelled).count() if cancelled else 0
+def _parse_period(request: HttpRequest) -> tuple[date, date]:
+    """?start=YYYY-MM-DD&end=YYYY-MM-DD, по умолчанию последние 30 дней (включительно)."""
+    today = date.today()
+    start_s = request.GET.get("start") or ""
+    end_s = request.GET.get("end") or ""
+    try:
+        start = date.fromisoformat(start_s) if start_s else today - timedelta(days=30)
+    except Exception:
+        start = today - timedelta(days=30)
+    try:
+        end = date.fromisoformat(end_s) if end_s else today
+    except Exception:
+        end = today
+    if end < start:
+        start, end = end, start
+    return start, end
 
-    # топ‑услуги и топ‑мастера (аналогично вашей логике)
-    top_services = (
-        Service.objects
-        .annotate(count=Count("appointment", filter=Q(appointment__start_time__date__range=[start, end])))
-        .order_by("-count")[:10]
+
+def _cancel_no_show_names() -> list[str]:
+    """Фактические названия статусов в БД (fallback на строковые)."""
+    cancelled = (AppointmentStatus.objects
+                 .filter(name__iexact="Cancelled")
+                 .values_list("name", flat=True).first()) or "Cancelled"
+    no_show = (AppointmentStatus.objects
+               .filter(name__iexact="No_Show")
+               .values_list("name", flat=True).first()) or "No_Show"
+    return [cancelled, no_show]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# view
+# ──────────────────────────────────────────────────────────────────────────────
+
+@staff_member_required
+def stats_view(request: HttpRequest) -> HttpResponse:
+    start, end = _parse_period(request)
+
+    # последний статус для каждого аппаойнтмента
+    last_status_name = (
+        AppointmentStatusHistory.objects
+        .filter(appointment_id=OuterRef("pk"))
+        .order_by("-set_at")
+        .values("status__name")[:1]
+    )
+    cancelled_like = _cancel_no_show_names()
+
+    # базовая выборка: только «валидные» визиты в периоде
+    base_q = (
+        Appointment.objects
+        .select_related("service", "client__user", "master__user")
+        .annotate(last_status=Subquery(last_status_name))
+        .exclude(last_status__in=cancelled_like)
+        .filter(start_time__date__gte=start, start_time__date__lte=end)
     )
 
-    master_role = Role.objects.filter(name="Master").first()
-    masters = MasterProfile.objects.filter(user__userrole__role=master_role).annotate(
-        total=Sum(
-            "appointments_as_master__service__base_price",
-            filter=Q(appointments_as_master__start_time__date__range=[start, end])
+    # ── KPI
+    kpi_total_revenue = base_q.aggregate(x=Coalesce(Sum("final_price"), Value(Decimal("0.00"))))["x"]
+    kpi_total_appointments = base_q.count()
+    kpi_with_discount = base_q.exclude(discount_source="").count()
+
+    # ── Топы
+    top_bookers = (
+        base_q.values(
+            "client_id",
+            "client__user__first_name",
+            "client__user__last_name",
+            "client__user__email",
         )
+        .annotate(
+            appt_count=Count("id"),
+            spent=Coalesce(Sum("final_price"), Value(Decimal("0.00"))),
+        )
+        .order_by("-appt_count", "-spent")[:10]
     )
-    top_masters = sorted(masters, key=lambda m: m.total or 0, reverse=True)[:10]
 
-    ctx = admin.site.each_context(request)
-    ctx.update({
-        "page_title": "Статистика",
-        "date_from": start.strftime("%Y-%m-%d"),
-        "date_to": end.strftime("%Y-%m-%d"),
-        "series": series,
-        "total_sales": total_sales,
-        "total_appts": total_appts,
-        "confirmed_appts": confirmed_appts,
-        "cancelled_appts": cancelled_appts,
-        "top_services": top_services,
-        "top_masters": top_masters,
-    })
-    return TemplateResponse(request, "admin/stats.html", ctx)
+    top_spenders = (
+        base_q.values(
+            "client_id",
+            "client__user__first_name",
+            "client__user__last_name",
+            "client__user__email",
+        )
+        .annotate(
+            spent=Coalesce(Sum("final_price"), Value(Decimal("0.00"))),
+            appt_count=Count("id"),
+        )
+        .order_by("-spent", "-appt_count")[:10]
+    )
 
+    # ── Разбивка по discount_source (для графика/таблицы)
+    # допустимые «каналы»: personal | service | promocode | ""(none)
+    ds_totals = (
+        base_q.values("discount_source")
+        .annotate(
+            cnt=Count("id"),
+            revenue=Coalesce(Sum("final_price"), Value(Decimal("0.00")))
+        )
+        .order_by("-revenue")
+    )
+
+    # дневные суммы по источникам (для стековой диаграммы)
+    days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    daily = {d.isoformat(): {"general": 0.0, "personal": 0.0, "promocode": 0.0, "none": 0.0} for d in days}
+
+    per_day = (
+        base_q.annotate(day=F("start_time__date"))
+        .values("day", "discount_source")
+        .annotate(total=Coalesce(Sum("final_price"), Value(Decimal("0.00"))))
+    )
+
+    for row in per_day:
+        day = row["day"].isoformat() if hasattr(row["day"], "isoformat") else str(row["day"])
+        src = (row["discount_source"] or "").strip() or "none"
+        if day in daily and src in daily[day]:
+            daily[day][src] = float(row["total"])
+
+
+    # ── Разбивка по КОНКРЕТНЫМ скидкам (ServiceDiscount)
+    valid_appt_ids = base_q.values("id")
+    discount_filters = (
+            Q(service__appointment__id__in=valid_appt_ids) &
+            Q(service__appointment__start_time__date__gte=F("start_date")) &
+            Q(service__appointment__start_time__date__lte=F("end_date")) &
+            Q(service__appointment__discount_source="service")
+    )
+    discount_breakdown = (
+        ServiceDiscount.objects
+        .select_related("service")
+        .annotate(
+            uses=Count("service__appointment", filter=discount_filters),
+            revenue=Coalesce(Sum("service__appointment__final_price", filter=discount_filters), Value(Decimal("0"))),
+            saved=Coalesce(
+                Sum(
+                    (F("service__appointment__service__base_price") - F("service__appointment__final_price")),
+                    filter=discount_filters
+                ),
+                Value(Decimal("0"))
+            ),
+        )
+        .filter(uses__gt=0)
+        .order_by("-uses", "-revenue")
+    )
+
+    # ── Разбивка по промокодам
+    promo_breakdown = (
+        AppointmentPromoCode.objects
+        .filter(appointment_id__in=valid_appt_ids)
+        .values("promocode__code")
+        .annotate(
+            uses=Count("id"),
+            revenue=Coalesce(Sum("appointment__final_price"), Value(Decimal("0")))
+        )
+        .order_by("-uses", "-revenue")
+    )
+
+    # данные для графика
+    chart = {
+        "labels": list(daily.keys()),
+        "general": [daily[d]["general"] for d in daily],
+        "personal": [daily[d]["personal"] for d in daily],
+        "promocode": [daily[d]["promocode"] for d in daily],
+        "none": [daily[d]["none"] for d in daily],
+    }
+
+    context = {
+        "title": "Statistics",
+        "start": start,
+        "end": end,
+        "kpi": {
+            "revenue": kpi_total_revenue,
+            "appointments": kpi_total_appointments,
+            "with_discount": kpi_with_discount,
+        },
+        "top_bookers": list(top_bookers),
+        "top_spenders": list(top_spenders),
+        "ds_totals": list(ds_totals),
+        "discount_breakdown": list(discount_breakdown),
+        "promo_breakdown": list(promo_breakdown),
+        "chart": chart,
+    }
+    return render(request, "admin/statistics.html", context)
 
 def _inject_admin_urls(original_get_urls):
     def get_urls():
