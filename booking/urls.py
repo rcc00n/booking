@@ -10,7 +10,7 @@ from django.contrib import admin
 from django.urls import path, include
 from core.autocomplete import ServiceAutocomplete
 from django.views.generic import RedirectView
-from core.views import service_search
+from core.views import service_search, service_price, service_promocodes_api
 from core.admin import stats_view
 from accounts.views import health_view, health_edit
 urlpatterns = [
@@ -21,6 +21,12 @@ urlpatterns = [
 
     path("autocomplete/service/", ServiceAutocomplete.as_view(), name="service-autocomplete"),
     path("admin/stats/", admin.site.admin_view(stats_view), name="admin-stats"),
+    path("api/service/<uuid:pk>/price/", service_price, name="service-price"),
+    path(
+        "accounts/api/services/<slug:service_id>/promocodes/",
+        service_promocodes_api,
+        name="service_promocodes_api",
+    ),
 
      path("", RedirectView.as_view(pattern_name="client-dashboard", permanent=False)),
     # Ничего из core тут не монтируем, чтобы не перехватывать /accounts/

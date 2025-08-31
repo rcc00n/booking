@@ -1,60 +1,76 @@
 {% extends "admin/base_site.html" %}
 {% load static %}
+
 {% block extrahead %}
     {{ block.super }}
     <link rel="stylesheet" href="{% static 'admin/css/custom_sidebar.css' %}">
     <script defer src="{% static 'admin/js/custom_sidebar.js' %}"></script>
     <link rel="stylesheet" href="{% static 'admin/css/admin_dashboard.css' %}">
-    <script defer src="{% static 'admin/js/admin_dashboard.js' %}"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
 
 {% block content %}
-
-
     <div class="dashboard-container">
         <div class="dashboard-grid">
-            <!-- Block 1: Recent Sales Chart -->
+
             {% if not is_master %}
-            <div class="dashboard-card">
-                <h3>Recent Sales</h3>
-                <p><br>Appointments value: <strong>CA$ {{ total_sales }}</strong></p>
-                <canvas id="salesChart"></canvas>
-            </div>
+                <!-- Block 1: Recent Sales (7d) -->
+                <div class="dashboard-card">
+                    <h3>Recent Sales</h3>
+                    <p><br>Appointments value (7d): <strong>CA$ {{ total_sales|floatformat:2 }}</strong></p>
+                    <canvas id="salesChart"></canvas>
+                </div>
             {% endif %}
-            <!-- Block 2: Upcoming Appointments -->
+
+            <!-- Block 2: Upcoming (weekly statuses) -->
             <div class="dashboard-card">
                 <h3>Upcoming appointments</h3>
                 <p><strong>{{ upcoming_total }} booked</strong></p>
                 <p>Confirmed appointments: {{ confirmed_count }}<br>Cancelled appointments: {{ cancelled_count }}</p>
                 <canvas id="upcomingChart" height="150"></canvas>
             </div>
-            {% if not is_master %}
-            <!-- Block 3: Appointments Activity -->
-            <div class="dashboard-card">
-                <h3>Appointment activity</h3>
-                <div class="appt-list">
-                    {% for app in recent_appointments %}
 
-                        <div class="appt-item{% if app.start_time.date == today %} appt-today{% endif %}" onclick="window.location.href='/admin/core/appointment/{{app.id}}/change/'">
-                            <div class="appt-date">
-                                <span class="appt-day">{{ app.start_time|date:"d" }}</span>
-                                <span class="appt-month">{{ app.start_time|date:"b" }}</span>
-                            </div>
-                            <div class="appt-details">
-                                <div class="appt-top">
-                                    <span class="appt-time">{{ app.start_time|date:"D, d M Y H:i" }}</span>
-                                    <span class="appt-status {{ app.appointmentstatushistory_set.last.status.name|lower }}">{{ app.appointmentstatushistory_set.last.status.name }}</span>
+            {% if not is_master %}
+                <!-- Block 3: Appointment activity (recent) -->
+                <div class="dashboard-card">
+                    <h3>Appointment activity</h3>
+                    <div class="appt-list">
+                        {% for app in recent_appointments %}
+                            <div class="appt-item{% if app.start_time.date == today %} appt-today{% endif %}"
+                                 onclick="window.location.href='{% url 'admin:core_appointment_change' app.id %}'">
+                                <div class="appt-date">
+                                    <span class="appt-day">{{ app.start_time|date:"d" }}</span>
+                                    <span class="appt-month">{{ app.start_time|date:"b" }}</span>
                                 </div>
-                                <div class="appt-service">{{ app.service.name }}</div>
-                                <div class="appt-master">with {{ app.master.get_full_name }}</div>
+                                <div class="appt-details">
+                                    <div class="appt-top">
+                                        <span class="appt-time">{{ app.start_time|date:"D, d M Y H:i" }}</span>
+                                        {% with last=app.appointmentstatushistory_set.last %}
+                                            {% if last %}<span class="appt-status {{ last.status.name|lower }}">{{ last.status.name }}</span>{% endif %}
+                                        {% endwith %}
+                                    </div>
+                                    {# первый item встречи #}
+                                    {% for it in app.items.all|slice:":1" %}
+                                        <div class="appt-service">{{ it.service.name }}</div>
+                                        <div class="appt-master">{% if it.master %}with {{ it.master.user.get_full_name }}{% endif %}</div>
+                                    {% empty %}
+                                        <div class="appt-service">—</div>
+                                        <div class="appt-master">&nbsp;</div>
+                                    {% endfor %}
+                                </div>
+                                <div class="appt-price">
+                                    {% if app.final_price %}CA$ {{ app.final_price|floatformat:2 }}
+                                    {% elif app.total_price %}CA$ {{ app.total_price|floatformat:2 }}
+                                    {% else %}&nbsp;{% endif %}
+                                </div>
                             </div>
-                            <div class="appt-price">CA$ {{ app.service.base_price }}</div>
-                        </div>
-                    {% endfor %}
+                        {% empty %}
+                            <div style="padding: 16px; color:#777;">No recent appointments.</div>
+                        {% endfor %}
+                    </div>
                 </div>
-            </div>
             {% endif %}
+
             <!-- Block 4: Today's Appointments -->
             <div class="dashboard-card">
                 <h3>Today's next appointments</h3>
@@ -66,8 +82,17 @@
                                 <div class="appt-timeline-content">
                                     <div class="appt-time-tag">{{ a.start_time|time:"H:i" }}</div>
                                     <div class="appt-line-main">
-                                        <strong>{{ a.client.get_full_name }}</strong>
-                                        <span class="appt-service-badge">{{ a.service.name }}</span>
+                                        <strong>{% if a.client %}{{ a.client.get_full_name }}{% else %}—{% endif %}</strong>
+                                        <span>
+                    {% for it in a.items.all|slice:":3" %}
+                        <span class="appt-service-badge">{{ it.service.name }}</span>
+                    {% empty %}
+                        <span class="appt-service-badge">No items</span>
+                    {% endfor %}
+                                            {% with cnt=a.items.all|length %}
+                                                {% if cnt > 3 %}<span class="appt-service-badge">+{{ cnt|add:"-3" }}</span>{% endif %}
+                                            {% endwith %}
+                  </span>
                                     </div>
                                 </div>
                             </div>
@@ -76,12 +101,12 @@
                 {% else %}
                     <p style="text-align:center; margin-top: 20px;">
                         <img src="{% static 'admin/icons/calendar_empty.png' %}" style="width:40px;" alt="No appts">
-                        <br>No More Appointments Today<br><a href="/admin/core/appointment/">Go to calendar</a>
+                        <br>No More Appointments Today<br><a href="{% url 'admin:core_appointment_changelist' %}">Go to calendar</a>
                     </p>
                 {% endif %}
-
             </div>
-            <!-- Block 5: Top Services -->
+
+            <!-- Block 5: Top services (this month) -->
             <div class="dashboard-card">
                 <h3>Top services</h3>
                 <table>
@@ -89,84 +114,71 @@
                     <tbody>
                     {% for s in top_services %}
                         <tr><td>{{ s.name }}</td><td>{{ s.count }}</td></tr>
+                    {% empty %}
+                        <tr><td colspan="2" style="color:#777">No data</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>
             </div>
 
+            {% if not is_master %}
+                <!-- Block 6: Top team member -->
+                <div class="dashboard-card">
+                    <h3>Top team member</h3>
+                    <table>
+                        <thead><tr><th>Team member</th><th>This month</th></tr></thead>
+                        <tbody>
+                        {% for m in top_masters %}
+                            <tr><td>{{ m.user.get_full_name }}</td><td>CA$ {{ m.total|default:0|floatformat:2 }}</td></tr>
+                        {% empty %}
+                            <tr><td colspan="2" style="color:#777">No data</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
 
-        {% if not is_master %}
-            <!-- Block 6: Top Team Member -->
-            <div class="dashboard-card">
-                <h3>Top team member</h3>
-                <table>
-                    <thead><tr><th>Team member</th><th>This month</th></tr></thead>
-                    <tbody>
-                    {% for m in top_masters %}
-                        <tr><td>{{ m.user.get_full_name }}</td><td>CA$ {{ m.total|floatformat:2 }}</td></tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        {% endif %}
         </div>
     </div>
 
-
-
     <script>
-        const chartData = {{ chart_data|safe }};
-        new Chart(document.getElementById('salesChart'), {
-            type: 'line',
-            data: {
-                labels: chartData.map(x => x.day),
-                datasets: [
-                    {
-                        label: 'Sales',
-                        data: chartData.map(x => x.sales),
-                        borderColor: 'blue', fill: false
+        // Line chart: recent sales (7d)
+        (function(){
+            const salesCtx = document.getElementById('salesChart');
+            const data = {{ chart_data|safe }};
+            if (salesCtx && Array.isArray(data)) {
+                new Chart(salesCtx, {
+                    type: 'line',
+                    data: {
+                        labels: data.map(x => x.day),
+                        datasets: [{ label: 'Sales', data: data.map(x => x.sales), borderColor: 'blue', fill: false, tension: .3 }]
                     },
-                ]
+                    options: { responsive: true }
+                });
             }
-        });
+        })();
 
-        const dailyAppointments = {{ daily_appointments|safe }};
-        const ctxUpcoming = document.getElementById("upcomingChart").getContext("2d");
-
-        new Chart(ctxUpcoming, {
-            type: 'bar',
-            data: {
-                labels: dailyAppointments.map(x => x.day),
-                datasets: [
-                    {
-                        label: 'Confirmed',
-                        data: dailyAppointments.map(x => x.confirmed),
-                        backgroundColor: 'rgba(63,81,181,0.8)', // blue
+        // Stacked bar: confirmed vs cancelled (7d)
+        (function(){
+            const ctx = document.getElementById("upcomingChart")?.getContext("2d");
+            const rows = {{ daily_appointments|safe }};
+            if (ctx && Array.isArray(rows)) {
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: rows.map(x => x.day),
+                        datasets: [
+                            { label: 'Confirmed', data: rows.map(x => x.confirmed), backgroundColor: 'rgba(63,81,181,0.8)' },
+                            { label: 'Cancelled', data: rows.map(x => x.cancelled), backgroundColor: 'rgba(244,67,54,0.8)' }
+                        ]
                     },
-                    {
-                        label: 'Cancelled',
-                        data: dailyAppointments.map(x => x.cancelled),
-                        backgroundColor: 'rgba(244,67,54,0.8)', // red
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                        scales: { x: { stacked: true }, y: { stacked: true, ticks: { stepSize: 1 }, beginAtZero: true } }
                     }
-                ]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: { position: 'top' },
-                    tooltip: { mode: 'index', intersect: false }
-                },
-                scales: {
-                    x: { stacked: true },
-                    y: { stacked: true,
-                        ticks: {
-                            stepSize: 1  // 👈 Шаг по оси Y
-                        },
-                        beginAtZero: true}
-                }
+                });
             }
-        });
+        })();
     </script>
-
-
 {% endblock %}

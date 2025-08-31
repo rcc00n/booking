@@ -16,7 +16,8 @@ from .models import (
     Appointment,
     AppointmentStatusHistory,
     Notification,
-    AppointmentPromoCode
+    AppointmentItem,
+    AppointmentItemPromoCode
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -64,6 +65,27 @@ def _notify_once(appointment_id, user_profile, *, channel="email", message: str)
         notif.user = user_profile or notif.user
         notif.save(update_fields=["message", "sent_at", "user"])
 
+# 4) Хелпер: список позиций (услуга + мастер + время)
+def _items_summary_lines(appt: Appointment) -> list[str]:
+    lines = []
+    qs = appt.items.select_related("service", "master__user").order_by("start_time")
+    for it in qs:
+        s = localtime(it.start_time).strftime("%d %b %Y, %H:%M")
+        master_name = it.master.user.get_full_name() or it.master.user.username
+        lines.append(f"• {it.service.name} with {master_name} at {s}")
+    return lines
+
+def _short_labels(appt: Appointment) -> tuple[str, str]:
+    """Для тем/смс: если 1 позиция — точные названия, иначе агрегированные."""
+    items = list(appt.items.select_related("service", "master__user"))
+    if not items:
+        return "", ""
+    if len(items) == 1:
+        it = items[0]
+        s_name = it.service.name
+        m_name = it.master.user.get_full_name() or it.master.user.username
+        return s_name, m_name
+    return f"{len(items)} services", "multiple masters"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Снимок полей перед сохранением и дифф после сохранения
@@ -71,8 +93,6 @@ def _notify_once(appointment_id, user_profile, *, channel="email", message: str)
 
 TRACK_FIELDS = (
     "client_id",
-    "master_id",
-    "service_id",
     "start_time",
     "payment_status_id",
     "final_price",
@@ -96,6 +116,19 @@ def _calc_diff(old: Snapshot, new: Snapshot) -> List[Tuple[str, Any, Any]]:
             diffs.append((f, old.values.get(f), new.values.get(f)))
     return diffs
 
+def _diff_snapshot(instance: Appointment) -> List[Tuple[str, Any, Any]]:
+    """
+    Возвращает список изменений [(field, was, now), ...] для отслеживаемых полей.
+    Использует снапшот из pre_save; если его нет — аккуратно деградирует.
+    """
+    old_snap = getattr(instance, "_old_snapshot", None)
+    new_snap = _take_snapshot(instance)
+
+    if old_snap is None:
+        # нет старого состояния (создание или первый сейв) — diff пустой
+        return []
+    return _calc_diff(old_snap, new_snap)
+
 def _humanize_diff(instance: Appointment, diffs: List[Tuple[str, Any, Any]]) -> str:
     """
     Красиво формируем список изменений для письма.
@@ -103,8 +136,6 @@ def _humanize_diff(instance: Appointment, diffs: List[Tuple[str, Any, Any]]) -> 
     # Подготовим «человеческие» подписи
     name_map = {
         "client_id": "Client",
-        "master_id": "Master",
-        "service_id": "Service",
         "start_time": "Start time",
         "payment_status_id": "Payment status",
         "final_price": "Final price",
@@ -120,14 +151,6 @@ def _humanize_diff(instance: Appointment, diffs: List[Tuple[str, Any, Any]]) -> 
                 from .models import UserProfile
                 obj = UserProfile.objects.filter(pk=value).select_related("user").first()
                 return obj.get_full_name() if obj else f"#{value}"
-            if field == "master_id":
-                from .models import MasterProfile
-                obj = MasterProfile.objects.filter(pk=value).select_related("user").first()
-                return obj.user.get_full_name() if obj else f"#{value}"
-            if field == "service_id":
-                from .models import Service
-                obj = Service.objects.filter(pk=value).first()
-                return obj.name if obj else f"#{value}"
             if field == "payment_status_id":
                 from .models import PaymentStatus
                 obj = PaymentStatus.objects.filter(pk=value).first()
@@ -155,7 +178,7 @@ def _humanize_diff(instance: Appointment, diffs: List[Tuple[str, Any, Any]]) -> 
         lines.append(f"• {title}: {was_h} → {now_h}")
     return "\n".join(lines)
 
-@receiver(post_save, sender=AppointmentPromoCode)
+@receiver(post_save, sender=AppointmentItemPromoCode)
 def _recalc_after_promocode_add(sender, instance, created, **kwargs):
     appt = instance.appointment
     if not appt:
@@ -164,7 +187,7 @@ def _recalc_after_promocode_add(sender, instance, created, **kwargs):
     appt._skip_update_email = True
     appt.save(update_fields=["final_price", "discount_source"])
 
-@receiver(post_delete, sender=AppointmentPromoCode)
+@receiver(post_delete, sender=AppointmentItemPromoCode)
 def _recalc_after_promocode_remove(sender, instance, **kwargs):
     appt = instance.appointment
     if not appt:
@@ -188,45 +211,63 @@ def appointment_pre_save(sender, instance: Appointment, **kwargs):
     except sender.DoesNotExist:
         instance._old_snapshot = None
 
+@receiver(post_save, sender=AppointmentItem)
+@receiver(post_delete, sender=AppointmentItem)
+def _recompute_on_item_change(sender, instance: AppointmentItem, **kwargs):
+    appt = instance.appointment
+    # подавляем «updated» у визита
+    appt._skip_update_email = True
+    appt.recompute_totals(save=True)
+
+@receiver(post_save, sender=AppointmentItemPromoCode)
+@receiver(post_delete, sender=AppointmentItemPromoCode)
+def _recompute_on_promocode_change(sender, instance: AppointmentItemPromoCode, **kwargs):
+    item = instance.item
+    try:
+        item.save()  # пересчёт позиционной цены (service/promocode)
+    except Exception:
+        pass
+    appt = item.appointment
+    appt._skip_update_email = True
+    appt.recompute_totals(save=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # post_save: рассылка «создано» и «изменено»
 # ──────────────────────────────────────────────────────────────────────────────
 
+# 5) appointment_post_save — ПОЛНОСТЬЮ ЗАМЕНИ
 @receiver(post_save, sender=Appointment)
 def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs):
     client = instance.client
     email = (client.user.email or "").strip()
-    # Приведём дату к локальному для текста
-    start_local = localtime(instance.start_time).strftime("%d %b %Y, %H:%M")
-    master_name = instance.master.user.get_full_name() or instance.master.user.username
-    service_name = instance.service.name
 
+    # якорное время визита уже хранится в appointment.start_time (min по позициям)
+    start_local = localtime(instance.start_time).strftime("%d %b %Y, %H:%M")
+    service_label, master_label = _short_labels(instance)
+    items_text = "\n".join(_items_summary_lines(instance)) or "—"
+
+    # подавление «шумовых» апдейтов (напр., первый пересчёт после создания)
     if getattr(instance, "_skip_update_email", False):
         return
+
     if created:
-        # Только одно письмо «запись создана», БЕЗ доп. письма про «скидка изменилась»
         subject = "Your appointment is booked"
         text = (
             f"Hello, {client.user.get_full_name() or client.user.username}!\n\n"
-            f"Service: {service_name}\n"
-            f"Master: {master_name}\n"
-            f"When: {start_local}\n"
+            f"{items_text}\n"
         )
         html = (
             f"<!doctype html><html><body>"
             f"<h2>Your appointment is booked</h2>"
-            f"<p>Service: <b>{service_name}</b><br>"
-            f"Master: <b>{master_name}</b><br>"
-            f"When: <b>{start_local}</b></p>"
+            f"<pre style='font:inherit'>{items_text}</pre>"
             f"</body></html>"
         )
         _send_email(email, subject, text, html, tag="appointment-created")
         _notify_once(instance.id, client, message=f"[CREATED] {text}")
 
-        sms_body = f"Your appointment is booked: {service_name} with {master_name} on {start_local}"
+        # SMS — лаконично
+        sms_body = f"Booked: {service_label} with {master_label} on {start_local}".strip()
         sid = send_sms(client.phone, sms_body)
-
         Notification.objects.update_or_create(
             user=client,
             appointment=instance,
@@ -242,18 +283,12 @@ def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs
         )
         return
 
-    # Обновление: сравним снапшот
-    old_snapshot: Snapshot | None = getattr(instance, "_old_snapshot", None)
-    if not old_snapshot:
-        return
+    # --- updated ---
+    diffs = _diff_snapshot(instance)
 
-    new_snapshot = _take_snapshot(instance)
-    diffs = _calc_diff(old_snapshot, new_snapshot)
     if not diffs:
         return
-
-    # Не отправляем «изменения» если они произошли одновременно с созданием — этот кейс уже отфильтрован выше.
-    # Доп. фильтр: если изменился только discount_source (шум на первом сохранении) — не шлём.
+    # если менялись только финансы сразу после создания (30 сек) — не спамим
     created_recently = (timezone.now() - instance.created_at) <= timedelta(seconds=30)
     changed_fields = {f for f, _, _ in diffs}
     if created_recently and changed_fields.issubset({"final_price", "discount_source"}):
@@ -263,19 +298,20 @@ def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs
     subject = "Your appointment was updated"
     text = (
         f"Hello, {client.user.get_full_name() or client.user.username}!\n\n"
-        f"Your appointment changes:\n{diff_text}\n"
+        f"Changes:\n{diff_text}\n\nCurrent services:\n{items_text}\n"
     )
-    html_lines = "<br>".join(line for line in diff_text.splitlines())
     html = (
         f"<!doctype html><html><body>"
         f"<h2>Your appointment was updated</h2>"
-        f"<p>{html_lines}</p>"
+        f"<p>{'<br>'.join(diff_text.splitlines())}</p>"
+        f"<h3>Current services</h3>"
+        f"<pre style='font:inherit'>{items_text}</pre>"
         f"</body></html>"
     )
     _send_email(email, subject, text, html, tag="appointment-updated")
     _notify_once(instance.id, client, message=f"[UPDATED]\n{text}")
 
-    sms_body = f"Your appointment was updated:\n{diff_text}"
+    sms_body = f"Updated: {service_label} with {master_label} on {start_local}"
     sid = send_sms(client.phone, sms_body)
     Notification.objects.update_or_create(
         user=client,
@@ -290,6 +326,7 @@ def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs
             "error": "" if sid else "twilio returned no SID",
         },
     )
+
 
 
 

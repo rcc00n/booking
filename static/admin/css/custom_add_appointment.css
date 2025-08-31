@@ -1,0 +1,23 @@
+.ab-wrap{max-width:1100px;margin:0 auto}
+.ab-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,.04)}
+.ab-h{font-weight:700;margin:0 0 8px}
+.ab-sub{color:#6b7280;margin:0 0 18px}
+.ab-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:900px){.ab-grid{grid-template-columns:1fr}}
+.ab-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:12px;align-items:end}
+@media (max-width:1100px){.ab-row{grid-template-columns:1fr 1fr}}
+.ab-field label{display:block;font-size:13px;color:#374151;margin-bottom:6px}
+.ab-field input,.ab-field select{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px}
+.ab-actions{display:flex;gap:10px}
+.ab-btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:10px 14px;border:1px solid #e5e7eb;background:#111827;color:#fff;cursor:pointer}
+.ab-btn.secondary{background:#fff;color:#111827;border-color:#d1d5db}
+.ab-btn.danger{background:#b91c1c}
+.ab-items{display:flex;flex-direction:column;gap:12px}
+.ab-item{padding:14px;border:1px dashed #e5e7eb;border-radius:12px;background:#fafafa}
+.ab-total{margin-top:16px;text-align:right;color:#111827}
+.ab-hidden{display:none}
+.hint{color:#6b7280;font-size:12px;margin-top:4px}
+
+.msg { padding:10px; border-radius:8px; margin:8px 0; }
+.msg-success { background:#ecfdf5; color:#065f46; border:1px solid #a7f3d0; }
+.msg-error { background:#fef2f2; color:#991b1b; border:1px solid #fecaca; }

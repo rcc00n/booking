@@ -2,14 +2,17 @@ from pathlib import Path
 
 from dal import autocomplete
 from django import forms
+from django.contrib.admin import TabularInline
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import UserCreationForm, UserChangeForm
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.template import TemplateDoesNotExist, engines
 from django.utils.safestring import mark_safe
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
+from django.forms import inlineformset_factory, BaseInlineFormSet
 from django.contrib.auth.password_validation import validate_password
 from .models import *
+from .validators import *
 
 
 HEALTH_CHRONIC_CHOICES = [
@@ -31,79 +34,140 @@ HEALTH_CONTRA_CHOICES = [
 # Appointment Form
 # -----------------------------
 
-class AppointmentForm(forms.ModelForm):
-    """
-    Custom form for the Appointment model.
-    Adds autocomplete functionality for the 'service' field.
-    """
+class AppointmentAdminForm(forms.ModelForm):
     status = forms.ModelChoiceField(
         queryset=AppointmentStatus.objects.all(),
-        required=True,
-        label="Appointment status"
+        required=False,
+        label="Status"
     )
-    promocode = forms.CharField(required=False, label="Promocode")
+
     class Meta:
         model = Appointment
-        fields = '__all__'
-        widgets = {
-            'service': autocomplete.ModelSelect2(url='service-autocomplete')
-        }
+        fields = (
+            "client",
+            "start_time",
+            "payment_status",    # NOTE: если есть
+        )
+
     def __init__(self, *args, **kwargs):
-        self.user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            last_status = self.instance.appointmentstatushistory_set.order_by("-set_at").first()
+            if last_status:
+                self.fields["status"].initial = last_status.status
+        now = timezone.now()
+        qs = PromoCode.objects.all()
 
-    def clean(self):
-        cleaned_data = super().clean()
-        instance = self.instance
-
-        # Обнови instance перед вызовом clean()
-        instance.master = cleaned_data.get("master")
-        instance.start_time = cleaned_data.get("start_time")
-        instance.service = cleaned_data.get("service")
-        promocode_str = cleaned_data.get("promocode")
-        service = cleaned_data.get("service")
-        try:
-            instance.clean()
-        except ValidationError as e:
-            raise forms.ValidationError(e)
-
-        if promocode_str:
-            try:
-                code = PromoCode.objects.get(code=promocode_str.upper())
-                if not code.is_valid_for(service):
-                    raise forms.ValidationError("Этот промокод недействителен для выбранной услуги или срока.")
-                cleaned_data["applied_promocode"] = code
-            except PromoCode.DoesNotExist:
-                raise forms.ValidationError("Неверный промокод.")
-
-        return cleaned_data
+        # Если у вас в PromoCode есть поля "active/starts_at/ends_at", отфильтруем валидные коды:
+        if hasattr(PromoCode, "active"):
+            qs = qs.filter(active=True)
+        if hasattr(PromoCode, "starts_at"):
+            qs = qs.filter(starts_at__lte=now)
+        if hasattr(PromoCode, "ends_at"):
+            qs = qs.filter(ends_at__gte=now)
+        if "promocode" in self.fields:
+            self.fields["promocode"].queryset = qs
+            self.fields["promocode"].required = False
+            self.fields["promocode"].help_text = "Выберите действующий промокод (опционально)."
 
     def save(self, commit=True):
-        instance = super().save(commit=False)
-        instance.save()
+        obj = super().save(commit)
+        new_status = self.cleaned_data.get("status")
+        if new_status:
+            last_status = obj.appointmentstatushistory_set.order_by("-set_at").first()
+            if not last_status or last_status.status_id != new_status.id:
+                AppointmentStatusHistory.objects.create(
+                    appointment=obj,
+                    status=new_status,
+                    set_by=getattr(self.request, "user", None).userprofile
+                )
+        return obj
 
-        promocode = self.cleaned_data.get("applied_promocode")
-        if promocode:
-            discount = instance.service.base_price * (promocode.discount_percent / 100)
-            AppointmentPromoCode.objects.create(
-                appointment=instance,
-                promocode=promocode,
-                discount_applied=discount
-            )
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Позиции AppointmentItem
+# ──────────────────────────────────────────────────────────────────────────────
+
+class AppointmentAddForm(forms.ModelForm):
+    """Форма 'создать визит': показываем только клиента."""
+    class Meta:
+        model = Appointment
+        fields = ("client",)
+
+class AppointmentItemInlineForm(forms.ModelForm):
+    promocode = forms.ModelChoiceField(
+        label="Promocode",
+        required=False,
+        queryset=PromoCode.objects.all(),  # или фильтрация по активным/дате, если надо
+        help_text="Опционально: промокод для данной позиции",
+    )
+    class Meta:
+        model = AppointmentItem
+        fields = "__all__"
+
+    def __init__(self, *args, parent_obj=None, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # 1) Инициализация от родителя: только для НОВОЙ строки (у которой нет PK)
+        if not self.instance.pk and parent_obj:
+            if "master" in self.fields and getattr(parent_obj, "master_id", None):
+                self.fields["master"].initial = parent_obj.master
+            if "start_time" in self.fields and getattr(parent_obj, "start_time", None):
+                self.fields["start_time"].initial = parent_obj.start_time
+
+        # 2) Инициализация unit_price от услуги (если ещё не задан)
+        service = self.initial.get("service") or getattr(self.instance, "service", None)
+        if "unit_price" in self.fields:
+            has_price_initial = self.initial.get("unit_price") or getattr(self.instance, "unit_price", None)
+            if not has_price_initial and service and getattr(service, "base_price", None) is not None:
+                self.fields["unit_price"].initial = service.base_price
+
+        # 3) Сохраняем ссылку на родителя для метода ниже (не обязательно, но удобно)
+        self._parent_obj = parent_obj
+
+        if self.instance and self.instance.pk:
+            link = AppointmentItemPromoCode.objects.filter(item=self.instance).select_related("promocode").first()
+            if link:
+                self.fields["promocode"].initial = link.promocode_id
+
+    def fix_promocode_queryset(self):
+        """
+        Если вы фильтруете промокоды (active/дата и т.п.),
+        добавьте сюда текущий выбранный, чтобы он был виден при редактировании.
+        """
+        if "promocode" not in self.fields:
+            return
+        qs = self.fields["promocode"].queryset
+        current_id = getattr(self.instance, "promocode_id", None)
+        if current_id:
+            self.fields["promocode"].queryset = qs.model.objects.filter(Q(pk=current_id) | Q(pk__in=qs.values("pk")))
 
 
-        new_status = self.cleaned_data['status']
-        profile = getattr(self.user, "userprofile", None)
-        latest = instance.appointmentstatushistory_set.order_by('-set_at').first()
-        if not latest or latest.status != new_status:
-            AppointmentStatusHistory.objects.create(
-                appointment=instance,
-                status=new_status,
-                set_by=profile
-            )
+    def save(self, commit=True):
+        # сохраняем сам Item
+        item = super().save(commit)
+        promo = self.cleaned_data.get("promocode")
 
-        return instance
+        # синхронизируем through-модель
+        if item.pk:
+            if promo:
+                AppointmentItemPromoCode.objects.update_or_create(
+                    item=item,
+                    defaults={"promocode": promo}
+                )
+            else:
+                # если поле очищено — удаляем связь
+                AppointmentItemPromoCode.objects.filter(item=item).delete()
 
+            # пересчёт цен/скидок для Item (и/или Апойнтмента)
+            # сделайте один из вариантов, который у вас реально есть:
+            if hasattr(item, "recompute_pricing"):
+                item.recompute_pricing()
+            else:
+                # fallback: триггерим save() или вызовите ваш сервис пересчёта
+                item.save()
+
+        return item
 # -----------------------------
 # Custom User Creation Form
 # -----------------------------
@@ -541,8 +605,8 @@ class MasterCreateFullForm(forms.ModelForm):
 
             # Назначаем роль Master
             master_role = Role.objects.filter(name="Master").first()
-            if master_role:
-                user.userrole_set.create(role=master_role)
+            # if master_role:
+            #     user.userrole_set.create(role=master_role)
 
             # Профиль мастера
             master = super().save(commit=False)
@@ -550,9 +614,7 @@ class MasterCreateFullForm(forms.ModelForm):
             if commit:
                 master.save()
 
-            ServiceMaster.objects.bulk_create([
-                ServiceMaster(service=s, master=master) for s in selected_services
-            ], ignore_conflicts=True)
+            assign_services_to_master(master, selected_services)
 
             return master
 
@@ -604,4 +666,29 @@ class MasterCreateFullForm(forms.ModelForm):
         }
 
 
+def assign_services_to_master(master, selected_services):
+    # 1) мастер должен быть сохранён
+    if not master.pk:
+        master.save()
 
+    # 2) работаем по ID, чтобы не было ошибки с несохранёнными инстансами
+    service_ids = []
+    for s in selected_services:
+        sid = getattr(s, "pk", s)  # поддержим как объекты, так и уже id
+        if sid:
+            service_ids.append(sid)
+
+    if not service_ids:
+        return
+
+    # 3) найдём уже существующие связи, чтобы не дублировать
+    existing = set(
+        ServiceMaster.objects
+        .filter(master_id=master.pk, service_id__in=service_ids)
+        .values_list("service_id", flat=True)
+    )
+
+    # 4) создадим только недостающие связи
+    for sid in service_ids:
+        if sid not in existing:
+            ServiceMaster.objects.create(master_id=master.pk, service_id=sid)

@@ -58,7 +58,8 @@
                             data-time-label="{{ cell.time_label }}"
                             data-duration="{{ cell.duration }}"
                             data-price="{{ cell.base_price }}"
-                            data-final="{{ cell.final_price }}">
+                            data-final="{{ cell.final_price }}"
+                            data-items-count="{{ cell.items_count }}">
                             <div class="event-inner"
                                  style="background-color: {{ cell.background }}; {% if cell.status == 'Cancelled' %}opacity:.6;{% endif %} position:relative;">
 

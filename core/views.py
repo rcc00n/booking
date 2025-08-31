@@ -1,5 +1,7 @@
 # core/views.py
-from django.shortcuts import render, get_object_or_404
+from django.contrib.admin.views.decorators import staff_member_required
+from django.forms import inlineformset_factory
+from django.shortcuts import render, get_object_or_404, redirect
 from django.db.models import Prefetch, Q
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
@@ -10,8 +12,8 @@ from datetime import datetime
 import json
 
 from core.models import (
-    Appointment, ServiceCategory, Service, CustomUserDisplay,
-    AppointmentStatusHistory, MasterProfile, UserProfile, CancellationReason
+    Appointment, ServiceCategory, Service, PromoCode,
+    AppointmentStatusHistory, MasterProfile, UserProfile, CancellationReason,AppointmentItem
 )
 from core.services.booking import (
     get_available_slots, get_service_masters,
@@ -168,7 +170,7 @@ def api_book(request):
 
 # --- API: отмена/перенос записи ---
 from django.views.decorators.http import require_POST
-from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden, Http404
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 
@@ -273,11 +275,6 @@ def api_appointment_reschedule(request, appt_id):
     }})
 
 
-# core/views.py
-from django.http import JsonResponse
-from django.views.decorators.http import require_GET
-from django.db.models import Q
-from .models import Service
 
 @require_GET
 def service_search(request):
@@ -307,3 +304,37 @@ def service_search(request):
             "duration_min": s.duration_min,
         })
     return JsonResponse({"results": results})
+
+@require_GET
+@staff_member_required
+def service_price(request, pk):
+    # pk — UUID (строка)
+    try:
+        s = Service.objects.get(pk=pk)
+    except Service.DoesNotExist:
+        raise Http404
+    return JsonResponse({"id": str(s.pk), "base_price": str(s.base_price)})
+
+@staff_member_required
+def service_promocodes_api(request, service_id: str):
+    if request.method != "GET":
+        raise Http404()
+
+    now = timezone.now().date()
+    qs = PromoCode.objects.filter(
+        applicable_services__id=service_id,
+        active=True,
+        start_date__lte=now,
+        end_date__gte=now,
+    ).distinct().order_by("code")
+
+    data = [
+        {
+            "id": str(pc.pk),
+            "code": pc.code,
+            "discount_percent": pc.discount_percent,
+        }
+        for pc in qs
+    ]
+    return JsonResponse(data, safe=False)
+

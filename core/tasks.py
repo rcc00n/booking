@@ -19,6 +19,7 @@ from core.models import (
     Notification,
     UserProfile,
     ReminderSchedule,
+    AppointmentItem
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -92,11 +93,27 @@ def _safe_render(template_name: str, ctx: dict, fallback_subject: str) -> tuple[
     text = ctx.get("text_fallback", fallback_subject)
     return html, text
 
+# 2) Хелперы для позиций
+def _items_summary_lines(appt: Appointment) -> list[str]:
+    qs = appt.items.select_related("service", "master__user").order_by("start_time")
+    lines = []
+    for it in qs:
+        s = timezone.localtime(it.start_time).strftime("%d %b %Y, %H:%M")
+        m = it.master.user.get_full_name() or it.master.user.username
+        lines.append(f"• {it.service.name} with {m} at {s}")
+    return lines
+
+def _label_service_master(appt: Appointment) -> tuple[str, str]:
+    items = list(appt.items.select_related("service", "master__user"))
+    if not items:
+        return "", ""
+    if len(items) == 1:
+        it = items[0]
+        return it.service.name, (it.master.user.get_full_name() or it.master.user.username)
+    return f"{len(items)} services", "multiple masters"
+
 
 def _base_queryset_for_window(target_start, target_end):
-    """
-    Выборка записей, которые начинаются в окне, с исключением последних статусов = Cancelled.
-    """
     last_status_subq = (AppointmentStatusHistory.objects
                         .filter(appointment_id=OuterRef("pk"))
                         .order_by("-set_at")
@@ -108,7 +125,7 @@ def _base_queryset_for_window(target_start, target_end):
                       .first())
 
     qs = (Appointment.objects
-          .select_related("client__user", "master__user", "service")
+          .select_related("client__user")
           .annotate(last_status_name=Subquery(last_status_subq))
           .filter(start_time__gte=target_start, start_time__lt=target_end))
 
@@ -200,16 +217,15 @@ def _record_notification(
 # Напоминания до визита
 # ──────────────────────────────────────────────────────────────────────────────
 
+# 4) Рендер напоминания — теперь добавляем items_lines и агрегированные ярлыки
 def _render_reminder(ctx: dict[str, str]) -> tuple[str, str, str]:
-    """
-    Универсальный рендер напоминаний (EN).
-    Шаблон: templates/email/appointment_reminder.html
-    """
     subject = f"Reminder: your appointment {ctx['subject_suffix']}"
+    # fallback-текст
+    lines = ctx.get("items_lines") or []
+    items_block = ("\n".join(lines)) if lines else f"Service: {ctx['service_name']}\nMaster: {ctx['master_name']}"
     ctx["text_fallback"] = (
         f"Hello, {ctx['client_name']}!\n\n"
-        f"Service: {ctx['service_name']}\n"
-        f"Master: {ctx['master_name']}\n"
+        f"{items_block}\n"
         f"When: {ctx['start_local']} (starts {ctx['subject_suffix']})\n"
     )
     html, text = _safe_render("email/appointment_reminder.html", ctx, subject)
@@ -235,13 +251,17 @@ def _process_reminder_window(now, ahead: timedelta, label: str) -> int:
 
         start_local = timezone.localtime(appt.start_time).strftime("%d %b %Y, %H:%M")
         remaining, subj_suffix = _humanize_remaining(appt.start_time - now)
+        service_name, master_name = _label_service_master(appt)
+        items_lines = _items_summary_lines(appt)
+
         ctx = {
             "client_name": client.user.get_full_name() or client.user.username,
-            "service_name": appt.service.name,
-            "master_name": appt.master.user.get_full_name() or appt.master.user.username,
+            "service_name": service_name,
+            "master_name": master_name,
             "start_local": start_local,
             "time_remaining": remaining,
             "subject_suffix": subj_suffix,
+            "items_lines": items_lines,
         }
         subject, text, html = _render_reminder(ctx)
         try:
@@ -264,6 +284,7 @@ def _process_reminder_window(now, ahead: timedelta, label: str) -> int:
                 user=client, appointment=appt, channel="email", kind=kind,
                 defaults={"message": f"{marker_prefix}[FAILED] {text}\n{e}", "status": "failed", "error": str(e)},
             )
+
     return sent
 
 
@@ -308,8 +329,11 @@ def _get_status(name: str) -> Optional[AppointmentStatus]:
 
 
 def _appointment_end_dt(appt: Appointment):
-    dur = (appt.service.duration_min or 0) + (appt.service.extra_time_min or 0)
-    return appt.start_time + timedelta(minutes=dur)
+    items = list(appt.items.select_related("service"))
+    if not items:
+        return appt.start_time
+    # предполагается, что у AppointmentItem есть свойство end_time
+    return max(it.end_time for it in items)
 
 
 def _latest_status_name_subquery():
@@ -420,10 +444,9 @@ def _send_review_requests(now) -> int:
 
         ctx = {
             "client_name": client.user.get_full_name() or client.user.username,
-            "service_name": appt.service.name,
-            "master_name": appt.master.user.get_full_name() or appt.master.user.username,
             "start_local": start_local,
             "review_url": review_url,
+            "items_lines": _items_summary_lines(appt)
         }
         subject, text, html = _render_review_email(ctx)
         try:
@@ -483,12 +506,7 @@ def run_all_schedulers() -> dict:
 
 @shared_task(name="core.tasks.send_cancellation_email")
 def send_cancellation_email(appointment_id: str, reason: str | None = None) -> bool:
-    """
-    Отправить письмо клиенту об отмене записи.
-    Рекомендуется вызывать из сигнала после фиксации статуса Cancelled
-    (post_save AppointmentStatusHistory), а не при удалении записи.
-    """
-    appt = Appointment.objects.select_related("client__user", "master__user", "service").filter(id=appointment_id).first()
+    appt = Appointment.objects.select_related("client__user").filter(id=appointment_id).first()
     if not appt:
         return False
 
@@ -498,32 +516,39 @@ def send_cancellation_email(appointment_id: str, reason: str | None = None) -> b
         return False
 
     start_local = timezone.localtime(appt.start_time).strftime("%d %b %Y, %H:%M")
+    service_name, master_name = _label_service_master(appt)
+    items_lines = _items_summary_lines(appt)
+
     subject = "Your appointment has been cancelled"
-    ctx = {
-        "client_name": client.user.get_full_name() or client.user.username,
-        "service_name": appt.service.name,
-        "master_name": appt.master.user.get_full_name() or appt.master.user.username,
-        "start_local": start_local,
-        "cancellation_reason": reason or "",
-        "text_fallback": (
-                f"Hello, {client.user.get_full_name() or client.user.username}!\n\n"
-                f"Your appointment for {appt.service.name} with {appt.master.user.get_full_name() or appt.master.user.username} "
-                f"on {start_local} has been cancelled."
-                + (f"\nReason: {reason}" if reason else "")
-        ),
-    }
-    html, text = _safe_render("email/appointment_cancelled.html", ctx, subject)
-
-    # kind=OTHER, но с update_or_create — не создаём дубликаты
-    kind = Notification.OTHER
-    marker_prefix = "[CANCELLED]"
-
-    if _already_sent(appt, kind=kind, marker_prefix=marker_prefix):
-        return True
+    text_lines = [
+        f"Hello, {client.user.get_full_name() or client.user.username}!",
+        "",
+        "Your appointment has been cancelled.",
+        f"When: {start_local}",
+    ]
+    if reason:
+        text_lines.append(f"Reason: {reason}")
+    if items_lines:
+        text_lines.append("")
+        text_lines.extend(items_lines)
+    text = "\n".join(text_lines)
 
     try:
+        html, _ = _safe_render("email/appointment_cancelled.html", {
+            "client_name": client.user.get_full_name() or client.user.username,
+            "start_local": start_local,
+            "reason": reason or "",
+            "items_lines": items_lines,
+            "service_name": service_name,  # для совместимости со старыми шаблонами
+            "master_name": master_name,
+            "text_fallback": text,
+        }, subject)
+        kind = Notification.CANCELLED
+        marker_prefix = "[CANCELLED]"
+
         _send_email(email, subject, text, html, tag="appointment-cancelled")
         _record_notification(appt=appt, client=client, kind=kind, message=text, marker_prefix=marker_prefix)
+
         sid = send_sms(client.phone, text)
         Notification.objects.update_or_create(
             user=client, appointment=appt, channel="sms", kind=kind,

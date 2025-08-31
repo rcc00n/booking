@@ -196,6 +196,7 @@ function showTooltip(box) {
     const final = box.dataset.final || "";
     const master = box.dataset.master || "";
 
+
     const firstLetter = client.trim().charAt(0).toUpperCase();
     if (price === final) {
         // let floatNumber = parseFloat(price.replace(/[^0-9.]/g, '')); // 150.00
@@ -366,4 +367,6 @@ function handleAdd(type) {
     }
 
     window.location.href = url;
+
 }
+

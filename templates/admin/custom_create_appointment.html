@@ -1,0 +1,319 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+{% block extrastyle %}
+
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static '/admin/css/custom_sidebar.css' %}">
+    <style>
+
+
+        .ab-wrap{max-width:1100px;margin:0 auto}
+        .ab-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,.04)}
+        .ab-h{font-weight:700;margin:0 0 8px}
+        .ab-sub{color:#6b7280;margin:0 0 18px}
+        .ab-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+        @media (max-width:900px){.ab-grid{grid-template-columns:1fr}}
+        .ab-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:12px;align-items:end}
+        @media (max-width:1100px){.ab-row{grid-template-columns:1fr 1fr}}
+        .ab-field label{display:block;font-size:13px;color:#374151;margin-bottom:6px}
+        .ab-field input,.ab-field select{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px}
+        .ab-actions{display:flex;gap:10px}
+        .ab-btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:10px 14px;border:1px solid #e5e7eb;background:#111827;color:#fff;cursor:pointer}
+        .ab-btn.secondary{background:#fff;color:#111827;border-color:#d1d5db}
+        .ab-btn.danger{background:#b91c1c}
+        .ab-items{display:flex;flex-direction:column;gap:12px}
+        .ab-item{padding:14px;border:1px dashed #e5e7eb;border-radius:12px;background:#fafafa}
+        .ab-total{margin-top:16px;text-align:right;color:#111827}
+        .ab-hidden{display:none}
+        .hint{color:#6b7280;font-size:12px;margin-top:4px}
+    </style>
+{% endblock %}
+
+
+{% block content %}
+    <div class="ab-wrap">
+        <form method="post" action="" id="appt-form" class="ab-card" style="padding:20px">
+            {% csrf_token %}
+
+            {% if add %} {# создаём #}
+                <h2>Создание записи</h2>
+            {% elif change %} {# редактируем #}
+                <h2>Редактирование записи</h2>
+            {% endif %}
+            <p class="ab-sub">Сначала выберите клиента, затем добавьте одну или несколько услуг.</p>
+
+            <!-- STEP 1: CLIENT -->
+            <div class="ab-grid" id="step-client">
+                <div class="ab-field">
+                    <label for="id_client">Client <span style="color:#ef4444">*</span></label>
+                    <select id="id_client" name="client" required>
+                        <option value="">---------</option>
+                        {% for c in clients %}
+                            <option value="{{ c.id }}">{{ c.label }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="hint">После выбора клиента ниже станет доступно добавление услуг.</div>
+                </div>
+            </div>
+
+            <!-- STEP 2: ITEMS -->
+            <div id="items-section" class="ab-hidden" style="margin-top:20px">
+                <div class="ab-actions" style="margin-bottom:10px">
+                    <button type="button" class="ab-btn secondary" id="btn-add-item">＋ Add service</button>
+                </div>
+
+                <!-- management form for inline formset -->
+                <input type="hidden" name="items-TOTAL_FORMS" id="id_items-TOTAL_FORMS" value="0">
+                <input type="hidden" name="items-INITIAL_FORMS" id="id_items-INITIAL_FORMS" value="0">
+                <input type="hidden" name="items-MIN_NUM_FORMS" id="id_items-MIN_NUM_FORMS" value="0">
+                <input type="hidden" name="items-MAX_NUM_FORMS" id="id_items-MAX_NUM_FORMS" value="1000">
+
+                <div class="ab-items" id="items-container"></div>
+
+                <div class="ab-total"><strong id="grand-total">$0.00</strong></div>
+            </div>
+
+            <div style="margin-top:20px;display:flex;gap:10px">
+                <button type="submit" class="ab-btn">Save</button>
+                <a href="{% url 'admin:core_appointment_changelist' %}" class="ab-btn secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+
+    <!-- ✅ Прокидываем справочники в JS -->
+    {{ masters|json_script:"ab-masters" }}
+    {{ services_by_master|json_script:"ab-services-by-master" }}
+    {{ initial_first_item|json_script:"initial-first-item" }}
+
+    <template id="item-row-tpl">
+        <div class="ab-item">
+            <div class="ab-row">
+                <div class="ab-field">
+                    <label>Master <span style="color:#ef4444">*</span></label>
+                    <select class="js-master" required>
+                        <option value="">---------</option>
+                        <!-- options вставятся из JS -->
+                    </select>
+                </div>
+
+                <div class="ab-field">
+                    <label>Service <span style="color:#ef4444">*</span></label>
+                    <select class="js-service" required disabled>
+                        <option value="">---------</option>
+                    </select>
+                    <div class="hint js-service-hint"></div>
+                </div>
+
+                <div class="ab-field">
+                    <label>Date <span style="color:#ef4444">*</span></label>
+                    <input type="date" class="js-date" name="items-0-start_time_0"
+                           value="{{ initial_first_item.start_time_date|default:'' }}" required>
+                </div>
+
+                <div class="ab-field">
+                    <label>Time <span style="color:#ef4444">*</span></label>
+                    <input type="time" class="js-time" name="items-0-start_time_1"
+                           value="{{ initial_first_item.start_time_time|default:'' }}" required step="900">
+                </div>
+
+                <div class="ab-field">
+                    <label>Unit price</label>
+                    <input type="number" class="js-price" step="0.01" min="0" placeholder="Auto">
+                </div>
+
+                <div class="ab-field">
+                    <label>Promocode</label>
+                    <select class="js-promo">
+                        <option value="">— No promocode —</option>
+                        <!-- варианты подставятся через JS -->
+                    </select>
+                </div>
+
+                <div class="ab-actions" style="grid-column:1/-1">
+                    <button type="button" class="ab-btn danger js-remove">Remove</button>
+                </div>
+            </div>
+        </div>
+    </template>
+    <script>
+        (function(){
+            // ---- Data from backend
+            const MASTERS = JSON.parse(document.getElementById('ab-masters').textContent || '[]');
+            // services_by_master: { "<master_id>": [{id, name, base_price, duration_min}, ...], ... }
+            const SERVICES_BY_MASTER = JSON.parse(document.getElementById('ab-services-by-master').textContent || '{}');
+
+            // ---- Elements
+            const clientEl = document.getElementById('id_client');
+            const itemsSection = document.getElementById('items-section');
+            const container = document.getElementById('items-container');
+            const totalForms = document.getElementById('id_items-TOTAL_FORMS');
+            const tpl = document.getElementById('item-row-tpl');
+            const grandTotal = document.getElementById('grand-total');
+
+            // ---- Helpers
+            function money(n){ n = Number(n||0); return '$' + n.toFixed(2); }
+
+            function recalcGrandTotal(){
+                let sum = 0;
+                container.querySelectorAll('.js-price').forEach(inp => {
+                    const v = parseFloat(inp.value);
+                    if (!isNaN(v)) sum += v;
+                });
+                grandTotal.textContent = money(sum);
+            }
+
+            function buildOption(v, t){ const o = document.createElement('option'); o.value=v; o.textContent=t; return o; }
+
+            function populateMasters(select){
+                select.innerHTML = '';
+                select.appendChild(buildOption('', '---------'));
+                // MASTERS: [{id, label}]
+                MASTERS.forEach(m => select.appendChild(buildOption(String(m.id), m.label)));
+            }
+
+            function populateServices(select, masterId){
+                select.innerHTML = '';
+                select.appendChild(buildOption('', '---------'));
+                const list = SERVICES_BY_MASTER[String(masterId)] || [];
+                list.forEach(s => {
+                    const o = buildOption(String(s.id), s.name);
+                    o.dataset.price = s.base_price;
+                    o.dataset.duration = s.duration_min;
+                    select.appendChild(o);
+                });
+                select.disabled = list.length === 0;
+            }
+            function populatePromocodes(select, serviceId){
+                select.innerHTML = '';
+                select.appendChild(buildOption('', '— No promocode —'));
+                if (!serviceId) return;
+
+                // ⚠️ тут ты делаешь AJAX к API, который вернёт список промокодов для услуги
+                // например /accounts/api/services/<id>/promocodes/
+                fetch(`/accounts/api/services/${serviceId}/promocodes/`)
+                    .then(r => r.json())
+                    .then(data => {
+                        data.forEach(p => {
+                            const label = p.discount_percent
+                                ? `${p.code} — ${p.discount_percent}%`
+                                : p.code;
+                            select.appendChild(buildOption(String(p.id), label));
+                        });
+                    })
+                    .catch(err => console.error("Failed to load promocodes", err));
+            }
+
+            function hookRow(row, idx){
+                // Проставляем имена для formset'а Django Admin Inline
+                const name = (suffix)=> `items-${idx}-${suffix}`;
+                row.querySelector('.js-master').setAttribute('name', name('master'));
+                row.querySelector('.js-service').setAttribute('name', name('service'));
+                row.querySelector('.js-date').setAttribute('name', name('start_time_0'));
+                row.querySelector('.js-time').setAttribute('name', name('start_time_1'));
+                row.querySelector('.js-price').setAttribute('name', name('unit_price'));
+                row.querySelector('.js-promo').setAttribute('name', name('promocode'));
+
+                // id'шники для удобства (не обязательно)
+                row.querySelector('.js-master').id = `id_items-${idx}-master`;
+                row.querySelector('.js-service').id = `id_items-${idx}-service`;
+                row.querySelector('.js-date').id = `id_items-${idx}-start_time_0`;
+                row.querySelector('.js-time').id = `id_items-${idx}-start_time_1`;
+                row.querySelector('.js-price').id = `id_items-${idx}-unit_price`;
+                row.querySelector('.js-promo').id = `id_items-${idx}-promocode`;
+
+                // Заполним мастеров
+                const masterSel = row.querySelector('.js-master');
+                const serviceSel = row.querySelector('.js-service');
+                const hint = row.querySelector('.js-service-hint');
+                populateMasters(masterSel);
+
+                // Смена мастера → обновить список сервисов
+                masterSel.addEventListener('change', () => {
+                    populateServices(serviceSel, masterSel.value);
+                    hint.textContent = '';
+                    // очистим цену
+                    const priceInput = row.querySelector('.js-price');
+                    if (priceInput){ priceInput.value = ''; recalcGrandTotal(); }
+                });
+
+                // Смена сервиса → подставить цену
+                serviceSel.addEventListener('change', () => {
+                    const opt = serviceSel.selectedOptions[0];
+                    const price = opt && opt.dataset && opt.dataset.price ? opt.dataset.price : '';
+                    const dur = opt && opt.dataset ? opt.dataset.duration : '';
+                    populatePromocodes(row.querySelector('.js-promo'), serviceSel.value);
+                    const priceInput = row.querySelector('.js-price');
+                    if (priceInput){
+                        priceInput.value = price;
+                        recalcGrandTotal();
+                    }
+                    hint.textContent = dur ? (`Duration: ${dur} min`) : '';
+
+                });
+
+                // Ручная смена цены → пересчитать общую сумму
+                row.querySelector('.js-price').addEventListener('input', recalcGrandTotal);
+
+                // Удаление строки
+                row.querySelector('.js-remove').addEventListener('click', () => {
+                    row.remove();
+                    renumberRows();
+                    recalcGrandTotal();
+                });
+            }
+
+            function addRow(){
+                const idx = Number(totalForms.value);
+                const fragment = tpl.content.cloneNode(true);
+                const row = fragment.querySelector('.ab-item');
+
+                hookRow(row, idx);
+
+                container.appendChild(row);
+                totalForms.value = idx + 1;
+            }
+
+            function renumberRows(){
+                // Проходим и переиндексируем имена/идшники, чтобы formset соответствовал
+                const rows = Array.from(container.querySelectorAll('.ab-item'));
+                totalForms.value = rows.length;
+                rows.forEach((row, i) => {
+                    hookRow(row, i);
+                });
+            }
+
+            // Показать секцию items, когда выбран клиент
+            clientEl.addEventListener('change', () => {
+                itemsSection.classList.toggle('ab-hidden', !clientEl.value);
+            });
+
+            document.getElementById('btn-add-item').addEventListener('click', addRow);
+
+            // Инициализация
+            (function init(){
+                // Если клиент заранее выбран — показать секцию
+                if (clientEl.value) itemsSection.classList.remove('ab-hidden');
+                // Добавим первую строку, чтобы не было пусто
+                addRow();
+            })();
+
+            // На submit — базовая валидация (можно расширять)
+            document.getElementById('appt-form').addEventListener('submit', (e) => {
+                if (!clientEl.value){
+                    e.preventDefault();
+                    alert('Выберите клиента.');
+                    return;
+                }
+                if (container.querySelectorAll('.ab-item').length === 0){
+                    e.preventDefault();
+                    alert('Добавьте хотя бы одну услугу.');
+                    return;
+                }
+            });
+
+        })();
+    </script>
+
+{% endblock %}
+
+

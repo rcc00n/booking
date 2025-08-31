@@ -1,0 +1,293 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+{% load filters %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script defer src="{% static 'admin/js/appointment_edit.js' %}"></script>
+    <script src="{% url 'admin:jsi18n' %}"></script>
+    {{ media }}
+{% endblock %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <style>
+        :root{ --ctl-h: 44px; }
+        * { box-sizing: border-box; }
+
+        .ab-wrap{max-width:1100px;margin:0 auto}
+
+        /* Tabs */
+        .tabs{display:flex;gap:8px;margin:0 0 12px}
+        .tab{padding:10px 14px;border:1px solid #e5e7eb;border-radius:10px;cursor:pointer;background:#fff}
+        .tab.active{background:#111827;color:#fff;border-color:#111827}
+        .tab-panel{display:none}
+        .tab-panel.active{display:block}
+
+        /* Cards & layout */
+        .ab-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,.04);padding:22px}
+        .ab-section{margin-bottom:24px}
+        .ab-h{font-weight:800;margin:0 0 8px}
+        .ab-sub{color:#6b7280;margin:0 0 18px}
+
+        /* Equal columns like Items (so all sections look same width) */
+        .ab-row{display:grid;grid-template-columns:repeat(4, 1fr);gap:14px}
+        @media (max-width:1100px){.ab-row{grid-template-columns:1fr 1fr}}
+
+        /* Fields */
+        .ab-field label{display:block;font-size:13px;color:#374151;margin-bottom:6px}
+        .ab-input,.ab-select,.ab-textarea{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px}
+        /* Unify control sizes */
+        .ab-card input[type="text"],
+        .ab-card input[type="number"],
+        .ab-card input[type="time"],
+        .ab-card input[type="date"],
+        .ab-card select{
+            height: var(--ctl-h);
+            padding: 10px 12px;
+            border:1px solid #d1d5db;
+            border-radius:10px;
+            width: 100%;
+        }
+
+        .ab-muted{color:#6b7280;font-size:12px}
+        .ab-hr{height:1px;background:#eee;margin:16px 0}
+        .ab-r{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+        .ab-btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:10px 14px;border:1px solid #e5e7eb;background:#111827;color:#fff;cursor:pointer}
+        .ab-btn.secondary{background:#fff;color:#111827;border-color:#d1d5db}
+        .ab-btn.danger{background:#b91c1c}
+        .ab-hidden{display:none !important}
+        .ab-pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#f3f4f6;font-size:12px}
+        .ab-err{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:10px;border-radius:8px;margin-bottom:12px}
+
+        /* Items block */
+        .ab-items{display:flex;flex-direction:column;gap:16px}
+        .ab-item{padding:16px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa}
+        .ab-foot{display:flex;justify-content:space-between;align-items:center}
+    </style>
+{% endblock %}
+
+{% block content %}
+
+    <div class="ab-wrap">
+        <form method="post" novalidate>
+            {% csrf_token %}
+
+            <nav class="tabs" id="tabs">
+                <button type="button" class="tab active" data-tab="details">Appointment details</button>
+                <button type="button" class="tab" data-tab="discounts">Discounts & totals</button>
+                <button type="button" class="tab" data-tab="items">Items</button>
+            </nav>
+
+            {# ───────── 1) DETAILS ───────── #}
+            <section class="tab-panel active" data-tab-panel="details">
+                <div class="ab-section ab-card">
+                    <h3 class="ab-h">1) Appointment details</h3>
+
+                    <div class="ab-row">
+                        {% for field in form.visible_fields %}
+                            {% if APPT_FIELDS_1 %}
+                                {% if field.name in APPT_FIELDS_1 %}
+                                    <div class="ab-field">
+                                        {{ field.label_tag }} {{ field }}
+                                        {% if field.errors %}<div class="ab-err">{{ field.errors }}</div>{% endif %}
+                                    </div>
+                                {% endif %}
+                            {% else %}
+                                <div class="ab-field">
+                                    {{ field.label_tag }} {{ field }}
+                                    {% if field.errors %}<div class="ab-err">{{ field.errors }}</div>{% endif %}
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+
+                    <div class="ab-muted" style="margin-top:6px">Appointment ID: {{ form.instance.pk }}</div>
+                </div>
+            </section>
+
+            {# ───────── 2) DISCOUNTS ───────── #}
+            <section class="tab-panel" data-tab-panel="discounts">
+                <div class="ab-section ab-card">
+                    <h3 class="ab-h">2) Discounts & totals</h3>
+
+                    <div class="ab-row">
+                        <div class="ab-field">
+                            <label>Discount source (appointment)</label>
+                            <div><span class="ab-pill">{{ form.instance.discount_source|default:"—" }}</span></div>
+                        </div>
+                        <div class="ab-field">
+                            {% if form.instance.personal_discount_percent %}
+                                <label>Client's personal discount</label>
+                                <div>{{ form.instance.personal_discount_percent }}%</div>
+                            {% endif %}
+                        </div>
+                        <div class="ab-field" style="grid-column:3/5; text-align:right">
+                            <label>Visit total (after personal)</label>
+                            <div><strong>${{ form.instance.final_price|default_if_none:"0.00" }}</strong></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {# ───────── 3) ITEMS ───────── #}
+            <section class="tab-panel" data-tab-panel="items">
+                <div class="ab-section ab-card">
+                    <h3 class="ab-h">3) Items (services)</h3>
+
+                    {{ items_formset.management_form }}
+
+                    <div id="items-container" class="ab-items">
+                        {% for f in items_formset.forms %}
+                            <div class="ab-item" data-form-index="{{ forloop.counter0 }}">
+                                {% if f.non_field_errors %}<div class="ab-err">{{ f.non_field_errors }}</div>{% endif %}
+                                {% for h in f.hidden_fields %}{{ h }}{% endfor %}
+
+                                <div class="ab-row">
+                                    <!-- MASTER -->
+                                    <div class="ab-field" data-field="master">
+                                        <div class="ab-hidden native-master">{{ f.master }}</div>
+                                        <label>Master</label>
+                                        <select class="ab-select js-master"></select>
+                                    </div>
+
+                                    <!-- SERVICE -->
+                                    <div class="ab-field" data-field="service">
+                                        <div class="ab-hidden native-service">{{ f.service }}</div>
+                                        <label>Service</label>
+                                        <select class="ab-select js-service" disabled></select>
+                                        <div class="ab-muted">Only services available for the selected master</div>
+                                    </div>
+
+                                    <!-- START TIME -->
+                                    <div class="ab-field">
+                                        <label>Start time</label>
+                                        {{ f.start_time }}
+                                        {% if f.start_time.errors %}<div class="ab-err">{{ f.start_time.errors }}</div>{% endif %}
+                                    </div>
+
+                                    <!-- PRICE -->
+                                    <div class="ab-field">
+                                        <label>Unit price</label>
+                                        {{ f.unit_price }}
+                                        {% if f.unit_price.errors %}<div class="ab-err">{{ f.unit_price.errors }}</div>{% endif %}
+                                        <div class="ab-muted">Leave empty to use the service base price</div>
+                                    </div>
+                                </div>
+
+                                <!-- PROMOCODE -->
+                                <div class="ab-row">
+                                    <div class="ab-field" data-field="promocode" style="grid-column:1/3">
+                                        <div class="ab-hidden native-promocode">
+                                            {% with pf=f|getfield:"promocode" %}{% if pf %}{{ pf }}{% endif %}{% endwith %}
+                                            {% with ff=f|getfield:"force_apply" %}{% if ff %}{{ ff }}{% endif %}{% endwith %}
+                                            {% with ff=f|getfield:"force_promo" %}{% if ff %}{{ ff }}{% endif %}{% endwith %}
+                                        </div>
+                                        <label>Promocode</label>
+                                        <select class="ab-select js-promocode" disabled></select>
+                                        <label style="display:inline-flex;gap:6px;align-items:center;margin-top:6px">
+                                            <input type="checkbox" class="js-promo-force"> Force
+                                        </label>
+                                        <div class="ab-muted">Active promocodes valid for the selected service (plus global)</div>
+                                    </div>
+                                </div>
+
+                                <div class="ab-hr"></div>
+                                <div class="ab-foot">
+                                    <div>
+                                        <span class="ab-muted">Discount source (item):</span>
+                                        <span class="ab-pill">{{ f.instance.discount_source|default:"—" }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="ab-muted">Item total:&nbsp;</span>
+                                        <strong class="js-item-total">${{ f.instance.final_price|default_if_none:"0.00" }}</strong>
+                                    </div>
+                                </div>
+
+                                {% if items_formset.can_delete %}
+                                    <div class="ab-r"><label class="ab-btn danger">{{ f.DELETE }} Remove</label></div>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="ab-r">
+                        <button type="button" class="ab-btn secondary" id="btn-add-item">＋ Add item</button>
+                    </div>
+
+                    <!-- empty form template -->
+                    <template id="empty-form-tpl">
+                        <div class="ab-item" data-form-index="__prefix__">
+                            {% with f=items_formset.empty_form %}
+                                {% for h in f.hidden_fields %}{{ h.as_widget }}{% endfor %}
+
+                                <div class="ab-row">
+                                    <div class="ab-field" data-field="master">
+                                        <div class="ab-hidden native-master">{{ f.master }}</div>
+                                        <label>Master</label>
+                                        <select class="ab-select js-master"></select>
+                                    </div>
+                                    <div class="ab-field" data-field="service">
+                                        <div class="ab-hidden native-service">{{ f.service }}</div>
+                                        <label>Service</label>
+                                        <select class="ab-select js-service" disabled></select>
+                                        <div class="ab-muted">Only services available for the selected master</div>
+                                    </div>
+                                    <div class="ab-field">
+                                        <label>Start time</label>
+                                        {{ f.start_time }}
+                                    </div>
+                                    <div class="ab-field">
+                                        <label>Unit price</label>
+                                        {{ f.unit_price }}
+                                        <div class="ab-muted">Leave empty to use the service base price</div>
+                                    </div>
+                                </div>
+
+                                <div class="ab-row">
+                                    <div class="ab-field" data-field="promocode" style="grid-column:1/3">
+                                        <div class="ab-hidden native-promocode">
+                                            {% with pf=f|getfield:"promocode" %}{% if pf %}{{ pf }}{% endif %}{% endwith %}
+                                            {% with ff=f|getfield:"force_apply" %}{% if ff %}{{ ff }}{% endif %}{% endwith %}
+                                            {% with ff=f|getfield:"force_promo" %}{% if ff %}{{ ff }}{% endif %}{% endwith %}
+                                        </div>
+                                        <label>Promocode</label>
+                                        <select class="ab-select js-promocode" disabled></select>
+                                        <label style="display:inline-flex;gap:6px;align-items:center;margin-top:6px">
+                                            <input type="checkbox" class="js-promo-force"> Force
+                                        </label>
+                                        <div class="ab-muted">Active promocodes</div>
+                                    </div>
+                                </div>
+
+                                <div class="ab-hr"></div>
+                                <div class="ab-foot">
+                                    <div><span class="ab-muted">Discount source (item):</span> <span class="ab-pill">—</span></div>
+                                    <div><span class="ab-muted">Item total:&nbsp;</span><strong class="js-item-total">$0.00</strong></div>
+                                </div>
+
+                                {% if items_formset.can_delete %}
+                                    <div class="ab-r"><label class="ab-btn danger">{{ f.DELETE }} Remove</label></div>
+                                {% endif %}
+                            {% endwith %}
+                        </div>
+                    </template>
+                </div>
+            </section>
+
+            <div class="ab-r" style="margin-top:18px">
+                <button type="submit" class="ab-btn">Save</button>
+                <a href="{% url 'admin:core_appointment_changelist' %}" class="ab-btn secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+
+    {# JSON data from context #}
+    {{ masters_data|json_script:"masters-data" }}
+    {{ ms_map_data|json_script:"ms-map-data" }}
+    {{ svc_discounts_data|json_script:"svc-discounts-data" }}
+    {{ promos_by_service_data|json_script:"promos-by-service-data" }}
+    {{ promos_global_data|json_script:"promos-global-data" }}
+
+
+{% endblock %}

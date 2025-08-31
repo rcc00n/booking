@@ -1,5 +1,11 @@
+from __future__ import annotations
+
 from django.contrib.admin import SimpleListFilter
 from .models import *
+
+from django.contrib import admin
+from django.utils.translation import gettext_lazy as _
+from django.apps import apps
 
 class ClientStatusFilter(SimpleListFilter):
     title = "Client Status"
@@ -47,4 +53,54 @@ class MasterRoleFilter(SimpleListFilter):
                 return queryset.filter(id__in=master_ids)
         return queryset
 
+class AppointmentServiceFilter(admin.SimpleListFilter):
+    title = _("услуга (через позиции)")
+    parameter_name = "service"
+
+    def lookups(self, request, model_admin):
+        qs = Service.objects.all()
+        if hasattr(Service, "is_active"):
+            qs = qs.filter(is_active=True)
+        return [(str(s.pk), getattr(s, "name", f"Service {s.pk}")) for s in qs.order_by("name")[:500]]
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if not value:
+            return queryset
+        return queryset.filter(appointmentitem__service_id=value).distinct()
+
+
+class AppointmentItemMasterFilter(admin.SimpleListFilter):
+    title = _("мастер (через позиции)")
+    parameter_name = "item_master"
+
+    def lookups(self, request, model_admin):
+        qs = UserProfile.objects.all()
+        # если есть роль Мастер — можно отфильтровать только их
+        if hasattr(UserProfile, "is_master"):
+            qs = qs.filter(is_master=True)
+        return [(str(u.pk), getattr(u, "short_name", getattr(u, "user", str(u)))) for u in qs.order_by("id")[:500]]
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if not value:
+            return queryset
+        return queryset.filter(appointmentitem__master_id=value).distinct()
+
+
+class AppointmentHasPromocodeFilter(admin.SimpleListFilter):
+    title = _("есть промокоды в позициях")
+    parameter_name = "has_promocode"
+
+    def lookups(self, request, model_admin):
+        return [("yes", _("Да")), ("no", _("Нет"))]
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if not value:
+            return queryset
+        if value == "yes":
+            return queryset.filter(appointmentitem__promocode__isnull=False).distinct()
+        else:
+            return queryset.exclude(appointmentitem__promocode__isnull=False).distinct()
 
