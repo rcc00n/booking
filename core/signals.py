@@ -17,7 +17,7 @@ from .models import (
     AppointmentStatusHistory,
     Notification,
     AppointmentItem,
-    AppointmentItemPromoCode
+    AppointmentItemPromoCode, UserProfile, PaymentStatus
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ def _items_summary_lines(appt: Appointment) -> list[str]:
     qs = appt.items.select_related("service", "master__user").order_by("start_time")
     for it in qs:
         s = localtime(it.start_time).strftime("%d %b %Y, %H:%M")
-        master_name = it.master.user.get_full_name() or it.master.user.username
+        master_name = it.master.user.get_full_name() or it.master.user.user.username
         lines.append(f"• {it.service.name} with {master_name} at {s}")
     return lines
 
@@ -148,11 +148,9 @@ def _humanize_diff(instance: Appointment, diffs: List[Tuple[str, Any, Any]]) -> 
         try:
             if field == "client_id":
                 # UserProfile
-                from .models import UserProfile
                 obj = UserProfile.objects.filter(pk=value).select_related("user").first()
                 return obj.get_full_name() if obj else f"#{value}"
             if field == "payment_status_id":
-                from .models import PaymentStatus
                 obj = PaymentStatus.objects.filter(pk=value).first()
                 return obj.name if obj else f"#{value}"
         except Exception:
@@ -236,41 +234,59 @@ def _recompute_on_promocode_change(sender, instance: AppointmentItemPromoCode, *
 # ──────────────────────────────────────────────────────────────────────────────
 
 # 5) appointment_post_save — ПОЛНОСТЬЮ ЗАМЕНИ
-@receiver(post_save, sender=Appointment)
-def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs):
-    client = instance.client
+
+def _send_created_email(appt: Appointment) -> None:
+    """Отправляет e-mail/SMS о создании визита, если его ещё не отправляли и есть позиции."""
+    if Notification.objects.filter(appointment=appt, kind=Notification.CREATED, channel="email").exists():
+        return  # уже отослано
+
+    client = appt.client
     email = (client.user.email or "").strip()
+    if not email or not appt.items.exists():
+        return  # нет адреса или нет позиций — не шлём «пустое» письмо
 
-    # якорное время визита уже хранится в appointment.start_time (min по позициям)
-    start_local = localtime(instance.start_time).strftime("%d %b %Y, %H:%M")
-    service_label, master_label = _short_labels(instance)
-    items_text = "\n".join(_items_summary_lines(instance)) or "—"
-
-    # подавление «шумовых» апдейтов (напр., первый пересчёт после создания)
-    if getattr(instance, "_skip_update_email", False):
+    # красивый текст по позициям (service/master/time)
+    from django.utils.timezone import localtime
+    items_text = "\n".join(_items_summary_lines(appt)).strip()
+    if not items_text:
         return
 
-    if created:
-        subject = "Your appointment is booked"
-        text = (
-            f"Hello, {client.user.get_full_name() or client.user.username}!\n\n"
-            f"{items_text}\n"
-        )
-        html = (
-            f"<!doctype html><html><body>"
-            f"<h2>Your appointment is booked</h2>"
-            f"<pre style='font:inherit'>{items_text}</pre>"
-            f"</body></html>"
-        )
-        _send_email(email, subject, text, html, tag="appointment-created")
-        _notify_once(instance.id, client, message=f"[CREATED] {text}")
+    # метки для SMS
+    service_label, master_label = _short_labels(appt)
+    # берём якорь из appointment.start_time (он синкается сигналом по айтемам),
+    # а на всякий случай подстрахуемся start_time первого айтема
+    first_item = appt.items.order_by("start_time").first()
+    start_dt = appt.start_time or (first_item.start_time if first_item else None)
+    start_local = localtime(start_dt).strftime("%d %b %Y, %H:%M") if start_dt else ""
 
-        # SMS — лаконично
+    subject = "Your appointment is booked"
+    text = (
+        f"Hello, {client.user.get_full_name() or client.user.username}!\n\n"
+        f"{items_text}\n"
+    )
+    html = (
+        f"<!doctype html><html><body>"
+        f"<h2>Your appointment is booked</h2>"
+        f"<pre style='font:inherit'>{items_text}</pre>"
+        f"</body></html>"
+    )
+
+    _send_email(email, subject, text, html, tag="appointment-created")
+    Notification.objects.update_or_create(
+        user=client,
+        appointment=appt,
+        channel="email",
+        kind=Notification.CREATED,
+        defaults={"message": text, "status": "sent"},
+    )
+
+    # SMS — один раз, если ещё не слали
+    if not Notification.objects.filter(appointment=appt, kind=Notification.CREATED, channel="sms").exists():
         sms_body = f"Booked: {service_label} with {master_label} on {start_local}".strip()
         sid = send_sms(client.phone, sms_body)
         Notification.objects.update_or_create(
             user=client,
-            appointment=instance,
+            appointment=appt,
             channel="sms",
             kind=Notification.CREATED,
             defaults={
@@ -281,7 +297,23 @@ def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs
                 "error": "" if sid else "twilio returned no SID",
             },
         )
+
+@receiver(post_save, sender=Appointment)
+def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs):
+    client = instance.client
+    email = (client.user.email or "").strip()
+
+    # якорное время визита уже хранится в appointment.start_time (min по позициям)
+    start_local = localtime(instance.start_time).strftime("%d %b %Y, %H:%M")
+    service_label, master_label = _short_labels(instance)
+    items_text = "\n".join(_items_summary_lines(instance)) or "—"
+    if created:
+        # если позиции уже есть (например, создали в одной транзакции) — шлём сейчас,
+        # иначе дождёмся первого AppointmentItem
+        if instance.items.exists():
+            _send_created_email(instance)
         return
+
 
     # --- updated ---
     diffs = _diff_snapshot(instance)
@@ -327,7 +359,16 @@ def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs
         },
     )
 
-
+@receiver(post_save, sender=AppointmentItem)
+def send_created_when_first_item(sender, instance: AppointmentItem, created: bool, **kwargs):
+    if not created:
+        return
+    appt = instance.appointment
+    if Notification.objects.filter(appointment=appt, kind=Notification.CREATED, channel="email").exists():
+        return  # уже слали
+    # На сохранении айтемов мы и так делаем recompute_totals со скипом апдейт-писем.
+    # Здесь только отправим «created», когда появилась хотя бы 1 позиция.
+    _send_created_email(appt)
 
 
 def _is_cancelled_status(status_obj) -> bool:
@@ -363,7 +404,6 @@ def on_status_history_created(sender, instance: AppointmentStatusHistory, create
 
     # Отправка (Celery task)
     send_cancellation_email.delay(appointment_id=appt_id)
-    print("Email Sent!!")
     user = getattr(instance.appointment, "client", None)
     # Опционально: помечаем, что уведомление отправлено (если у вас так принято)
     Notification.objects.create(

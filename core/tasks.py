@@ -38,23 +38,6 @@ FALLBACK_REMINDER_OFFSETS = [
 # Необязательный шаблон ссылки на отзыв
 REVIEW_URL_PATTERN: Optional[str] = getattr(settings, "REVIEW_FORM_URL", None)
 
-TEMPLATE_MAP = {
-    "created": {
-        "subject": "emails/appointment_created_subject.txt",
-        "html": "emails/appointment_created.html",
-        "text": "emails/appointment_created.txt",
-    },
-    "updated": {
-        "subject": "emails/appointment_updated_subject.txt",
-        "html": "emails/appointment_updated.html",
-        "text": "emails/appointment_updated.txt",
-    },
-    "cancelled": {  # <— ДОБАВИЛИ
-        "subject": "emails/appointment_cancelled_subject.txt",
-        "html": "emails/appointment_cancelled.html",
-        "text": "emails/appointment_cancelled.txt",
-    },
-}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Утилиты: почта/рендер/идемпотентность/база выборки
@@ -105,11 +88,12 @@ def _items_summary_lines(appt: Appointment) -> list[str]:
 
 def _label_service_master(appt: Appointment) -> tuple[str, str]:
     items = list(appt.items.select_related("service", "master__user"))
+
     if not items:
         return "", ""
     if len(items) == 1:
         it = items[0]
-        return it.service.name, (it.master.user.get_full_name() or it.master.user.username)
+        return it.service.name, (it.master.user.get_full_name() or it.master.user.user.username)
     return f"{len(items)} services", "multiple masters"
 
 
@@ -359,7 +343,7 @@ def _set_completed_if_finished(now) -> int:
     recent_from = now - timedelta(days=3)
     last_status_subq = _latest_status_name_subquery()
     qs = (Appointment.objects
-          .select_related("client__user", "master__user", "service")
+          .select_related("client__user")
           .annotate(last_status_name=Subquery(last_status_subq))
           .filter(start_time__gte=recent_from, start_time__lte=now))
 
@@ -406,7 +390,7 @@ def _send_review_requests(now) -> int:
     last_status_subq = _latest_status_name_subquery()
     recent_from = now - timedelta(days=3)
     qs = (Appointment.objects
-          .select_related("client__user", "master__user", "service")
+          .select_related("client__user")
           .annotate(last_status_name=Subquery(last_status_subq))
           .filter(start_time__gte=recent_from, start_time__lte=now))
 
