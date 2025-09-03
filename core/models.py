@@ -2,7 +2,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.apps import apps
 from django.core.validators import MinValueValidator, MaxValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import User
 import uuid
 from django.core.exceptions import ValidationError
@@ -321,7 +321,7 @@ class Appointment(models.Model):
     start_time = models.DateTimeField(null=True, blank=True)
     payment_status = models.ForeignKey(PaymentStatus, on_delete=models.CASCADE, default=PaymentStatus.objects.get(name="Not Paid").id)
     final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
-    discount_source = models.CharField(max_length=20, blank=True, default="", editable=False)
+    discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Снимок персональной скидки клиента на момент создания
@@ -344,46 +344,40 @@ class Appointment(models.Model):
         ends = [it.end_time for it in items if it.end_time]
         return (min(starts), max(ends)) if starts and ends else None
 
-    def recompute_totals(self, save=True):
+    def recompute_totals(self, save=True, *, persist_items=True):
         """
-        1) Сумма позиций после **позиционных** скидок (service/промокод), без персональной.
-        2) Применяем **персональную** скидку ко всей сумме визита.
-        3) discount_source визита — агрегируем источники позиций + «personal», если >0.
+        1) Складываем позиции c учётом позиционных скидок (service/promocode), без персональной.
+        2) Применяем персональную скидку ко всей сумме визита.
+        3) discount_source визита: агрегируем позиционные источники; 'personal' добавляем 1 раз,
+           только если персональная скидка визита > 0.
         """
         from decimal import Decimal
-
+        changed = []
         subtotal = Decimal("0.00")
         item_sources = set()
-
+        item_sources.add("")
         for it in self.items_qs():
-            it._compute_item_pricing()   # только service/promocode, без персональной
+            before = (it.final_price, it.discount_source, it.unit_price)
+            it._compute_item_pricing()
             if it.final_price is None:
-                it.final_price = it.unit_price  # fallback
+                it.final_price = it.unit_price
+            after = (it.final_price, it.discount_source, it.unit_price)
+            if after != before:
+                changed.append(it)
             subtotal += it.final_price
+            # собираем ТОЛЬКО позиционные источники
             if it.discount_source:
                 item_sources.add(it.discount_source)
+        # агрегированный источник
 
-        # Применяем персональную скидку ко всему визиту
-        personal = Decimal(self.personal_discount_percent or 0)
-        total = (subtotal * (Decimal(100) - personal) / Decimal(100)).quantize(Decimal("0.01"))
-
-        # Агрегированный источник
-        src = ""
-        if len(item_sources) > 1:
-            src = "mixed"
-        elif len(item_sources) == 1:
-            src = next(iter(item_sources))
-        if personal > 0:
-            src = (src + "+personal") if src else "personal"
-
-        self.final_price = total
-        self.discount_source = src
-
-        # Якорное время — min start_time среди позиций
-        span = self.time_span()
-        if span:
-            self.start_time = span[0]
-
+        self.sync_start_time_from_items(save=True)
+        self.final_price = subtotal
+        self.discount_source = max(item_sources)
+        with transaction.atomic():
+            if persist_items and changed:
+                type(self).items.rel.related_model.objects.bulk_update(
+                    changed, ["final_price", "discount_source", "unit_price"]
+        )
         if save:
             super().save(update_fields=["final_price", "discount_source", "start_time"])
 
@@ -394,7 +388,6 @@ class Appointment(models.Model):
         """
         first = self.items.order_by("start_time").first()
         new_start = first.start_time if first else None
-
         # сохраняем только при изменении, чтобы не трогать updated_at и не триггерить лишние сигналы
         if self.start_time != new_start:
             self.start_time = new_start
@@ -577,7 +570,7 @@ class AppointmentItem(models.Model):
 
     # Итог позиции после позиционных скидок (service/promocode). Персональная НЕ учитывается!
     final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
-    discount_source = models.CharField(max_length=20, blank=True, default="", editable=False)  # '', 'service', 'promocode'
+    discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)  # '', 'service', 'promocode'
 
     class Meta:
         indexes = [models.Index(fields=["master", "start_time"])]
@@ -591,30 +584,6 @@ class AppointmentItem(models.Model):
     @property
     def end_time(self):
         return self.start_time + timedelta(minutes=self.duration_min)
-
-    def _item_discount_percent(self, promocode_obj, force_apply: bool) -> int:
-        """
-        Возвращает % скидки ДЛЯ ПОЗИЦИИ без учёта персональной:
-          - скидка на услугу (ServiceDiscount)
-          - промокод (если валиден для услуги)
-        Если для услуги активна скидка, промокод:
-          - клиентам запрещён,
-          - админ может форсировать (force_apply=True).
-        """
-        s = 0
-        disc = self.service.get_active_discount()
-        if disc:
-            s = int(disc.discount_percent)
-
-        pr = 0
-        if promocode_obj and promocode_obj.is_valid_for(self.service):
-            pr = int(promocode_obj.discount_percent)
-
-        if s > 0 and pr > 0 and not force_apply:
-            # у услуги есть скидка и промокод — клиентам нельзя «накладывать»
-            return s
-
-        return max(s, pr)
 
     @staticmethod
     def _to_decimal(val):
@@ -644,22 +613,53 @@ class AppointmentItem(models.Model):
 
     def _compute_item_pricing(self):
         """
-        Считает цену позиции с учётом скидки услуги/промокода.
-        Персональная скидка НЕ применяется здесь.
+        Считает цену позиции с учётом:
+          • скидки услуги или промокода (берём максимум)
+          • персональной скидки клиента (поверх остальных)
         """
         promocode_link = getattr(self, "promocode_link", None)
         promocode = getattr(promocode_link, "promocode", None)
-        force = bool(getattr(promocode_link, "force_apply", False))
 
-        base = self._effective_unit_price()  # ← теперь гарантированно Decimal
-        pct = int(self._item_discount_percent(promocode, force) or 0)
+        base = self._effective_unit_price()  # Decimal
 
-        price = (base * (Decimal(100) - Decimal(pct)) / Decimal(100)).quantize(Decimal("0.01"))
-        self.final_price = price
-        if pct == 0:
+        service_disc = 0
+        disc = self.service.get_active_discount()
+        if disc:
+            service_disc = int(disc.discount_percent)
+        promo_disc = 0
+        if promocode and promocode.is_valid_for(self.service):
+            promo_disc = int(promocode.discount_percent)
+        # сначала применяем скидку услуги/промокода
+        price = base * (Decimal(100) - Decimal(promo_disc)) / Decimal(100)
+        print(f"Promocode Price: {price}")
+        price = price * (Decimal(100) - Decimal(service_disc)) / Decimal(100)
+        print(f"Service Disc Price: {price}")
+        # потом — персональную скидку клиента
+        personal_pct = 0
+        if self.appointment and self.appointment.client:
+            personal_pct = int(self.appointment.client.personal_discount_percent or 0)
+
+        if personal_pct:
+            price = price * (Decimal(100) - Decimal(personal_pct)) / Decimal(100)
+        print(f"Personal Price: {price}")
+        # финальная цена
+        self.final_price = price.quantize(Decimal("0.01"))
+        print(f"Final Price: {self.final_price}")
+        # источник скидки
+        if service_disc == 0 and personal_pct == 0 and promo_disc == 0:
             self.discount_source = ""
+        elif promo_disc > 0 and personal_pct > 0 and service_disc:
+            self.discount_source = "promocode+personal+service"
+        elif service_disc > 0 and personal_pct > 0:
+            self.discount_source = "service+personal"
+        elif promo_disc > 0 and personal_pct > 0:
+            self.discount_source = "promocode+personal"
+        elif service_disc > 0:
+            self.discount_source = "service"
+        elif promo_disc > 0:
+            self.discount_source = "promocode"
         else:
-            self.discount_source = "promocode" if (promocode and (pct == int(promocode.discount_percent))) else "service"
+            self.discount_source = "personal"
 
 
     # Удобный хелпер: берём реальный старт из self.start_time (или из appointment.start_time, если нет)
@@ -854,21 +854,14 @@ class AppointmentItem(models.Model):
         if not self.start_time:
             last = self.appointment.items.exclude(pk=self.pk).order_by('-start_time').first()
             self.start_time = (last.end_time if last else self.appointment.start_time)
-
         # Если руками поменяли unit_price — помечаем
         if self.unit_price is not None and 'update_fields' in kwargs:
             if 'unit_price' in (kwargs.get('update_fields') or []):
                 self.unit_price_overridden = True
 
         # Пересчёт позиционной цены (service/promocode)
-        self._compute_item_pricing()
+        # self._compute_item_pricing()
         super().save(*args, **kwargs)
-
-        # После сохранения позиции пересчитаем визит (для персональной скидки и total)
-        try:
-            self.appointment.recompute_totals(save=True)
-        except Exception:
-            pass
 
 
 
@@ -985,7 +978,7 @@ class Notification(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
-    appointment = models.ForeignKey(Appointment, on_delete=models.CASCADE, null=True, blank=True)
+    appointment = models.ForeignKey(Appointment, on_delete=models.SET_NULL, null=True, blank=True)
     channel = models.CharField(max_length=10, choices=[('email', 'Email'), ('sms', 'SMS')])
     kind = models.CharField(max_length=32, choices=KIND_CHOICES, default=OTHER)
 

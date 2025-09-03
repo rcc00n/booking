@@ -82,17 +82,10 @@
                                 <div class="appt-timeline-content">
                                     <div class="appt-time-tag">{{ a.start_time|time:"H:i" }}</div>
                                     <div class="appt-line-main">
-                                        <strong>{% if a.client %}{{ a.client.get_full_name }}{% else %}—{% endif %}</strong>
-                                        <span>
-                    {% for it in a.items.all|slice:":3" %}
-                        <span class="appt-service-badge">{{ it.service.name }}</span>
-                    {% empty %}
-                        <span class="appt-service-badge">No items</span>
-                    {% endfor %}
-                                            {% with cnt=a.items.all|length %}
-                                                {% if cnt > 3 %}<span class="appt-service-badge">+{{ cnt|add:"-3" }}</span>{% endif %}
-                                            {% endwith %}
-                  </span>
+                                        <strong>{% if a.appointment.client %}{{ a.appointment.client.get_full_name }}{% else %}—{% endif %}</strong>
+
+                        <span class="appt-service-badge">{{ a.service.name }}</span>
+
                                     </div>
                                 </div>
                             </div>

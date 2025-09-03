@@ -34,8 +34,9 @@ HEALTH_CONTRA_CHOICES = [
 # Appointment Form
 # -----------------------------
 
+
 class AppointmentAdminForm(forms.ModelForm):
-    status = forms.ModelChoiceField(
+    current_status = forms.ModelChoiceField(
         queryset=AppointmentStatus.objects.all(),
         required=False,
         label="Status"
@@ -52,9 +53,21 @@ class AppointmentAdminForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self.instance.pk:
-            last_status = self.instance.appointmentstatushistory_set.order_by("-set_at").first()
-            if last_status:
-                self.fields["status"].initial = last_status.status
+            last = (AppointmentStatusHistory.objects
+                    .filter(appointment=self.instance)
+                    .select_related("status")
+                    .order_by("-set_at")
+                    .first())
+            if last:
+                self.fields["current_status"].initial = last.status_id
+            else:
+                # fallback: если хочешь значение по умолчанию
+                first_status = AppointmentStatus.objects.order_by("id").first()
+                if first_status:
+                    self.fields["current_status"].initial = first_status.pk
+
+        # Нормальный класс под твои стили
+        self.fields["current_status"].widget.attrs.update({"class": "ab-select"})
         now = timezone.now()
         qs = PromoCode.objects.all()
 
@@ -69,19 +82,6 @@ class AppointmentAdminForm(forms.ModelForm):
             self.fields["promocode"].queryset = qs
             self.fields["promocode"].required = False
             self.fields["promocode"].help_text = "Выберите действующий промокод (опционально)."
-
-    def save(self, commit=True):
-        obj = super().save(commit)
-        new_status = self.cleaned_data.get("status")
-        if new_status:
-            last_status = obj.appointmentstatushistory_set.order_by("-set_at").first()
-            if not last_status or last_status.status_id != new_status.id:
-                AppointmentStatusHistory.objects.create(
-                    appointment=obj,
-                    status=new_status,
-                    set_by=getattr(self.request, "user", None).userprofile
-                )
-        return obj
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -119,7 +119,7 @@
                         <div class="ab-field">
                             {% if form.instance.personal_discount_percent %}
                                 <label>Client's personal discount</label>
-                                <div>{{ form.instance.personal_discount_percent }}%</div>
+                                <div id="id_personal_discount_percent">{{ form.instance.personal_discount_percent }}%</div>
                             {% endif %}
                         </div>
                         <div class="ab-field" style="grid-column:3/5; text-align:right">
@@ -200,7 +200,7 @@
                                     </div>
                                     <div>
                                         <span class="ab-muted">Item total:&nbsp;</span>
-                                        <strong class="js-item-total">${{ f.instance.final_price|default_if_none:"0.00" }}</strong>
+                                        <strong id="grand-total" class="js-item-total">${{ f.instance.final_price|default_if_none:"0.00" }}</strong>
                                     </div>
                                 </div>
 

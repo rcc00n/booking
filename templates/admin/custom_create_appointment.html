@@ -26,6 +26,7 @@
         .ab-total{margin-top:16px;text-align:right;color:#111827}
         .ab-hidden{display:none}
         .hint{color:#6b7280;font-size:12px;margin-top:4px}
+
     </style>
 {% endblock %}
 
@@ -112,10 +113,10 @@
 
                 <div class="ab-field">
                     <label>Time <span style="color:#ef4444">*</span></label>
-                    <input type="time" class="js-time" name="items-0-start_time_1"
+                    <input type="time" class="js-time ab-hidden" name="items-0-start_time_1" data-timepicker="15"
                            value="{{ initial_first_item.start_time_time|default:'' }}" required step="900">
                 </div>
-
+                <input type="hidden" id="id_start_time" name="start_time">
                 <div class="ab-field">
                     <label>Unit price</label>
                     <input type="number" class="js-price" step="0.01" min="0" placeholder="Auto">
@@ -311,6 +312,84 @@
                 }
             });
 
+        })();
+        // timepicker_15min.js
+        (() => {
+            function buildSelect() {
+                const sel = document.createElement('select');
+                sel.className = 'ab-select js-timepicker';
+                for (let h = 0; h < 24; h++) {
+                    for (let m = 0; m < 60; m += 15) {
+                        const v = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+                        const opt = document.createElement('option');
+                        opt.value = v;
+                        opt.textContent = v;
+                        sel.appendChild(opt);
+                    }
+                }
+                return sel;
+            }
+
+            function enhanceTimeInput(input) {
+                if (!input || input.dataset.enhanced) return;
+
+                const sel = buildSelect();
+
+                // Установить начальное значение, если есть
+                const raw = (input.value || '').slice(0, 5); // 'HH:MM'
+                if (raw) {
+                    const found = [...sel.options].some(o => o.value === raw);
+                    if (found) sel.value = raw;
+                }
+
+                // Синхронизация select -> input
+                sel.addEventListener('change', () => {
+                    input.value = sel.value;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+
+                // Вставка рядом и скрытие оригинала
+                input.insertAdjacentElement('afterend', sel);
+                input.classList.add('ab-hidden');
+                input.dataset.enhanced = '1';
+            }
+
+            function init(container = document) {
+                // 1) Явно помеченные поля
+                container.querySelectorAll('input[type="time"][data-timepicker]')
+                    .forEach(enhanceTimeInput);
+
+                // 2) Запасной селектор на случай, если имя оканчивается на "-time"
+                container.querySelectorAll('input[type="time"][name$="-time"]')
+                    .forEach(enhanceTimeInput);
+            }
+
+            document.addEventListener('DOMContentLoaded', () => {
+                const holder = document.querySelector('#items-holder') || document;
+
+                // Инициализация для уже отрисованных строк
+                init(holder);
+
+                // Перехват кнопки добавления строки (если есть такая кнопка)
+                document.body.addEventListener('click', (e) => {
+                    const btn = e.target.closest('.js-add-item, .add-row, .js-add-service');
+                    if (btn) {
+                        // Даём формсету дорисоваться
+                        setTimeout(() => init(holder), 0);
+                    }
+                });
+
+                // Фолбэк: подхватываем любые новые узлы формсета
+                const mo = new MutationObserver((mutations) => {
+                    for (const m of mutations) {
+                        for (const n of m.addedNodes) {
+                            if (n instanceof HTMLElement) init(n);
+                        }
+                    }
+                });
+                mo.observe(holder, { childList: true, subtree: true });
+            });
         })();
     </script>
 

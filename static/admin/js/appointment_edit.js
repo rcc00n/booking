@@ -72,34 +72,62 @@
     function formatMoney(n){
         return '$' + (Math.round(n*100)/100).toFixed(2);
     }
-
+    const personalPct = (() => {
+        const el = document.getElementById('id_personal_discount_percent');
+        if (!el) return 0;
+        const raw = (el.value || el.textContent || '0').toString();
+        const v = parseFloat(raw.replace(/[^\d.]/g, '')) || 0;
+        return Math.max(0, Math.min(100, v));
+    })();
     /* Totals */
-    function recomputeItemTotal(itemBox){
-        const serviceSel = itemBox.querySelector('.js-service');
-        const priceInput = itemBox.querySelector('input[name$="-unit_price"]');
-        const totalEl = itemBox.querySelector('.js-item-total');
-        if (!serviceSel || !totalEl) return;
-
-        const svcOpt = serviceSel.options[serviceSel.selectedIndex];
-        const basePrice = svcOpt ? priceToNumber(svcOpt.getAttribute('data-base-price')) : 0;
-        const entered = priceToNumber(priceInput ? priceInput.value : 0);
-        let price = entered > 0 ? entered : basePrice;
-
-        let disc = 0;
-        const serviceId = serviceSel.value || "";
-        if (serviceId && svcDisc[serviceId]) disc = Math.max(disc, parseInt(svcDisc[serviceId], 10) || 0);
-
-        const promoSel = itemBox.querySelector('.js-promocode');
-        if (promoSel && promoSel.value){
-            const opt = promoSel.options[promoSel.selectedIndex];
-            const pct = parseInt(opt.getAttribute('data-discount')||'0', 10) || 0;
-            disc = Math.max(disc, pct);
-        }
-
-        const final = price * (100 - disc) / 100;
-        totalEl.textContent = formatMoney(final);
-    }
-
+    // function recomputeItemTotal(itemBox){
+    //     const serviceSel = itemBox.querySelector('.js-service');
+    //     const priceInput = itemBox.querySelector('input[name$="-unit_price"]');
+    //     const totalEl = itemBox.querySelector('.js-item-total');
+    //     if (!serviceSel || !totalEl) return;
+    //
+    //     const svcOpt = serviceSel.options[serviceSel.selectedIndex];
+    //     const basePrice = svcOpt ? priceToNumber(svcOpt.getAttribute('data-base-price')) : 0;
+    //     const entered = priceToNumber(priceInput ? priceInput.value : 0);
+    //     let price = entered > 0 ? entered : basePrice;
+    //
+    //     let disc = 0;
+    //     const serviceId = serviceSel.value || "";
+    //     if (serviceId && svcDisc[serviceId]) disc = Math.max(disc, parseInt(svcDisc[serviceId], 10) || 0);
+    //
+    //     const promoSel = itemBox.querySelector('.js-promocode');
+    //     if (promoSel && promoSel.value){
+    //         const opt = promoSel.options[promoSel.selectedIndex];
+    //         const pct = parseInt(opt.getAttribute('data-discount')||'0', 10) || 0;
+    //         disc = Math.max(disc, pct);
+    //     }
+    //
+    //     // ИТОГ ПОЗИЦИИ — без персональной
+    //     const final = price * (100 - disc) / 100;
+    //
+    //     // Пишем текст и сохраняем "сырое" число для grand total
+    //     totalEl.textContent = formatMoney(final);
+    //     totalEl.dataset.raw = String(final);
+    //
+    //     recomputeGrandTotal(); // ← добавили
+    // }
+    // function recomputeGrandTotal(){
+    //     const totals = Array.from(document.querySelectorAll('.js-item-total'));
+    //     const subtotal = totals.reduce((s, el) => {
+    //         const raw = el.dataset.raw || el.textContent.replace(/[^\d.]/g, '');
+    //         return s + (parseFloat(raw) || 0);
+    //     }, 0);
+    //     console.log(personalPct);
+    //     const withPersonal = subtotal * (100 - (personalPct || 0)) / 100;
+    //     console.log("Total Price:");
+    //     console.log(withPersonal);
+    //     const grandEl = document.getElementById('grand-total');
+    //     if (grandEl) grandEl.textContent = formatMoney(withPersonal);
+    //
+    //     // опционально: показывать подсказку «−X% personal»
+    //     const badge = document.getElementById('personal-discount-badge');
+    //     if (badge) badge.textContent = personalPct ? `−${personalPct}% personal` : '';
+    // }
     /* Date/Time enhancers */
     function enhanceTimeInput(timeInput){
         if (!timeInput || timeInput.dataset.enhanced) return;
@@ -180,7 +208,6 @@
         else { serviceSel.value = ""; setNativeValue(nativeService, ""); }
 
         rebuildPromos(itemBox);
-        recomputeItemTotal(itemBox);
     }
 
     function onServiceChange(itemBox){
@@ -198,21 +225,18 @@
         }
 
         rebuildPromos(itemBox);
-        recomputeItemTotal(itemBox);
     }
 
     function onPromoChange(itemBox){
         const promoSel = itemBox.querySelector('.js-promocode');
         const nativePromo = findNativePromo(itemBox);
         setNativeValue(nativePromo, promoSel ? promoSel.value : "");
-        recomputeItemTotal(itemBox);
     }
 
     function onPromoForceChange(itemBox){
         const fake = itemBox.querySelector('.js-promo-force');
         const native = findNativePromoForce(itemBox);
         setNativeChecked(native, fake ? fake.checked : false);
-        recomputeItemTotal(itemBox);
     }
 
     function initItem(itemBox){
@@ -233,10 +257,6 @@
         serviceSel.addEventListener('change', ()=>onServiceChange(itemBox));
         if (promoSel) promoSel.addEventListener('change', ()=>onPromoChange(itemBox));
         if (promoForce) promoForce.addEventListener('change', ()=>onPromoForceChange(itemBox));
-        if (unitPrice){
-            unitPrice.addEventListener('input',  ()=>recomputeItemTotal(itemBox));
-            unitPrice.addEventListener('change', ()=>recomputeItemTotal(itemBox));
-        }
 
         // enhance date/time in this row
         enhanceDateTimeIn(itemBox);
@@ -255,7 +275,6 @@
         const nativeForce = findNativePromoForce(itemBox);
         if (promoForce && nativeForce) promoForce.checked = !!nativeForce.checked;
 
-        recomputeItemTotal(itemBox);
     }
 
     /* init existing rows + main form date/time */

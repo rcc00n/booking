@@ -88,8 +88,7 @@ def custom_index(request):
                     .aggregate(total=Sum("amount"))["total"] or 0
         appts = appts_7d.filter(start_time__date=day).distinct().count()
         total_sales += float(sales)
-        print(day.strftime("%a %d"))
-        print(sales)
+
         chart_data.append({"day": day.strftime("%a %d"), "sales": float(sales), "appointments": appts})
 
     # Статусы и счётчики на ближайшие 7 дней
@@ -185,19 +184,12 @@ def custom_index(request):
 
     # Сегодняшние предстоящие встречи (Appointment + items); мастеру — только его
     today_appointments = (
-        Appointment.objects.filter(start_time__date=today, start_time__gte=now)
-        .select_related("client__user")
-        .prefetch_related(
-            Prefetch(
-                "items",
-                queryset=AppointmentItem.objects.select_related("service", "master__user")
-                .order_by("start_time"),
-                )
-        )
+        AppointmentItem.objects.filter(start_time__date=today, start_time__gte=now)
+        .select_related("appointment__client__user")
         .order_by("start_time")
     )
     if is_master and master_profile:
-        today_appointments = today_appointments.filter(items__master=master_profile).distinct()
+        today_appointments = today_appointments.filter(master=master_profile).distinct()
 
     # Ежедневная разбивка Confirmed/Cancelled (на 7 дней вперёд)
     daily_counts = []
@@ -806,7 +798,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "svc_discounts_data": svc_discounts,
                 "promos_by_service_data": dict(promos_by_service),
                 "promos_global_data": promos_global,
-                "APPT_FIELDS_1": ("client", "start_time", "payment_status"),
+                "APPT_FIELDS_1": ("client", "start_time", "payment_status", "current_status"),
         })
 
         return super().render_change_form(request, ctx, add=add, change=change, form_url=form_url, obj=obj)
@@ -815,6 +807,30 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         # Админка валидирует формы, но мы дополнительно страхуемся:
         obj.full_clean()  # вызывает Appointment.clean()
         super().save_model(request, obj, form, change)
+        new_status = form.cleaned_data.get("current_status")
+        if not new_status:
+            return
+
+        last = (AppointmentStatusHistory.objects
+                .filter(appointment=obj)
+                .order_by("-set_at")             # или -created_at
+                .values_list("status_id", flat=True)
+                .first())
+        if last != new_status.id:
+            AppointmentStatusHistory.objects.create(
+                appointment=obj,
+                status=new_status,
+                set_by=self._actor(request.user),
+                set_at=timezone.now(),
+            )
+
+    def _actor(self, user):
+        # Подгони под свой профиль:
+
+        p = getattr(user, "userprofile", None)
+        if p is not None:
+            return p
+        return user
 
     def save_formset(self, request, form, formset, change):
         # Забираем инстансы без сохранения
@@ -836,6 +852,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         else:
             kwargs["form"] = self.form
         return super().get_form(request, obj, **kwargs)
+
 
     def add_view(self, request, form_url='', extra_context=None):
         return self.custom_create_view(request)
@@ -985,7 +1002,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             return result
 
         # GET — отрисовка формы
-        if request.method == "GET":
+        if request.method == "GET" and request.GET.get("master") != 'undefined':
             clients, masters, services_by_master = self._context_lists()
 
             # читаем query-параметры
@@ -1197,6 +1214,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
     def save_related(self, request, form, formsets, change):
         super().save_related(request, form, formsets, change)
         appt = form.instance
+        appt.recompute_totals(save=True)
         # Бизнес-правила (как и раньше — строгость сохранили):
         validate_appointment_has_items_on_save(appt)
         validate_items_prices_nonnegative(appt)
@@ -1394,6 +1412,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         if hasattr(response, "context_data"):
             context = response.context_data
             context.update({
+
                 "calendar_table": calendar_table,
                 "masters": masters,
                 "selected_date": selected_date,
@@ -1632,7 +1651,12 @@ admin.site.register(ServiceCategory)
 admin.site.register(PrepaymentOption)
 admin.site.register(PaymentStatus)
 admin.site.register(CancellationReason)
-admin.site.register(AppointmentItemPromoCode)
+
+@admin.register(AppointmentItemPromoCode)
+class AppointmentItemPromoCodeAdmin(admin.ModelAdmin):
+    list_display = ["item", "promocode", "promocode__discount_percent", "promocode__start_date", "promocode__end_date"]
+
+
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
@@ -2461,7 +2485,9 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         rowsp = max(1, (-(-minutes // 15)))  # ceil
         slot_key = block_start.strftime("%H:%M")
 
-        if slot_key not in two_col_map[mid]:
+        if slot_key not in two_col_map.get(mid, set()):
+            if mid not in two_col_map:
+                two_col_map[mid] = {}
             two_col_map[mid][slot_key] = {
                 "kind": "unavailable",
                 "rowspan": rowsp,
@@ -2474,6 +2500,8 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             }
             for i in range(rowsp):
                 t = (block_start + timedelta(minutes=15 * i)).strftime("%H:%M")
+                if mid not in skip_two:
+                    skip_two[mid] = {}
                 skip_two[mid][t] = True
 
     # ───── финальная сборка строк ──────────────────────────────────────────────

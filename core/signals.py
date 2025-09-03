@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Tuple
 from .utils.sms import send_sms
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
-from django.db.models.signals import pre_save, post_save, post_delete
+from django.db.models.signals import pre_save, post_save, post_delete, pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.timezone import localtime
@@ -215,7 +215,7 @@ def _recompute_on_item_change(sender, instance: AppointmentItem, **kwargs):
     appt = instance.appointment
     # подавляем «updated» у визита
     appt._skip_update_email = True
-    appt.recompute_totals(save=True)
+    # appt.recompute_totals(save=True)
 
 @receiver(post_save, sender=AppointmentItemPromoCode)
 @receiver(post_delete, sender=AppointmentItemPromoCode)
@@ -227,7 +227,6 @@ def _recompute_on_promocode_change(sender, instance: AppointmentItemPromoCode, *
         pass
     appt = item.appointment
     appt._skip_update_email = True
-    appt.recompute_totals(save=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # post_save: рассылка «создано» и «изменено»
@@ -315,7 +314,6 @@ def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs
         return
 
 
-    # --- updated ---
     diffs = _diff_snapshot(instance)
 
     if not diffs:
