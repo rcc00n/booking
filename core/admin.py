@@ -1157,12 +1157,19 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 appt.full_clean()
                 appt.save()
 
-                first_start = None
+
+                row_errs = {}  # message_dict для последующего ValidationError
+                prebuilt_items = []  # сюда сложим валидные, чтобы потом сохранить
+
+
+
                 for row in valid_rows:
+                    idx = row["idx"]
                     if not (row["master_id"] and row["service_id"] and row["dt"]):
                         # (сюда попадём только если кто-то внезапно пустой — но мы отфильтровали выше)
+                        key = f"items-{idx}"
+                        row_errs.setdefault(key, []).append("Incomplete row.")
                         continue
-
                     item = AppointmentItem(
                         appointment=appt,
                         master_id=row["master_id"],
@@ -1170,13 +1177,35 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                         start_time=row["dt"],
                         unit_price=row["unit_price"] or None,
                     )
-                    item.full_clean()
-                    item.save()
+                    try:
+                        item.full_clean()
+                        prebuilt_items.append((idx, item, row.get("promocode_id") or ""))
+                        item.save()
+                    except ValidationError as e:
+                        if hasattr(e, "message_dict"):
+                            for field, msgs in e.message_dict.items():
+                                msgs = msgs if isinstance(msgs, (list, tuple)) else [msgs]
+                                if field in ("__all__", "non_field_errors"):
+                                    key = f"items-{idx}"
+                                    row_errs.setdefault(key, []).extend(msgs)
+                                else:
+                                    key = f"items-{idx}-{field}"
+                                    row_errs.setdefault(key, []).extend(msgs)
+                        else:
+                            msgs = e.messages if hasattr(e, "messages") else [str(e)]
+                            key = f"items-{idx}"
+                            row_errs.setdefault(key, []).extend(msgs)
 
+                    # Если хотя бы у одной строки есть ошибки — откатываем и показываем их в форме
+                if row_errs:
+                    raise ValidationError(row_errs)
+                first_start = None
+                for idx, item, promocode_id in prebuilt_items:
+                    item.save()
                     if first_start is None or item.start_time < first_start:
                         first_start = item.start_time
 
-                    promo_id = (row["promocode_id"] or "").strip()
+                    promo_id = (promocode_id or "").strip()
                     if promo_id:
                         promo_obj = PromoCode.objects.filter(pk=promo_id).first()
                         if promo_obj:
@@ -1211,7 +1240,6 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             # Переносим ошибки из моделей в наш мешок и показываем в той же форме
             _serialize_validation_error(ve, bag)
             bag = _finalize_bag(bag)
-            print(f"Errors: {bag}")
             ctx = {
                 **self.admin_site.each_context(request),
                 "clients": clients,

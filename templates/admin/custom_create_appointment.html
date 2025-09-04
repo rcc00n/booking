@@ -152,12 +152,7 @@
         <div class="ab-field" data-field="start_time_1">
           <label>Time <span style="color:#ef4444">*</span></label>
           <input type="time" class="js-time ab-hidden" data-timepicker="15" required step="900">
-                    {% if field_errors.start_time %}
-                        {% for e in field_errors.start_time %}
-                            <div class="ab-field-error js-err-time">{{ e }}</div>
-                        {% endfor %}
-                    {% endif %}
-
+          <div class="ab-field-error js-err-time"></div>
         </div>
 
         <div class="ab-field" data-field="unit_price">
@@ -170,11 +165,7 @@
           <select class="js-promo">
             <option value="">— No promocode —</option>
           </select>
-          {% if field_errors.promocode %}
-               {% for e in field_errors.promocode %}
-                  <div class="ab-field-error">{{ e }}</div>
-              {% endfor %}
-          {% endif %}
+          <div class="ab-field-error js-err-promocode"></div>
         </div>
 
         <div class="ab-actions" style="grid-column:1/-1">
@@ -348,45 +339,76 @@
                     hookRow(row, i);
                 });
             }
+            function rowIndexFromNames(row){
+                const any = row.querySelector('[name^="items-"]');
+                if (!any) return null;
+                const m = any.getAttribute('name').match(/^items-(\d+)-/);
+                return m ? m[1] : null; // строковый индекс как в item_errors
+            }
 
-            // ---- Ошибки построчно
+// Заменяем paintItemErrors на точное сопоставление по name
             function paintItemErrors(){
-                Object.entries(ITEM_ERRORS || {}).forEach(([idx, errs]) => {
-                    const row = container.children[Number(idx)];
-                    if (!row) return;
+                const items = ITEM_ERRORS || {};
+                console.log('ITEM_ERRORS', ITEM_ERRORS);
+                console.log('POSTED_ITEMS', POSTED_ITEMS);
+                container.querySelectorAll('.ab-item').forEach(row => {
+                    const idx = rowIndexFromNames(row);
+                    if (idx == null) return;
+                    const errs = items[idx];
+                    if (!errs) return;
+
                     // master
-                    if (errs.master && errs.master.length){
+                    if (errs.master?.length){
                         const fld = row.querySelector('[data-field="master"]');
                         fld.classList.add('errors');
-                        const box = row.querySelector('.js-err-master');
-                        box.textContent = errs.master.join(' ');
+                        row.querySelector('.js-err-master').textContent = errs.master.join(' ');
                     }
+
                     // service
-                    if (errs.service && errs.service.length){
+                    if (errs.service?.length){
                         const fld = row.querySelector('[data-field="service"]');
                         fld.classList.add('errors');
-                        const box = row.querySelector('.js-err-service');
-                        box.textContent = errs.service.join(' ');
+                        row.querySelector('.js-err-service').textContent = errs.service.join(' ');
                     }
+
                     // date
-                    if (errs.start_time_0 && errs.start_time_0.length){
+                    if (errs.start_time_0?.length){
                         const fld = row.querySelector('[data-field="start_time_0"]');
                         fld.classList.add('errors');
-                        const box = row.querySelector('.js-err-date');
-                        box.textContent = errs.start_time_0.join(' ');
+                        row.querySelector('.js-err-date').textContent = errs.start_time_0.join(' ');
                     }
-                    // time
-                    if (errs.start_time_1 && errs.start_time_1.length){
+
+                    // time (учитываем и сводный start_time, и start_time_1)
+                    const timeMsgs = [...(errs.start_time || []), ...(errs.start_time_1 || [])];
+                    if (timeMsgs.length){
                         const fld = row.querySelector('[data-field="start_time_1"]');
                         fld.classList.add('errors');
-                        const box = row.querySelector('.js-err-time');
-                        box.textContent = errs.start_time_1.join(' ');
+                        row.querySelector('.js-err-time').textContent = timeMsgs.join(' ');
                     }
+
+                    // price
+                    if (errs.unit_price?.length){
+                        const fld = row.querySelector('[data-field="unit_price"]');
+                        fld.classList.add('errors');
+                        const box = fld.querySelector('.ab-field-error') || document.createElement('div');
+                        box.className = 'ab-field-error';
+                        box.textContent = errs.unit_price.join(' ');
+                        fld.appendChild(box);
+                    }
+
+                    // promocode
+                    if (errs.promocode?.length){
+                        const fld = row.querySelector('[data-field="promocode"]');
+                        fld.classList.add('errors');
+                        const box = row.querySelector('.js-err-promocode');
+                        if (box) box.textContent = errs.promocode.join(' ');
+                    }
+
                     // общие ошибки строки
-                    if (errs.__all__ && errs.__all__.length){
+                    if (errs.__all__?.length){
                         const note = document.createElement('div');
                         note.className = 'ab-errornote';
-                        note.innerHTML = errs.__all__.join('<br>');
+                        note.innerHTML = errs.__all__.map(String).join('<br>');
                         row.prepend(note);
                     }
                 });
