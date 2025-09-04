@@ -152,7 +152,12 @@
         <div class="ab-field" data-field="start_time_1">
           <label>Time <span style="color:#ef4444">*</span></label>
           <input type="time" class="js-time ab-hidden" data-timepicker="15" required step="900">
-          <div class="ab-field-error js-err-time"></div>
+                    {% if field_errors.start_time %}
+                        {% for e in field_errors.start_time %}
+                            <div class="ab-field-error js-err-time">{{ e }}</div>
+                        {% endfor %}
+                    {% endif %}
+
         </div>
 
         <div class="ab-field" data-field="unit_price">
@@ -165,6 +170,11 @@
           <select class="js-promo">
             <option value="">— No promocode —</option>
           </select>
+          {% if field_errors.promocode %}
+               {% for e in field_errors.promocode %}
+                  <div class="ab-field-error">{{ e }}</div>
+              {% endfor %}
+          {% endif %}
         </div>
 
         <div class="ab-actions" style="grid-column:1/-1">

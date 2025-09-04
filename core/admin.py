@@ -1211,7 +1211,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             # Переносим ошибки из моделей в наш мешок и показываем в той же форме
             _serialize_validation_error(ve, bag)
             bag = _finalize_bag(bag)
-
+            print(f"Errors: {bag}")
             ctx = {
                 **self.admin_site.each_context(request),
                 "clients": clients,
