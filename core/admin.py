@@ -7,10 +7,10 @@ from django.contrib.admin import DateFieldListFilter
 
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.core.exceptions import FieldError
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField
 from itertools import cycle
 
@@ -932,21 +932,20 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
 
 
     def custom_create_view(self, request):
-
+        # ---------------- helpers ----------------
         def _parse_dt(date_str: str | None, time_str: str | None):
             if not date_str or not time_str:
                 return None
-                # Популярные форматы времени
+            # популярные форматы
             for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
                 try:
                     naive = datetime.strptime(f"{date_str} {time_str}", fmt)
                     return make_aware(naive, get_current_timezone())
                 except ValueError:
                     pass
-                # fallback для ISO (если прилетит 'Z')
+            # ISO fallback (если time приходит c 'Z' и т.п.)
             try:
                 t = time_str.replace("Z", "+00:00") if time_str.endswith("Z") else time_str
-                # fromisoformat поддерживает "YYYY-MM-DDTHH:MM[:SS][+TZ]"
                 dt = datetime.fromisoformat(f"{date_str}T{t}")
                 if dt.tzinfo is None:
                     dt = make_aware(dt, get_current_timezone())
@@ -954,27 +953,22 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             except Exception:
                 return None
 
-        def _structure_errors(exc: ValidationError):
-            """
-            Преобразует ValidationError в удобную структуру:
-            {
-              "__all__": ["общие ошибки"...],
-              "fields": {"start_time": ["..."], "client": ["..."]},
-              "items": {
-                 0: {"start_time": ["..."], "master": ["..."]},
-                 2: {"promocode": ["..."]}
-              }
+        def _empty_error_bag():
+            return {
+                "__all__": [],                 # глобальные ошибки
+                "fields": defaultdict(list),   # ошибки по полям формы (вне айтемов)
+                "items": defaultdict(lambda: defaultdict(list)),  # ошибки по строкам айтемов
             }
-            Поддерживает ключи вида "items-2-start_time" или "items-2".
-            """
-            result = {"__all__": [], "fields": defaultdict(list), "items": defaultdict(lambda: defaultdict(list))}
 
-    # message_dict есть, если ошибки полевые; иначе только messages
+        def _serialize_validation_error(exc, bag):
+            """
+            Преобразует ValidationError (в т.ч. с message_dict) в наш bag.
+            """
             if hasattr(exc, "message_dict"):
                 for key, msgs in exc.message_dict.items():
                     msgs = msgs if isinstance(msgs, (list, tuple)) else [msgs]
                     if key.startswith("items-"):
-                        # варианты: items-2-start_time или просто items-2
+                        # варианты: items-2-start_time или items-2
                         parts = key.split("-")
                         try:
                             idx = int(parts[1])
@@ -983,44 +977,42 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                         if idx is not None:
                             if len(parts) >= 3:
                                 field = "-".join(parts[2:])
-                                result["items"][idx][field].extend(msgs)
+                                bag["items"][idx][field].extend(msgs)
                             else:
-                                result["items"][idx]["__all__"].extend(msgs)
+                                bag["items"][idx]["__all__"].extend(msgs)
                         else:
-                            result["__all__"].extend(msgs)
+                            bag["__all__"].extend(msgs)
                     elif key in ("__all__", "non_field_errors"):
-                        result["__all__"].extend(msgs)
+                        bag["__all__"].extend(msgs)
                     else:
-                        result["fields"][key].extend(msgs)
+                        bag["fields"][key].extend(msgs)
             else:
-                # общий ValidationError без привязки к полям
                 msgs = exc.messages if hasattr(exc, "messages") else [str(exc)]
-                result["__all__"].extend(msgs)
+                bag["__all__"].extend(msgs)
 
-            # Преобразуем defaultdict в обычные dict
-            result["fields"] = dict(result["fields"])
-            result["items"] = {i: dict(fields) for i, fields in result["items"].items()}
-            return result
+        def _finalize_bag(bag):
+            bag["fields"] = dict(bag["fields"])
+            bag["items"] = {i: dict(fields) for i, fields in bag["items"].items()}
+            return bag
 
-        # GET — отрисовка формы
+        def _context_lists():
+            """Ваш существующий метод, оставляю как есть; если у вас уже есть — используйте его."""
+            return self._context_lists()
+        # ---------------- GET: первичная отрисовка ----------------
         if request.method == "GET" and request.GET.get("master") != 'undefined':
-            clients, masters, services_by_master = self._context_lists()
+            clients, masters, services_by_master = _context_lists()
 
-            # читаем query-параметры
             q_date   = request.GET.get("date")
             q_time   = request.GET.get("time")
             q_master = request.GET.get("master")
 
-            # подготавливаем initial для ПЕРВОГО айтема
             initial_first_item = {}
             if q_master and MasterProfile.objects.filter(pk=q_master).exists():
                 initial_first_item["master"] = str(q_master)
 
             dt = _parse_dt(q_date, q_time)
             if dt:
-                # твои POST-имена: start_time_0 (дата), start_time_1 (время)
                 initial_first_item["start_time_date"] = dt.strftime("%Y-%m-%d")
-                # если были секунды — сохраним; если нет — HH:MM
                 initial_first_item["start_time_time"] = dt.strftime("%H:%M:%S" if dt.second else "%H:%M")
 
             ctx = {
@@ -1028,22 +1020,15 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "clients": clients,
                 "masters": masters,
                 "services_by_master": services_by_master,
-                # <-- новые ключи для шаблона:
                 "initial_first_item": initial_first_item,
-                # на всякий случай прокинем и «сырые» query-параметры (вдруг пригодится в JS)
-                "prefill_query": {
-                    "date": q_date,
-                    "time": q_time,
-                    "master": str(q_master) if q_master else None,
-                },
+                "prefill_query": {"date": q_date, "time": q_time, "master": str(q_master) if q_master else None},
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
-            # POST — создание Appointment и AppointmentItem’ов
-        clients, masters, services_by_master = self._context_lists()
-        errors = []
 
-        client_id = request.POST.get("client")
-        total_forms = int(request.POST.get("items-TOTAL_FORMS", 0))
+        # ---------------- POST: создаём запись ----------------
+        clients, masters, services_by_master = _context_lists()
+
+        # соберём промокоды по сервисам (как у вас)
         promos_by_service: dict[str, list[dict]] = {}
         try:
             fk_qs = PromoCode.objects.filter(~Q(service=None)).select_related("service")
@@ -1075,99 +1060,205 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                     "discount": getattr(pc, "discount_percent", None),
                 })
 
-        # Уберём дубликаты и отсортируем по text
+        # dedup + sort
         for sid, items in promos_by_service.items():
-            seen = set()
-            uniq = []
+            seen, uniq = set(), []
             for it in items:
                 if it["id"] in seen:
                     continue
                 seen.add(it["id"])
                 uniq.append(it)
-            promos_by_service[sid] = sorted(
-                uniq, key=lambda x: (x["text"] or "").lower()
-            )
+            promos_by_service[sid] = sorted(uniq, key=lambda x: (x["text"] or "").lower())
 
+        # state + первичная валидация
+        bag = _empty_error_bag()
+        client_id = (request.POST.get("client") or "").strip()
+        try:
+            total_forms = int(request.POST.get("items-TOTAL_FORMS", 0))
+        except Exception:
+            total_forms = 0
+
+        posted_items = []  # чтобы вернуть в шаблон ровно то, что вводили
+        for i in range(total_forms):
+            pref = f"items-{i}-"
+            posted_items.append({
+                "master":      (request.POST.get(pref + "master") or "").strip(),
+                "service":     (request.POST.get(pref + "service") or "").strip(),
+                "start_time_0": (request.POST.get(pref + "start_time_0") or "").strip(),  # date
+                "start_time_1": (request.POST.get(pref + "start_time_1") or "").strip(),  # time
+                "unit_price":  (request.POST.get(pref + "unit_price") or "").strip(),
+                "promocode":   (request.POST.get(pref + "promocode") or "").strip(),
+            })
+
+        # обязательные поля верхнего уровня
         if not client_id:
-            errors.append("Client is required.")
+            bag["fields"]["client"].append("Client is required.")
         if total_forms < 1:
-            errors.append("Add at least one service.")
+            bag["__all__"].append("Add at least one service.")
 
-        if errors:
+        # построчная валидация ещё до создания объектов
+        valid_rows = []
+        for idx, row in enumerate(posted_items):
+            # пропускаем пустые
+            if not any(row.values()):
+                continue
+
+            master_id  = row["master"]
+            service_id = row["service"]
+            date_str   = row["start_time_0"]
+            time_str   = row["start_time_1"]
+
+            if not master_id:
+                bag["items"][idx]["master"].append("Select master.")
+            if not service_id:
+                bag["items"][idx]["service"].append("Select service.")
+            if not date_str:
+                bag["items"][idx]["start_time_0"].append("Select date.")
+            if not time_str:
+                bag["items"][idx]["start_time_1"].append("Select time.")
+
+            dt = _parse_dt(date_str, time_str)
+            if date_str and time_str and not dt:
+                bag["items"][idx]["start_time_1"].append("Invalid date/time.")
+
+            valid_rows.append({
+                "idx": idx,
+                "master_id": master_id or None,
+                "service_id": service_id or None,
+                "dt": dt,
+                "unit_price": (row["unit_price"] or None),
+                "promocode_id": (row["promocode"] or None),
+            })
+
+        # если уже есть ошибки — просто показать страницу с ними
+        has_errors = bool(bag["__all__"] or bag["fields"] or bag["items"])
+        if has_errors:
             ctx = {
                 **self.admin_site.each_context(request),
                 "clients": clients,
                 "masters": masters,
-                "promos_by_service_json": json.dumps(promos_by_service),
                 "services_by_master": services_by_master,
-                "form_errors": errors,
+                "promos_by_service_json": json.dumps(promos_by_service),
+                "form_errors": bag["__all__"],
+                "field_errors": dict(bag["fields"]),
+                "item_errors": {i: dict(v) for i, v in bag["items"].items()},
+                "posted_items": posted_items,
+                "posted_client": client_id,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
-        with transaction.atomic():
-            appt = Appointment(
-                client_id=client_id,
-                payment_status_id=self._default_payment_status_id(),
-            )
-            appt.full_clean()
-            appt.save()
-
-            first_start = None
-            for i in range(total_forms):
-                pref = f"items-{i}-"
-
-                master_id  = request.POST.get(pref + "master")
-                service_id = request.POST.get(pref + "service")
-                date_str   = request.POST.get(pref + "start_time_0")   # YYYY-MM-DD
-                time_str   = request.POST.get(pref + "start_time_1")   # HH:MM
-                unit_price = request.POST.get(pref + "unit_price") or None
-                promocode_id = request.POST.get(pref + "promocode") or ""
-
-                if not (master_id and service_id and date_str and time_str):
-                    continue  # пропускаем неполные строки
-
-                dt = make_aware(datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M"))
-
-                item = AppointmentItem(
-                    appointment=appt,
-                    master_id=master_id,
-                    service_id=service_id,
-                    start_time=dt,
-                    unit_price=unit_price,   # если None — модель подставит базовую цену
+        # всё валидно — создаём
+        try:
+            with transaction.atomic():
+                appt = Appointment(
+                    client_id=client_id,
+                    payment_status_id=self._default_payment_status_id(),
                 )
-                item.full_clean()
-                item.save()
-                if first_start is None or item.start_time < first_start:
-                    first_start = item.start_time
+                appt.full_clean()
+                appt.save()
 
-                if promocode_id:
-                    promo_obj = PromoCode.objects.filter(pk=promocode_id).first()
-                    if promo_obj:
-                        AppointmentItemPromoCode.objects.update_or_create(
-                            item=item,
-                            defaults={"promocode": promo_obj},
-                        )
+                first_start = None
+                for row in valid_rows:
+                    if not (row["master_id"] and row["service_id"] and row["dt"]):
+                        # (сюда попадём только если кто-то внезапно пустой — но мы отфильтровали выше)
+                        continue
+
+                    item = AppointmentItem(
+                        appointment=appt,
+                        master_id=row["master_id"],
+                        service_id=row["service_id"],
+                        start_time=row["dt"],
+                        unit_price=row["unit_price"] or None,
+                    )
+                    item.full_clean()
+                    item.save()
+
+                    if first_start is None or item.start_time < first_start:
+                        first_start = item.start_time
+
+                    promo_id = (row["promocode_id"] or "").strip()
+                    if promo_id:
+                        promo_obj = PromoCode.objects.filter(pk=promo_id).first()
+                        if promo_obj:
+                            AppointmentItemPromoCode.objects.update_or_create(
+                                item=item, defaults={"promocode": promo_obj}
+                            )
+                    else:
+                        AppointmentItemPromoCode.objects.filter(item=item).delete()
+
+                if first_start:
+                    appt.start_time = first_start
+
+                if hasattr(appt, "recompute_totals"):
+                    appt.recompute_totals(save=True)
                 else:
-                    # если сняли промокод
-                    AppointmentItemPromoCode.objects.filter(item=item).delete()
+                    appt.save(update_fields=["start_time"])
 
-            if first_start:
-                appt.start_time = first_start
+                status = AppointmentStatus.objects.filter(name="Booked").first()
+                if status:
+                    # аккуратно получаем профиль, если он есть
+                    set_by = getattr(getattr(request.user, "userprofile", None), "pk", None)
+                    AppointmentStatusHistory.objects.create(
+                        appointment=appt,
+                        status=status,
+                        set_by=request.user.userprofile if set_by else None,
+                    )
 
-            if hasattr(appt, "recompute_totals"):
-                appt.recompute_totals(save=True)
-            else:
-                appt.save(update_fields=["start_time"])
+            messages.success(request, "Appointment created.")
+            return redirect("admin:core_appointment_change", appt.pk)
 
-            status = AppointmentStatus.objects.filter(name="Booked").first()
-            if status:
-                AppointmentStatusHistory.objects.create(
-                    appointment=appt,
-                    status=status,           # объект, не id
-                    set_by=request.user.userprofile,
-                )
+        except ValidationError as ve:
+            # Переносим ошибки из моделей в наш мешок и показываем в той же форме
+            _serialize_validation_error(ve, bag)
+            bag = _finalize_bag(bag)
 
-        return redirect("admin:core_appointment_change", appt.pk)
+            ctx = {
+                **self.admin_site.each_context(request),
+                "clients": clients,
+                "masters": masters,
+                "services_by_master": services_by_master,
+                "promos_by_service_json": json.dumps(promos_by_service),
+                "form_errors": bag["__all__"],
+                "field_errors": bag["fields"],
+                "item_errors": bag["items"],
+                "posted_items": posted_items,
+                "posted_client": client_id,
+            }
+            return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
+
+        except IntegrityError as ie:
+            # Ошибка БД — показываем как глобальную и не падаем 500
+            bag["__all__"].append(f"Database error: {ie}")
+            ctx = {
+                **self.admin_site.each_context(request),
+                "clients": clients,
+                "masters": masters,
+                "services_by_master": services_by_master,
+                "promos_by_service_json": json.dumps(promos_by_service),
+                "form_errors": bag["__all__"],
+                "field_errors": dict(bag["fields"]),
+                "item_errors": {i: dict(v) for i, v in bag["items"].items()},
+                "posted_items": posted_items,
+                "posted_client": client_id,
+            }
+            return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
+
+        except Exception:
+            # На проде — лог, а пользователю безопасно
+            bag["__all__"].append("Unexpected error while creating appointment.")
+            ctx = {
+                **self.admin_site.each_context(request),
+                "clients": clients,
+                "masters": masters,
+                "services_by_master": services_by_master,
+                "promos_by_service_json": json.dumps(promos_by_service),
+                "form_errors": bag["__all__"],
+                "field_errors": dict(bag["fields"]),
+                "item_errors": {i: dict(v) for i, v in bag["items"].items()},
+                "posted_items": posted_items,
+                "posted_client": client_id,
+            }
+            return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
     @admin.display(description=_("Позиций"), ordering="_items_count")
     def items_count_display(self, obj):

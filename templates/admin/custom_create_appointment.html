@@ -1,16 +1,12 @@
 {% extends "admin/base_site.html" %}
 {% load static %}
-{% block extrastyle %}
 
+{% block extrastyle %}
     {{ block.super }}
     <link rel="stylesheet" href="{% static '/admin/css/custom_sidebar.css' %}">
     <style>
-
-
         .ab-wrap{max-width:1100px;margin:0 auto}
-        .ab-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,.04)}
-        .ab-h{font-weight:700;margin:0 0 8px}
-        .ab-sub{color:#6b7280;margin:0 0 18px}
+        .ab-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,.04);padding:20px}  .ab-sub{color:#6b7280;margin:0 0 18px}
         .ab-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
         @media (max-width:900px){.ab-grid{grid-template-columns:1fr}}
         .ab-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:12px;align-items:end}
@@ -27,25 +23,35 @@
         .ab-hidden{display:none}
         .hint{color:#6b7280;font-size:12px;margin-top:4px}
 
+        /* Ошибки */
+        .ab-errornote{background:#FEF2F2;border:1px solid #FCA5A5;color:#991B1B;padding:10px 12px;border-radius:10px;margin:10px 0}
+        .ab-errorlist{margin:0;padding-left:18px}
+        .ab-field.errors input,.ab-field.errors select{border-color:#ef4444}
+        .ab-field .ab-field-error{color:#b91c1c;font-size:12px;margin-top:6px}
+        .ab-section-title{font-weight:700;margin-top:18px}
     </style>
 {% endblock %}
 
-
 {% block content %}
     <div class="ab-wrap">
-        <form method="post" action="" id="appt-form" class="ab-card" style="padding:20px">
+        <form method="post" action="" id="appt-form" class="ab-card">
             {% csrf_token %}
 
-            {% if add %} {# создаём #}
-                <h2>Создание записи</h2>
-            {% elif change %} {# редактируем #}
-                <h2>Редактирование записи</h2>
-            {% endif %}
+            <h2>{% if add %}Создание записи{% else %}Создание записи{% endif %}</h2>
             <p class="ab-sub">Сначала выберите клиента, затем добавьте одну или несколько услуг.</p>
+
+            {# Глобальные ошибки (из form_errors) #}
+            {% if form_errors %}
+                <div class="ab-errornote">
+                    <ul class="ab-errorlist">
+                        {% for e in form_errors %}<li>{{ e }}</li>{% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
 
             <!-- STEP 1: CLIENT -->
             <div class="ab-grid" id="step-client">
-                <div class="ab-field">
+                <div class="ab-field {% if field_errors.client %}errors{% endif %}">
                     <label for="id_client">Client <span style="color:#ef4444">*</span></label>
                     <select id="id_client" name="client" required>
                         <option value="">---------</option>
@@ -53,6 +59,11 @@
                             <option value="{{ c.id }}">{{ c.label }}</option>
                         {% endfor %}
                     </select>
+                    {% if field_errors.client %}
+                        {% for e in field_errors.client %}
+                            <div class="ab-field-error">{{ e }}</div>
+                        {% endfor %}
+                    {% endif %}
                     <div class="hint">После выбора клиента ниже станет доступно добавление услуг.</div>
                 </div>
             </div>
@@ -63,7 +74,7 @@
                     <button type="button" class="ab-btn secondary" id="btn-add-item">＋ Add service</button>
                 </div>
 
-                <!-- management form for inline formset -->
+                <!-- management form (согласовано с вашим view) -->
                 <input type="hidden" name="items-TOTAL_FORMS" id="id_items-TOTAL_FORMS" value="0">
                 <input type="hidden" name="items-INITIAL_FORMS" id="id_items-INITIAL_FORMS" value="0">
                 <input type="hidden" name="items-MIN_NUM_FORMS" id="id_items-MIN_NUM_FORMS" value="0">
@@ -81,94 +92,96 @@
         </form>
     </div>
 
-    <!-- ✅ Прокидываем справочники в JS -->
+    {# ---- Данные для JS из контекста ---- #}
     {{ masters|json_script:"ab-masters" }}
     {{ services_by_master|json_script:"ab-services-by-master" }}
-    {{ initial_first_item|json_script:"initial-first-item" }}
+    {{ initial_first_item|json_script:"ab-initial-first" }}
 
-    <template id="item-row-tpl">
-        <div class="ab-item">
-            <div class="ab-row">
-                <div class="ab-field">
-                    <label>Master <span style="color:#ef4444">*</span></label>
-                    <select class="js-master" required>
-                        <option value="">---------</option>
-                        <!-- options вставятся из JS -->
-                    </select>
-                </div>
+    {# могут отсутствовать — даём безопасные дефолты #}
+    {{ posted_items|default:'[]'|json_script:"ab-posted-items" }}
+    {{ item_errors|default:'{}'|json_script:"ab-item-errors" }}
+    {{ field_errors|default:'{}'|json_script:"ab-field-errors" }}
+    {{ posted_client|default:'""'|json_script:"ab-posted-client" }}
 
-                <div class="ab-field">
-                    <label>Service <span style="color:#ef4444">*</span></label>
-                    <select class="js-service" required disabled>
-                        <option value="">---------</option>
-                    </select>
-                    <div class="hint js-service-hint"></div>
-                </div>
-
-                <div class="ab-field">
-                    <label>Date <span style="color:#ef4444">*</span></label>
-                    <input type="date" class="js-date" name="items-0-start_time_0"
-                           value="{{ initial_first_item.start_time_date|default:'' }}" required>
-                </div>
-
-                <div class="ab-field">
-                    <label>Time <span style="color:#ef4444">*</span></label>
-                    <input type="time" class="js-time ab-hidden" name="items-0-start_time_1" data-timepicker="15"
-                           value="{{ initial_first_item.start_time_time|default:'' }}" required step="900">
-                </div>
-                <input type="hidden" id="id_start_time" name="start_time">
-                <div class="ab-field">
-                    <label>Unit price</label>
-                    <input type="number" class="js-price" step="0.01" min="0" placeholder="Auto">
-                </div>
-
-                <div class="ab-field">
-                    <label>Promocode</label>
-                    <select class="js-promo">
-                        <option value="">— No promocode —</option>
-                        <!-- варианты подставятся через JS -->
-                    </select>
-                </div>
-
-                <div class="ab-actions" style="grid-column:1/-1">
-                    <button type="button" class="ab-btn danger js-remove">Remove</button>
-                </div>
-            </div>
-        </div>
-    </template>
     <script>
         (function(){
             // ---- Data from backend
             const MASTERS = JSON.parse(document.getElementById('ab-masters').textContent || '[]');
-            // services_by_master: { "<master_id>": [{id, name, base_price, duration_min}, ...], ... }
             const SERVICES_BY_MASTER = JSON.parse(document.getElementById('ab-services-by-master').textContent || '{}');
+            const INITIAL_FIRST = JSON.parse(document.getElementById('ab-initial-first').textContent || '{}');
+
+            const POSTED_ITEMS = JSON.parse(document.getElementById('ab-posted-items').textContent || '[]');
+            const ITEM_ERRORS = JSON.parse(document.getElementById('ab-item-errors').textContent || '{}');
+            const FIELD_ERRORS = JSON.parse(document.getElementById('ab-field-errors').textContent || '{}');
+            const POSTED_CLIENT = JSON.parse(document.getElementById('ab-posted-client').textContent || '""');
 
             // ---- Elements
             const clientEl = document.getElementById('id_client');
             const itemsSection = document.getElementById('items-section');
             const container = document.getElementById('items-container');
             const totalForms = document.getElementById('id_items-TOTAL_FORMS');
-            const tpl = document.getElementById('item-row-tpl');
             const grandTotal = document.getElementById('grand-total');
+
+            // ---- Template row (создаём через JS — так проще печатать ошибки построчно)
+            function createRow() {
+                const wrap = document.createElement('div');
+                wrap.className = 'ab-item';
+                wrap.innerHTML = `
+      <div class="ab-row">
+        <div class="ab-field" data-field="master">
+          <label>Master <span style="color:#ef4444">*</span></label>
+          <select class="js-master" required></select>
+          <div class="ab-field-error js-err-master"></div>
+        </div>
+
+        <div class="ab-field" data-field="service">
+          <label>Service <span style="color:#ef4444">*</span></label>
+          <select class="js-service" required disabled>
+            <option value="">---------</option>
+          </select>
+          <div class="hint js-service-hint"></div>
+          <div class="ab-field-error js-err-service"></div>
+        </div>
+
+        <div class="ab-field" data-field="start_time_0">
+          <label>Date <span style="color:#ef4444">*</span></label>
+          <input type="date" class="js-date" required>
+          <div class="ab-field-error js-err-date"></div>
+        </div>
+
+        <div class="ab-field" data-field="start_time_1">
+          <label>Time <span style="color:#ef4444">*</span></label>
+          <input type="time" class="js-time ab-hidden" data-timepicker="15" required step="900">
+          <div class="ab-field-error js-err-time"></div>
+        </div>
+
+        <div class="ab-field" data-field="unit_price">
+          <label>Unit price</label>
+          <input type="number" class="js-price" step="0.01" min="0" placeholder="Auto">
+        </div>
+
+        <div class="ab-field" data-field="promocode">
+          <label>Promocode</label>
+          <select class="js-promo">
+            <option value="">— No promocode —</option>
+          </select>
+        </div>
+
+        <div class="ab-actions" style="grid-column:1/-1">
+          <button type="button" class="ab-btn danger js-remove">Remove</button>
+        </div>
+      </div>
+    `;
+                return wrap;
+            }
 
             // ---- Helpers
             function money(n){ n = Number(n||0); return '$' + n.toFixed(2); }
-
-            function recalcGrandTotal(){
-                let sum = 0;
-                container.querySelectorAll('.js-price').forEach(inp => {
-                    const v = parseFloat(inp.value);
-                    if (!isNaN(v)) sum += v;
-                });
-                grandTotal.textContent = money(sum);
-            }
-
             function buildOption(v, t){ const o = document.createElement('option'); o.value=v; o.textContent=t; return o; }
 
             function populateMasters(select){
                 select.innerHTML = '';
                 select.appendChild(buildOption('', '---------'));
-                // MASTERS: [{id, label}]
                 MASTERS.forEach(m => select.appendChild(buildOption(String(m.id), m.label)));
             }
 
@@ -184,78 +197,89 @@
                 });
                 select.disabled = list.length === 0;
             }
-            function populatePromocodes(select, serviceId){
-                select.innerHTML = '';
-                select.appendChild(buildOption('', '— No promocode —'));
-                if (!serviceId) return;
 
-                // ⚠️ тут ты делаешь AJAX к API, который вернёт список промокодов для услуги
-                // например /accounts/api/services/<id>/promocodes/
-                fetch(`/accounts/api/services/${serviceId}/promocodes/`)
-                    .then(r => r.json())
-                    .then(data => {
-                        data.forEach(p => {
-                            const label = p.discount_percent
-                                ? `${p.code} — ${p.discount_percent}%`
-                                : p.code;
-                            select.appendChild(buildOption(String(p.id), label));
-                        });
-                    })
-                    .catch(err => console.error("Failed to load promocodes", err));
+            function recalcGrandTotal(){
+                let sum = 0;
+                container.querySelectorAll('.js-price').forEach(inp => {
+                    const v = parseFloat(inp.value);
+                    if (!isNaN(v)) sum += v;
+                });
+                grandTotal.textContent = money(sum);
             }
 
+            // ---- Timepicker 15m (селект поверх input[type=time])
+            function buildTimeSelect() {
+                const sel = document.createElement('select');
+                sel.className = 'ab-select js-timepicker';
+                for (let h = 0; h < 24; h++) {
+                    for (let m = 0; m < 60; m += 15) {
+                        const v = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+                        const opt = document.createElement('option');
+                        opt.value = v;
+                        opt.textContent = v;
+                        sel.appendChild(opt);
+                    }
+                }
+                return sel;
+            }
+            function enhanceTimeInput(input) {
+                if (!input || input.dataset.enhanced) return;
+                const sel = buildTimeSelect();
+                const raw = (input.value || '').slice(0,5);
+                if (raw) {
+                    const found = [...sel.options].some(o => o.value === raw);
+                    if (found) sel.value = raw;
+                }
+                sel.addEventListener('change', () => {
+                    input.value = sel.value;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+                input.insertAdjacentElement('afterend', sel);
+                input.classList.add('ab-hidden');
+                input.dataset.enhanced = '1';
+            }
+
+            // ---- Row wiring
             function hookRow(row, idx){
-                // Проставляем имена для formset'а Django Admin Inline
                 const name = (suffix)=> `items-${idx}-${suffix}`;
-                row.querySelector('.js-master').setAttribute('name', name('master'));
-                row.querySelector('.js-service').setAttribute('name', name('service'));
-                row.querySelector('.js-date').setAttribute('name', name('start_time_0'));
-                row.querySelector('.js-time').setAttribute('name', name('start_time_1'));
-                row.querySelector('.js-price').setAttribute('name', name('unit_price'));
-                row.querySelector('.js-promo').setAttribute('name', name('promocode'));
-
-                // id'шники для удобства (не обязательно)
-                row.querySelector('.js-master').id = `id_items-${idx}-master`;
-                row.querySelector('.js-service').id = `id_items-${idx}-service`;
-                row.querySelector('.js-date').id = `id_items-${idx}-start_time_0`;
-                row.querySelector('.js-time').id = `id_items-${idx}-start_time_1`;
-                row.querySelector('.js-price').id = `id_items-${idx}-unit_price`;
-                row.querySelector('.js-promo').id = `id_items-${idx}-promocode`;
-
-                // Заполним мастеров
                 const masterSel = row.querySelector('.js-master');
                 const serviceSel = row.querySelector('.js-service');
+                const dateInp = row.querySelector('.js-date');
+                const timeInp = row.querySelector('.js-time');
+                const priceInp = row.querySelector('.js-price');
+                const promoSel = row.querySelector('.js-promo');
                 const hint = row.querySelector('.js-service-hint');
-                populateMasters(masterSel);
 
-                // Смена мастера → обновить список сервисов
+                // names + ids (для вью)
+                masterSel.name = name('master');   masterSel.id = `id_items-${idx}-master`;
+                serviceSel.name = name('service'); serviceSel.id = `id_items-${idx}-service`;
+                dateInp.name = name('start_time_0'); dateInp.id = `id_items-${idx}-start_time_0`;
+                timeInp.name = name('start_time_1'); timeInp.id = `id_items-${idx}-start_time_1`;
+                priceInp.name = name('unit_price');  priceInp.id = `id_items-${idx}-unit_price`;
+                promoSel.name = name('promocode');   promoSel.id = `id_items-${idx}-promocode`;
+
+                populateMasters(masterSel);
+                enhanceTimeInput(timeInp);
+
                 masterSel.addEventListener('change', () => {
                     populateServices(serviceSel, masterSel.value);
                     hint.textContent = '';
-                    // очистим цену
-                    const priceInput = row.querySelector('.js-price');
-                    if (priceInput){ priceInput.value = ''; recalcGrandTotal(); }
+                    priceInp.value = '';
+                    recalcGrandTotal();
                 });
 
-                // Смена сервиса → подставить цену
                 serviceSel.addEventListener('change', () => {
                     const opt = serviceSel.selectedOptions[0];
-                    const price = opt && opt.dataset && opt.dataset.price ? opt.dataset.price : '';
+                    const price = opt && opt.dataset ? opt.dataset.price : '';
                     const dur = opt && opt.dataset ? opt.dataset.duration : '';
-                    populatePromocodes(row.querySelector('.js-promo'), serviceSel.value);
-                    const priceInput = row.querySelector('.js-price');
-                    if (priceInput){
-                        priceInput.value = price;
-                        recalcGrandTotal();
-                    }
+                    priceInp.value = price || '';
                     hint.textContent = dur ? (`Duration: ${dur} min`) : '';
-
+                    recalcGrandTotal();
                 });
 
-                // Ручная смена цены → пересчитать общую сумму
-                row.querySelector('.js-price').addEventListener('input', recalcGrandTotal);
+                priceInp.addEventListener('input', recalcGrandTotal);
 
-                // Удаление строки
                 row.querySelector('.js-remove').addEventListener('click', () => {
                     row.remove();
                     renumberRows();
@@ -263,19 +287,51 @@
                 });
             }
 
-            function addRow(){
+            function addRow(prefill){
                 const idx = Number(totalForms.value);
-                const fragment = tpl.content.cloneNode(true);
-                const row = fragment.querySelector('.ab-item');
-
+                const row = createRow();
                 hookRow(row, idx);
+
+                // Префилл значений
+                const masterSel = row.querySelector('.js-master');
+                const serviceSel = row.querySelector('.js-service');
+                const dateInp = row.querySelector('.js-date');
+                const timeInp = row.querySelector('.js-time');
+                const priceInp = row.querySelector('.js-price');
+                const promoSel = row.querySelector('.js-promo');
+
+                if (prefill && prefill.master){
+                    masterSel.value = String(prefill.master);
+                    populateServices(serviceSel, masterSel.value);
+                }
+                if (prefill && prefill.service){
+                    serviceSel.value = String(prefill.service);
+                    // дернуть цену/длительность
+                    const opt = serviceSel.selectedOptions[0];
+                    if (opt) {
+                        priceInp.value = opt.dataset.price || '';
+                        const hint = row.querySelector('.js-service-hint');
+                        hint.textContent = opt.dataset.duration ? (`Duration: ${opt.dataset.duration} min`) : '';
+                    }
+                }
+                if (prefill && prefill.start_time_0) dateInp.value = prefill.start_time_0;
+                if (prefill && prefill.start_time_1){
+                    timeInp.value = prefill.start_time_1.length===5 ? prefill.start_time_1 : prefill.start_time_1.slice(0,5);
+                    // синхронизируем селект-таймпикер
+                    const sel = timeInp.nextElementSibling;
+                    if (sel && sel.classList.contains('js-timepicker')){
+                        const v = timeInp.value.slice(0,5);
+                        if ([...sel.options].some(o=>o.value===v)) sel.value = v;
+                    }
+                }
+                if (prefill && prefill.unit_price) priceInp.value = prefill.unit_price;
+                if (prefill && prefill.promocode)  promoSel.value = prefill.promocode;
 
                 container.appendChild(row);
                 totalForms.value = idx + 1;
             }
 
             function renumberRows(){
-                // Проходим и переиндексируем имена/идшники, чтобы formset соответствовал
                 const rows = Array.from(container.querySelectorAll('.ab-item'));
                 totalForms.value = rows.length;
                 rows.forEach((row, i) => {
@@ -283,22 +339,88 @@
                 });
             }
 
-            // Показать секцию items, когда выбран клиент
+            // ---- Ошибки построчно
+            function paintItemErrors(){
+                Object.entries(ITEM_ERRORS || {}).forEach(([idx, errs]) => {
+                    const row = container.children[Number(idx)];
+                    if (!row) return;
+                    // master
+                    if (errs.master && errs.master.length){
+                        const fld = row.querySelector('[data-field="master"]');
+                        fld.classList.add('errors');
+                        const box = row.querySelector('.js-err-master');
+                        box.textContent = errs.master.join(' ');
+                    }
+                    // service
+                    if (errs.service && errs.service.length){
+                        const fld = row.querySelector('[data-field="service"]');
+                        fld.classList.add('errors');
+                        const box = row.querySelector('.js-err-service');
+                        box.textContent = errs.service.join(' ');
+                    }
+                    // date
+                    if (errs.start_time_0 && errs.start_time_0.length){
+                        const fld = row.querySelector('[data-field="start_time_0"]');
+                        fld.classList.add('errors');
+                        const box = row.querySelector('.js-err-date');
+                        box.textContent = errs.start_time_0.join(' ');
+                    }
+                    // time
+                    if (errs.start_time_1 && errs.start_time_1.length){
+                        const fld = row.querySelector('[data-field="start_time_1"]');
+                        fld.classList.add('errors');
+                        const box = row.querySelector('.js-err-time');
+                        box.textContent = errs.start_time_1.join(' ');
+                    }
+                    // общие ошибки строки
+                    if (errs.__all__ && errs.__all__.length){
+                        const note = document.createElement('div');
+                        note.className = 'ab-errornote';
+                        note.innerHTML = errs.__all__.join('<br>');
+                        row.prepend(note);
+                    }
+                });
+            }
+
+            // ---- Init form
+            (function init(){
+                // Восстановим выбранного клиента (если был)
+                if (POSTED_CLIENT){ clientEl.value = POSTED_CLIENT; }
+                // Покажем секцию услуг, если клиент выбран
+                itemsSection.classList.toggle('ab-hidden', !clientEl.value);
+
+                // Нарисуем строки:
+                if (Array.isArray(POSTED_ITEMS) && POSTED_ITEMS.length){
+                    POSTED_ITEMS.forEach(it => addRow({
+                        master: it.master, service: it.service,
+                        start_time_0: it.start_time_0, start_time_1: it.start_time_1,
+                        unit_price: it.unit_price, promocode: it.promocode
+                    }));
+                } else {
+                    // Если есть initial_first_item (GET с префилом) — используем
+                    if (INITIAL_FIRST && (INITIAL_FIRST.master || INITIAL_FIRST.start_time_date || INITIAL_FIRST.start_time_time)){
+                        addRow({
+                            master: INITIAL_FIRST.master || '',
+                            start_time_0: INITIAL_FIRST.start_time_date || '',
+                            start_time_1: (INITIAL_FIRST.start_time_time || '').slice(0,5),
+                        });
+                    } else {
+                        addRow({});
+                    }
+                }
+
+                recalcGrandTotal();
+                paintItemErrors();
+            })();
+
+            // Системные события
             clientEl.addEventListener('change', () => {
                 itemsSection.classList.toggle('ab-hidden', !clientEl.value);
             });
 
-            document.getElementById('btn-add-item').addEventListener('click', addRow);
+            document.getElementById('btn-add-item').addEventListener('click', () => addRow({}));
 
-            // Инициализация
-            (function init(){
-                // Если клиент заранее выбран — показать секцию
-                if (clientEl.value) itemsSection.classList.remove('ab-hidden');
-                // Добавим первую строку, чтобы не было пусто
-                addRow();
-            })();
-
-            // На submit — базовая валидация (можно расширять)
+            // Базовая клиентская валидация, чтобы не гонять пустое
             document.getElementById('appt-form').addEventListener('submit', (e) => {
                 if (!clientEl.value){
                     e.preventDefault();
@@ -313,86 +435,5 @@
             });
 
         })();
-        // timepicker_15min.js
-        (() => {
-            function buildSelect() {
-                const sel = document.createElement('select');
-                sel.className = 'ab-select js-timepicker';
-                for (let h = 0; h < 24; h++) {
-                    for (let m = 0; m < 60; m += 15) {
-                        const v = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
-                        const opt = document.createElement('option');
-                        opt.value = v;
-                        opt.textContent = v;
-                        sel.appendChild(opt);
-                    }
-                }
-                return sel;
-            }
-
-            function enhanceTimeInput(input) {
-                if (!input || input.dataset.enhanced) return;
-
-                const sel = buildSelect();
-
-                // Установить начальное значение, если есть
-                const raw = (input.value || '').slice(0, 5); // 'HH:MM'
-                if (raw) {
-                    const found = [...sel.options].some(o => o.value === raw);
-                    if (found) sel.value = raw;
-                }
-
-                // Синхронизация select -> input
-                sel.addEventListener('change', () => {
-                    input.value = sel.value;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                });
-
-                // Вставка рядом и скрытие оригинала
-                input.insertAdjacentElement('afterend', sel);
-                input.classList.add('ab-hidden');
-                input.dataset.enhanced = '1';
-            }
-
-            function init(container = document) {
-                // 1) Явно помеченные поля
-                container.querySelectorAll('input[type="time"][data-timepicker]')
-                    .forEach(enhanceTimeInput);
-
-                // 2) Запасной селектор на случай, если имя оканчивается на "-time"
-                container.querySelectorAll('input[type="time"][name$="-time"]')
-                    .forEach(enhanceTimeInput);
-            }
-
-            document.addEventListener('DOMContentLoaded', () => {
-                const holder = document.querySelector('#items-holder') || document;
-
-                // Инициализация для уже отрисованных строк
-                init(holder);
-
-                // Перехват кнопки добавления строки (если есть такая кнопка)
-                document.body.addEventListener('click', (e) => {
-                    const btn = e.target.closest('.js-add-item, .add-row, .js-add-service');
-                    if (btn) {
-                        // Даём формсету дорисоваться
-                        setTimeout(() => init(holder), 0);
-                    }
-                });
-
-                // Фолбэк: подхватываем любые новые узлы формсета
-                const mo = new MutationObserver((mutations) => {
-                    for (const m of mutations) {
-                        for (const n of m.addedNodes) {
-                            if (n instanceof HTMLElement) init(n);
-                        }
-                    }
-                });
-                mo.observe(holder, { childList: true, subtree: true });
-            });
-        })();
     </script>
-
 {% endblock %}
-
-
