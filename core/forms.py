@@ -692,3 +692,42 @@ def assign_services_to_master(master, selected_services):
     for sid in service_ids:
         if sid not in existing:
             ServiceMaster.objects.create(master_id=master.pk, service_id=sid)
+
+
+class QuarterHourTimeInput(forms.TimeInput):
+    input_type = "time"
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("attrs", {})
+        kwargs["attrs"]["step"] = 900   # 15 минут
+        super().__init__(*args, **kwargs)
+
+class MasterAvailabilityForm(forms.ModelForm):
+    class Meta:
+        model = MasterAvailability
+        fields = "__all__"
+        widgets = {
+            "start_time": forms.SplitDateTimeWidget(
+                date_attrs={"type": "date"},
+                time_attrs={"type": "time", "step": 900},  # 15 минут
+            ),
+            "end_time": forms.SplitDateTimeWidget(
+                date_attrs={"type": "date"},
+                time_attrs={"type": "time", "step": 900},  # 15 минут
+            ),
+        }
+
+    class Media:
+        # Можно оставить CDN, а позже переложить в static
+        css = {
+            "all": [
+                "https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css",
+                "https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/material_blue.css",
+                "admin/css/ma_flatpickr_overrides.css",       # наш небольшой тюнинг (ниже)
+            ]
+        }
+        js = [
+            "https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js",
+            "admin/js/quarter_timepicker.js",                 # твой селектор 15 минут
+            "admin/js/ma_flatpickr_init.js",                  # инициализация календаря (ниже)
+        ]

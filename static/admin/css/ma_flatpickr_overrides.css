@@ -1,0 +1,42 @@
+/* Выравниваем высоту и радиус под админские инпуты */
+.form-control[type="text"]{
+    background: #fff !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: 8px !important;
+    margin-bottom: 1vh  !important;
+    height: 36px !important;
+    width: 20vh !important;
+    line-height: 20px;
+    font-size: 1.6vh !important;
+}
+
+/* Иконка календаря у altInput — добавим небольшой паддинг справа под стрелку */
+.flatpickr-input[readonly] {
+    padding-right: 36px !important;
+}
+
+/* Тень и скругления попапа */
+.flatpickr-calendar {
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.12);
+}
+
+/* Чуть крупнее дни для кликабельности */
+.flatpickr-day {
+    border-radius: 8px;
+}
+.flatpickr-day:hover {
+    background: #e8f0fe;
+}
+.flatpickr-day.selected, .flatpickr-day.startRange, .flatpickr-day.endRange {
+    background: #1e40af;   /* сочетается с material_blue */
+    border-color: #1e40af;
+}
+
+/* Чтоб родной input[type=date] не “мигал” при инициализации */
+input[type="date"].flatpickr-input {
+    color: transparent;
+}
+
+
+

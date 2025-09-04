@@ -447,6 +447,7 @@ admin.site.register(User, CustomUserAdmin)
 
 @admin.register(MasterAvailability)
 class MasterAvailabilityAdmin(ExportCsvMixin, admin.ModelAdmin):
+    form = MasterAvailabilityForm
     list_display = ("master", "start_time", "end_time", "reason")
     list_filter = ("master",)
     search_fields = ("master__first_name", "master__last_name", "reason")

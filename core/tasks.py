@@ -367,7 +367,7 @@ def _render_review_email(ctx: dict[str, str]) -> tuple[str, str, str]:
     subject = "How was your visit?"
     ctx["text_fallback"] = (
         f"Hello, {ctx['client_name']}!\n\n"
-        f"We hope you enjoyed your {ctx['service_name']} with {ctx['master_name']} on {ctx['start_local']}.\n"
+        f"We hope you enjoyed your {ctx['items_lines']}.\n"
         f"Please share your feedback."
     )
     html, text = _safe_render("email/post_appointment_review.html", ctx, subject)

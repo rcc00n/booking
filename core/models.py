@@ -631,9 +631,7 @@ class AppointmentItem(models.Model):
             promo_disc = int(promocode.discount_percent)
         # сначала применяем скидку услуги/промокода
         price = base * (Decimal(100) - Decimal(promo_disc)) / Decimal(100)
-        print(f"Promocode Price: {price}")
         price = price * (Decimal(100) - Decimal(service_disc)) / Decimal(100)
-        print(f"Service Disc Price: {price}")
         # потом — персональную скидку клиента
         personal_pct = 0
         if self.appointment and self.appointment.client:
@@ -641,10 +639,8 @@ class AppointmentItem(models.Model):
 
         if personal_pct:
             price = price * (Decimal(100) - Decimal(personal_pct)) / Decimal(100)
-        print(f"Personal Price: {price}")
         # финальная цена
         self.final_price = price.quantize(Decimal("0.01"))
-        print(f"Final Price: {self.final_price}")
         # источник скидки
         if service_disc == 0 and personal_pct == 0 and promo_disc == 0:
             self.discount_source = ""
