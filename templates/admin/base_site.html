@@ -1,6 +1,6 @@
 {% extends "admin/base.html" %}
 {% load static %}
-
+{% load filters %}
 {%block extrahead %}
     <link rel="stylesheet" href="{% static 'admin/css/custom_sidebar.css' %}">
     <script defer src="{% static 'admin/js/custom_sidebar.js' %}"></script>
@@ -27,13 +27,13 @@
                     </a>
                     <ul class="submenu">
                         <li><a href="{% url 'admin:core_appointment_changelist' %}">All Appointments</a></li>
-                        {% if not request.user.master_profile %}
+                        {% if not request.user|is_master_user %}
                         <li><a href="{% url 'admin:core_appointmentstatushistory_changelist' %}">Status History</a></li>
                         <li><a href="{% url 'admin:core_appointmentitempromocode_changelist' %}">Appointment Promocode</a></li>
                         {% endif %}
                     </ul>
                 </li>
-                {% if not request.user.master_profile %}
+                {% if not request.user|is_master_user %}
                 <li class="dropdown">
                     <a href="javascript:void(0);" onclick="toggleDropdown(this)">
                         <img src="{% static 'admin/icons/users.png' %}" alt="Users">

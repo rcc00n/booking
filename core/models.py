@@ -95,6 +95,7 @@ class UserProfile(models.Model):
         parts = []
         if hc.get("allergies"): parts.append(f"Allergies: {', '.join(hc['allergies'])}")
         if hc.get("medications"): parts.append(f"Medications: {', '.join(hc['medications'])}")
+        if hc.get("chronic_conditions"): parts.append(f"Chronic Conditions: {', '.join(hc['chronic_conditions'])}")
         if hc.get("contraindications"): parts.append(f"Contraindications: {', '.join(hc['contraindications'])}")
         if hc.get("notes"): parts.append(f"Notes: {hc['notes']}")
         return " | ".join(parts) or "—"

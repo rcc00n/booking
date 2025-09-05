@@ -17,6 +17,7 @@ from itertools import cycle
 from django.utils.formats import number_format
 from django.utils.timezone import localtime, datetime, make_aware, localdate, get_current_timezone, make_naive
 from django.utils.html import escape
+from core.utils.admin_perms import is_master, master_obj
 from django.shortcuts import redirect
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
@@ -546,22 +547,6 @@ class MasterAvailabilityAdmin(ExportCsvMixin, admin.ModelAdmin):
 # -----------------------------
 
 
-
-def _is_master(user) -> bool:
-    """
-    Режим мастера (видит/фильтрует только свои записи).
-    Подставь собственную проверку роли, если она у тебя уже есть.
-    """
-    # NOTE: примеры — замени на свой способ:
-    up = getattr(user, "userprofile", None)
-    if up is not None and getattr(up, "is_master", False):
-        return True
-    # или по группе:
-    if user.groups.filter(name__iexact="Masters").exists():
-        return True
-    return False
-
-
 def _can_override_discount_rule(user) -> bool:
     """Право на одновременную скидку услуги и промокод в одной позиции."""
     return bool(
@@ -612,6 +597,42 @@ class AppointmentItemInline(admin.TabularInline):
 
         return PrefillFormSet
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if is_master(request.user):
+            # Если мастер хранится в AppointmentItem (мульти-услуги)
+            return qs.filter(master=master_obj(request.user)).distinct()
+            # Если мастер хранится прямо в Appointment (одиночная услуга):
+        # return qs.filter(master=master_obj(request.user))
+        return qs
+
+    def has_view_permission(self, request, obj=None):
+        ok = super().has_view_permission(request, obj)
+        if not ok:
+            return False
+        if obj and is_master(request.user):
+            # Разрешаем смотреть только свои
+            return obj.filter(master=master_obj(request.user)).exists()
+            # для поля appointment.master:
+            # return obj.master_id == master_obj(request.user).id
+        return True
+
+    def has_change_permission(self, request, obj=None):
+        ok = super().has_change_permission(request, obj)
+        if not ok:
+            return False
+        if obj and is_master(request.user):
+            return obj.filter(master=master_obj(request.user)).exists()
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        ok = super().has_delete_permission(request, obj)
+        if not ok:
+            return False
+        if obj and is_master(request.user):
+            return obj.filter(master=master_obj(request.user)).exists()
+        return True
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CSV helpers
@@ -644,12 +665,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
     date_hierarchy = "start_time"  # поправь, если поле называется иначе
 
     list_select_related = ("client",)
-    list_filter = (
-        AppointmentServiceFilter,
-        AppointmentItemMasterFilter,
-        AppointmentHasPromocodeFilter,
-        # добавь фильтры по статусу/оплате/клиенту по необходимости
-    )
+
 
     ordering = ("-start_time",)
     autocomplete=["promocode",]
@@ -672,46 +688,50 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
 
     # ── РЕЖИМ МАСТЕРА: права и доступ ────────────────────────────────────────
 
-    def has_add_permission(self, request):
-        if _is_master(request.user):
-            # мастерам запрещаем создавать приёмы (только просмотр)
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if is_master(request.user):
+            # Если мастер хранится в AppointmentItem (мульти-услуги)
+            return qs.filter(items__master=master_obj(request.user)).distinct()
+            # Если мастер хранится прямо в Appointment (одиночная услуга):
+        # return qs.filter(master=master_obj(request.user))
+        return qs
+
+    def has_view_permission(self, request, obj=None):
+        ok = super().has_view_permission(request, obj)
+        if not ok:
             return False
-        return super().has_add_permission(request)
+        if obj and is_master(request.user):
+            # Разрешаем смотреть только свои
+            return obj.items.filter(master=master_obj(request.user)).exists()
+            # для поля appointment.master:
+            # return obj.master_id == master_obj(request.user).id
+        return True
 
     def has_change_permission(self, request, obj=None):
-        if _is_master(request.user):
-            # мастерам запрещаем редактирование (только просмотр)
+        ok = super().has_change_permission(request, obj)
+        if not ok:
             return False
-        return super().has_change_permission(request, obj)
+        if obj and is_master(request.user):
+            return obj.items.filter(master=master_obj(request.user)).exists()
+        return True
 
     def has_delete_permission(self, request, obj=None):
-        if _is_master(request.user):
+        ok = super().has_delete_permission(request, obj)
+        if not ok:
             return False
-        return super().has_delete_permission(request, obj)
-
-    def get_readonly_fields(self, request, obj=None):
-        ro = list(super().get_readonly_fields(request, obj))
-        if _is_master(request.user):
-            # для мастера — полностью read-only карточка приёма
-            # (инлайн тоже отрезан через has_change_permission=False)
-            all_fields = [f.name for f in self.model._meta.fields]
-            ro = list(set(ro) | set(all_fields))
-        return tuple(ro)
-
+        if obj and is_master(request.user):
+            return obj.items.filter(master=master_obj(request.user)).exists()
+        return True
     def get_actions(self, request):
         actions = super().get_actions(request)
-        if _is_master(request.user):
+        if is_master(request.user):
             # мастерам скрываем CSV-экшены и любые массовые действия
             return {}
         return actions
 
     # ── QS и агрегаты ────────────────────────────────────────────────────────
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        if hasattr(request.user, "master_profile") and not request.user.is_superuser:
-            return qs.filter(master=request.user.master_profile)
-        return qs
 
     def get_changeform_initial_data(self, request):
         """
@@ -1024,6 +1044,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "prefill_query": {"date": q_date, "time": q_time, "master": str(q_master) if q_master else None},
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
+
 
         # ---------------- POST: создаём запись ----------------
         clients, masters, services_by_master = _context_lists()
@@ -1491,9 +1512,9 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         if request.GET.get("service"):
             appointments = appointments.filter(service_id=request.GET["service"])
         if request.GET.get("status"):
-            appointments = appointments.filter(appointmentstatushistory__status_id=request.GET["status"])
+            appointments = appointments.filter(appointment__appointmentstatushistory__status_id=request.GET["status"])
         if request.GET.get("payment_status"):
-            appointments = appointments.filter(payment_status_id__in=request.GET.getlist("payment_status"))
+            appointments = appointments.filter(appointment__payment_status_id__in=request.GET.getlist("payment_status"))
 
         # Слоты по 15 минут
         start_hour = 8
@@ -2411,10 +2432,11 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             def _to_str(v):
                 if isinstance(v, (list, tuple)): return ", ".join(map(str, v))
                 return (v or "").strip()
-            has_all = bool(hc.get("has_allergies")) or bool(_to_str(hc.get("allergies")))
+            has_all = bool(hc.get("has_allergies")) or bool(_to_str(hc.get("allergies_text")))
             has_med = bool(_to_str(hc.get("medications")))
             has_ctr = bool(_to_str(hc.get("contraindications")))
-            if not (has_all or has_med or has_ctr):
+            has_ch = bool(_to_str(hc.get("chronic_conditions")))
+            if not (has_all or has_med or has_ctr or has_ch):
                 return False, "", ""
             try:
                 url = reverse("health-view-master", args=[prof.id])
@@ -2424,6 +2446,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
 
         health_html = ""
         show_flag, flag_url, flag_title = _health_flag_info(item.appointment)
+
         if show_flag:
             ico = "⚕️"
             health_html = (

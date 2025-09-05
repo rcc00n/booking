@@ -84,7 +84,7 @@ filterForm.addEventListener("submit", function (e) {
     const selectedDate = document.getElementById("realDateInput").value;
     formData.append("date", selectedDate);
     const params = new URLSearchParams(formData).toString();
-
+    console.log(params);
     fetch(`?${params}`, {
         headers: {
             "X-Requested-With": "XMLHttpRequest"
