@@ -306,22 +306,19 @@ def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs
     start_local = localtime(instance.start_time).strftime("%d %b %Y, %H:%M")
     service_label, master_label = _short_labels(instance)
     items_text = "\n".join(_items_summary_lines(instance)) or "—"
-    if created:
+
         # если позиции уже есть (например, создали в одной транзакции) — шлём сейчас,
         # иначе дождёмся первого AppointmentItem
-        if instance.items.exists():
-            _send_created_email(instance)
-        return
-
 
     diffs = _diff_snapshot(instance)
-
     if not diffs:
         return
     # если менялись только финансы сразу после создания (30 сек) — не спамим
     created_recently = (timezone.now() - instance.created_at) <= timedelta(seconds=30)
-    changed_fields = {f for f, _, _ in diffs}
-    if created_recently and changed_fields.issubset({"final_price", "discount_source"}):
+
+    if created_recently:
+        if instance.items.exists():
+            _send_created_email(instance)
         return
 
     diff_text = _humanize_diff(instance, diffs)
@@ -357,16 +354,20 @@ def appointment_post_save(sender, instance: Appointment, created: bool, **kwargs
         },
     )
 
-@receiver(post_save, sender=AppointmentItem)
-def send_created_when_first_item(sender, instance: AppointmentItem, created: bool, **kwargs):
-    if not created:
-        return
-    appt = instance.appointment
-    if Notification.objects.filter(appointment=appt, kind=Notification.CREATED, channel="email").exists():
-        return  # уже слали
-    # На сохранении айтемов мы и так делаем recompute_totals со скипом апдейт-писем.
-    # Здесь только отправим «created», когда появилась хотя бы 1 позиция.
-    _send_created_email(appt)
+
+
+
+
+# @receiver(post_save, sender=AppointmentItem)
+# def send_created_when_first_item(sender, instance: AppointmentItem, created: bool, **kwargs):
+#     if not created:
+#         return
+#     appt = instance.appointment
+#     if Notification.objects.filter(appointment=appt, kind=Notification.CREATED, channel="email").exists():
+#         return  # уже слали
+#     # На сохранении айтемов мы и так делаем recompute_totals со скипом апдейт-писем.
+#     # Здесь только отправим «created», когда появилась хотя бы 1 позиция.
+#     _send_created_email(appt)
 
 
 def _is_cancelled_status(status_obj) -> bool:
