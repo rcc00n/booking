@@ -4,8 +4,25 @@
 
 {% block extrahead %}
     {{ block.super }}
+    <script>
+        ;(() => {
+            const origAdd = window.addEventListener;
+            const origRem = window.removeEventListener;
+
+            window.addEventListener = function(type, listener, options){
+                if (type === 'unload') type = 'pagehide';
+                return origAdd.call(this, type, listener, options);
+            };
+            window.removeEventListener = function(type, listener, options){
+                if (type === 'unload') type = 'pagehide';
+                return origRem.call(this, type, listener, options);
+            };
+        })();
+    </script>
     <script defer src="{% static 'admin/js/appointment_edit.js' %}"></script>
+
     <script src="{% url 'admin:jsi18n' %}"></script>
+    <script src="{% static 'admin/js/quarter_timepicker.js' %}"></script>
     {{ media }}
 {% endblock %}
 
@@ -64,6 +81,8 @@
         .ab-items{display:flex;flex-direction:column;gap:16px}
         .ab-item{padding:16px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa}
         .ab-foot{display:flex;justify-content:space-between;align-items:center}
+
+        .ab-item.readonly{opacity:.75}
     </style>
 {% endblock %}
 
@@ -149,6 +168,7 @@
                                         <div class="ab-hidden native-master">{{ f.master }}</div>
                                         <label>Master</label>
                                         <select class="ab-select js-master"></select>
+                                        <div class="ab-muted js-ro-badge ab-hidden">This item is read-only</div>
                                     </div>
 
                                     <!-- SERVICE -->
@@ -226,6 +246,7 @@
                                         <div class="ab-hidden native-master">{{ f.master }}</div>
                                         <label>Master</label>
                                         <select class="ab-select js-master"></select>
+                                        <div class="ab-muted js-ro-badge ab-hidden">This item is read-only</div>
                                     </div>
                                     <div class="ab-field" data-field="service">
                                         <div class="ab-hidden native-service">{{ f.service }}</div>
@@ -289,5 +310,11 @@
     {{ promos_by_service_data|json_script:"promos-by-service-data" }}
     {{ promos_global_data|json_script:"promos-global-data" }}
 
+    <script>
+        window.APPOINTMENT_CTX = {
+            is_master: {{ is_master|yesno:"true,false" }},
+            current_master_id: {{ current_master_id|default:"null" }}
+        };
+    </script>
 
 {% endblock %}

@@ -1,297 +1,260 @@
-(function(){
-    /* Tabs */
-    const tabs = document.getElementById('tabs');
-    function switchTab(name){
-        document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab===name));
-        document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel===name));
-        try { localStorage.setItem('appt_tab', name); } catch(e){}
+/* admin/js/appointment_edit.js */
+/* Мастер не может менять поле master и редактировать чужие позиции.
+   Чужие строки — read-only; новые строки мастера — автоподстановка своего master. */
+
+;(() => {
+    const CTX = window.APPOINTMENT_CTX || { is_master: false, current_master_id: null };
+    const IS_MASTER = !!CTX.is_master;
+    const MY_ID = CTX.current_master_id != null ? String(CTX.current_master_id) : null;
+
+    // безопасный разбор JSON-скриптов
+    const parseJSON = (id, fallback) => {
+        const el = document.getElementById(id);
+        if (!el) return fallback;
+        try { return JSON.parse(el.textContent || ""); } catch { return fallback; }
+    };
+
+    const MASTERS = parseJSON("masters-data", []);
+    const MS_MAP = parseJSON("ms-map-data", {}); // { master_id: [ {id,name,base_price,svc_disc}, ... ] }
+    const PROMO_BY_SERVICE = parseJSON("promos-by-service-data", {}); // { service_id: [ {id,text,discount}, ... ] }
+    const PROMO_GLOBAL = parseJSON("promos-global-data", []);        // [ {id,text,discount}, ... ]
+
+    const $ = (sel, root = document) => root.querySelector(sel);
+    const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+    const itemsContainer = $("#items-container");
+    if (!itemsContainer) return;
+
+    function buildOption(value, text) {
+        const o = document.createElement("option");
+        o.value = String(value);
+        o.textContent = String(text);
+        return o;
     }
-    tabs.addEventListener('click',(e)=>{
-        const btn=e.target.closest('.tab'); if(!btn) return;
-        switchTab(btn.dataset.tab);
-    });
-    switchTab(localStorage.getItem('appt_tab') || 'details');
 
-    /* Data */
-    const masters = JSON.parse(document.getElementById('masters-data').textContent || '[]');
-    const msMap  = JSON.parse(document.getElementById('ms-map-data').textContent || '{}');
-    const svcDisc = JSON.parse(document.getElementById('svc-discounts-data').textContent || '{}');
-    const promosByService = JSON.parse(document.getElementById('promos-by-service-data').textContent || '{}');
-    const promosGlobal = JSON.parse(document.getElementById('promos-global-data').textContent || '[]');
-
-    const container = document.getElementById('items-container');
-    const addBtn = document.getElementById('btn-add-item');
-    const totalInput = document.getElementById('id_items-TOTAL_FORMS');
-
-    /* Helpers */
-    function fillSelect(el, options, placeholder) {
-        el.innerHTML = "";
-        if (placeholder) {
-            const opt0 = document.createElement('option');
-            opt0.value = ""; opt0.textContent = placeholder;
-            el.appendChild(opt0);
+    function populateMasters(uiSelect) {
+           uiSelect.innerHTML = "";
+           // всегда показываем всех — нужно корректно отрисовать чужие строки
+            (MASTERS || []).forEach(m => uiSelect.appendChild(buildOption(m.id, m.name || m.label || String(m.id))));
         }
-        options.forEach(o=>{
-            const opt=document.createElement('option');
-            opt.value=o.id; opt.textContent=o.name||o.text;
-            if(o.discount!=null) opt.setAttribute('data-discount', String(o.discount));
-            if(o.base_price!=null) opt.setAttribute('data-base-price', String(o.base_price));
-            el.appendChild(opt);
+
+    function populateServices(uiSelect, masterId) {
+        uiSelect.innerHTML = "";
+        const list = MS_MAP[String(masterId)] || [];
+        list.forEach(s => uiSelect.appendChild(buildOption(s.id, s.name)));
+        uiSelect.disabled = list.length === 0;
+    }
+
+    function populatePromos(uiSelect, serviceId) {
+        uiSelect.innerHTML = "";
+        uiSelect.appendChild(buildOption("", "— No promocode —"));
+        const list = (PROMO_BY_SERVICE[String(serviceId)] || []).concat(PROMO_GLOBAL || []);
+        // дедуп по id
+        const seen = new Set();
+        list.forEach(p => {
+            if (seen.has(p.id)) return;
+            seen.add(p.id);
+            uiSelect.appendChild(buildOption(p.id, p.text));
         });
     }
-    function findNative(itemBox, cls) {
-        const wrap = itemBox.querySelector('.' + cls);
-        return wrap ? wrap.querySelector('select,input,textarea') : null;
-    }
-    function findNativePromo(itemBox){
-        const wrap = itemBox.querySelector('.native-promocode');
-        if(!wrap) return null;
-        return wrap.querySelector('select[name$="-promocode"],input[name$="-promocode"]');
-    }
-    function findNativePromoForce(itemBox){
-        const wrap = itemBox.querySelector('.native-promocode');
-        if(!wrap) return null;
-        return wrap.querySelector('input[type="checkbox"]');
-    }
-    function setNativeValue(input, value) {
-        if (!input) return;
-        input.value = value || "";
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-    function setNativeChecked(input, checked){
-        if(!input) return;
-        input.checked = !!checked;
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-    function priceToNumber(v){
-        if (typeof v === "number") return v;
-        v = (v || "").toString().replace(",", ".");
-        const n = parseFloat(v);
-        return isFinite(n) ? n : 0;
-    }
-    function formatMoney(n){
-        return '$' + (Math.round(n*100)/100).toFixed(2);
-    }
-    const personalPct = (() => {
-        const el = document.getElementById('id_personal_discount_percent');
-        if (!el) return 0;
-        const raw = (el.value || el.textContent || '0').toString();
-        const v = parseFloat(raw.replace(/[^\d.]/g, '')) || 0;
-        return Math.max(0, Math.min(100, v));
-    })();
-    /* Totals */
-    // function recomputeItemTotal(itemBox){
-    //     const serviceSel = itemBox.querySelector('.js-service');
-    //     const priceInput = itemBox.querySelector('input[name$="-unit_price"]');
-    //     const totalEl = itemBox.querySelector('.js-item-total');
-    //     if (!serviceSel || !totalEl) return;
-    //
-    //     const svcOpt = serviceSel.options[serviceSel.selectedIndex];
-    //     const basePrice = svcOpt ? priceToNumber(svcOpt.getAttribute('data-base-price')) : 0;
-    //     const entered = priceToNumber(priceInput ? priceInput.value : 0);
-    //     let price = entered > 0 ? entered : basePrice;
-    //
-    //     let disc = 0;
-    //     const serviceId = serviceSel.value || "";
-    //     if (serviceId && svcDisc[serviceId]) disc = Math.max(disc, parseInt(svcDisc[serviceId], 10) || 0);
-    //
-    //     const promoSel = itemBox.querySelector('.js-promocode');
-    //     if (promoSel && promoSel.value){
-    //         const opt = promoSel.options[promoSel.selectedIndex];
-    //         const pct = parseInt(opt.getAttribute('data-discount')||'0', 10) || 0;
-    //         disc = Math.max(disc, pct);
-    //     }
-    //
-    //     // ИТОГ ПОЗИЦИИ — без персональной
-    //     const final = price * (100 - disc) / 100;
-    //
-    //     // Пишем текст и сохраняем "сырое" число для grand total
-    //     totalEl.textContent = formatMoney(final);
-    //     totalEl.dataset.raw = String(final);
-    //
-    //     recomputeGrandTotal(); // ← добавили
-    // }
-    // function recomputeGrandTotal(){
-    //     const totals = Array.from(document.querySelectorAll('.js-item-total'));
-    //     const subtotal = totals.reduce((s, el) => {
-    //         const raw = el.dataset.raw || el.textContent.replace(/[^\d.]/g, '');
-    //         return s + (parseFloat(raw) || 0);
-    //     }, 0);
-    //     console.log(personalPct);
-    //     const withPersonal = subtotal * (100 - (personalPct || 0)) / 100;
-    //     console.log("Total Price:");
-    //     console.log(withPersonal);
-    //     const grandEl = document.getElementById('grand-total');
-    //     if (grandEl) grandEl.textContent = formatMoney(withPersonal);
-    //
-    //     // опционально: показывать подсказку «−X% personal»
-    //     const badge = document.getElementById('personal-discount-badge');
-    //     if (badge) badge.textContent = personalPct ? `−${personalPct}% personal` : '';
-    // }
-    /* Date/Time enhancers */
-    function enhanceTimeInput(timeInput){
-        if (!timeInput || timeInput.dataset.enhanced) return;
-        timeInput.dataset.enhanced = '1';
-        timeInput.classList.add('ab-hidden');
 
-        const sel = document.createElement('select');
-        sel.className = 'ab-select js-timepicker';
-        for(let h=0; h<24; h++){
-            for(let m=0; m<60; m+=15){
-                const v = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':00';
-                const opt = document.createElement('option');
-                opt.value = v; opt.textContent = v.slice(0,5);
-                sel.appendChild(opt);
+    // disabled поля не уезжают в POST — подложим hidden-клон
+    function ensureHiddenClone(el) {
+        if (!el || !el.name) return;
+        // уже есть клон?
+        const next = el.nextElementSibling;
+        if (next && next.tagName === "INPUT" && next.type === "hidden" && next.name === el.name && next.dataset.generated === "1") {
+            // обновим value на всякий
+            next.value = readValueFor(el);
+            return;
+        }
+        const hid = document.createElement("input");
+        hid.type = "hidden";
+        hid.name = el.name;
+        hid.value = readValueFor(el);
+        hid.dataset.generated = "1";
+        el.insertAdjacentElement("afterend", hid);
+    }
+
+    function readValueFor(el) {
+        if (el.tagName === "SELECT") return el.value || "";
+        if (el.type === "checkbox") return el.checked ? (el.value || "on") : "";
+        return el.value || "";
+    }
+
+    function disableAndClone(el) {
+        try { el.disabled = true; } catch {}
+        ensureHiddenClone(el);
+    }
+
+    // синхронизация UI<->нативных полей
+    function syncSelects(ui, native) {
+        if (!ui || !native) return;
+        // первичное выравнивание
+        if (native.value) ui.value = String(native.value);
+        ui.addEventListener("change", () => { native.value = ui.value; });
+    }
+
+    function initRow(row) {
+        // элементы
+        const nativeMaster = $(".native-master select", row);
+        const uiMaster     = $(".js-master", row);
+        const nativeSvc    = $(".native-service select", row);
+        const uiSvc        = $(".js-service", row);
+        const nativePromo  = $(".native-promocode select[name$='-promocode']", row);
+        const uiPromo      = $(".js-promocode", row);
+        const promoForceUI = $(".js-promo-force", row);
+        const nativeStart  = $("[name$='-start_time']", row);   // реальное поле
+        const nativePrice  = $("[name$='-unit_price']", row);   // реальное поле
+        const delWrap      = $(".js-del-wrap", row);
+        const roBadge      = $(".js-ro-badge", row);
+
+        // наполним мастеров и выставим значения
+        populateMasters(uiMaster);
+
+        // не трогаем значение master у существующих строк; просто отражаем его в UI
+        if (nativeMaster && uiMaster) uiMaster.value = String(nativeMaster.value || "");
+        // мастер не может менять мастера
+        if (IS_MASTER && uiMaster) uiMaster.disabled = true;
+
+        // услуги исходя из мастер-id
+        const effectiveMasterId = (nativeMaster ? nativeMaster.value : (uiMaster ? uiMaster.value : ""));
+        populateServices(uiSvc, effectiveMasterId);
+        if (nativeSvc && nativeSvc.value) uiSvc.value = String(nativeSvc.value);
+
+        // промокоды (UI остаётся disabled по умолчанию, включим ниже для «моих»)
+        if (nativeSvc && nativeSvc.value) {
+            populatePromos(uiPromo, nativeSvc.value);
+            if (nativePromo && nativePromo.value) uiPromo.value = String(nativePromo.value);
+        }
+
+        // решим, «моя» ли эта строка
+        const isMine = IS_MASTER && MY_ID && nativeMaster ? (String(nativeMaster.value) === MY_ID) : false;
+
+        // // мастер не может менять master ни при каких обстоятельствах
+        // if (uiMaster) {
+        //     uiMaster.disabled = true;
+        //     // подсказка для чужих строк
+        //     if (!isMine && roBadge) roBadge.classList.remove("ab-hidden");
+        // }
+
+        // права редактирования:
+        if (IS_MASTER) {
+            if (isMine) {
+                // МОЯ строка: master зафриженный; сервис и промокод — можно
+                uiSvc.disabled = false;
+                // включим UI промокода, но синхронизируем с нативой
+                uiPromo.disabled = false;
+
+                // изменения сервисов — в нативу
+                uiSvc.addEventListener("change", () => {
+                    if (nativeSvc) nativeSvc.value = uiSvc.value;
+                    populatePromos(uiPromo, uiSvc.value);
+                    if (nativePromo) nativePromo.value = uiPromo.value;
+                });
+
+                // промо в нативу
+                if (nativePromo) {
+                    uiPromo.addEventListener("change", () => { nativePromo.value = uiPromo.value; });
+                }
+                if (promoForceUI) {
+                    const nativeForce = $(".native-promocode input[name$='-force_apply']", row);
+                    promoForceUI.addEventListener("change", () => { if (nativeForce) nativeForce.checked = !!promoForceUI.checked; });
+                }
+            } else {
+                // ЧУЖАЯ строка: всё делаем read-only
+                row.classList.add("readonly");
+
+                // UI селекты/контролы блокируем
+                if (uiSvc) uiSvc.disabled = true;
+                if (uiPromo) uiPromo.disabled = true;
+                if (promoForceUI) { promoForceUI.disabled = true; promoForceUI.checked = !!($(".native-promocode input[name$='-force_apply']", row)?.checked); }
+
+                // реальные отправляемые инпуты (start_time, unit_price) — disable + hidden clone
+                if (nativeStart) disableAndClone(nativeStart);
+                if (nativePrice) disableAndClone(nativePrice);
+
+                // удалять чужое нельзя
+                if (delWrap) delWrap.classList.add("ab-hidden");
+            }
+        } else {
+            // админ: обычная синхронизация UI <> нативные поля
+            syncSelects(uiMaster, nativeMaster);
+            uiMaster.addEventListener("change", () => {
+                populateServices(uiSvc, uiMaster.value);
+                // сбросим сервис+промо при смене мастера
+                if (nativeSvc) nativeSvc.value = "";
+                if (uiSvc) uiSvc.value = "";
+                if (nativePromo) nativePromo.value = "";
+                if (uiPromo) { uiPromo.value = ""; uiPromo.disabled = true; }
+            });
+            uiSvc.disabled = false;
+            uiSvc.addEventListener("change", () => {
+                if (nativeSvc) nativeSvc.value = uiSvc.value;
+                populatePromos(uiPromo, uiSvc.value);
+            });
+            if (nativePromo) {
+                uiPromo.disabled = false;
+                uiPromo.addEventListener("change", () => { nativePromo.value = uiPromo.value; });
             }
         }
-        // set initial
-        if (timeInput.value){
-            const val = timeInput.value.length===5 ? (timeInput.value+':00') : timeInput.value;
-            if ([...sel.options].some(o=>o.value===val)) sel.value = val;
+    }
+
+    function initExistingRows() {
+        $$(".ab-item", itemsContainer).forEach(initRow);
+    }
+
+    // добавление новой строки (когда работает ваш существующий код на клонирование empty_form)
+    // после вставки — проинициализируем и зафиксируем мастера
+    const mo = new MutationObserver(muts => {
+        muts.forEach(m => m.addedNodes.forEach(node => {
+            if (node.nodeType === 1 && node.classList.contains("ab-item")) {
+                // если мастер — сразу подставим себя в нативу и UI
+                if (IS_MASTER && MY_ID) {
+                    const nativeMaster = $(".native-master select", node);
+                    const uiMaster = $(".js-master", node);
+                    if (nativeMaster) nativeMaster.value = MY_ID;
+                    if (uiMaster) { uiMaster.value = MY_ID; uiMaster.disabled = true; }
+
+                }
+                initRow(node);
+            }
+        }));
+    });
+    mo.observe(itemsContainer, { childList: true });
+
+    // вкладки
+    function initTabs() {
+        const tabs = $$(".tab");
+        const panels = $$(".tab-panel");
+        tabs.forEach(t => t.addEventListener("click", () => {
+            tabs.forEach(x => x.classList.remove("active"));
+            panels.forEach(p => p.classList.remove("active"));
+            t.classList.add("active");
+            const id = t.getAttribute("data-tab");
+            const panel = $(`.tab-panel[data-tab-panel="${id}"]`);
+            if (panel) panel.classList.add("active");
+        }));
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        initExistingRows();
+        initTabs();
+
+        // при сабмите — убедимся, что все disabled реальные поля имеют hidden-клоны
+        const form = itemsContainer.closest("form");
+        if (form) {
+            form.addEventListener("submit", () => {
+                $$(".ab-item", itemsContainer).forEach(row => {
+                    if (row.classList.contains("readonly")) {
+                        const nativeStart = $("[name$='-start_time']", row);
+                        const nativePrice = $("[name$='-unit_price']", row);
+                        if (nativeStart) ensureHiddenClone(nativeStart);
+                        if (nativePrice) ensureHiddenClone(nativePrice);
+                    }
+                    // master всегда не редактируем: UI disabled, но нативное поле активно — ничего делать не нужно
+                });
+            });
         }
-        timeInput.parentNode.insertBefore(sel, timeInput.nextSibling);
-        sel.addEventListener('change', ()=>{
-            timeInput.value = sel.value;
-            timeInput.dispatchEvent(new Event('change',{bubbles:true}));
-        });
-    }
-    function enhanceDateInput(dateInput){
-        if (!dateInput) return;
-        try { dateInput.type = 'date'; } catch(e){}
-    }
-    function enhanceDateTimeIn(scope){
-        // Appointment main form or item row
-        const dateInputs = scope.querySelectorAll('input[name="start_time_0"], input[name$="-start_time_0"]');
-        const timeInputs = scope.querySelectorAll('input[name="start_time_1"], input[name$="-start_time_1"]');
-        dateInputs.forEach(enhanceDateInput);
-        timeInputs.forEach(enhanceTimeInput);
-    }
-
-    /* UI handlers */
-    function rebuildPromos(itemBox){
-        const serviceSel = itemBox.querySelector('.js-service');
-        const promoSel = itemBox.querySelector('.js-promocode');
-        const nativePromo = findNativePromo(itemBox);
-        if (!promoSel) return;
-
-        const sid = serviceSel.value || "";
-        const list = []
-            .concat(promosByService[sid] || [])
-            .concat(promosGlobal || [])
-            .filter((x,i,arr)=>arr.findIndex(y=>y.id===x.id)===i);
-
-        fillSelect(promoSel, list, list.length ? "Select promo…" : "No promos");
-        promoSel.disabled = list.length===0;
-
-        if (nativePromo && nativePromo.value){
-            if (list.some(p=>p.id===nativePromo.value)) promoSel.value = nativePromo.value;
-            else promoSel.value = "";
-        }
-    }
-
-    function onMasterChange(itemBox){
-        const nativeMaster = findNative(itemBox, 'native-master');
-        const nativeService = findNative(itemBox, 'native-service');
-        const masterSel = itemBox.querySelector('.js-master');
-        const serviceSel = itemBox.querySelector('.js-service');
-
-        const masterId = masterSel.value || "";
-        setNativeValue(nativeMaster, masterId);
-
-        const services = msMap[masterId] || [];
-        fillSelect(serviceSel, services, services.length ? "Select service…" : "No services");
-        serviceSel.disabled = services.length === 0;
-
-        const prev = nativeService ? nativeService.value : "";
-        const still = services.some(s => s.id === prev);
-        if (still) { serviceSel.value = prev; }
-        else { serviceSel.value = ""; setNativeValue(nativeService, ""); }
-
-        rebuildPromos(itemBox);
-    }
-
-    function onServiceChange(itemBox){
-        const nativeService = findNative(itemBox, 'native-service');
-        const serviceSel = itemBox.querySelector('.js-service');
-        const priceInput = itemBox.querySelector('input[name$="-unit_price"]');
-
-        const sid = serviceSel.value || "";
-        setNativeValue(nativeService, sid);
-
-        const opt = serviceSel.options[serviceSel.selectedIndex];
-        const base = opt ? (opt.getAttribute('data-base-price') || "") : "";
-        if (priceInput && (priceInput.value === "" || Number(priceInput.value) === 0)) {
-            priceInput.value = base;
-        }
-
-        rebuildPromos(itemBox);
-    }
-
-    function onPromoChange(itemBox){
-        const promoSel = itemBox.querySelector('.js-promocode');
-        const nativePromo = findNativePromo(itemBox);
-        setNativeValue(nativePromo, promoSel ? promoSel.value : "");
-    }
-
-    function onPromoForceChange(itemBox){
-        const fake = itemBox.querySelector('.js-promo-force');
-        const native = findNativePromoForce(itemBox);
-        setNativeChecked(native, fake ? fake.checked : false);
-    }
-
-    function initItem(itemBox){
-        const nativeMaster = findNative(itemBox, 'native-master');
-        const nativeService = findNative(itemBox, 'native-service');
-
-        const masterSel = itemBox.querySelector('.js-master');
-        const serviceSel = itemBox.querySelector('.js-service');
-        const promoSel = itemBox.querySelector('.js-promocode');
-        const promoForce = itemBox.querySelector('.js-promo-force');
-        const unitPrice = itemBox.querySelector('input[name$="-unit_price"]');
-
-        // master list
-        fillSelect(masterSel, masters, "Select master…");
-        if (nativeMaster && nativeMaster.value) masterSel.value = nativeMaster.value;
-
-        masterSel.addEventListener('change', ()=>onMasterChange(itemBox));
-        serviceSel.addEventListener('change', ()=>onServiceChange(itemBox));
-        if (promoSel) promoSel.addEventListener('change', ()=>onPromoChange(itemBox));
-        if (promoForce) promoForce.addEventListener('change', ()=>onPromoForceChange(itemBox));
-
-        // enhance date/time in this row
-        enhanceDateTimeIn(itemBox);
-
-        // initial fill
-        onMasterChange(itemBox);
-        if (nativeService && nativeService.value){
-            serviceSel.value = nativeService.value;
-            onServiceChange(itemBox);
-        }
-
-        const nativePromo = findNativePromo(itemBox);
-        if (promoSel && nativePromo && nativePromo.value){
-            promoSel.value = nativePromo.value;
-        }
-        const nativeForce = findNativePromoForce(itemBox);
-        if (promoForce && nativeForce) promoForce.checked = !!nativeForce.checked;
-
-    }
-
-    /* init existing rows + main form date/time */
-    container.querySelectorAll('.ab-item').forEach(initItem);
-    enhanceDateTimeIn(document);  // main appointment start_time (details tab)
-
-    /* add new row */
-    function nextIndex(){ return container.querySelectorAll('.ab-item').length; }
-    function addItem(){
-        const idx = nextIndex();
-        const tpl = document.getElementById('empty-form-tpl').innerHTML.replaceAll('__prefix__', idx);
-        const wrap = document.createElement('div'); wrap.innerHTML = tpl.trim();
-        const node = wrap.firstElementChild;
-        container.appendChild(node);
-        if (totalInput) totalInput.value = String(idx + 1);
-        initItem(node);
-    }
-    addBtn && addBtn.addEventListener('click', addItem);
-
+    });
 })();

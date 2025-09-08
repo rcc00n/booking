@@ -104,6 +104,13 @@
     {{ posted_client|default:'""'|json_script:"ab-posted-client" }}
 
     <script>
+
+    window.APPOINTMENT_CTX = {
+        is_master : {{ is_master|yesno:"true,false" }},
+        current_master_id : {{ current_master_id|default:"null" }}
+    }
+    </script>
+    <script>
         (function(){
             // ---- Data from backend
             const MASTERS = JSON.parse(document.getElementById('ab-masters').textContent || '[]');
@@ -114,6 +121,11 @@
             const ITEM_ERRORS = JSON.parse(document.getElementById('ab-item-errors').textContent || '{}');
             const FIELD_ERRORS = JSON.parse(document.getElementById('ab-field-errors').textContent || '{}');
             const POSTED_CLIENT = JSON.parse(document.getElementById('ab-posted-client').textContent || '""');
+
+            // MASTER-MODE flags
+            const CTX = (window.APPOINTMENT_CTX || {is_master:false,current_master_id:null});
+            const IS_MASTER = !!CTX.is_master;
+            const CURRENT_MASTER_ID = CTX.current_master_id != null ? String(CTX.current_master_id) : null;
 
             // ---- Elements
             const clientEl = document.getElementById('id_client');
@@ -180,16 +192,23 @@
             function money(n){ n = Number(n||0); return '$' + n.toFixed(2); }
             function buildOption(v, t){ const o = document.createElement('option'); o.value=v; o.textContent=t; return o; }
 
+            function getAvailableMasters(){
+                if (!IS_MASTER || !CURRENT_MASTER_ID) return MASTERS;
+                return MASTERS.filter(m => String(m.id) === CURRENT_MASTER_ID);
+            }
+
             function populateMasters(select){
+                const masters = getAvailableMasters();
                 select.innerHTML = '';
                 select.appendChild(buildOption('', '---------'));
-                MASTERS.forEach(m => select.appendChild(buildOption(String(m.id), m.label)));
+                masters.forEach(m => select.appendChild(buildOption(String(m.id), m.label)));
             }
 
             function populateServices(select, masterId){
                 select.innerHTML = '';
                 select.appendChild(buildOption('', '---------'));
-                const list = SERVICES_BY_MASTER[String(masterId)] || [];
+                const mid = IS_MASTER && CURRENT_MASTER_ID ? CURRENT_MASTER_ID : String(masterId || '');
+                const list = SERVICES_BY_MASTER[String(mid)] || [];
                 list.forEach(s => {
                     const o = buildOption(String(s.id), s.name);
                     o.dataset.price = s.base_price;
@@ -241,6 +260,17 @@
                 input.dataset.enhanced = '1';
             }
 
+            function ensureHiddenClone(el){
+                if (!el || !el.disabled) return;
+                // не дублируем
+                if (el.nextElementSibling && el.nextElementSibling.tagName === 'INPUT' && el.nextElementSibling.type === 'hidden' && el.nextElementSibling.name === el.name) return;
+                const hid = document.createElement('input');
+                hid.type = 'hidden';
+                hid.name = el.name;
+                hid.value = el.value || '';
+                el.insertAdjacentElement('afterend', hid);
+            }
+
             // ---- Row wiring
             function hookRow(row, idx){
                 const name = (suffix)=> `items-${idx}-${suffix}`;
@@ -262,6 +292,26 @@
 
                 populateMasters(masterSel);
                 enhanceTimeInput(timeInp);
+
+                // MASTER-MODE: фиксируем мастера, дизейблим селект и подкидываем hidden
+                if (IS_MASTER && CURRENT_MASTER_ID){
+                    masterSel.value = CURRENT_MASTER_ID;
+                    masterSel.setAttribute('disabled', 'disabled');
+                    // визуально вместо select покажем бейдж с именем мастера
+                    const box = masterSel.closest('[data-field="master"]');
+                    if (box && !box.querySelector('.ab-master-badge')) {
+                        const mObj = (MASTERS.find(m => String(m.id) === CURRENT_MASTER_ID) || {label:'(Me)'});
+                        const badge = document.createElement('div');
+                        badge.className = 'ab-master-badge';
+                        badge.textContent = mObj.label || 'Current master';
+                        // спрячем селект, оставим бейдж
+                        masterSel.classList.add('ab-hidden');
+                        box.insertBefore(badge, masterSel);
+                    }
+                    ensureHiddenClone(masterSel);
+                }
+
+                populateServices(serviceSel, masterSel.value);
 
                 masterSel.addEventListener('change', () => {
                     populateServices(serviceSel, masterSel.value);
@@ -301,9 +351,18 @@
                 const priceInp = row.querySelector('.js-price');
                 const promoSel = row.querySelector('.js-promo');
 
-                if (prefill && prefill.master){
+                if (IS_MASTER && CURRENT_MASTER_ID){
+                    masterSel.value = CURRENT_MASTER_ID;
+                    masterSel.setAttribute('disabled', 'disabled');
+                    ensureHiddenClone(masterSel);
+                    populateServices(serviceSel, CURRENT_MASTER_ID);
+                }
+                else if (prefill && prefill.master){
                     masterSel.value = String(prefill.master);
                     populateServices(serviceSel, masterSel.value);
+                }
+                else {
+                    populateServices(serviceSel, masterSel.value)
                 }
                 if (prefill && prefill.service){
                     serviceSel.value = String(prefill.service);
@@ -336,6 +395,8 @@
                 const rows = Array.from(container.querySelectorAll('.ab-item'));
                 totalForms.value = rows.length;
                 rows.forEach((row, i) => {
+                    const old = row.cloneNode(true);
+                    row.parentNode.replaceChild(old, row);
                     hookRow(row, i);
                 });
             }
@@ -421,23 +482,35 @@
                 // Покажем секцию услуг, если клиент выбран
                 itemsSection.classList.toggle('ab-hidden', !clientEl.value);
 
+                // Если мастер — убедимся, что в initial_first_item уже его master
+                if (IS_MASTER && CURRENT_MASTER_ID){
+                    if (!INITIAL_FIRST || typeof INITIAL_FIRST !== 'object') window.INITIAL_FIRST = {};
+                    if (!INITIAL_FIRST.master) INITIAL_FIRST.master = CURRENT_MASTER_ID;
+                }
+
                 // Нарисуем строки:
                 if (Array.isArray(POSTED_ITEMS) && POSTED_ITEMS.length){
-                    POSTED_ITEMS.forEach(it => addRow({
-                        master: it.master, service: it.service,
-                        start_time_0: it.start_time_0, start_time_1: it.start_time_1,
-                        unit_price: it.unit_price, promocode: it.promocode
-                    }));
+                    POSTED_ITEMS.forEach(it => {
+                        const rowPrefill = {
+                            master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : it.master,
+                            service: it.service,
+                            start_time_0: it.start_time_0,
+                            start_time_1: it.start_time_1,
+                            unit_price: it.unit_price,
+                            promocode: it.promocode
+                        }
+                    });
+                    addRow(rowPrefill)
                 } else {
                     // Если есть initial_first_item (GET с префилом) — используем
                     if (INITIAL_FIRST && (INITIAL_FIRST.master || INITIAL_FIRST.start_time_date || INITIAL_FIRST.start_time_time)){
                         addRow({
-                            master: INITIAL_FIRST.master || '',
+                            master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : (INITIAL_FIRST.master || ''),
                             start_time_0: INITIAL_FIRST.start_time_date || '',
                             start_time_1: (INITIAL_FIRST.start_time_time || '').slice(0,5),
                         });
                     } else {
-                        addRow({});
+                        addRow({master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : ''});
                     }
                 }
 
@@ -450,7 +523,7 @@
                 itemsSection.classList.toggle('ab-hidden', !clientEl.value);
             });
 
-            document.getElementById('btn-add-item').addEventListener('click', () => addRow({}));
+            document.getElementById('btn-add-item').addEventListener('click', () => addRow({ master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : ''}));
 
             // Базовая клиентская валидация, чтобы не гонять пустое
             document.getElementById('appt-form').addEventListener('submit', (e) => {
@@ -463,6 +536,15 @@
                     e.preventDefault();
                     alert('Добавьте хотя бы одну услугу.');
                     return;
+                }
+                // MASTER-MODE: перед отправкой гарантируем hidden-клоны для всех master (disabled)
+                if (IS_MASTER){
+                    container.querySelectorAll('select.js-master').forEach(sel => {
+                        if (sel.disabled) {
+                            sel.value = CURRENT_MASTER_ID; // на всякий случай
+                            ensureHiddenClone(sel);
+                        }
+                    });
                 }
             });
 

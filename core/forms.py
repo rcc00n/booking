@@ -29,11 +29,69 @@ HEALTH_CONTRA_CHOICES = [
     ("allergy_unknown", "Allergy to unknown agents"),
 ]
 
+EDITABLE_FIELDS_FOR_MASTER = (
+    "service", "start_time", "end_time", "unit_price", "promocode",
+)
 
 # -----------------------------
 # Appointment Form
 # -----------------------------
 
+class AppointmentItemAdminForm(forms.ModelForm):
+    class Meta:
+        model = AppointmentItem
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
+        super().__init__(*args, **kwargs)
+
+        self._current_master = None
+        if self.user:
+            self._current_master = MasterProfile.objects.filter(user=self.user).first()
+
+        # 1) Ограничим выбор мастера ТОЛЬКО текущим мастером
+        if "master" in self.fields and self._current_master:
+            self.fields["master"].queryset = MasterProfile.objects.filter(pk=self._current_master.pk)
+
+        # 2) Если это существующая позиция и её master != текущий мастер — делаем её read-only
+        readonly = False
+        if self.instance and self.instance.pk and self._current_master:
+            if getattr(self.instance, "master_id", None) != self._current_master.id:
+                readonly = True
+
+        if readonly:
+            for name, field in self.fields.items():
+                # Поле master и остальные — в readonly (disabled)
+                field.disabled = True
+                # помогаем фронту понять, что надо подложить hidden-клон
+                field.widget.attrs["data-ro"] = "1"
+        else:
+            # даже если позиция «моя», менять поле master нельзя
+            if "master" in self.fields:
+                self.fields["master"].disabled = True
+                self.fields["master"].widget.attrs["data-ro"] = "1"
+
+    def clean_master(self):
+        # Защитимся от подмены master через POST
+        if self._current_master:
+            return self._current_master
+        return self.cleaned_data.get("master")
+
+    def clean(self):
+        cleaned = super().clean()
+        if not self._current_master:
+            # не мастер — пусть решает общий админ, здесь ничего не ограничиваем
+            return cleaned
+
+        # Нельзя редактировать чужие позиции
+        if self.instance and self.instance.pk:
+            if getattr(self.instance, "master_id", None) != self._current_master.id:
+                # если пришли изменения каких-либо editable полей — стоп
+                for f in EDITABLE_FIELDS_FOR_MASTER:
+                    if f in self.changed_data:
+                        raise ValidationError("Вы не можете редактировать позиции другого мастера.")
+        return cleaned
 
 class AppointmentAdminForm(forms.ModelForm):
     current_status = forms.ModelChoiceField(

@@ -570,6 +570,7 @@ def _can_edit_unit_price(user) -> bool:
 class AppointmentItemInline(admin.TabularInline):
     model = AppointmentItem
     form = AppointmentItemInlineForm
+    fk_name = "appointment"
     extra = 0
     # autocomplete_fields = ["service", "master", "promocode"]  # если используете автокомплит
 
@@ -597,40 +598,8 @@ class AppointmentItemInline(admin.TabularInline):
 
         return PrefillFormSet
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        if is_master(request.user):
-            # Если мастер хранится в AppointmentItem (мульти-услуги)
-            return qs.filter(master=master_obj(request.user)).distinct()
-            # Если мастер хранится прямо в Appointment (одиночная услуга):
-        # return qs.filter(master=master_obj(request.user))
-        return qs
-
-    def has_view_permission(self, request, obj=None):
-        ok = super().has_view_permission(request, obj)
-        if not ok:
-            return False
-        if obj and is_master(request.user):
-            # Разрешаем смотреть только свои
-            return obj.filter(master=master_obj(request.user)).exists()
-            # для поля appointment.master:
-            # return obj.master_id == master_obj(request.user).id
-        return True
-
-    def has_change_permission(self, request, obj=None):
-        ok = super().has_change_permission(request, obj)
-        if not ok:
-            return False
-        if obj and is_master(request.user):
-            return obj.filter(master=master_obj(request.user)).exists()
-        return True
-
     def has_delete_permission(self, request, obj=None):
-        ok = super().has_delete_permission(request, obj)
-        if not ok:
-            return False
-        if obj and is_master(request.user):
-            return obj.filter(master=master_obj(request.user)).exists()
+
         return True
 
 
@@ -645,6 +614,7 @@ def _money(x):
 # ──────────────────────────────────────────────────────────────────────────────
 # AppointmentAdmin
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @admin.register(Appointment)
 class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
@@ -690,39 +660,14 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if is_master(request.user):
-            # Если мастер хранится в AppointmentItem (мульти-услуги)
-            return qs.filter(items__master=master_obj(request.user)).distinct()
+        # if is_master(request.user):
+        #     # Если мастер хранится в AppointmentItem (мульти-услуги)
+        #     return qs.filter(items__master=master_obj(request.user)).distinct()
             # Если мастер хранится прямо в Appointment (одиночная услуга):
         # return qs.filter(master=master_obj(request.user))
         return qs
 
-    def has_view_permission(self, request, obj=None):
-        ok = super().has_view_permission(request, obj)
-        if not ok:
-            return False
-        if obj and is_master(request.user):
-            # Разрешаем смотреть только свои
-            return obj.items.filter(master=master_obj(request.user)).exists()
-            # для поля appointment.master:
-            # return obj.master_id == master_obj(request.user).id
-        return True
 
-    def has_change_permission(self, request, obj=None):
-        ok = super().has_change_permission(request, obj)
-        if not ok:
-            return False
-        if obj and is_master(request.user):
-            return obj.items.filter(master=master_obj(request.user)).exists()
-        return True
-
-    def has_delete_permission(self, request, obj=None):
-        ok = super().has_delete_permission(request, obj)
-        if not ok:
-            return False
-        if obj and is_master(request.user):
-            return obj.items.filter(master=master_obj(request.user)).exists()
-        return True
     def get_actions(self, request):
         actions = super().get_actions(request)
         if is_master(request.user):
@@ -749,23 +694,26 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             now = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
         else:
             now = now.replace(minute=minute, second=0, microsecond=0)
-
         data.setdefault("start_time", now)
 
-        # если у пользователя есть привязанный мастер — можно подставить
-        up = getattr(request.user, "userprofile", None)
-        if up and getattr(up, "is_master", False) and getattr(up, "masterprofile", None):
-            data.setdefault("master", up.masterprofile)
+        # если у пользователя есть привязанный мастер — подставим его в initial
+        # (мастер не сможет выбрать другого, это дополнительно контролируется на фронте и в POST)
+        mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
+        if mp:
+            data.setdefault("master", mp)
 
         return data
 
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
+
         ctx = dict(context)
         adminform = ctx.get("adminform")
         if adminform:
             ctx["form"] = adminform.form
 
         # отдаём инлайн-формсет позиций в шаблон
+        # ── НАЙТИ inline formset ДЛЯ AppointmentItem НАДЁЖНО ─────────────────
+        # === 1) Собираем formset для items принудительно ===
         items_fs = None
         for inline in ctx.get("inline_admin_formsets", []):
 
@@ -774,21 +722,30 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 items_fs = inline.formset
 
                 break
+
+
         if items_fs is not None:
             ctx["items_formset"] = items_fs
-
         # ===== данные для кастомных селектов =====
+        # ограничим пул мастеров, если текущий пользователь — мастер
+        mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
+
         # мастера (id, название)
-        masters_qs = MasterProfile.objects.select_related("user").all().order_by("user__user__first_name", "user__user__last_name")
+        # if is_master(request.user):
+        #     masters_qs = MasterProfile.objects.select_related("user").filter(pk=mp.pk)
+        # else:
+        masters_qs = MasterProfile.objects.select_related("user").all()
+
+        masters_qs = masters_qs.order_by("user__user__first_name", "user__user__last_name")
         masters = [{"id": str(m.id), "name": str(m)} for m in masters_qs]
 
         today = timezone.now().date()
         svc_discounts = {}
         for sd in ServiceDiscount.objects.filter(start_date__lte=today, end_date__gte=today).select_related("service"):
             svc_discounts[str(sd.service_id)] = int(sd.discount_percent)
+
         # карта мастер → [услуги]
         ms_map = defaultdict(list)
-        # заранее тянем все связи
         for sm in ServiceMaster.objects.select_related("service", "master").order_by("service__name"):
             sid = str(sm.service_id)
             ms_map[str(sm.master_id)].append({
@@ -798,12 +755,10 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "svc_disc": svc_discounts.get(sid, 0),  # %
             })
 
-
+        # промокоды
         promos_by_service = defaultdict(list)
         promos_global = []
-        qs = PromoCode.objects.filter(active=True, start_date__lte=today, end_date__gte=today)
-        qs = qs.prefetch_related("applicable_services")
-
+        qs = PromoCode.objects.filter(active=True, start_date__lte=today, end_date__gte=today).prefetch_related("applicable_services")
         for pc in qs:
             payload = {"id": str(pc.pk), "text": pc.code, "discount": int(pc.discount_percent)}
             services = list(pc.applicable_services.all())
@@ -814,14 +769,17 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 promos_global.append(payload)
 
         ctx.update({
-                "masters_data": masters,
-                "ms_map_data": dict(ms_map),
-                "svc_discounts_data": svc_discounts,
-                "promos_by_service_data": dict(promos_by_service),
-                "promos_global_data": promos_global,
-                "APPT_FIELDS_1": ("client", "start_time", "payment_status", "current_status"),
-        })
+            "masters_data": masters,
+            "ms_map_data": dict(ms_map),
+            "svc_discounts_data": svc_discounts,
+            "promos_by_service_data": dict(promos_by_service),
+            "promos_global_data": promos_global,
+            "APPT_FIELDS_1": ("client", "start_time", "payment_status", "current_status"),
 
+            # === важные флаги для шаблонов/JS ===
+            "is_master": is_master(request.user),
+            "current_master_id": mp.id if mp else None,
+        })
         return super().render_change_form(request, ctx, add=add, change=change, form_url=form_url, obj=obj)
 
     def save_model(self, request, obj, form, change):
@@ -1019,6 +977,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             """Ваш существующий метод, оставляю как есть; если у вас уже есть — используйте его."""
             return self._context_lists()
         # ---------------- GET: первичная отрисовка ----------------
+        mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
         if request.method == "GET" and request.GET.get("master") != 'undefined':
             clients, masters, services_by_master = _context_lists()
 
@@ -1026,7 +985,12 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             q_time   = request.GET.get("time")
             q_master = request.GET.get("master")
 
+            if is_master(request.user):
+                q_master = str(mp.pk)
+                masters = [m for m in masters if str(m["id"]) == str(mp.pk)]
+
             initial_first_item = {}
+
             if q_master and MasterProfile.objects.filter(pk=q_master).exists():
                 initial_first_item["master"] = str(q_master)
 
@@ -1042,6 +1006,9 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "services_by_master": services_by_master,
                 "initial_first_item": initial_first_item,
                 "prefill_query": {"date": q_date, "time": q_time, "master": str(q_master) if q_master else None},
+
+                "is_master": is_master(request.user),
+                "current_master_id": mp.id if mp else None,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -1049,6 +1016,8 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         # ---------------- POST: создаём запись ----------------
         clients, masters, services_by_master = _context_lists()
 
+        if is_master:
+            masters = [m for m in masters if str(m["id"]) == str(mp.pk)]
         # соберём промокоды по сервисам (как у вас)
         promos_by_service: dict[str, list[dict]] = {}
         try:
@@ -1129,6 +1098,12 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             date_str   = row["start_time_0"]
             time_str   = row["start_time_1"]
 
+            if is_master:
+                if master_id and str(master_id) != str(mp.pk):
+                    # фиксируем в UI, но и ошибку подсветим, чтобы было наглядно, почему перезатираем
+                    bag["items"][idx]["master"].append("You can assign items only to yourself.")
+                master_id = str(mp.pk)
+
             if not master_id:
                 bag["items"][idx]["master"].append("Select master.")
             if not service_id:
@@ -1165,6 +1140,10 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "item_errors": {i: dict(v) for i, v in bag["items"].items()},
                 "posted_items": posted_items,
                 "posted_client": client_id,
+
+
+                "is_master": is_master(request.user),
+                "current_master_id": mp.id if mp else None,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -1190,6 +1169,11 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                         # (сюда попадём только если кто-то внезапно пустой — но мы отфильтровали выше)
                         key = f"items-{idx}"
                         row_errs.setdefault(key, []).append("Incomplete row.")
+                        continue
+
+                    if is_master and str(row["master_id"]) != str(mp.pk):
+                        key = f"items-{idx}-master"
+                        row_errs.setdefault(key, []).append("You can assign items only to yourself.")
                         continue
                     item = AppointmentItem(
                         appointment=appt,
@@ -1272,6 +1256,8 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "item_errors": bag["items"],
                 "posted_items": posted_items,
                 "posted_client": client_id,
+                "is_master": is_master(request.user),
+                "current_master_id": mp.id if mp else None,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -1289,6 +1275,8 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "item_errors": {i: dict(v) for i, v in bag["items"].items()},
                 "posted_items": posted_items,
                 "posted_client": client_id,
+                "is_master": is_master(request.user),
+                "current_master_id": mp.id if mp else None,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -1306,6 +1294,8 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "item_errors": {i: dict(v) for i, v in bag["items"].items()},
                 "posted_items": posted_items,
                 "posted_client": client_id,
+                "is_master": is_master(request.user),
+                "current_master_id": mp.id if mp else None,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -1355,6 +1345,16 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
     def save_related(self, request, form, formsets, change):
         super().save_related(request, form, formsets, change)
         appt = form.instance
+        mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
+        if is_master(request.user):
+            for formset in formsets:
+                if not isinstance(formset, BaseInlineFormSet):
+                    continue
+                model = getattr(getattr(formset, "model", None), "__name__", "")
+                # интересует только инлайн с AppointmentItem
+                if model != "AppointmentItem":
+                    continue
+
         appt.recompute_totals(save=True)
         # Бизнес-правила (как и раньше — строгость сохранили):
         validate_appointment_has_items_on_save(appt)
@@ -1957,7 +1957,7 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
             # MasterAvailability (time off)
             "view_masteravailability", "add_masteravailability", "change_masteravailability", "delete_masteravailability",
 
-             "view_userprofile", "change_userprofile"
+             "view_userprofile", "change_userprofile", "add_appointmentitem", "change_appointmentitem", "delete_appointmentitem"
         ]
         perms = Permission.objects.filter(codename__in=needed)
         user.user_permissions.add(*perms)
