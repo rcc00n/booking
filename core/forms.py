@@ -391,6 +391,68 @@ class CustomUserCreationForm(HealthFieldsMixin, UserCreationForm):
 # Custom User Change Form
 # -----------------------------
 
+class UserProfileChangeForm(forms.ModelForm):
+    # «виртуальные» поля из связанного User
+    has_allergies = forms.BooleanField(required=False)
+    allergies_text = forms.CharField(required=False, widget=forms.Textarea)
+    gender = forms.CharField(required=False)
+    chronic_conditions = forms.CharField(required=False, widget=forms.Textarea)
+    medications = forms.CharField(required=False, widget=forms.Textarea)
+    pregnant = forms.BooleanField(required=False)
+    skin_sensitivity = forms.BooleanField(required=False)
+    recent_procedures = forms.CharField(required=False, widget=forms.Textarea)
+    contraindications = forms.CharField(required=False, widget=forms.Textarea)
+    health_notes = forms.CharField(required=False, widget=forms.Textarea)
+    # если files — поле у User (ManyToMany/ForeignKey), можно отрендерить как обычное:
+    # при M2M желательно widget=FilteredSelectMultiple, но можно начать с простого
+
+
+    class Meta:
+        model = UserProfile
+        fields = (
+            "user",
+            "phone", "birth_date", "postal_code",
+            "how_heard",
+            "notes",
+            # ВАЖНО: тут только реальные поля UserProfile!
+        )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        u = self.instance.user if getattr(self.instance, "user_id", None) else None
+
+        # --- инициализация полей из User ---
+        for name in (
+                "has_allergies", "allergies_text", "gender", "chronic_conditions",
+                "medications", "pregnant", "skin_sensitivity",
+                "recent_procedures", "contraindications", "health_notes",
+        ):
+            if name in self.fields and u and hasattr(u, name):
+                self.fields[name].initial = getattr(u, name)
+        for name, field in self.fields.items():
+            if name != "notes":
+                field.disabled = True
+
+        # --- files (ManyToMany у User) ---
+
+
+    def save(self, commit=True):
+        profile = super().save(commit=False)
+        u = profile.user
+
+        for name in (
+                "has_allergies", "allergies_text", "gender", "chronic_conditions",
+                "medications", "pregnant", "skin_sensitivity",
+                "recent_procedures", "contraindications", "health_notes",
+        ):
+            if name in self.cleaned_data and hasattr(u, name):
+                setattr(u, name, self.cleaned_data[name])
+
+        if commit:
+            u.save()
+            profile.save()
+        return profile
+
 class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
     """
     Custom form for editing existing users in the admin.

@@ -993,7 +993,8 @@ class Notification(models.Model):
             # Не допускаем дубликатов напоминаний одного вида для одной записи
             models.UniqueConstraint(
                 fields=["appointment", "kind", "channel"],
-                name="uniq_notification_per_kind_channel"
+                name="uniq_notification_per_kind_channel",
+                condition=~models.Q(kind="updated"),
             )
         ]
 

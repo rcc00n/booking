@@ -74,11 +74,7 @@ def custom_index(request):
 
     # Роль/профиль мастера
     userprof = getattr(request.user, "userprofile", None)
-    is_master = bool(
-        userprof
-        and userprof.userrole_set.filter(role__name="Master").exists()
-        and not request.user.is_superuser
-    )
+
     master_profile = getattr(userprof, "master_profile", None) if userprof else None
 
     # График продаж/записей за 7 дней
@@ -189,7 +185,7 @@ def custom_index(request):
         .select_related("appointment__client__user")
         .order_by("start_time")
     )
-    if is_master and master_profile:
+    if is_master(request.user) and master_profile:
         today_appointments = today_appointments.filter(master=master_profile).distinct()
 
     # Ежедневная разбивка Confirmed/Cancelled (на 7 дней вперёд)
@@ -205,7 +201,7 @@ def custom_index(request):
 
     context = admin.site.each_context(request)
     context.update({
-        "is_master": is_master,
+        "is_master": is_master(request.user),
         "daily_appointments": daily_counts,
         "chart_data": chart_data,
         "total_sales": total_sales,
@@ -301,24 +297,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             consent
         ]
     # Fields shown when adding a new user
-    add_fieldsets = (
-        (None, {
-            'classes': ('wide',),
-            'fields': ('username', 'email', 'first_name', 'last_name', 'phone', 'postal_code','birth_date',
-                       'password1', 'password2', 'is_staff', 'is_active', 'is_superuser', 'email_marketing_consent', 'how_heard'),
-        }),
-        ('Health', {
-            'classes': ('collapse', 'wide'),
-            'fields': (
-                'has_allergies', 'allergies_text',
-                'gender',
-                'chronic_conditions', 'medications',
-                'pregnant', 'skin_sensitivity',
-                'recent_procedures', 'contraindications',
-                'health_notes',
-            ),
-        }),
-    )
+
 
     # Fields shown in user list
     list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'source', 'client_status_col')
@@ -434,11 +413,6 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     def staff_status(self, instance):
         return instance.is_staff
     staff_status.boolean = True
-
-    @admin.display(description="Roles")
-    def user_roles(self, instance):
-        roles = instance.userprofile.userrole_set.select_related('role').all()
-        return ", ".join([ur.role.name for ur in roles]) if roles else "-"
 
 
 # Unregister the default User admin and re-register with our custom one
@@ -1016,7 +990,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         # ---------------- POST: создаём запись ----------------
         clients, masters, services_by_master = _context_lists()
 
-        if is_master:
+        if is_master(request.user):
             masters = [m for m in masters if str(m["id"]) == str(mp.pk)]
         # соберём промокоды по сервисам (как у вас)
         promos_by_service: dict[str, list[dict]] = {}
@@ -1098,7 +1072,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             date_str   = row["start_time_0"]
             time_str   = row["start_time_1"]
 
-            if is_master:
+            if is_master(request.user):
                 if master_id and str(master_id) != str(mp.pk):
                     # фиксируем в UI, но и ошибку подсветим, чтобы было наглядно, почему перезатираем
                     bag["items"][idx]["master"].append("You can assign items only to yourself.")
@@ -1171,7 +1145,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                         row_errs.setdefault(key, []).append("Incomplete row.")
                         continue
 
-                    if is_master and str(row["master_id"]) != str(mp.pk):
+                    if is_master(request.user) and str(row["master_id"]) != str(mp.pk):
                         key = f"items-{idx}-master"
                         row_errs.setdefault(key, []).append("You can assign items only to yourself.")
                         continue
@@ -1801,18 +1775,52 @@ class AppointmentItemPromoCodeAdmin(admin.ModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
+    form = UserProfileChangeForm
     # Явно перечислим поля на форме
-    fields = (
-        "user",
-        "phone",
-        "birth_date",
-        "postal_code",
-        "how_heard",
-        "email_marketing_consent",
-        "notes",
-        "personal_discount_percent",
-         # единственное редактируемое поле для мастера
+    @admin.display(description="First name")
+    def user_first_name(self, obj):
+        return getattr(getattr(obj, "user", None), "first_name", "")
+
+    @admin.display(description="Last name")
+    def user_last_name(self, obj):
+        return getattr(getattr(obj, "user", None), "last_name", "")
+
+    @admin.display(description="Email")
+    def user_email(self, obj):
+        return getattr(getattr(obj, "user", None), "email", "")
+
+    fieldsets = (
+        (None, {
+            "fields": (
+                "user_first_name",
+                "user_last_name"
+            )
+        }),
+        ("Personal Info", {
+            "fields": (
+                "phone", "user_email","birth_date", "postal_code",
+                "how_heard",
+            )
+        }),
+        ("Notes", {"fields": ("notes",)}),
+
+        # ТЕ САМЫЕ ПОЛЯ — но они теперь ПРИСУТСТВУЮТ в форме (как виртуальные),
+        # поэтому Django их корректно отрендерит в админке UserProfile.
+        ("Health", {
+            "classes": ("collapse", "wide"),
+            "fields": (
+                "has_allergies", "allergies_text", "gender",
+                "chronic_conditions", "medications",
+                "pregnant", "skin_sensitivity",
+                "recent_procedures", "contraindications",
+                "health_notes",
+            ),
+        }),
+
     )
+
+    readonly_fields = ("user_first_name", "user_last_name", "user_email")
+
 
     @admin.display(description="Status")
     def client_status_col(self, obj):
