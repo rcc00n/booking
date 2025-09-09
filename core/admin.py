@@ -758,6 +758,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         # Админка валидирует формы, но мы дополнительно страхуемся:
+        print(f"obj:{obj}")
         obj.full_clean()  # вызывает Appointment.clean()
         super().save_model(request, obj, form, change)
         new_status = form.cleaned_data.get("current_status")
@@ -788,13 +789,14 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
     def save_formset(self, request, form, formset, change):
         # Забираем инстансы без сохранения
         instances = formset.save(commit=False)
-
+        print(f"formset: {formset}")
         # Удаления — отдельно
         for deleted in formset.deleted_objects:
             deleted.delete()
 
         # Прогоняем full_clean() на каждом дочернем объекте
         for inst in instances:
+            print(f"inst: {inst}")
             inst.full_clean()  # вызывает AppointmentItem.clean()
             inst.save()
 
@@ -829,12 +831,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 self.admin_site.admin_view(self.custom_create_view),
                 name="core_appointment_custom_create",
             ),
-            # UUID или int — всё покроем одной регой
-            # re_path(
-            #     r"^api/services/(?P<service_id>[0-9a-f-]+)/promocodes/$",
-            #     self.admin_site.admin_view(self.promocodes_api),
-            #     name="core_service_promocodes_api",
-            # ),
+
         ]
         return custom + urls
 

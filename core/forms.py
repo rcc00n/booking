@@ -203,9 +203,9 @@ class AppointmentItemInlineForm(forms.ModelForm):
 
     def save(self, commit=True):
         # сохраняем сам Item
+
         item = super().save(commit)
         promo = self.cleaned_data.get("promocode")
-
         # синхронизируем through-модель
         if item.pk:
             if promo:

@@ -30,7 +30,29 @@
         o.textContent = String(text);
         return o;
     }
-
+    function mirrorOptions(dstSelect, srcSelect) {
+        if (!dstSelect || !srcSelect) return;
+        dstSelect.innerHTML = "";
+        Array.from(srcSelect.options).forEach(o => {
+            const opt = document.createElement("option");
+            opt.value = String(o.value);
+            opt.textContent = o.textContent;
+            dstSelect.appendChild(opt);
+        });
+    }
+    function setSelectValueEnsuringOption(select, value, labelIfAdd) {
+        if (!select) return;
+        const val = String(value ?? "");
+        if (!val) { select.value = ""; return; }
+        let has = Array.from(select.options).some(o => o.value === val);
+        if (!has) {
+            const opt = document.createElement("option");
+            opt.value = val;
+            opt.textContent = String(labelIfAdd ?? val);
+            select.appendChild(opt);
+        }
+        select.value = val;
+    }
     function populateMasters(uiSelect) {
            uiSelect.innerHTML = "";
            // всегда показываем всех — нужно корректно отрисовать чужие строки
@@ -56,7 +78,12 @@
             uiSelect.appendChild(buildOption(p.id, p.text));
         });
     }
-
+    // disabled поля не уезжают в POST — подложим hidden-клон
+    function readValueFor(el) {
+        if (el.tagName === "SELECT") return el.value || "";
+        if (el.type === "checkbox") return el.checked ? (el.value || "on") : "";
+        return el.value || "";
+    }
     // disabled поля не уезжают в POST — подложим hidden-клон
     function ensureHiddenClone(el) {
         if (!el || !el.name) return;
@@ -75,12 +102,6 @@
         el.insertAdjacentElement("afterend", hid);
     }
 
-    function readValueFor(el) {
-        if (el.tagName === "SELECT") return el.value || "";
-        if (el.type === "checkbox") return el.checked ? (el.value || "on") : "";
-        return el.value || "";
-    }
-
     function disableAndClone(el) {
         try { el.disabled = true; } catch {}
         ensureHiddenClone(el);
@@ -93,7 +114,31 @@
         if (native.value) ui.value = String(native.value);
         ui.addEventListener("change", () => { native.value = ui.value; });
     }
+    function syncRowToNative(row) {
+        const nativeMaster = row.querySelector(".native-master select");
+        const uiMaster     = row.querySelector(".js-master");
+        if (nativeMaster && uiMaster && uiMaster.value) nativeMaster.value = uiMaster.value;
 
+        const nativeSvc = row.querySelector(".native-service select");
+        const uiSvc     = row.querySelector(".js-service");
+        if (nativeSvc && uiSvc) {
+            // передать опции и значение
+            mirrorOptions(nativeSvc, uiSvc);
+            const lbl = uiSvc.selectedOptions?.[0]?.textContent || "";
+            setSelectValueEnsuringOption(nativeSvc, uiSvc.value, lbl);
+        }
+
+        const nativePromo = row.querySelector(".native-promocode select[name$='-promocode']");
+        const uiPromo     = row.querySelector(".js-promocode");
+        if (nativePromo && uiPromo) {
+            // промокоды могут быть тоже пустыми в native — синхронизируем минимально выбранное
+            setSelectValueEnsuringOption(nativePromo, uiPromo.value, uiPromo.selectedOptions?.[0]?.textContent || "");
+        }
+
+        const nativeForce  = row.querySelector(".native-promocode input[name$='-force_apply']");
+        const promoForceUI = row.querySelector(".js-promo-force");
+        if (nativeForce) nativeForce.checked = !!(promoForceUI && promoForceUI.checked);
+    }
     function initRow(row) {
         // элементы
         const nativeMaster = $(".native-master select", row);
@@ -120,7 +165,25 @@
         const effectiveMasterId = (nativeMaster ? nativeMaster.value : (uiMaster ? uiMaster.value : ""));
         populateServices(uiSvc, effectiveMasterId);
         if (nativeSvc && nativeSvc.value) uiSvc.value = String(nativeSvc.value);
+        mirrorOptions(nativeSvc, uiSvc);
 
+
+// после того как uiSvc.value задан — протолкнём в native
+
+        const label = uiSvc.selectedOptions?.[0]?.textContent || "";
+        setSelectValueEnsuringOption(nativeSvc, uiSvc.value, label);
+
+
+// при изменении сервиса пользователем: и в native опции/значение
+        uiSvc.addEventListener("change", () => {
+            mirrorOptions(nativeSvc, uiSvc);
+            const label = uiSvc.selectedOptions?.[0]?.textContent || "";
+            setSelectValueEnsuringOption(nativeSvc, uiSvc.value, label);
+            // и пересобрать промокоды UI (как было у тебя)
+            if (typeof populatePromos === "function") {
+                populatePromos(uiPromo, uiSvc.value);
+            }
+        });
         // промокоды (UI остаётся disabled по умолчанию, включим ниже для «моих»)
         if (nativeSvc && nativeSvc.value) {
             populatePromos(uiPromo, nativeSvc.value);
@@ -156,19 +219,47 @@
                 }
             } else {
                 // ЧУЖАЯ строка: всё делаем read-only
+                // ЧУЖАЯ строка: всё делаем read-only
                 row.classList.add("readonly");
 
                 // UI селекты/контролы блокируем
                 if (uiSvc) uiSvc.disabled = true;
                 if (uiPromo) uiPromo.disabled = true;
-                if (promoForceUI) { promoForceUI.disabled = true; promoForceUI.checked = !!($(".native-promocode input[name$='-force_apply']", row)?.checked); }
+                if (promoForceUI) {
+                    promoForceUI.disabled = true;
+                    const nativeForce = $(".native-promocode input[name$='-force_apply']", row);
+                    promoForceUI.checked = !!(nativeForce && nativeForce.checked);
+                }
 
-                // реальные отправляемые инпуты (start_time, unit_price) — disable + hidden clone
-                if (nativeStart) disableAndClone(nativeStart);
-                if (nativePrice) disableAndClone(nativePrice);
+                // реальные отправляемые инпуты — делаем disabled и подкладываем hidden-клоны
+                const nativeStartDate = $("[name$='-start_time_0']", row);
+                const nativeStartTime = $("[name$='-start_time_1']", row);
+                const nativePrice     = $("[name$='-unit_price']",    row);
 
-                // удалять чужое нельзя
-                if (delWrap) delWrap.classList.add("ab-hidden");
+                if (nativeStartDate) disableAndClone(nativeStartDate);
+                if (nativeStartTime) disableAndClone(nativeStartTime);
+                if (nativePrice)     disableAndClone(nativePrice);
+
+                // если поверх time уже навешан четвертной селект — тоже задизейблим
+
+
+                // удалить чужое нельзя: вырубаем чекбокс DELETE и прячем «кнопку»
+                const delInput = $("input[name$='-DELETE']", row);
+                if (delInput) {
+                    delInput.disabled = true; // на всякий
+                    const lbl = delInput.closest("label");
+                    if (lbl && lbl.classList.contains("ab-btn")) {
+                        lbl.classList.add("ab-hidden");         // полностью скрыть
+                        lbl.style.pointerEvents = "none";       // и на всякий без кликов
+                    }
+                }
+
+                // глушим любые взаимодействия внутри чужой строки (клики/клавиатура)
+                const stopper = e => { e.preventDefault(); e.stopPropagation(); };
+                row.addEventListener("click", stopper, true);
+                row.addEventListener("mousedown", stopper, true);
+                row.addEventListener("keydown", stopper, true);
+
             }
         } else {
             // админ: обычная синхронизация UI <> нативные поля
@@ -295,15 +386,21 @@
         if (form) {
             form.addEventListener("submit", () => {
                 $$(".ab-item", itemsContainer).forEach(row => {
+
+                    syncRowToNative(row);
                     if (row.classList.contains("readonly")) {
-                        const nativeStart = $("[name$='-start_time']", row);
+                        const nativeStartDate = $("[name$='-start_time_0']", row);
+                        const nativeStartTime = $("[name$='-start_time_1']", row);
                         const nativePrice = $("[name$='-unit_price']", row);
-                        if (nativeStart) ensureHiddenClone(nativeStart);
-                        if (nativePrice) ensureHiddenClone(nativePrice);
+                        if (nativeStartDate) ensureHiddenClone(nativeStartDate);
+                        if (nativeStartTime) ensureHiddenClone(nativeStartTime);
+                        if (nativePrice)     ensureHiddenClone(nativePrice);
                     }
+
                     // master всегда не редактируем: UI disabled, но нативное поле активно — ничего делать не нужно
                 });
             });
         }
     });
+
 })();
