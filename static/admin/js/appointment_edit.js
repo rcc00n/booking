@@ -13,7 +13,6 @@
         if (!el) return fallback;
         try { return JSON.parse(el.textContent || ""); } catch { return fallback; }
     };
-
     const MASTERS = parseJSON("masters-data", []);
     const MS_MAP = parseJSON("ms-map-data", {}); // { master_id: [ {id,name,base_price,svc_disc}, ... ] }
     const PROMO_BY_SERVICE = parseJSON("promos-by-service-data", {}); // { service_id: [ {id,text,discount}, ... ] }
@@ -131,12 +130,6 @@
         // решим, «моя» ли эта строка
         const isMine = IS_MASTER && MY_ID && nativeMaster ? (String(nativeMaster.value) === MY_ID) : false;
 
-        // // мастер не может менять master ни при каких обстоятельствах
-        // if (uiMaster) {
-        //     uiMaster.disabled = true;
-        //     // подсказка для чужих строк
-        //     if (!isMine && roBadge) roBadge.classList.remove("ab-hidden");
-        // }
 
         // права редактирования:
         if (IS_MASTER) {
@@ -223,6 +216,60 @@
     });
     mo.observe(itemsContainer, { childList: true });
 
+    // Добавление новой строки из empty_form
+    function nextFormIndex() {
+        const totalEl = document.querySelector('input[name="items-TOTAL_FORMS"]');
+        return totalEl ? parseInt(totalEl.value || "0", 10) : 0;
+    }
+    function bumpTotalForms() {
+        const totalEl = document.querySelector('input[name="items-TOTAL_FORMS"]');
+        if (totalEl) totalEl.value = String((parseInt(totalEl.value || "0", 10) + 1));
+    }
+
+    function replacePrefixAttributes(rootEl, idx) {
+        const walk = rootEl.querySelectorAll("[name], [id], label[for]");
+        walk.forEach(el => {
+            if (el.name && el.name.includes("__prefix__")) el.name = el.name.replace(/__prefix__/g, idx);
+            if (el.id && el.id.includes("__prefix__")) el.id = el.id.replace(/__prefix__/g, idx);
+            if (el.getAttribute && el.hasAttribute("for")) {
+                const f = el.getAttribute("for");
+                if (f && f.includes("__prefix__")) el.setAttribute("for", f.replace(/__prefix__/g, idx));
+            }
+        });
+        // для удобства
+        rootEl.dataset.formIndex = String(idx);
+    }
+
+    function initDefaultsForNewRow(row) {
+        // если мастер — сразу зафиксируем своего мастера
+        if (IS_MASTER && MY_ID) {
+            const nativeMaster = $(".native-master select", row);
+            const uiMaster = $(".js-master", row);
+            if (nativeMaster) nativeMaster.value = MY_ID;
+            if (uiMaster) { uiMaster.value = MY_ID; uiMaster.disabled = true; }
+        }
+    }
+
+    function addItem() {
+        const tpl = $("#empty-form-tpl");
+        if (!tpl) return;
+
+        const idx = nextFormIndex();
+        const fragment = tpl.content.cloneNode(true);
+        const node = fragment.firstElementChild; // .ab-item
+
+        replacePrefixAttributes(node, idx);
+        initDefaultsForNewRow(node);
+
+        // Вставка в DOM
+        itemsContainer.appendChild(node);
+
+        // Увеличиваем TOTAL_FORMS
+        bumpTotalForms();
+
+        // Инициализация строки (селекты, таймпикер и т.д.)
+        initRow(node);
+    }
     // вкладки
     function initTabs() {
         const tabs = $$(".tab");
@@ -241,7 +288,9 @@
         initExistingRows();
         initTabs();
 
-        // при сабмите — убедимся, что все disabled реальные поля имеют hidden-клоны
+        const btnAdd = $("#btn-add-item");
+        if (btnAdd) btnAdd.addEventListener("click", addItem);
+        // при с   абмите — убедимся, что все disabled реальные поля имеют hidden-клоны
         const form = itemsContainer.closest("form");
         if (form) {
             form.addEventListener("submit", () => {
