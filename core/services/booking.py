@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta, time
 from typing import List, Dict, Optional, Tuple
 
-from django.db.models import Q
+from django.db.models import Q, OuterRef, Subquery
 from django.utils import timezone
 from django.utils.timezone import make_aware, get_current_timezone
 
 from core.models import (
     Service, ServiceMaster, CustomUserDisplay, Appointment,
+    AppointmentItem,
     MasterAvailability, AppointmentStatus, AppointmentStatusHistory,
     PaymentStatus, MasterProfile,
 )
@@ -68,8 +69,8 @@ def _master_day_work_window(mp: MasterProfile, day: datetime) -> Slot:
     """
     weekday = day.weekday()
     workday = mp.workdays.filter(weekday=weekday).first()
-    if not workday:
-        return None, None  # в этот день мастер не работает
+    if not workday or not workday.start_time or not workday.end_time:
+        return None, None  # в этот день мастер не работает / расписание пустое
 
     ws = _tz_aware(datetime(day.year, day.month, day.day,
                             workday.start_time.hour, workday.start_time.minute))
@@ -85,21 +86,36 @@ def _appointment_intervals(master: MasterProfile, day: datetime) -> List[Slot]:
     start_day = _tz_aware(datetime(day.year, day.month, day.day, 0, 0)) - timedelta(hours=3)
     end_day = start_day + timedelta(days=1, hours=3)
 
-    qs = (
-        Appointment.objects
-        .filter(master=master, start_time__gte=start_day, start_time__lt=end_day)
-        .select_related("service")
-    )
-    # исключаем отменённые (если есть статус 'Cancelled')
+    # Последний статус записи для фильтра отменённых
     cancelled = AppointmentStatus.objects.filter(name__iexact="Cancelled").first()
+    last_status_sq = (
+        AppointmentStatusHistory.objects
+        .filter(appointment_id=OuterRef("appointment_id"))
+        .order_by("-set_at")
+        .values("status_id")[:1]
+    )
+
+    qs = (
+        AppointmentItem.objects
+        .select_related("appointment", "service")
+        .annotate(last_status=Subquery(last_status_sq))
+        .filter(
+            master=master,
+            appointment__start_time__gte=start_day,
+            appointment__start_time__lt=end_day,
+        )
+    )
     if cancelled:
-        qs = qs.exclude(appointmentstatushistory__status=cancelled)
+        qs = qs.exclude(last_status=cancelled.id)
 
     blocks: List[Slot] = []
-    for ap in qs:
-        ap_start = ap.start_time
-        dur = timedelta(minutes=ap.service.duration_min or 0)
-        blocks.append((ap_start, ap_start + dur))
+    for item in qs:
+        base_start = item.start_time or getattr(item.appointment, "start_time", None)
+        if not base_start:
+            continue
+        duration_min = (item.service.duration_min or 0) + (item.service.extra_time_min or 0)
+        dur = timedelta(minutes=duration_min)
+        blocks.append((base_start, base_start + dur))
     return blocks
 
 def _timeoff_intervals(master: MasterProfile, day: datetime) -> List[Slot]:
@@ -144,7 +160,7 @@ def get_available_slots(
     #TODO change master work_s work_e accordingly to each day. It is the same for all days now. Needs to be changed to each day separately
 
         work_s, work_e = _master_day_work_window(m, day)
-        if work_s >= work_e:
+        if not work_s or not work_e or work_s >= work_e:
             continue
 
         blocks = _appointment_intervals(m, day) + _timeoff_intervals(m, day)

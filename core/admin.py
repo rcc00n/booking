@@ -273,6 +273,29 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     form = CustomUserChangeForm
     export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'postal_code', 'user_roles', 'is_staff', 'is_superuser', 'is_active', 'source']
 
+    add_fieldsets = (
+        (None, {
+            'classes': ('wide',),
+            'fields': (
+                'username', 'usable_password', 'password1', 'password2',
+                'email', 'first_name', 'last_name',
+                'phone', 'birth_date', 'postal_code',
+                'personal_discount_percent', 'how_heard', 'email_marketing_consent',
+                'notes',
+                'is_active', 'is_staff', 'is_superuser', 'groups',
+            ),
+        }),
+        ('Health', {
+            'classes': ('collapse',),
+            'fields': (
+                'has_allergies', 'allergies_text', 'gender',
+                'chronic_conditions', 'medications', 'pregnant',
+                'skin_sensitivity', 'recent_procedures',
+                'contraindications', 'health_notes',
+            ),
+        }),
+    )
+
     def get_export_row(self, obj):
         phone = obj.userprofile.phone if hasattr(obj, 'userprofile') else ''
         birth_date = obj.userprofile.birth_date if hasattr(obj, 'userprofile') else ''
@@ -2855,3 +2878,20 @@ def _corner_badges_html(appt, appt_promocode):
         return ""
 
     return f"<div class='corner-badges'>{promo_html}{health_html}</div>"
+
+# core/admin.py
+from django.db import connection
+
+def custom_index(request):
+    from django.template.response import TemplateResponse
+
+    tables = set(connection.introspection.table_names())
+    userprof = None
+    if "core_userprofile" in tables:
+        try:
+            userprof = getattr(request.user, "userprofile", None)
+        except Exception:
+            userprof = None
+
+    ctx = {"userprof": userprof}
+    return TemplateResponse(request, "admin/index.html", ctx)

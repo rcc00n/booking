@@ -95,11 +95,11 @@ WSGI_APPLICATION = 'booking.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'Malva', # Change to your local DB name
-        'USER': 'postgres', # Change to your local user name
-        'PASSWORD': 'admin', # Change to your local user password
+        'NAME': 'appdb', # Change to your local DB name
+        'USER': 'appuser', # Change to your local user name
+        'PASSWORD': 'strong_password', # Change to your local user password
         'HOST': 'localhost',
-        'PORT': '5433',
+        'PORT': '5432',
     }
 }
 
@@ -153,40 +153,76 @@ STATICFILES_DIRS = [ BASE_DIR / "static" ]
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Use S3 as default storage for uploaded media
-DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+# # Use S3 as default storage for uploaded media
+# DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 
-# AWS credentials
+# # AWS credentials
 
-AWS_S3_SIGNATURE_NAME  = 's3v4'
-# Your S3 bucket name
-AWS_STORAGE_BUCKET_NAME = 'malvatest1'
-AWS_S3_REGION_NAME = 'ca-central-1'
-# Optional: Make files public
-AWS_QUERYSTRING_AUTH = False
+# AWS_S3_SIGNATURE_NAME  = 's3v4'
+# # Your S3 bucket name
+# AWS_STORAGE_BUCKET_NAME = 'malvatest1'
+# AWS_S3_REGION_NAME = 'ca-central-1'
+# # Optional: Make files public
+# AWS_QUERYSTRING_AUTH = False
 
-# Optional: Customize file URLs
-AWS_S3_FILE_OVERWRITE = False
-AWS_DEFAULT_ACL = None
-# Optional: Specify custom domain (if you use CloudFront or static hosting)
-# AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
+# # Optional: Customize file URLs
+# AWS_S3_FILE_OVERWRITE = False
+# AWS_DEFAULT_ACL = None
+# # Optional: Specify custom domain (if you use CloudFront or static hosting)
+# # AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
 
-AWS_ACCESS_KEY_ID=env("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY=env("AWS_SECRET_ACCESS_KEY")
+# AWS_ACCESS_KEY_ID=env("AWS_ACCESS_KEY_ID")
+# AWS_SECRET_ACCESS_KEY=env("AWS_SECRET_ACCESS_KEY")
 
-# Media URL for S3
-MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.ca-central-1.amazonaws.com/'
-REVIEW_FORM_URL = "https://your-domain.tld/review/{appointment_id}/"
+# settings.py
+from environ import Env
+env = Env()
 
-EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
-ANYMAIL = {
-    "SENDGRID_API_KEY": env("SENDGRID_API_KEY"),
-}
-DEFAULT_FROM_EMAIL=env("DEFAULT_FROM_EMAIL")
-SERVER_EMAIL=env("SERVER_EMAIL")
+USE_S3 = env.bool("USE_S3", default=False)
+
+if USE_S3:
+    INSTALLED_APPS += ["storages"]
+    AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY")
+    AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
+    AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="us-east-1")
+    AWS_S3_SIGNATURE_VERSION = "s3v4"
+    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+else:
+    # локально — файловая система
+    MEDIA_URL = "/media/"
+    MEDIA_ROOT = BASE_DIR / "media"
+
+# # Media URL for S3
+# MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.ca-central-1.amazonaws.com/'
+# REVIEW_FORM_URL = "https://your-domain.tld/review/{appointment_id}/"
+
+# EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
+# ANYMAIL = {
+#     "SENDGRID_API_KEY": env("SENDGRID_API_KEY"),
+# }
+# DEFAULT_FROM_EMAIL=env("DEFAULT_FROM_EMAIL")
+# SERVER_EMAIL=env("SERVER_EMAIL")
 
   # для административных уведомлений
 # хороший дефолт, чтобы Django формировал абсолютные ссылки в письмах:
+from environ import Env
+env = Env()
+
+# ===== Email =====
+USE_SENDGRID = env.bool("USE_SENDGRID", default=False)
+
+if USE_SENDGRID:
+    INSTALLED_APPS += ["sendgrid_backend"]
+    SENDGRID_API_KEY = env.str("SENDGRID_API_KEY")          # без default, чтобы в проде падало, если забыли
+    EMAIL_BACKEND = "sendgrid_backend.SendgridBackend"
+    DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="noreply@example.com")
+    SENDGRID_SANDBOX_MODE_IN_DEBUG = env.bool("SENDGRID_SANDBOX_MODE_IN_DEBUG", default=False)
+    SENDGRID_ECHO_TO_STDOUT = env.bool("SENDGRID_ECHO_TO_STDOUT", default=False)
+else:
+    # дев-режим без ключей
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+    DEFAULT_FROM_EMAIL = "dev@local.test"
 
 # --- Celery ---
 CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
@@ -202,9 +238,23 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
-TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = env("TWILIO_AUTH_TOKEN")
-TWILIO_FROM_NUMBER = env("TWILIO_FROM_NUMBER")
+# TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID")
+# TWILIO_AUTH_TOKEN = env("TWILIO_AUTH_TOKEN")
+# TWILIO_FROM_NUMBER = env("TWILIO_FROM_NUMBER")
+from environ import Env
+env = Env()
+
+USE_TWILIO = env.bool("USE_TWILIO", default=False)
+
+if USE_TWILIO:
+    TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID")
+    TWILIO_AUTH_TOKEN = env("TWILIO_AUTH_TOKEN")
+    TWILIO_FROM_NUMBER = env("TWILIO_FROM_NUMBER")
+else:
+    # Локально заглушка, чтобы не падало
+    TWILIO_ACCOUNT_SID = ""
+    TWILIO_AUTH_TOKEN = ""
+    TWILIO_FROM_NUMBER = ""
 
 JAZZMIN_SETTINGS = {
     "site_title": "Malva Admin",

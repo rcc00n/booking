@@ -9,6 +9,8 @@ from django.views.decorators.csrf import csrf_protect
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 from datetime import datetime
+from django.core.exceptions import ValidationError
+from django.db import transaction
 import json
 
 from core.models import (
@@ -56,10 +58,14 @@ def public_mainmenu(request):
     if request.user.is_authenticated:
         user = request.user
         ctx["profile"] = getattr(user, "userprofile", None)
+        items_prefetch = Prefetch(
+            "items",
+            queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
+        )
         ctx["appointments"] = (
             Appointment.objects
             .filter(client=user.userprofile)
-            .select_related("service", "master")
+            .prefetch_related(items_prefetch)
             .order_by("-start_time")
         )
     else:
@@ -139,25 +145,47 @@ def api_book(request):
         from django.http import HttpResponseBadRequest
         return HttpResponseBadRequest("invalid start_time")
 
-    pay_status = get_default_payment_status()
-    appt = Appointment(
-        client=request.user.userprofile,
-        master=master,
-        service=service,
-        start_time=start_dt,
-        payment_status=pay_status if pay_status else None,
-    )
-    appt.full_clean()
-    appt.save()
+    try:
+        with transaction.atomic():
+            pay_status = get_default_payment_status()
+            appt = Appointment(
+                client=request.user.userprofile,
+                start_time=start_dt,
+                payment_status=pay_status if pay_status else None,
+            )
+            appt.full_clean()
+            appt.save()
 
-    initial_status = get_or_create_status("Confirmed")
-    AppointmentStatusHistory.objects.create(
-        appointment=appt,
-        status=initial_status,
-        set_by=request.user.userprofile
-    )
+            item = AppointmentItem(
+                appointment=appt,
+                service=service,
+                master=master,
+                start_time=start_dt,
+            )
+            item.full_clean()
+            item.save()
 
-    from django.http import JsonResponse
+            appt.sync_start_time_from_items(save=True)
+            appt.recompute_totals(save=True)
+
+            initial_status = get_or_create_status("Confirmed")
+            AppointmentStatusHistory.objects.create(
+                appointment=appt,
+                status=initial_status,
+                set_by=request.user.userprofile
+            )
+    except ValidationError as exc:
+        messages = []
+        if hasattr(exc, "message_dict"):
+            for vals in exc.message_dict.values():
+                if isinstance(vals, (list, tuple)):
+                    messages.extend(vals)
+                else:
+                    messages.append(str(vals))
+        else:
+            messages.extend(getattr(exc, "messages", [str(exc)]))
+        return JsonResponse({"error": messages[0] if messages else "Invalid data"}, status=400)
+
     return JsonResponse({
         "ok": True,
         "appointment": {
@@ -172,11 +200,10 @@ def api_book(request):
 from django.views.decorators.http import require_POST
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden, Http404
 from django.shortcuts import get_object_or_404
-from django.db import transaction
 
 from core.models import (
     Appointment, AppointmentStatus, AppointmentStatusHistory,
-    CustomUserDisplay, ServiceMaster
+    CustomUserDisplay, ServiceMaster, AppointmentItem
 )
 
 def _status(name: str) -> AppointmentStatus:
@@ -187,7 +214,15 @@ def _status(name: str) -> AppointmentStatus:
 @require_POST
 @csrf_protect
 def api_appointment_cancel(request, appt_id):
-    appt = get_object_or_404(Appointment.objects.select_related("client", "service", "master"), pk=appt_id)
+    appt = get_object_or_404(
+        Appointment.objects.select_related("client").prefetch_related(
+            Prefetch(
+                "items",
+                queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
+            )
+        ),
+        pk=appt_id,
+    )
     # только владелец или staff
 
     if not (request.user.is_staff or appt.client_id == request.user.userprofile.id):
@@ -225,7 +260,15 @@ def api_appointment_reschedule(request, appt_id):
     JSON: { "start_time": "<ISO8601>", "master": <user_id optional> }
     Меняет время (и по желанию мастера) с валидацией Appointment.clean().
     """
-    appt = get_object_or_404(Appointment.objects.select_related("client", "service", "master"), pk=appt_id)
+    appt = get_object_or_404(
+        Appointment.objects.select_related("client").prefetch_related(
+            Prefetch(
+                "items",
+                queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
+            )
+        ),
+        pk=appt_id,
+    )
     if not (request.user.is_staff or appt.client_id == request.user.userprofile.id):
         return HttpResponseForbidden("not allowed")
 
@@ -248,19 +291,25 @@ def api_appointment_reschedule(request, appt_id):
 
     # смена мастера (опционально)
     master_id = payload.get("master")
+    primary_item = appt.primary_item
+    if not primary_item:
+        return HttpResponseBadRequest("appointment has no items")
+
     if master_id:
         new_master = get_object_or_404(MasterProfile, pk=master_id)
         # мастер должен уметь услугу
-        if not ServiceMaster.objects.filter(service=appt.service, master=new_master).exists():
+        if not ServiceMaster.objects.filter(service=primary_item.service, master=new_master).exists():
             return HttpResponseBadRequest("master can't perform this service")
-        appt.master = new_master
+        primary_item.master = new_master
 
-    appt.start_time = new_start
+    primary_item.start_time = new_start
 
     # валидация пересечений/комнат/отпусков
-    appt.full_clean()
+    primary_item.full_clean()
     with transaction.atomic():
-        appt.save()
+        primary_item.save()
+        appt.sync_start_time_from_items(save=True)
+        appt.recompute_totals(save=True)
         # история статусов
         AppointmentStatusHistory.objects.create(
             appointment=appt,
@@ -271,7 +320,7 @@ def api_appointment_reschedule(request, appt_id):
     return JsonResponse({"ok": True, "appointment": {
         "id": str(appt.pk),
         "start_time": appt.start_time.isoformat(),
-        "master": appt.master.user.get_full_name() or appt.master.user.username
+        "master": appt.master.user.get_full_name() or appt.master.user.username if appt.master else ""
     }})
 
 
@@ -337,4 +386,3 @@ def service_promocodes_api(request, service_id: str):
         for pc in qs
     ]
     return JsonResponse(data, safe=False)
-
