@@ -34,7 +34,7 @@ SECRET_KEY = env("SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["malvabeauty.duckdns.org"]
 
 
 # Application definition
@@ -190,9 +190,10 @@ if USE_S3:
     DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 else:
     # локально — файловая система
-    MEDIA_URL = "/media/"
-    MEDIA_ROOT = BASE_DIR / "media"
-
+    # MEDIA_URL = "/media/"
+    # MEDIA_ROOT = BASE_DIR / "media"
+    STATIC_ROOT = "/app/storage/static"
+    MEDIA_ROOT  = "/app/storage/media"
 # # Media URL for S3
 # MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.ca-central-1.amazonaws.com/'
 # REVIEW_FORM_URL = "https://your-domain.tld/review/{appointment_id}/"
