@@ -1172,29 +1172,24 @@
         }
 
         const needCard = Boolean(context.payment.client_secret);
-        if (cardNumberInput) {
-          cardNumberInput.disabled = !needCard;
-          cardNumberInput.value = '';
-        }
-        if (cardExpiryInput) {
-          cardExpiryInput.disabled = !needCard;
-          cardExpiryInput.value = '';
-        }
-        if (cardCvcInput) {
-          cardCvcInput.disabled = !needCard;
-          cardCvcInput.value = '';
-        }
+        [cardNumberInput, cardExpiryInput, cardCvcInput].forEach((input) => {
+          if (!input) return;
+          input.disabled = !needCard;
+          input.value = '';
+        });
 
         if (needCard) {
           stripeCardComplete = false;
           const stripe = ensureStripe();
           if (!stripe) {
             setPaymentMessage('error', PAYMENT_COPY.missingKey);
+          } else {
+            setPaymentMessage('status', PAYMENT_COPY.enterCard);
           }
           if (paymentConfirm) {
             paymentConfirm.disabled = !stripe;
           }
-          setTimeout(() => { cardNumberInput?.focus(); }, 80);
+          setTimeout(() => { cardNumberInput?.focus(); }, 120);
         } else {
           stripeCardComplete = true;
           if (paymentConfirm) paymentConfirm.disabled = false;
@@ -1300,7 +1295,8 @@
         setPaymentMessage('status', PAYMENT_COPY.processing);
         try{
           const result = await stripe.confirmCardPayment(payment.client_secret, {
-            payment_method: {
+            payment_method_data: {
+              type: 'card',
               card: {
                 number: card.number,
                 exp_month: card.exp_month,
@@ -1638,40 +1634,29 @@
         inputState,
         inputPostal,
         inputCountry,
+        cardNumberInput,
+        cardExpiryInput,
+        cardCvcInput,
       ].filter(Boolean);
       paymentInputs.forEach((input) => {
-        input.addEventListener('input', () => {
+        const handler = () => {
           if (input === inputPostal) {
             input.value = normalizePostal(input.value);
           }
+          if (input === cardNumberInput) {
+            input.value = formatCardNumberDisplay(input.value);
+          }
+          if (input === cardExpiryInput) {
+            input.value = normalizeExpiry(input.value);
+          }
+          if (input === cardCvcInput) {
+            input.value = normalizeCvc(input.value);
+          }
           checkPaymentForm();
-        });
-        if (input === inputPostal) {
-          input.addEventListener('blur', () => {
-            input.value = normalizePostal(input.value);
-            checkPaymentForm();
-          });
-        }
+        };
+        input.addEventListener('input', handler);
+        input.addEventListener('blur', handler);
       });
-
-      if (cardNumberInput){
-        cardNumberInput.addEventListener('input', () => {
-          cardNumberInput.value = formatCardNumberDisplay(cardNumberInput.value);
-          checkPaymentForm();
-        });
-      }
-      if (cardExpiryInput){
-        cardExpiryInput.addEventListener('input', () => {
-          cardExpiryInput.value = normalizeExpiry(cardExpiryInput.value);
-          checkPaymentForm();
-        });
-      }
-      if (cardCvcInput){
-        cardCvcInput.addEventListener('input', () => {
-          cardCvcInput.value = normalizeCvc(cardCvcInput.value);
-          checkPaymentForm();
-        });
-      }
 
       if (paymentTitle) paymentTitle.textContent = PAYMENT_COPY.title;
       if (paymentConfirm) paymentConfirm.textContent = 'Pay now';
