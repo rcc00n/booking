@@ -15,11 +15,13 @@ import json
 
 from core.models import (
     Appointment, ServiceCategory, Service, PromoCode,
-    AppointmentStatusHistory, MasterProfile, UserProfile, CancellationReason,AppointmentItem
+    AppointmentStatusHistory, MasterProfile, UserProfile, CancellationReason,
+    AppointmentItem, BookingCart, BookingCartItem,
 )
 from core.services.booking import (
     get_available_slots, get_service_masters,
-    get_or_create_status, get_default_payment_status, _tz_aware
+    get_or_create_status, get_default_payment_status, _tz_aware,
+    create_appointment_from_cart_items,
 )
 
 def _build_catalog_context(request):
@@ -194,6 +196,173 @@ def api_book(request):
             "master": master.user.get_full_name() or master.user.username,
             "start_time": appt.start_time.isoformat(),
         }
+    }, status=201)
+
+
+# ===== CART API =====
+
+def _ensure_profile(user):
+    profile = getattr(user, "userprofile", None)
+    if profile is None:
+        profile = UserProfile.objects.create(user=user)
+    return profile
+
+
+def _master_display(master: MasterProfile) -> str:
+    if not master:
+        return ""
+    profile = getattr(master, "user", None)
+    name = ""
+    if profile and hasattr(profile, "get_full_name"):
+        name = profile.get_full_name() or ""
+    if not name:
+        linked_user = getattr(profile, "user", None)
+        if linked_user:
+            name = linked_user.get_full_name() or linked_user.username
+    return name
+
+
+def _cart_payload(item: BookingCartItem) -> dict:
+    master_label = _master_display(item.master)
+    return {
+        "id": item.id,
+        "service": {
+            "id": item.service.id,
+            "name": item.service.name,
+            "duration_min": item.service.duration_min,
+            "extra_time_min": item.service.extra_time_min,
+            "price": str(item.service.base_price),
+        },
+        "master": {
+            "id": item.master.id,
+            "name": master_label,
+        } if item.master else None,
+        "start_time": item.start_time.isoformat() if item.start_time else None,
+    }
+
+
+@login_required
+@require_GET
+def api_cart_summary(request):
+    profile = _ensure_profile(request.user)
+    cart = BookingCart.for_user(profile)
+    items = list(cart.items.select_related("service", "master__user"))
+
+    total_price = sum((it.service.base_price or 0) for it in items)
+    total_duration = sum(((it.service.duration_min or 0) + (it.service.extra_time_min or 0)) for it in items)
+
+    return JsonResponse({
+        "items": [_cart_payload(it) for it in items],
+        "count": len(items),
+        "total_price": str(total_price),
+        "total_duration_min": total_duration,
+    })
+
+
+@login_required
+@require_POST
+@csrf_protect
+def api_cart_add(request):
+    profile = _ensure_profile(request.user)
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    service_id = payload.get("service")
+    master_id = payload.get("master")
+    start_iso = payload.get("start_time")
+
+    if not service_id or not master_id or not start_iso:
+        return JsonResponse({"error": "service, master and start_time required"}, status=400)
+
+    service = get_object_or_404(Service, pk=service_id)
+    master = get_object_or_404(MasterProfile, pk=master_id)
+
+    if not get_service_masters(service).filter(pk=master.pk).exists():
+        return JsonResponse({"error": "master can't perform this service"}, status=400)
+
+    try:
+        start_dt = parse_datetime(start_iso) or _tz_aware(datetime.fromisoformat(start_iso))
+        if not timezone.is_aware(start_dt):
+            start_dt = _tz_aware(start_dt)
+    except Exception:
+        return JsonResponse({"error": "invalid start_time"}, status=400)
+
+    cart = BookingCart.for_user(profile)
+    item = BookingCartItem(cart=cart, service=service, master=master, start_time=start_dt)
+    try:
+        item.full_clean()
+        item.save()
+    except ValidationError as exc:
+        messages = []
+        if hasattr(exc, "message_dict"):
+            for vals in exc.message_dict.values():
+                if isinstance(vals, (list, tuple)):
+                    messages.extend(vals)
+                else:
+                    messages.append(str(vals))
+        else:
+            messages.extend(getattr(exc, "messages", [str(exc)]))
+        return JsonResponse({"error": messages[0] if messages else "Invalid data"}, status=400)
+
+    return JsonResponse({"ok": True, "item": _cart_payload(item)}, status=201)
+
+
+@login_required
+@require_POST
+@csrf_protect
+def api_cart_remove(request, item_id):
+    profile = _ensure_profile(request.user)
+    cart = BookingCart.for_user(profile)
+    item = cart.items.filter(pk=item_id).first()
+    if not item:
+        return JsonResponse({"error": "item not found"}, status=404)
+    item.delete()
+    return JsonResponse({"ok": True})
+
+
+@login_required
+@require_POST
+@csrf_protect
+def api_cart_checkout(request):
+    profile = _ensure_profile(request.user)
+    cart = BookingCart.for_user(profile)
+    items = list(cart.items.select_related("service", "master__user"))
+
+    if not items:
+        return JsonResponse({"error": "cart is empty"}, status=400)
+
+    try:
+        appt = create_appointment_from_cart_items(profile=profile, items=items)
+    except ValidationError as exc:
+        messages = []
+        if hasattr(exc, "message_dict"):
+            for vals in exc.message_dict.values():
+                if isinstance(vals, (list, tuple)):
+                    messages.extend(vals)
+                else:
+                    messages.append(str(vals))
+        else:
+            messages.extend(getattr(exc, "messages", [str(exc)]))
+        return JsonResponse({"error": messages[0] if messages else "Invalid data"}, status=400)
+
+    cart.clear()
+
+    return JsonResponse({
+        "ok": True,
+        "appointment": {
+            "id": str(appt.pk),
+            "start_time": appt.start_time.isoformat() if appt.start_time else None,
+            "items": [
+                {
+                    "service": it.service.name,
+                    "master": _master_display(it.master),
+                    "start_time": it.start_time.isoformat() if it.start_time else None,
+                }
+                for it in appt.items.select_related("service", "master__user")
+            ],
+        },
     }, status=201)
 
 # --- API: отмена/перенос записи ---

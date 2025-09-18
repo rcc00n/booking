@@ -67,6 +67,8 @@
     .site-header{background:var(--green-dark);box-shadow:var(--shadow);position:sticky;top:0;z-index:100;padding-block:.75rem}
     .site-header__inner{display:flex;align-items:center;justify-content:space-between}
     .logo{font:900 1.25rem/1 var(--font-heading);color:var(--gold);letter-spacing:.3px}
+    .header-actions{display:flex;align-items:center;gap:.5rem}
+    .cart-bubble{display:inline-flex;align-items:center;justify-content:center;min-width:1.5rem;padding:0 .35rem;border-radius:999px;background:rgba(255,255,255,.2);font-size:.85rem;font-weight:700}
 
     .hero{
       display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;gap:1.1rem;
@@ -129,6 +131,16 @@
     .field input,.field select{padding:.6rem .8rem;border:1px solid var(--lgray);border-radius:.6rem;font-size:.95rem;background:#fff}
 
     .modal__footer{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem}
+    .modal__dialog--narrow{width:min(540px,96vw)}
+    .cart-list{display:flex;flex-direction:column;gap:.75rem;overflow-y:auto;max-height:50vh;padding-right:.25rem}
+    .cart-item{display:flex;justify-content:space-between;gap:.75rem;padding:.75rem;border:1px solid var(--grid-border);border-radius:.75rem;background:var(--chip-bg)}
+    .cart-item__info{flex:1 1 auto}
+    .cart-item__info strong{display:block;font-weight:800;color:var(--green-dark);margin-bottom:.35rem}
+    .cart-item__meta{font-size:.85rem;color:var(--muted)}
+    .cart-remove{border:none;background:transparent;color:var(--busy);font-weight:900;font-size:1.1rem;cursor:pointer;line-height:1;padding:.15rem}
+    .cart-empty{color:var(--muted);font-size:.95rem;text-align:center;padding:1rem 0}
+    .cart-footer{display:flex;justify-content:space-between;align-items:center;width:100%;gap:.75rem}
+    .cart-summary{font-size:.95rem;color:var(--muted)}
     .hint{font-size:.85rem;color:var(--muted)}
     .error{color:#b00020;font-size:.9rem;margin-top:.5rem}
     .success{color:#0a7a3b;font-size:.95rem;margin-top:.5rem}
@@ -201,7 +213,10 @@
   <header class="site-header">
     <div class="container site-header__inner">
       <span class="logo">Malva Booking</span>
-      <nav>
+      <nav class="header-actions">
+        <button type="button" class="btn btn--primary" id="cartButton">
+          Корзина <span class="cart-bubble" id="cartCount">0</span>
+        </button>
         {% if user.is_authenticated %}
           <a href="{% url 'dashboard' %}" class="btn btn--ghost">Client Profile</a>
         {% else %}
@@ -263,7 +278,7 @@
                 {% endwith %}
                 · {{ s.duration_min }} min
               </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Pick a time</button>
+              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Добавить в корзину</button>
             </article>
           {% empty %}
             <div class="stub">No results for “{{ q }}”.</div>
@@ -292,7 +307,7 @@
                 {% endwith %}
                 · {{ s.duration_min }} min
               </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Pick a time</button>
+              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Добавить в корзину</button>
             </article>
           {% empty %}
             <div class="stub">No services in this category yet.</div>
@@ -320,7 +335,7 @@
                 {% endwith %}
                 · {{ s.duration_min }} min
               </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Pick a time</button>
+              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Добавить в корзину</button>
             </article>
           {% endfor %}
         </div>
@@ -338,7 +353,7 @@
   <div class="modal" id="bookModal" aria-hidden="true">
     <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="bookTitle">
       <div class="modal__header">
-        <div class="modal__title" id="bookTitle">Booking for <span id="bookServiceName"></span></div>
+        <div class="modal__title" id="bookTitle">Добавление услуги: <span id="bookServiceName"></span></div>
         <button class="modal__close" id="bookClose" aria-label="Close">×</button>
       </div>
 
@@ -378,8 +393,8 @@
 
         <div>
           <div class="field">
-            <label>Summary</label>
-            <div class="muted" id="bookSummary">Pick a master and time.</div>
+            <label>Итог</label>
+            <div class="muted" id="bookSummary">Выберите мастера и время.</div>
           </div>
           <div class="error" id="bookError" style="display:none;"></div>
           <div class="success" id="bookSuccess" style="display:none;"></div>
@@ -387,8 +402,26 @@
       </div>
 
       <div class="modal__footer">
-        <button class="btn btn--ghost" id="bookCancel">Cancel</button>
-        <button class="btn btn--primary" id="bookSubmit" disabled>Confirm booking</button>
+        <button class="btn btn--ghost" id="bookCancel">Отмена</button>
+        <button class="btn btn--primary" id="bookSubmit" disabled>Добавить в корзину</button>
+      </div>
+  </div>
+</div>
+
+  <!-- ===== Modal: cart ===== -->
+  <div class="modal" id="cartModal" aria-hidden="true">
+    <div class="modal__dialog modal__dialog--narrow" role="dialog" aria-modal="true" aria-labelledby="cartTitle">
+      <div class="modal__header">
+        <div class="modal__title" id="cartTitle">Корзина</div>
+        <button class="modal__close" id="cartClose" aria-label="Закрыть">×</button>
+      </div>
+      <div class="cart-list" id="cartItems"></div>
+      <div class="cart-empty" id="cartEmpty">Корзина пуста.</div>
+      <div class="error" id="cartError" style="display:none;"></div>
+      <div class="success" id="cartSuccess" style="display:none;"></div>
+      <div class="modal__footer cart-footer">
+        <div class="cart-summary" id="cartSummary">Итого: $0 · 0 мин</div>
+        <button class="btn btn--primary" id="cartCheckout" disabled>Оформить визит</button>
       </div>
     </div>
   </div>
@@ -398,7 +431,10 @@
       const isAuth  = {{ user.is_authenticated|yesno:"true,false" }};
       const loginUrl= "{% url 'login' %}?next={{ request.path }}";
       const apiAvail= "/accounts/api/availability/";
-      const apiBook = "/accounts/api/book/";
+      const apiCart = "/accounts/api/cart/";
+      const apiCartAdd = "/accounts/api/cart/add/";
+      const apiCartCheckout = "/accounts/api/cart/checkout/";
+      const cartRemoveUrl = (id)=>`/accounts/api/cart/${id}/remove/`;
 
       // ===== helpers =====
       function getCookie(name){ const m=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return m?m.pop():''; }
@@ -417,6 +453,182 @@
       const elSummary=document.getElementById('bookSummary');
       const elError=document.getElementById('bookError');
       const elSuccess=document.getElementById('bookSuccess');
+      const cartBtn=document.getElementById('cartButton');
+      const cartModal=document.getElementById('cartModal');
+      const cartClose=document.getElementById('cartClose');
+      const cartItems=document.getElementById('cartItems');
+      const cartEmpty=document.getElementById('cartEmpty');
+      const cartError=document.getElementById('cartError');
+      const cartSuccess=document.getElementById('cartSuccess');
+      const cartSummary=document.getElementById('cartSummary');
+      const cartCheckout=document.getElementById('cartCheckout');
+      const cartCount=document.getElementById('cartCount');
+
+      function fmtDateTime(iso){
+        try{
+          const d=new Date(iso);
+          return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+        }catch(_){
+          return iso;
+        }
+      }
+
+      function setCartMessage(kind, text){
+        if(cartError){ cartError.style.display='none'; }
+        if(cartSuccess){ cartSuccess.style.display='none'; }
+        if(kind==='error' && cartError){
+          cartError.textContent=text;
+          cartError.style.display='block';
+        } else if(kind==='success' && cartSuccess){
+          cartSuccess.textContent=text;
+          cartSuccess.style.display='block';
+        }
+      }
+
+      function updateCartUI(data){
+        if(!data) return;
+        cartState = data;
+        if(cartCount){ cartCount.textContent = data.count || 0; }
+
+        const items = Array.isArray(data.items) ? data.items : [];
+        if(cartItems){
+          cartItems.innerHTML='';
+          if(items.length){
+            cartItems.style.display='flex';
+            items.forEach(item=>{
+              const row=document.createElement('div');
+              row.className='cart-item';
+              row.dataset.itemId=item.id;
+
+              const info=document.createElement('div');
+              info.className='cart-item__info';
+
+              const title=document.createElement('strong');
+              title.textContent=item?.service?.name || 'Услуга';
+              info.appendChild(title);
+
+              const meta=document.createElement('div');
+              meta.className='cart-item__meta';
+              const masterName=item?.master?.name || '—';
+              const timeLabel=item?.start_time ? fmtDateTime(item.start_time) : 'Без времени';
+              const duration=item?.service?.duration_min || 0;
+              meta.textContent=`${masterName} · ${timeLabel} · ${duration} мин`;
+              info.appendChild(meta);
+
+              if(item?.service?.price){
+                const price=document.createElement('div');
+                price.className='cart-item__meta';
+                price.textContent=`$${item.service.price}`;
+                info.appendChild(price);
+              }
+
+              row.appendChild(info);
+
+              const remove=document.createElement('button');
+              remove.type='button';
+              remove.className='cart-remove';
+              remove.dataset.removeId=item.id;
+              remove.innerHTML='×';
+              row.appendChild(remove);
+
+              cartItems.appendChild(row);
+            });
+          }else{
+            cartItems.style.display='none';
+          }
+        }
+
+        if(cartEmpty){ cartEmpty.style.display = items.length ? 'none' : 'block'; }
+        if(cartCheckout){ cartCheckout.disabled = !items.length; }
+
+        if(cartSummary){
+          const raw = data.total_price;
+          const num = Number(raw);
+          const formatted = Number.isFinite(num) ? num.toFixed(2) : (raw || '0.00');
+          const duration = data.total_duration_min || 0;
+          cartSummary.textContent = `Итого: $${formatted} · ${duration} мин`;
+        }
+      }
+
+      async function refreshCart(silent=true){
+        if(!isAuth) return;
+        try{
+          const resp=await fetch(apiCart, {credentials:'same-origin'});
+          if(resp.status===401){
+            if(cartCount) cartCount.textContent='0';
+            return;
+          }
+          if(!resp.ok) throw new Error('Cart load failed');
+          const data=await resp.json();
+          updateCartUI(data);
+          if(!silent) setCartMessage(null);
+        }catch(err){
+          if(!silent){
+            setCartMessage('error', 'Не удалось загрузить корзину');
+            console.error(err);
+          }
+        }
+      }
+
+      async function removeCartItem(id){
+        if(!id) return;
+        try{
+          const resp=await fetch(cartRemoveUrl(id),{
+            method:'POST',
+            headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
+            credentials:'same-origin',
+            body:JSON.stringify({})
+          });
+          const data=await resp.json().catch(()=>({}));
+          if(!resp.ok){
+            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Не удалось удалить услугу';
+            throw new Error(msg);
+          }
+          setCartMessage('success','Услуга удалена из корзины.');
+          await refreshCart(true);
+        }catch(err){
+          setCartMessage('error', err.message||'Не удалось удалить услугу');
+        }
+      }
+
+      async function checkoutCart(){
+        if(!cartState.items || !cartState.items.length) return;
+        if(cartCheckout) cartCheckout.disabled=true;
+        setCartMessage(null);
+        try{
+          const resp=await fetch(apiCartCheckout,{
+            method:'POST',
+            headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
+            credentials:'same-origin',
+            body:JSON.stringify({})
+          });
+          const data=await resp.json().catch(()=>({}));
+          if(!resp.ok){
+            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Не удалось оформить визит';
+            throw new Error(msg);
+          }
+          await refreshCart(true);
+          setCartMessage('success','Запись создана! Перенаправляем…');
+          setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
+        }catch(err){
+          setCartMessage('error', err.message||'Не удалось оформить визит');
+          if(cartCheckout) cartCheckout.disabled=false;
+        }
+      }
+
+      async function openCartModal(){
+        if(!isAuth){ window.location=loginUrl; return; }
+        setCartMessage(null);
+        if(cartModal){
+          cartModal.classList.add('modal--open');
+        }
+        await refreshCart(true);
+      }
+
+      function closeCartModal(){
+        if(cartModal){ cartModal.classList.remove('modal--open'); }
+        setCartMessage(null);
+      }
 
       // outlook
       const olGrid=document.getElementById('olGrid');
@@ -435,6 +647,7 @@
       let current={ serviceId:null, serviceName:'', masterId:null, slot:null, mastersData:[] };
       let baseStart = new Date(); baseStart.setHours(0,0,0,0);
       let availabilityCache = new Map(); // dateStr -> { set:Set(HH:MM), iso:Map(HH:MM->ISO) }
+      let cartState = { items: [], count: 0, total_price: "0", total_duration_min: 0 };
 
       // ===== open/close =====
       function openModal(serviceId, serviceName){
@@ -443,7 +656,7 @@
         elServiceName.textContent=serviceName;
         elError.style.display='none'; elSuccess.style.display='none';
         btnSubmit.disabled=true;
-        elSummary.textContent='Pick a master and time.';
+        elSummary.textContent='Выберите мастера и время.';
 
         availabilityCache.clear();
         baseStart = new Date(); baseStart.setHours(0,0,0,0);
@@ -612,17 +825,17 @@
       elMaster.addEventListener('change', async ()=>{
         current.masterId = Number(elMaster.value);
         current.slot = null; btnSubmit.disabled = true;
-        elSummary.textContent='Pick a master and time.';
+        elSummary.textContent='Выберите мастера и время.';
         availabilityCache.clear();
         await renderWindow();
       });
 
-      // ===== submit booking =====
-      async function submitBooking(){
+      // ===== add to cart =====
+      async function addToCart(){
         if(!current.serviceId||!current.masterId||!current.slot) return;
         btnSubmit.disabled=true; elError.style.display='none'; elSuccess.style.display='none';
         try{
-          const resp=await fetch(apiBook,{
+          const resp=await fetch(apiCartAdd,{
             method:'POST',
             headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
             credentials:'same-origin',
@@ -630,15 +843,18 @@
           });
           const data=await resp.json().catch(()=>({}));
           if(!resp.ok){
-            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Could not create an appointment';
+            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Не удалось добавить услугу';
             throw new Error(msg);
           }
-          elSuccess.textContent='Appointment created! ' + (data.appointment?.start_time?('Time: '+new Date(data.appointment.start_time).toLocaleString()):'');
+          elSuccess.textContent='Услуга добавлена в корзину.';
           elSuccess.style.display='block';
-          setTimeout(()=>{ window.location.reload(); }, 700);
+          await refreshCart(true);
+          setTimeout(()=>{ closeModal(); }, 600);
         }catch(err){
-          elError.textContent=err.message||'Booking error';
-          elError.style.display='block'; btnSubmit.disabled=false;
+          elError.textContent=err.message||'Ошибка при добавлении';
+          elError.style.display='block';
+        }finally{
+          btnSubmit.disabled=false;
         }
       }
 
@@ -651,7 +867,22 @@
       btnClose.addEventListener('click',closeModal);
       btnCancel.addEventListener('click',closeModal);
       modal.addEventListener('click',(e)=>{ if(e.target===modal) closeModal(); });
-      btnSubmit.addEventListener('click',submitBooking);
+      btnSubmit.addEventListener('click',addToCart);
+
+      if(cartBtn){ cartBtn.addEventListener('click', openCartModal); }
+      if(cartClose){ cartClose.addEventListener('click', closeCartModal); }
+      if(cartModal){ cartModal.addEventListener('click',(e)=>{ if(e.target===cartModal) closeCartModal(); }); }
+      if(cartItems){
+        cartItems.addEventListener('click',(e)=>{
+          const btn=e.target.closest('.cart-remove');
+          if(btn){
+            const id=btn.dataset.removeId;
+            btn.disabled=true;
+            removeCartItem(id).finally(()=>{ btn.disabled=false; });
+          }
+        });
+      }
+      if(cartCheckout){ cartCheckout.addEventListener('click', checkoutCart); }
 
       // UX: Shift+wheel горизонтально
       olWrap.addEventListener('wheel', (e)=>{
@@ -659,6 +890,12 @@
           e.preventDefault(); olWrap.scrollLeft += e.deltaY;
         }
       }, { passive:false });
+
+      if(isAuth){
+        refreshCart(true);
+      }else if(cartCount){
+        cartCount.textContent='0';
+      }
 
       /* ===== Live search (как было) ===== */
       const qInput = document.querySelector('input[name="q"]');
@@ -699,7 +936,7 @@
             <div class="service-meta">${priceBlock} · ${escapeHtml(String(s.duration_min))} min</div>
             <button class="btn btn--primary book-btn"
               data-service-id="${escapeHtml(s.id)}"
-              data-service-name="${escapeHtml(s.name)}">Pick a time</button>
+              data-service-name="${escapeHtml(s.name)}">Добавить в корзину</button>
           </article>`;
       }
 

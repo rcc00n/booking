@@ -7,11 +7,11 @@ from .views import (
     ClientRegisterView,
     MainMenuView,  # можно оставить, если где-то используется
 )
-from core.views import public_mainmenu, api_availability, api_book
 from django.contrib.auth.views import LogoutView
 from core.views import (
     public_mainmenu, api_availability, api_book,
     api_appointment_cancel, api_appointment_reschedule,   # ← добавить
+    api_cart_summary, api_cart_add, api_cart_remove, api_cart_checkout,
 )
 
 
@@ -32,6 +32,10 @@ urlpatterns = [
     # API бронирования (требует логина)
     path("api/availability/", api_availability, name="api-availability"),
     path("api/book/",         api_book,         name="api-book"),
+    path("api/cart/",             api_cart_summary,   name="api-cart"),
+    path("api/cart/add/",        api_cart_add,       name="api-cart-add"),
+    path("api/cart/<int:item_id>/remove/", api_cart_remove, name="api-cart-remove"),
+    path("api/cart/checkout/",  api_cart_checkout,  name="api-cart-checkout"),
     path("logout/", LogoutView.as_view(next_page="/accounts/"), name="logout"),
     
     path("api/appointment/<uuid:appt_id>/cancel/",     api_appointment_cancel,     name="api-appt-cancel"),

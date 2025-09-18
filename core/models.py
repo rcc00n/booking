@@ -293,6 +293,68 @@ class ServiceMaster(models.Model):
     def __str__(self):
         return f"{self.master} → {self.service.name}"
 
+
+class BookingCart(models.Model):
+    """Lightweight cart that accumulates services before a booking is confirmed."""
+
+    owner = models.OneToOneField(
+        UserProfile,
+        on_delete=models.CASCADE,
+        related_name="booking_cart",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def for_user(cls, profile: UserProfile) -> "BookingCart":
+        """Ensure there is a cart for the given profile and return it."""
+        cart, _ = cls.objects.get_or_create(owner=profile)
+        return cart
+
+    def clear(self) -> None:
+        self.items.all().delete()
+
+    def __str__(self):
+        return f"Cart for {self.owner}"
+
+
+class BookingCartItem(models.Model):
+    """Single service selection stored inside a booking cart."""
+
+    cart = models.ForeignKey(
+        BookingCart,
+        related_name="items",
+        on_delete=models.CASCADE,
+    )
+    service = models.ForeignKey(Service, on_delete=models.CASCADE)
+    master = models.ForeignKey(MasterProfile, on_delete=models.CASCADE)
+    start_time = models.DateTimeField(help_text="Chosen start time for this service")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["start_time", "id"]
+
+    def clean(self):
+        super().clean()
+        if self.start_time and not timezone.is_aware(self.start_time):
+            self.start_time = timezone.make_aware(self.start_time, timezone.get_current_timezone())
+
+        if not ServiceMaster.objects.filter(service=self.service, master=self.master).exists():
+            raise ValidationError({"master": "Selected master cannot perform this service."})
+
+    def service_duration(self) -> int:
+        base = self.service.duration_min or 0
+        extra = self.service.extra_time_min or 0
+        return base + extra
+
+    def end_time(self):
+        dur = self.service_duration()
+        return self.start_time + timedelta(minutes=dur)
+
+    def __str__(self):
+        stamp = self.start_time.astimezone(timezone.get_current_timezone()).strftime("%Y-%m-%d %H:%M")
+        return f"{self.service.name} on {stamp} by {self.master}"
+
 # --- 3. APPOINTMENTS ---
 
 class AppointmentStatus(models.Model):

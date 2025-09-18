@@ -13,6 +13,7 @@ from core.models import (
     MasterAvailability, AppointmentStatus, AppointmentStatusHistory,
     PaymentStatus, MasterProfile,
 )
+from django.db import transaction
 
 Slot = Tuple[datetime, datetime]
 
@@ -183,3 +184,52 @@ def get_default_payment_status() -> Optional[PaymentStatus]:
         PaymentStatus.objects.filter(name__iexact="Pending").first()
         or PaymentStatus.objects.first()
     )
+
+
+def create_appointment_from_cart_items(
+    *,
+    profile,
+    items,
+) -> Appointment:
+    """
+    Build a multi-service appointment from cart items.
+    """
+    items = list(items)
+    if not items:
+        raise ValueError("Cart is empty")
+
+    starts = [it.start_time for it in items if it.start_time]
+    primary_start = min(starts) if starts else None
+
+    pay_status = get_default_payment_status()
+
+    with transaction.atomic():
+        appt = Appointment(
+            client=profile,
+            start_time=primary_start,
+            payment_status=pay_status if pay_status else None,
+        )
+        appt.full_clean()
+        appt.save()
+
+        for cart_item in items:
+            item = AppointmentItem(
+                appointment=appt,
+                service=cart_item.service,
+                master=cart_item.master,
+                start_time=cart_item.start_time,
+            )
+            item.full_clean()
+            item.save()
+
+        appt.sync_start_time_from_items(save=True)
+        appt.recompute_totals(save=True)
+
+        initial_status = get_or_create_status("Confirmed")
+        AppointmentStatusHistory.objects.create(
+            appointment=appt,
+            status=initial_status,
+            set_by=profile,
+        )
+
+    return appt
