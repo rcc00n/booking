@@ -3,8 +3,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Malva Booking — Services</title>
+  <title data-i18n="services.meta.title">Malva Booking — Services</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="{% static 'js/i18n.js' %}"></script>
 
   <style>
     /* =========================
@@ -68,6 +69,11 @@
     .site-header__inner{display:flex;align-items:center;justify-content:space-between}
     .logo{font:900 1.25rem/1 var(--font-heading);color:var(--gold);letter-spacing:.3px}
     .header-actions{display:flex;align-items:center;gap:.5rem}
+    .lang-switcher{display:inline-flex;align-items:center;gap:.4rem;margin-right:.75rem;color:var(--taupe);font-weight:700;font-size:.85rem}
+    .lang-switcher__label{opacity:.8;margin-right:.25rem}
+    .lang-switcher__btn{border:1px solid transparent;background:rgba(255,255,255,.12);color:inherit;font:inherit;padding:.35rem .5rem;border-radius:.5rem;cursor:pointer;transition:.2s ease;min-width:2.6rem;text-transform:uppercase}
+    .lang-switcher__btn:hover{background:rgba(255,255,255,.18)}
+    .lang-switcher__btn.is-active{background:#fff;color:var(--green-dark);border-color:#fff}
     .cart-bubble{display:inline-flex;align-items:center;justify-content:center;min-width:1.5rem;padding:0 .35rem;border-radius:999px;background:rgba(255,255,255,.2);font-size:.85rem;font-weight:700}
 
     .hero{
@@ -212,15 +218,21 @@
   <!-- header -->
   <header class="site-header">
     <div class="container site-header__inner">
-      <span class="logo">Malva Booking</span>
+      <span class="logo" data-i18n="common.brand">Malva Booking</span>
       <nav class="header-actions">
+        <div class="lang-switcher" role="group" data-i18n-attr="aria-label:common.language">
+          <span class="lang-switcher__label" data-i18n="common.language">Language</span>
+          <button type="button" class="lang-switcher__btn" data-lang-switch="en" data-i18n="languages.en">English</button>
+          <button type="button" class="lang-switcher__btn" data-lang-switch="ru" data-i18n="languages.ru">Русский</button>
+        </div>
         <button type="button" class="btn btn--primary" id="cartButton">
-          Cart <span class="cart-bubble" id="cartCount">0</span>
+          <span data-i18n="services.nav.cart">Cart</span>
+          <span class="cart-bubble" id="cartCount">0</span>
         </button>
         {% if user.is_authenticated %}
-          <a href="{% url 'dashboard' %}" class="btn btn--ghost">Client Profile</a>
+          <a href="{% url 'dashboard' %}" class="btn btn--ghost" data-i18n="services.nav.clientProfile">Client Profile</a>
         {% else %}
-          <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="btn btn--ghost">Login</a>
+          <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="btn btn--ghost" data-i18n="services.nav.login">Login</a>
         {% endif %}
       </nav>
     </div>
@@ -228,37 +240,37 @@
 
   <!-- hero -->
   <section class="hero">
-    <h1>Book your appointment in 2 clicks</h1>
-    <p>Pick a service, a specialist, and a time — we’ll handle the rest.</p>
-    <a href="#services" class="btn btn--primary">Browse services ↓</a>
+    <h1 data-i18n="services.hero.title">Book your appointment in 2 clicks</h1>
+    <p data-i18n="services.hero.subtitle">Pick a service, a specialist, and a time — we’ll handle the rest.</p>
+    <a href="#services" class="btn btn--primary" data-i18n="services.hero.cta">Browse services ↓</a>
   </section>
 
   <main id="services" class="container" style="padding-block:3rem;">
-    <h2 style="font-size:1.75rem;font-weight:800;margin-bottom:1.5rem;color:var(--green);">Services</h2>
+    <h2 style="font-size:1.75rem;font-weight:800;margin-bottom:1.5rem;color:var(--green);" data-i18n="services.section.title">Services</h2>
 
     <!-- Filters -->
     <form method="get" class="filters" role="search">
-      <input type="search" name="q" placeholder="Search a service…" value="{{ q|default:'' }}">
+      <input type="search" name="q" placeholder="Search a service…" value="{{ q|default:'' }}" data-i18n-attr="placeholder:services.filters.searchPlaceholder">
       <select name="cat">
-        <option value="">All categories</option>
+        <option value="" data-i18n="services.filters.allCategories">All categories</option>
         {% for c in filter_categories %}
           <option value="{{ c.id }}" {% if active_category == c.id|stringformat:'s' %}selected{% endif %}>{{ c.name }}</option>
         {% endfor %}
       </select>
-      <button class="btn btn--primary" type="submit">Search</button>
+      <button class="btn btn--primary" type="submit" data-i18n="services.filters.submit">Search</button>
       {% if q or active_category %}
-        <a class="btn btn--ghost" href="{% url 'client-dashboard' %}#services">Reset</a>
+        <a class="btn btn--ghost" href="{% url 'client-dashboard' %}#services" data-i18n="services.filters.reset">Reset</a>
       {% endif %}
     </form>
 
     <!-- Live results (JS) -->
-    <h3 id="liveTitle" style="margin:.5rem 0 1rem; display:none;">Search results</h3>
+    <h3 id="liveTitle" style="margin:.5rem 0 1rem; display:none;" data-i18n="services.search.liveTitle">Search results</h3>
     <div id="liveGrid" class="services-grid" style="display:none;"></div>
 
     <!-- Server-rendered fallback/results -->
     <div id="serverContent">
       {% if search_results %}
-        <h3 style="margin:.5rem 0 1rem;">Search results</h3>
+        <h3 style="margin:.5rem 0 1rem;" data-i18n="services.search.resultsTitle">Search results</h3>
         <div class="services-grid">
           {% for s in search_results %}
             <article class="service-card">
@@ -276,12 +288,13 @@
                     <strong>${{ s.base_price|floatformat:2 }}</strong>
                   {% endif %}
                 {% endwith %}
-                · {{ s.duration_min }} min
+                <span aria-hidden="true">·</span>
+                <span class="meta-duration" data-i18n="services.units.minutes" data-i18n-vars='{"value":"{{ s.duration_min }}"}'>{{ s.duration_min }} min</span>
               </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Add to cart</button>
+              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
             </article>
           {% empty %}
-            <div class="stub">No results for “{{ q }}”.</div>
+            <div class="stub" data-i18n="services.search.noServerResults" data-i18n-vars='{"query":"{{ q|escapejs }}"}'>No results for “{{ q }}”.</div>
           {% endfor %}
         </div>
         <hr style="margin:2rem 0;border:none;border-top:1px solid var(--lgray)">
@@ -305,18 +318,19 @@
                     <strong>${{ s.base_price|floatformat:2 }}</strong>
                   {% endif %}
                 {% endwith %}
-                · {{ s.duration_min }} min
+                <span aria-hidden="true">·</span>
+                <span class="meta-duration" data-i18n="services.units.minutes" data-i18n-vars='{"value":"{{ s.duration_min }}"}'>{{ s.duration_min }} min</span>
               </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Add to cart</button>
+              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
             </article>
           {% empty %}
-            <div class="stub">No services in this category yet.</div>
+            <div class="stub" data-i18n="services.search.noCategory">No services in this category yet.</div>
           {% endfor %}
         </div>
       {% endfor %}
 
       {% if uncategorized %}
-        <h3 style="margin:1.5rem 0 .75rem;color:var(--green);font-weight:800">Uncategorized</h3>
+        <h3 style="margin:1.5rem 0 .75rem;color:var(--green);font-weight:800" data-i18n="services.search.uncategorized">Uncategorized</h3>
         <div class="services-grid">
           {% for s in uncategorized %}
             <article class="service-card">
@@ -333,48 +347,52 @@
                     <strong>${{ s.base_price|floatformat:2 }}</strong>
                   {% endif %}
                 {% endwith %}
-                · {{ s.duration_min }} min
+                <span aria-hidden="true">·</span>
+                <span class="meta-duration" data-i18n="services.units.minutes" data-i18n-vars='{"value":"{{ s.duration_min }}"}'>{{ s.duration_min }} min</span>
               </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Add to cart</button>
+              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
             </article>
           {% endfor %}
         </div>
       {% endif %}
 
       {% if not has_any_services %}
-        <div class="stub">The catalog will be available soon 👍</div>
+        <div class="stub" data-i18n="services.search.emptyCatalogue">The catalog will be available soon 👍</div>
       {% endif %}
     </div>
   </main>
 
-  <footer class="site-footer">© 2025 Malva Booking</footer>
+  <footer class="site-footer" data-i18n="services.footer.copy">© 2025 Malva Booking</footer>
 
   <!-- ===== Modal: booking ===== -->
   <div class="modal" id="bookModal" aria-hidden="true">
     <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="bookTitle">
       <div class="modal__header">
-        <div class="modal__title" id="bookTitle">Add service: <span id="bookServiceName"></span></div>
-        <button class="modal__close" id="bookClose" aria-label="Close">×</button>
+        <div class="modal__title" id="bookTitle">
+          <span data-i18n="services.modal.title">Add service:</span>
+          <span id="bookServiceName"></span>
+        </div>
+        <button class="modal__close" id="bookClose" aria-label="Close" data-i18n-attr="aria-label:common.close">×</button>
       </div>
 
       <div class="grid-2">
         <div>
           <!-- Master -->
           <div class="field">
-            <label for="bookMaster">Master</label>
+            <label for="bookMaster" data-i18n="services.modal.masterLabel">Master</label>
             <select id="bookMaster"></select>
           </div>
 
           <!-- Outlook grid -->
           <div class="field" style="margin-top:.5rem">
-            <label>Choose time</label>
+            <label data-i18n="services.modal.chooseTime">Choose time</label>
 
             <div class="outlook" id="ol">
               <div class="outlook__toolbar">
                 <div class="controls">
-                  <button id="olPrev" type="button">← Prev</button>
-                  <button id="olToday" type="button">Today</button>
-                  <button id="olNext" type="button">Next →</button>
+                  <button id="olPrev" type="button" data-i18n="services.modal.prev">← Prev</button>
+                  <button id="olToday" type="button" data-i18n="services.modal.today">Today</button>
+                  <button id="olNext" type="button" data-i18n="services.modal.next">Next →</button>
                 </div>
                 <div class="range" id="olRange">—</div>
               </div>
@@ -384,17 +402,17 @@
             </div>
 
             <div class="legend">
-              <span class="lg-free"><i></i> free</span>
-              <span class="lg-busy"><i></i> busy</span>
+              <span class="lg-free"><i></i> <span data-i18n="common.free">free</span></span>
+              <span class="lg-busy"><i></i> <span data-i18n="common.busy">busy</span></span>
             </div>
-            <div class="hint">Прокручивайте горизонтально. Красные слоты показаны как занятые и не кликаются.</div>
+            <div class="hint" data-i18n="services.modal.legendHint">Прокручивайте горизонтально. Красные слоты показаны как занятые и не кликаются.</div>
           </div>
         </div>
 
         <div>
           <div class="field">
-            <label>Summary</label>
-            <div class="muted" id="bookSummary">Pick a master and time.</div>
+            <label data-i18n="services.modal.summaryLabel">Summary</label>
+            <div class="muted" id="bookSummary" data-i18n="services.modal.summaryPlaceholder">Pick a master and time.</div>
           </div>
           <div class="error" id="bookError" style="display:none;"></div>
           <div class="success" id="bookSuccess" style="display:none;"></div>
@@ -402,8 +420,8 @@
       </div>
 
       <div class="modal__footer">
-        <button class="btn btn--ghost" id="bookCancel">Cancel</button>
-        <button class="btn btn--primary" id="bookSubmit" disabled>Add to cart</button>
+        <button class="btn btn--ghost" id="bookCancel" data-i18n="common.cancel">Cancel</button>
+        <button class="btn btn--primary" id="bookSubmit" disabled data-i18n="common.addToCart">Add to cart</button>
       </div>
   </div>
 </div>
@@ -412,22 +430,66 @@
   <div class="modal" id="cartModal" aria-hidden="true">
     <div class="modal__dialog modal__dialog--narrow" role="dialog" aria-modal="true" aria-labelledby="cartTitle">
       <div class="modal__header">
-        <div class="modal__title" id="cartTitle">Cart</div>
-        <button class="modal__close" id="cartClose" aria-label="Close">×</button>
+        <div class="modal__title" id="cartTitle" data-i18n="services.cart.title">Cart</div>
+        <button class="modal__close" id="cartClose" aria-label="Close" data-i18n-attr="aria-label:common.close">×</button>
       </div>
       <div class="cart-list" id="cartItems"></div>
-      <div class="cart-empty" id="cartEmpty">Your cart is empty.</div>
+      <div class="cart-empty" id="cartEmpty" data-i18n="services.cart.empty">Your cart is empty.</div>
       <div class="error" id="cartError" style="display:none;"></div>
       <div class="success" id="cartSuccess" style="display:none;"></div>
       <div class="modal__footer cart-footer">
-        <div class="cart-summary" id="cartSummary">Total: $0 · 0 min</div>
-        <button class="btn btn--primary" id="cartCheckout" disabled>Checkout</button>
+        <div class="cart-summary" id="cartSummary" data-i18n="services.cart.summary" data-i18n-vars='{"total":"$0","duration":"0 min"}'>Total: $0 · 0 min</div>
+        <button class="btn btn--primary" id="cartCheckout" disabled data-i18n="services.cart.checkout">Checkout</button>
       </div>
     </div>
   </div>
 
   <script>
-    (function(){
+    document.addEventListener('DOMContentLoaded', () => {
+      const I18N = window.MalvaI18n;
+      let refreshPending = false;
+      const queueRefresh = () => {
+        if (!I18N || typeof I18N.refresh !== 'function' || refreshPending) {
+          return;
+        }
+        refreshPending = true;
+        window.requestAnimationFrame(() => {
+          refreshPending = false;
+          I18N.refresh({ silent: true });
+        });
+      };
+      const translate = (key, vars, fallback) => {
+        if (!key) return fallback || '';
+        if (I18N) {
+          try {
+            return I18N.t(key, vars);
+          } catch (err) {
+            return fallback !== undefined ? fallback : key;
+          }
+        }
+        return fallback !== undefined ? fallback : key;
+      };
+      const setTextKey = (el, key, vars, fallback) => {
+        if (!el) return;
+        if (I18N && key) {
+          el.setAttribute('data-i18n', key);
+          if (vars) {
+            el.setAttribute('data-i18n-vars', JSON.stringify(vars));
+          } else {
+            el.removeAttribute('data-i18n-vars');
+          }
+          queueRefresh();
+        } else if (fallback !== undefined) {
+          el.textContent = fallback;
+        }
+      };
+      const clearTextKey = (el) => {
+        if (!el) return;
+        el.removeAttribute('data-i18n');
+        el.removeAttribute('data-i18n-vars');
+      };
+      const formatMinutes = (minutes) => translate('services.units.minutes', { value: String(minutes) }, `${minutes} min`);
+
       const isAuth  = {{ user.is_authenticated|yesno:"true,false" }};
       const loginUrl= "{% url 'login' %}?next={{ request.path }}";
       const apiAvail= "/accounts/api/availability/";
@@ -464,6 +526,9 @@
       const cartCheckout=document.getElementById('cartCheckout');
       const cartCount=document.getElementById('cartCount');
 
+      let summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
+      let cartState = { items: [], count: 0, total_price: '0', total_duration_min: 0 };
+
       function fmtDateTime(iso){
         try{
           const d=new Date(iso);
@@ -473,15 +538,25 @@
         }
       }
 
-      function setCartMessage(kind, text){
-        if(cartError){ cartError.style.display='none'; }
-        if(cartSuccess){ cartSuccess.style.display='none'; }
-        if(kind==='error' && cartError){
-          cartError.textContent=text;
-          cartError.style.display='block';
-        } else if(kind==='success' && cartSuccess){
-          cartSuccess.textContent=text;
-          cartSuccess.style.display='block';
+      function setCartMessage(kind, key, vars, fallback){
+        if (cartError) {
+          cartError.style.display = 'none';
+          cartError.textContent = '';
+          clearTextKey(cartError);
+        }
+        if (cartSuccess) {
+          cartSuccess.style.display = 'none';
+          cartSuccess.textContent = '';
+          clearTextKey(cartSuccess);
+        }
+        if (!kind) return;
+        const target = kind === 'error' ? cartError : cartSuccess;
+        if (!target) return;
+        target.style.display = 'block';
+        if (key) {
+          setTextKey(target, key, vars, fallback);
+        } else if (fallback !== undefined) {
+          target.textContent = fallback;
         }
       }
 
@@ -504,15 +579,15 @@
               info.className='cart-item__info';
 
               const title=document.createElement('strong');
-              title.textContent=item?.service?.name || 'Услуга';
+              title.textContent=item?.service?.name || translate('common.service', null, 'Service');
               info.appendChild(title);
 
               const meta=document.createElement('div');
               meta.className='cart-item__meta';
               const masterName=item?.master?.name || '-';
-              const timeLabel=item?.start_time ? fmtDateTime(item.start_time) : 'No time';
+              const timeLabel=item?.start_time ? fmtDateTime(item.start_time) : translate('common.noTime', null, 'No time');
               const duration=item?.service?.duration_min || 0;
-              meta.textContent=`${masterName} · ${timeLabel} · ${duration} min`;
+              meta.textContent=`${masterName} · ${timeLabel} · ${formatMinutes(duration)}`;
               info.appendChild(meta);
 
               if(item?.service?.price){
@@ -529,6 +604,7 @@
               remove.className='cart-remove';
               remove.dataset.removeId=item.id;
               remove.innerHTML='×';
+              remove.setAttribute('aria-label', translate('services.cart.remove', null, 'Remove item'));
               row.appendChild(remove);
 
               cartItems.appendChild(row);
@@ -536,18 +612,33 @@
           }else{
             cartItems.style.display='none';
           }
-        }
+      }
+      
+      if(cartEmpty){ cartEmpty.style.display = items.length ? 'none' : 'block'; }
+      if(cartCheckout){ cartCheckout.disabled = !items.length; }
 
-        if(cartEmpty){ cartEmpty.style.display = items.length ? 'none' : 'block'; }
-        if(cartCheckout){ cartCheckout.disabled = !items.length; }
+      if(cartSummary){
+        const raw = data.total_price;
+        const num = Number(raw);
+        const formatted = Number.isFinite(num) ? num.toFixed(2) : (raw || '0.00');
+        const duration = data.total_duration_min || 0;
+        const durationText = formatMinutes(duration);
+        setTextKey(cartSummary, 'services.cart.summary', {
+          total: `$${formatted}`,
+          duration: durationText
+        }, `Total: $${formatted} · ${durationText}`);
+      }
+    }
 
-        if(cartSummary){
-          const raw = data.total_price;
-          const num = Number(raw);
-          const formatted = Number.isFinite(num) ? num.toFixed(2) : (raw || '0.00');
-          const duration = data.total_duration_min || 0;
-          cartSummary.textContent = `Total: $${formatted} · ${duration} min`;
-        }
+      if (I18N && typeof I18N.onChange === 'function') {
+        I18N.onChange(() => {
+          if (cartState) {
+            updateCartUI(cartState);
+          }
+          if (summaryState && summaryState.key) {
+            setTextKey(elSummary, summaryState.key, summaryState.vars);
+          }
+        });
       }
 
       async function refreshCart(silent=true){
@@ -558,13 +649,13 @@
             if(cartCount) cartCount.textContent='0';
             return;
           }
-          if(!resp.ok) throw new Error('Cart load failed');
+          if(!resp.ok) throw new Error(translate('services.cart.loadFailed'));
           const data=await resp.json();
           updateCartUI(data);
           if(!silent) setCartMessage(null);
         }catch(err){
           if(!silent){
-            setCartMessage('error', 'Could not load cart');
+            setCartMessage('error', 'services.cart.loadFailed');
             console.error(err);
           }
         }
@@ -581,13 +672,19 @@
           });
           const data=await resp.json().catch(()=>({}));
           if(!resp.ok){
-            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Не удалось удалить услугу';
-            throw new Error(msg);
+            const message = data && (data.error || data.detail);
+            throw new Error(message || translate('services.cart.removeFailed'));
           }
-          setCartMessage('success','Item removed from cart.');
+          setCartMessage('success','services.cart.removeSuccess');
           await refreshCart(true);
         }catch(err){
-          setCartMessage('error', err.message||'Failed to remove item');
+          const fallback = err && err.message;
+          const defaultMessage = translate('services.cart.removeFailed');
+          if(fallback && fallback !== defaultMessage){
+            setCartMessage('error', null, null, fallback);
+          }else{
+            setCartMessage('error','services.cart.removeFailed');
+          }
         }
       }
 
@@ -604,14 +701,20 @@
           });
           const data=await resp.json().catch(()=>({}));
           if(!resp.ok){
-            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Checkout failed';
+            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):translate('services.cart.checkoutFailed');
             throw new Error(msg);
           }
           await refreshCart(true);
-          setCartMessage('success','Appointment created! Redirecting…');
+          setCartMessage('success','services.cart.checkoutSuccess');
           setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
         }catch(err){
-          setCartMessage('error', err.message||'Checkout failed');
+          const fallback = err && err.message;
+          const defaultMessage = translate('services.cart.checkoutFailed');
+          if(fallback && fallback !== defaultMessage){
+            setCartMessage('error', null, null, fallback);
+          }else{
+            setCartMessage('error','services.cart.checkoutFailed');
+          }
           if(cartCheckout) cartCheckout.disabled=false;
         }
       }
@@ -647,7 +750,6 @@
       let current={ serviceId:null, serviceName:'', masterId:null, slot:null, mastersData:[] };
       let baseStart = new Date(); baseStart.setHours(0,0,0,0);
       let availabilityCache = new Map(); // dateStr -> { set:Set(HH:MM), iso:Map(HH:MM->ISO) }
-      let cartState = { items: [], count: 0, total_price: "0", total_duration_min: 0 };
 
       // ===== open/close =====
       function openModal(serviceId, serviceName){
@@ -655,8 +757,10 @@
         current={ serviceId, serviceName, masterId:null, slot:null, mastersData:[] };
         elServiceName.textContent=serviceName;
         elError.style.display='none'; elSuccess.style.display='none';
+        clearTextKey(elError); clearTextKey(elSuccess);
         btnSubmit.disabled=true;
-        elSummary.textContent='Pick a master and time.';
+        summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
+        setTextKey(elSummary, 'services.modal.summaryPlaceholder');
 
         availabilityCache.clear();
         baseStart = new Date(); baseStart.setHours(0,0,0,0);
@@ -671,7 +775,7 @@
         const params = new URLSearchParams({ service: current.serviceId, date: dayISO });
         if (masterId) params.set('master', masterId);
         const r = await fetch(`${apiAvail}?${params.toString()}`, {credentials:'same-origin'});
-        if(!r.ok) throw new Error('Failed to load available slots');
+        if(!r.ok) throw new Error(translate('services.modal.errorLoad'));
         const data = await r.json();
 
         let slots = [];
@@ -727,9 +831,11 @@
 
           elMaster.innerHTML='';
           if(masters.length===0){
-            const opt=document.createElement('option'); opt.value=''; opt.textContent='No masters available';
+            const opt=document.createElement('option');
+            opt.value='';
+            opt.textContent = translate('services.modal.noMasters', null, 'No masters available');
             elMaster.appendChild(opt);
-            olGrid.innerHTML='<div class="skeleton" style="height:240px;margin:.5rem;"></div>';
+            olGrid.innerHTML=`<div class="p-4 text-sm text-center">${translate('services.modal.noAvailability', null, 'No availability')}</div>`;
             return;
           }
           masters.forEach(m=>{
@@ -742,8 +848,15 @@
           availabilityCache.clear();
           await renderWindow();
         }catch(err){
-          elError.textContent=err.message||'Unable to fetch availability';
+          const fallback = err && err.message;
+          const defaultMsg = translate('services.modal.errorLoad');
           elError.style.display='block';
+          if(fallback && fallback !== defaultMsg){
+            clearTextKey(elError);
+            elError.textContent=fallback;
+          }else{
+            setTextKey(elError, 'services.modal.errorLoad');
+          }
         }
       }
 
@@ -795,7 +908,14 @@
 
                 current.masterId = Number(elMaster.value);
                 current.slot     = data.iso.get(t);
-                elSummary.textContent = `Master: ${elMaster.selectedOptions[0]?.text || ''}. Time: ${chip.textContent}, ${d.toLocaleDateString()}.`;
+                const masterText = elMaster.selectedOptions[0]?.text || '';
+                const summaryVars = {
+                  master: masterText,
+                  time: chip.textContent,
+                  date: d.toLocaleDateString()
+                };
+                summaryState = { key: 'services.modal.summarySelected', vars: summaryVars };
+                setTextKey(elSummary, 'services.modal.summarySelected', summaryVars, `Master: ${summaryVars.master}. Time: ${summaryVars.time}, ${summaryVars.date}.`);
                 btnSubmit.disabled=false;
               });
             }else{
@@ -825,7 +945,8 @@
       elMaster.addEventListener('change', async ()=>{
         current.masterId = Number(elMaster.value);
         current.slot = null; btnSubmit.disabled = true;
-        elSummary.textContent='Выберите мастера и время.';
+        summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
+        setTextKey(elSummary, 'services.modal.summaryPlaceholder');
         availabilityCache.clear();
         await renderWindow();
       });
@@ -834,6 +955,7 @@
       async function addToCart(){
         if(!current.serviceId||!current.masterId||!current.slot) return;
         btnSubmit.disabled=true; elError.style.display='none'; elSuccess.style.display='none';
+        clearTextKey(elError); clearTextKey(elSuccess);
         try{
           const resp=await fetch(apiCartAdd,{
             method:'POST',
@@ -843,16 +965,23 @@
           });
           const data=await resp.json().catch(()=>({}));
           if(!resp.ok){
-          const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Could not add service to cart';
+            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):translate('services.modal.errorAdd');
             throw new Error(msg);
           }
-          elSuccess.textContent='Service added to cart.';
+          setTextKey(elSuccess, 'services.modal.success');
           elSuccess.style.display='block';
           await refreshCart(true);
           setTimeout(()=>{ closeModal(); }, 600);
         }catch(err){
-          elError.textContent=err.message||'Add to cart error';
+          const fallback = err && err.message;
+          const defaultMsg = translate('services.modal.errorAdd');
           elError.style.display='block';
+          if(fallback && fallback !== defaultMsg){
+            clearTextKey(elError);
+            elError.textContent = fallback;
+          }else{
+            setTextKey(elError, 'services.modal.errorAdd');
+          }
         }finally{
           btnSubmit.disabled=false;
         }
@@ -861,7 +990,7 @@
       // ===== wire up =====
       document.addEventListener('click',(e)=>{
         const btn=e.target.closest('.book-btn'); if(btn){
-          openModal(btn.dataset.serviceId, btn.dataset.serviceName || 'service');
+          openModal(btn.dataset.serviceId, btn.dataset.serviceName || translate('common.service', null, 'Service'));
         }
       });
       btnClose.addEventListener('click',closeModal);
@@ -927,16 +1056,18 @@
           : `<strong>$${escapeHtml(s.price || s.base_price)}</strong>`;
         const desc = s.description ? `<p class="muted">${escapeHtml(s.description)}</p>` : '';
         const cat  = s.category ? `<div class="muted">${escapeHtml(s.category)}</div>` : '';
+        const durationValue = escapeHtml(String(s.duration_min || 0));
         return `
           <article class="service-card">
             <div class="service-card__img">IMG</div>
             ${cat}
             <h3>${escapeHtml(s.name)}</h3>
             ${desc}
-            <div class="service-meta">${priceBlock} · ${escapeHtml(String(s.duration_min))} min</div>
+            <div class="service-meta">${priceBlock} · <span class="meta-duration" data-i18n="services.units.minutes" data-i18n-vars="value=${durationValue}">${durationValue} min</span></div>
             <button class="btn btn--primary book-btn"
               data-service-id="${escapeHtml(s.id)}"
-              data-service-name="${escapeHtml(s.name)}">Добавить в корзину</button>
+              data-service-name="${escapeHtml(s.name)}"
+              data-i18n="services.cards.addToCart">${translate('services.cards.addToCart')}</button>
           </article>`;
       }
 
@@ -949,7 +1080,7 @@
         if (cat) params.set('cat', cat);
         const url = `/accounts/api/services/search/?${params.toString()}`;
         const r = await fetch(url, { signal: aborter.signal, credentials: 'same-origin' });
-        if (!r.ok) throw new Error('Failed to load');
+        if (!r.ok) throw new Error(translate('services.search.loadFailed'));
         return r.json();
       }
 
@@ -963,12 +1094,15 @@
           const data = await fetchServices(q, cat);
           const items = (data && data.results) || [];
           if (items.length === 0){
-            liveGrid.innerHTML = `<div class="stub">No services found.</div>`;
+            liveGrid.innerHTML = `<div class="stub" data-i18n="services.search.noResults">${translate('services.search.noResults')}</div>`;
+            queueRefresh();
             return;
           }
           liveGrid.innerHTML = items.map(cardHTML).join('');
+          queueRefresh();
         }catch(e){
-          liveGrid.innerHTML = `<div class="stub">Could not load results. Please try again.</div>`;
+          liveGrid.innerHTML = `<div class="stub" data-i18n="services.search.error">${translate('services.search.error')}</div>`;
+          queueRefresh();
         }
       }, 300);
 
@@ -983,7 +1117,7 @@
           document.getElementById('services')?.scrollIntoView({behavior:'smooth', block:'start'});
         });
       }
-    })();
+    });
   </script>
 </body>
 </html>

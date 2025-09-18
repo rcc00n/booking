@@ -1,14 +1,16 @@
-{% load i18n tz %}<!DOCTYPE html>
+{% load i18n tz static %}<!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
   <meta charset="utf-8" />
-  <title>Client Portal | Malva Booking</title>
+  <title data-i18n="dashboard.meta.title">Client Portal | Malva Booking</title>
 
   <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
 
   <!-- Chart.js -->
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <script src="{% static 'js/i18n.js' %}"></script>
 
   <!-- Мини-стили для горизонтального дейтпикера (в модалке) -->
   <style>
@@ -33,6 +35,10 @@
     .chip--busy{color:#fff;background:var(--busy);opacity:.92}
     .chip--sel{background:var(--free)!important;color:#fff;border-color:var(--free)!important;box-shadow:0 0 0 2px color-mix(in srgb, var(--free) 20%, transparent)}
     @media (max-width: 900px){ .ol2__wrap{max-height:50vh} }
+    .lang-switcher{display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:#DAD3C1;opacity:.9}
+    .lang-switcher__btn{border:1px solid transparent;padding:.25rem .55rem;border-radius:.5rem;background:rgba(255,255,255,.12);color:inherit;cursor:pointer;transition:.2s ease;text-transform:uppercase;font-weight:600}
+    .lang-switcher__btn:hover{background:rgba(255,255,255,.2)}
+    .lang-switcher__btn.is-active{background:#fff;color:#204029;border-color:#fff}
   </style>
 </head>
 <body class="h-full bg-[#DEDEDE] text-[#4D4D4D]">
@@ -41,34 +47,42 @@
   <!-- ▸▸ SIDEBAR ◂◂ -->
   <aside class="w-64 bg-[#204029] text-[#DAD3C1] shadow-xl">
     <div class="p-6 font-extrabold text-xl tracking-wide flex items-center gap-2">
-      <span class="text-[#AF9525]">MB</span> Malva Booking
+      <span class="text-[#AF9525]">MB</span> <span data-i18n="common.brand">Malva Booking</span>
+    </div>
+
+    <div class="px-6 pb-4">
+      <div class="lang-switcher" role="group" data-i18n-attr="aria-label:common.language">
+        <span class="uppercase tracking-wide text-[11px] font-semibold opacity-80" data-i18n="common.language">Language</span>
+        <button type="button" class="lang-switcher__btn" data-lang-switch="en" data-i18n="languages.en">English</button>
+        <button type="button" class="lang-switcher__btn" data-lang-switch="ru" data-i18n="languages.ru">Русский</button>
+      </div>
     </div>
 
     <nav id="sidebar" class="space-y-1 px-3 text-sm">
       <a href="#" data-tab="dashboard"
          class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-        🏠 <span>Overview</span>
+        🏠 <span data-i18n="dashboard.nav.overview">Overview</span>
       </a>
       <a href="#" data-tab="appointments"
          class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-        📅 <span>Appointments</span>
+        📅 <span data-i18n="dashboard.nav.appointments">Appointments</span>
       </a>
       <a href="#" data-tab="files"
          class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-        📂 <span>Files</span>
+        📂 <span data-i18n="dashboard.nav.files">Files</span>
       </a>
       <a href="#" data-tab="notifications"
          class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-        🔔 <span>Notifications</span>
+        🔔 <span data-i18n="dashboard.nav.notifications">Notifications</span>
       </a>
       <a href="#" data-tab="profile"
          class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-        👤 <span>Profile</span>
+        👤 <span data-i18n="dashboard.nav.profile">Profile</span>
       </a>
 
       <a href="/accounts/"
          class="mt-1 flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-        ⬅️ <span>Back to Home</span>
+        ⬅️ <span data-i18n="dashboard.nav.back">Back to Home</span>
       </a>
 
       <div class="my-3 border-t border-white/10"></div>
@@ -79,7 +93,7 @@
                 class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-md
                        text-[#DAD3C1] border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white
                        focus:outline-none focus:ring-2 focus:ring-[#AF9525] transition">
-          🚪 <span>Sign out</span>
+          🚪 <span data-i18n="dashboard.nav.signOut">Sign out</span>
         </button>
       </form>
     </nav>
@@ -90,14 +104,16 @@
 
     <!-- DASHBOARD -->
     <section id="tab-dashboard" class="tab">
-      <h1 class="text-4xl font-extrabold mb-8 text-[#204029]">
-        {% if request.user.first_name %}Hello, {{ request.user.first_name }}!{% else %}Hello, {{ request.user.username }}!{% endif %}
-      </h1>
+      {% if request.user.first_name %}
+        <h1 class="text-4xl font-extrabold mb-8 text-[#204029]" data-i18n="dashboard.greetingNamed" data-i18n-vars='{"name":"{{ request.user.first_name|escapejs }}"}'>Hello, {{ request.user.first_name }}!</h1>
+      {% else %}
+        <h1 class="text-4xl font-extrabold mb-8 text-[#204029]" data-i18n="dashboard.greetingAnon" data-i18n-vars='{"username":"{{ request.user.username|escapejs }}"}'>Hello, {{ request.user.username }}!</h1>
+      {% endif %}
 
       <div class="grid lg:grid-cols-3 gap-6">
         <!-- Upcoming appointments -->
         <div class="bg-white rounded-2xl shadow p-6 border border-[#DAD3C1]">
-          <h2 class="text-lg font-semibold mb-4">Upcoming appointments</h2>
+          <h2 class="text-lg font-semibold mb-4" data-i18n="dashboard.upcomingTitle">Upcoming appointments</h2>
 
           {% if upcoming_appointments %}
             <ul class="space-y-4 max-h-64 overflow-y-auto pr-1">
@@ -111,21 +127,21 @@
                   </p>
                   <div class="mt-2 flex gap-4 text-sm">
                     <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
-                       data-appt-id="{{ a.id }}">Cancel</a>
+                       data-appt-id="{{ a.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>
                     <a href="#" class="appt-reschedule text-[#AF9525] hover:opacity-90 underline-offset-4 hover:underline"
-                       data-appt-id="{{ a.id }}" data-service-id="{{ a.service.id }}">Reschedule</a>
+                       data-appt-id="{{ a.id }}" data-service-id="{{ a.service.id }}" data-i18n="dashboard.appointment.reschedule">Reschedule</a>
                   </div>
                 </li>
               {% endfor %}
             </ul>
           {% else %}
-            <p class="text-[#4D4D4D]/70">No upcoming appointments.</p>
+            <p class="text-[#4D4D4D]/70" data-i18n="dashboard.upcomingEmpty">No upcoming appointments.</p>
           {% endif %}
         </div>
 
         <!-- Stats -->
         <div class="bg-white rounded-2xl shadow p-6 lg:col-span-2 border border-[#DAD3C1]">
-          <h2 class="text-lg font-semibold mb-4">Stats</h2>
+          <h2 class="text-lg font-semibold mb-4" data-i18n="dashboard.statsTitle">Stats</h2>
           <canvas id="stats_chart"
                   data-labels="{{ chart_labels|join:',' }}"
                   data-data="{{ chart_data|join:',' }}"
@@ -135,17 +151,17 @@
 
       <!-- Recent appointments -->
       <div class="bg-white rounded-2xl shadow p-6 mt-8 border border-[#DAD3C1]">
-        <h2 class="text-lg font-semibold mb-4">Recent appointments</h2>
+        <h2 class="text-lg font-semibold mb-4" data-i18n="dashboard.recentTitle">Recent appointments</h2>
         {% if recent_appointments %}
           <div class="overflow-x-auto">
             <table class="min-w-full text-sm">
               <thead>
                 <tr class="text-left bg-[#DAD3C1] text-[#204029]">
-                  <th class="py-2 pl-3 pr-4 rounded-l-lg">Date</th>
-                  <th class="py-2 pr-4">Service</th>
-                  <th class="py-2 pr-4">Master</th>
-                  <th class="py-2 pr-4">Status</th>
-                  <th class="py-2 pr-3 rounded-r-lg">Amount</th>
+                  <th class="py-2 pl-3 pr-4 rounded-l-lg" data-i18n="dashboard.table.date">Date</th>
+                  <th class="py-2 pr-4" data-i18n="dashboard.table.service">Service</th>
+                  <th class="py-2 pr-4" data-i18n="dashboard.table.master">Master</th>
+                  <th class="py-2 pr-4" data-i18n="dashboard.table.status">Status</th>
+                  <th class="py-2 pr-3 rounded-r-lg" data-i18n="dashboard.table.amount">Amount</th>
                 </tr>
               </thead>
               <tbody class="[&>tr]:border-b [&>tr]:border-[#DEDEDE]">
@@ -162,7 +178,7 @@
             </table>
           </div>
         {% else %}
-          <p class="text-[#4D4D4D]/70">No completed appointments yet.</p>
+          <p class="text-[#4D4D4D]/70" data-i18n="dashboard.recentEmpty">No completed appointments yet.</p>
         {% endif %}
       </div>
     </section>
@@ -170,9 +186,9 @@
     <!-- APPOINTMENTS -->
     <section id="tab-appointments" class="tab hidden">
       <div class="flex items-center mb-6">
-        <h2 class="text-2xl font-semibold text-[#204029]">My appointments</h2>
+        <h2 class="text-2xl font-semibold text-[#204029]" data-i18n="dashboard.myTitle">My appointments</h2>
         <a href="/accounts/#services"
-           class="ml-auto px-4 py-2 rounded-lg text-white bg-[#AF9525] hover:bg-[#9b8521] shadow">
+           class="ml-auto px-4 py-2 rounded-lg text-white bg-[#AF9525] hover:bg-[#9b8521] shadow" data-i18n="dashboard.book">
           + Book
         </a>
       </div>
@@ -190,31 +206,31 @@
               {% if a.start_time >= now %}
                 <div class="flex gap-3 text-sm appt-actions">
                   <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
-                     data-appt-id="{{ a.id }}">Cancel</a>
+                     data-appt-id="{{ a.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>
                   <a href="#" class="appt-reschedule text-[#AF9525] hover:opacity-90 underline-offset-4 hover:underline"
-                     data-appt-id="{{ a.id }}" data-service-id="{{ a.service.id }}">Reschedule</a>
+                     data-appt-id="{{ a.id }}" data-service-id="{{ a.service.id }}" data-i18n="dashboard.appointment.reschedule">Reschedule</a>
                 </div>
               {% else %}
-                <span class="text-xs text-[#4D4D4D]/70">Completed</span>
+                <span class="text-xs text-[#4D4D4D]/70" data-i18n="dashboard.appointment.completed">Completed</span>
               {% endif %}
             </div>
           {% endfor %}
         </div>
       {% else %}
-        <p class="text-[#4D4D4D]/70">No appointments.</p>
+        <p class="text-[#4D4D4D]/70" data-i18n="dashboard.myEmpty">No appointments.</p>
       {% endif %}
     </section>
 
     <!-- FILES -->
     <section id="tab-files" class="tab hidden">
-      <h2 class="text-2xl font-semibold mb-6 text-[#204029]">Files</h2>
-      <p class="text-[#4D4D4D]/70">Coming soon.</p>
+      <h2 class="text-2xl font-semibold mb-6 text-[#204029]" data-i18n="dashboard.filesTitle">Files</h2>
+      <p class="text-[#4D4D4D]/70" data-i18n="dashboard.comingSoon">Coming soon.</p>
     </section>
 
     <!-- NOTIFICATIONS -->
     <section id="tab-notifications" class="tab hidden">
-      <h2 class="text-2xl font-semibold mb-6 text-[#204029]">Notifications</h2>
-      <p class="text-[#4D4D4D]/70">Coming soon.</p>
+      <h2 class="text-2xl font-semibold mb-6 text-[#204029]" data-i18n="dashboard.notificationsTitle">Notifications</h2>
+      <p class="text-[#4D4D4D]/70" data-i18n="dashboard.comingSoon">Coming soon.</p>
     </section>
 
     <!-- PROFILE -->
@@ -236,38 +252,38 @@
     {% endif %}
 
     <section id="tab-profile" class="tab hidden">
-      <h2 class="text-2xl font-semibold mb-6 text-[#204029]">Profile</h2>
+      <h2 class="text-2xl font-semibold mb-6 text-[#204029]" data-i18n="dashboard.profileTitle">Profile</h2>
 
       <form method="post" class="grid md:grid-cols-2 gap-6 bg-white shadow rounded-2xl p-6 border border-[#DAD3C1]">
         {% csrf_token %}
         <div>
-          <label class="block text-sm font-medium">First name</label>
+          <label class="block text-sm font-medium" data-i18n="dashboard.form.firstName">First name</label>
           <input type="text" name="first_name" value="{{ request.user.first_name }}"
                  class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-sm font-medium">Last name</label>
+          <label class="block text-sm font-medium" data-i18n="dashboard.form.lastName">Last name</label>
           <input type="text" name="last_name" value="{{ request.user.last_name }}"
                  class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-sm font-medium">Phone</label>
+          <label class="block text-sm font-medium" data-i18n="dashboard.form.phone">Phone</label>
           <input type="text" name="phone" value="{{ profile.phone }}"
                  class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-sm font-medium">E-mail</label>
+          <label class="block text-sm font-medium" data-i18n="dashboard.form.email">E-mail</label>
           <input type="email" name="email" value="{{ request.user.email }}"
                  class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-sm font-medium">Birth date</label>
+          <label class="block text-sm font-medium" data-i18n="dashboard.form.birthDate">Birth date</label>
           <input type="date" name="birth_date" value="{{ profile.birth_date|date:'Y-m-d' }}"
                  class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm">
         </div>
 
         <div class="md:col-span-2 text-right">
-          <button type="submit" class="px-6 py-2 bg-[#204029] text-white rounded-lg hover:bg-[#1b3626]">
+          <button type="submit" class="px-6 py-2 bg-[#204029] text-white rounded-lg hover:bg-[#1b3626]" data-i18n="dashboard.form.save">
             Save changes
           </button>
         </div>
@@ -281,25 +297,25 @@
 <div id="resModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-4xl p-5 border border-[#DAD3C1]">
     <div class="flex items-center justify-between mb-3">
-      <h3 class="font-bold text-lg text-[#204029]">Reschedule appointment</h3>
-      <button id="resClose" class="text-2xl leading-none">&times;</button>
+      <h3 class="font-bold text-lg text-[#204029]" data-i18n="dashboard.reschedule.title">Reschedule appointment</h3>
+      <button id="resClose" class="text-2xl leading-none" aria-label="Close" data-i18n-attr="aria-label:common.close">&times;</button>
     </div>
 
     <div class="space-y-3">
       <div>
-        <label class="text-sm">Master</label>
+        <label class="text-sm" data-i18n="dashboard.reschedule.masterLabel">Master</label>
         <select id="resMaster" class="w-full border border-[#DEDEDE] rounded-md px-3 py-2"></select>
       </div>
 
       <!-- Новый горизонтальный выбор даты/времени -->
       <div>
-        <label class="text-sm">Choose time</label>
+        <label class="text-sm" data-i18n="dashboard.reschedule.chooseTime">Choose time</label>
         <div class="ol2 mt-1" id="rsOl">
           <div class="ol2__toolbar">
             <div class="flex gap-2">
-              <button id="rsPrev" type="button" class="px-2 py-1 border rounded-md">← Prev</button>
-              <button id="rsToday" type="button" class="px-2 py-1 border rounded-md">Today</button>
-              <button id="rsNext" type="button" class="px-2 py-1 border rounded-md">Next →</button>
+              <button id="rsPrev" type="button" class="px-2 py-1 border rounded-md" data-i18n="dashboard.reschedule.prev">← Prev</button>
+              <button id="rsToday" type="button" class="px-2 py-1 border rounded-md" data-i18n="dashboard.reschedule.today">Today</button>
+              <button id="rsNext" type="button" class="px-2 py-1 border rounded-md" data-i18n="dashboard.reschedule.next">Next →</button>
             </div>
             <div id="rsRange" class="font-bold text-[#204029]">—</div>
           </div>
@@ -308,15 +324,15 @@
           </div>
         </div>
 
-        <p class="text-xs text-[#4D4D4D]/80 mt-2">Scroll horizontally. Red slots are busy.</p>
+        <p class="text-xs text-[#4D4D4D]/80 mt-2" data-i18n="dashboard.reschedule.hint">Scroll horizontally. Red slots are busy.</p>
         <p class="text-sm text-red-600 mt-1 hidden" id="resErr"></p>
         <p class="text-sm text-emerald-700 mt-1 hidden" id="resOk"></p>
       </div>
     </div>
 
     <div class="flex justify-end gap-2 mt-4">
-      <button id="resCancel" class="px-4 py-2 rounded-md border border-[#DEDEDE]">Cancel</button>
-      <button id="resSubmit" class="px-4 py-2 rounded-md bg-[#AF9525] text-white hover:bg-[#9b8521] disabled:opacity-50" disabled>
+      <button id="resCancel" class="px-4 py-2 rounded-md border border-[#DEDEDE]" data-i18n="dashboard.reschedule.cancel">Cancel</button>
+      <button id="resSubmit" class="px-4 py-2 rounded-md bg-[#AF9525] text-white hover:bg-[#9b8521] disabled:opacity-50" disabled data-i18n="dashboard.reschedule.save">
         Save
       </button>
     </div>
@@ -326,6 +342,47 @@
 <!-- ▸▸ JS ◂◂ -->
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+  const I18N = window.MalvaI18n;
+  let refreshPending = false;
+  const queueRefresh = () => {
+    if (!I18N || typeof I18N.refresh !== 'function' || refreshPending) return;
+    refreshPending = true;
+    window.requestAnimationFrame(() => {
+      refreshPending = false;
+      I18N.refresh({ silent: true });
+    });
+  };
+  const translate = (key, vars, fallback) => {
+    if (!key) return fallback || '';
+    if (I18N) {
+      try {
+        return I18N.t(key, vars);
+      } catch (err) {
+        return fallback !== undefined ? fallback : key;
+      }
+    }
+    return fallback !== undefined ? fallback : key;
+  };
+  const setTextKey = (el, key, vars, fallback) => {
+    if (!el) return;
+    if (I18N && key) {
+      el.setAttribute('data-i18n', key);
+      if (vars) {
+        el.setAttribute('data-i18n-vars', JSON.stringify(vars));
+      } else {
+        el.removeAttribute('data-i18n-vars');
+      }
+      queueRefresh();
+    } else if (fallback !== undefined) {
+      el.textContent = fallback;
+    }
+  };
+  const clearTextKey = (el) => {
+    if (!el) return;
+    el.removeAttribute('data-i18n');
+    el.removeAttribute('data-i18n-vars');
+  };
+
   const links = document.querySelectorAll('.sidebar-link');
   const tabs  = document.querySelectorAll('.tab');
 
@@ -348,12 +405,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* chart */
   const el = document.getElementById('stats_chart');
+  let statsChart = null;
   if (el) {
     const labels = el.dataset.labels ? el.dataset.labels.split(',') : [];
     const data   = el.dataset.data   ? el.dataset.data.split(',').map(Number) : [];
-    new Chart(el, {
+    statsChart = new Chart(el, {
       type: 'bar',
-      data: { labels, datasets: [{ data, label: 'Appointments', backgroundColor: '#AF9525', borderRadius: 6 }] },
+      data: { labels, datasets: [{ data, label: translate('dashboard.chartLabel', null, 'Appointments'), backgroundColor: '#AF9525', borderRadius: 6 }] },
       options: {
         plugins: { legend: { display: false }},
         scales : {
@@ -372,9 +430,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* ===== отмена с подтверждением + «перечёркивание» без перезагрузки ===== */
   async function cancelAppointment(id){
-    if(!confirm('Cancel this appointment?')) return;
+    if(!confirm(translate('dashboard.reschedule.confirmCancel', null, 'Cancel this appointment?'))) return;
     const r = await fetch(`/accounts/api/appointment/${id}/cancel/`, { method:'POST', headers:{'X-CSRFToken': csrftoken}, credentials:'same-origin' });
-    if(!r.ok){ alert('Cancel error: ' + (await r.text())); return; }
+    if(!r.ok){
+      const text = await r.text();
+      alert(translate('dashboard.reschedule.cancelError', { detail: text }, `Cancel error: ${text}`));
+      return;
+    }
     strikeOut(id);
   }
   function strikeOut(id){
@@ -430,7 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams({ service: resState.serviceId, date: dayISO });
     if (masterId) params.set('master', masterId);
     const r = await fetch(`/accounts/api/availability/?${params.toString()}`, {credentials:'same-origin'});
-    if(!r.ok) throw new Error('Failed to load slots');
+    if(!r.ok) throw new Error(translate('dashboard.reschedule.loadFailed'));
     const data = await r.json();
 
     let slots=[];
@@ -468,13 +530,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadMastersAndRender(){
+    elError.classList.add('hidden');
+    clearTextKey(elError);
     try{
       const first = await fetchAvail(ymd(resState.baseStart), null);
       resState.masters = (first.raw && first.raw.masters) || [];
       resMaster.innerHTML = '';
       if(resState.masters.length===0){
-        resMaster.innerHTML = '<option>No masters available</option>';
-        rsGrid.innerHTML = '<div class="p-4 text-sm">No availability</div>';
+        const opt=document.createElement('option');
+        opt.value='';
+        opt.textContent = translate('dashboard.reschedule.noMasters', null, 'No masters available');
+        opt.setAttribute('data-i18n', 'dashboard.reschedule.noMasters');
+        resMaster.appendChild(opt);
+        rsGrid.innerHTML = `<div class="p-4 text-sm" data-i18n="dashboard.reschedule.noAvailability">${translate('dashboard.reschedule.noAvailability', null, 'No availability')}</div>`;
+        queueRefresh();
         return;
       }
       resState.masters.forEach(m=>{ const opt=document.createElement('option'); opt.value=m.id; opt.textContent=m.name; resMaster.appendChild(opt); });
@@ -484,8 +553,15 @@ document.addEventListener('DOMContentLoaded', () => {
       resState.cache.clear();
       await renderWindow();
     }catch(e){
-      resErr.textContent = e.message || 'Unable to fetch availability';
+      const fallback = e && e.message;
+      const defaultMsg = translate('dashboard.reschedule.errorLoad');
       resErr.classList.remove('hidden');
+      if(fallback && fallback !== defaultMsg){
+        clearTextKey(resErr);
+        resErr.textContent = fallback;
+      }else{
+        setTextKey(resErr, 'dashboard.reschedule.errorLoad');
+      }
     }
   }
 
@@ -560,6 +636,8 @@ document.addEventListener('DOMContentLoaded', () => {
   resMaster.addEventListener('change', async ()=>{
     resState.masterId = Number(resMaster.value);
     resState.slot = null; resSubmit.disabled=true; resState.cache.clear();
+    resErr.classList.add('hidden'); clearTextKey(resErr);
+    resOk.classList.add('hidden'); clearTextKey(resOk);
     await renderWindow();
   });
   rsPrev.addEventListener('click', ()=>shiftWindow(-WINDOW_DAYS));
@@ -572,6 +650,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function submitRes(){
     if(!resState.apptId || !resState.slot) return;
     resSubmit.disabled = true; resErr.classList.add('hidden'); resOk.classList.add('hidden');
+    clearTextKey(resErr); clearTextKey(resOk);
     const r = await fetch(`/accounts/api/appointment/${resState.apptId}/reschedule/`, {
       method:'POST',
       headers:{'Content-Type':'application/json','X-CSRFToken': csrftoken},
@@ -580,7 +659,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     const data = await r.json().catch(()=> ({}));
     if(r.ok){
-      resOk.textContent = 'Rescheduled to ' + (data.appointment?.start_time || '');
+      const startISO = data.appointment?.start_time || '';
+      const localized = startISO ? new Date(startISO).toLocaleString() : '';
+      setTextKey(resOk, 'dashboard.reschedule.success', { datetime: localized }, `Rescheduled to ${localized}`);
       resOk.classList.remove('hidden');
       // мгновенно обновим дату в карточке (если она на странице)
       document.querySelectorAll(`[data-appt-id="${resState.apptId}"] .appt-dt`).forEach(dt=>{
@@ -588,8 +669,15 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       setTimeout(()=> location.reload(), 700);
     }else{
-      resErr.textContent = data.error || data.detail || 'Reschedule failed';
-      resErr.classList.remove('hidden'); resSubmit.disabled = false;
+      const fallback = data.error || data.detail;
+      resErr.classList.remove('hidden');
+      if(fallback){
+        clearTextKey(resErr);
+        resErr.textContent = fallback;
+      }else{
+        setTextKey(resErr, 'dashboard.reschedule.failed');
+      }
+      resSubmit.disabled = false;
     }
   }
 
@@ -602,6 +690,15 @@ document.addEventListener('DOMContentLoaded', () => {
   resCancel.addEventListener('click', closeRes);
   resModal.addEventListener('click', (e)=>{ if(e.target===resModal) closeRes(); });
   resSubmit.addEventListener('click', submitRes);
+
+  if (I18N && typeof I18N.onChange === 'function') {
+    I18N.onChange(() => {
+      if (statsChart) {
+        statsChart.data.datasets[0].label = translate('dashboard.chartLabel', null, 'Appointments');
+        statsChart.update();
+      }
+    });
+  }
 });
 </script>
 </body>
