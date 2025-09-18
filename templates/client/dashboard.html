@@ -124,6 +124,7 @@
                   <p class="text-sm text-[#4D4D4D]">
                     <span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span> · {{ a.master.get_full_name }}
                   </p>
+                  <p class="text-xs text-[#4D4D4D]/80 mt-1" data-i18n="dashboard.appointment.paymentLabel" data-i18n-vars='{"status":"{{ a.payment_status.name|default:"Pending" }}"}'>Payment: {{ a.payment_status.name|default:"Pending" }}</p>
                   <div class="mt-2 flex gap-4 text-sm">
                     <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
                        data-appt-id="{{ a.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>
@@ -160,6 +161,7 @@
                   <th class="py-2 pr-4" data-i18n="dashboard.table.service">Service</th>
                   <th class="py-2 pr-4" data-i18n="dashboard.table.master">Master</th>
                   <th class="py-2 pr-4" data-i18n="dashboard.table.status">Status</th>
+                  <th class="py-2 pr-4" data-i18n="dashboard.table.payment">Payment</th>
                   <th class="py-2 pr-3 rounded-r-lg" data-i18n="dashboard.table.amount">Amount</th>
                 </tr>
               </thead>
@@ -170,6 +172,7 @@
                   <td class="py-2 pr-4"><span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span></td>
                     <td class="py-2 pr-4">{{ a.master.get_full_name }}</td>
                     <td class="py-2 pr-4">{{ a.current_status }}</td>
+                    <td class="py-2 pr-4">{{ a.payment_status.name|default:"—" }}</td>
                     <td class="py-2 pr-3">{{ a.price|default:"—" }}</td>
                   </tr>
                 {% endfor %}

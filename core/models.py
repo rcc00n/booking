@@ -1008,14 +1008,61 @@ class PaymentMethod(models.Model):
 
 
 class Payment(models.Model):
-    """
-    Stores payment records for appointments.
-    """
+    """Stores payment records for appointments (Stripe + offline)."""
+
+    STRIPE_STATUS_CHOICES = [
+        ("requires_payment_method", "Requires payment method"),
+        ("requires_confirmation", "Requires confirmation"),
+        ("requires_action", "Requires action"),
+        ("processing", "Processing"),
+        ("succeeded", "Succeeded"),
+        ("canceled", "Canceled"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    appointment = models.ForeignKey(Appointment, on_delete=models.CASCADE)
+    appointment = models.ForeignKey(Appointment, on_delete=models.CASCADE, related_name="payments")
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=10, default="cad")
     method = models.ForeignKey(PaymentMethod, on_delete=models.CASCADE)
+    status = models.CharField(
+        max_length=32,
+        choices=STRIPE_STATUS_CHOICES,
+        default="requires_payment_method",
+    )
+    stripe_payment_intent_id = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+    )
+    stripe_payment_method_id = models.CharField(max_length=255, blank=True, default="")
+    stripe_charge_id = models.CharField(max_length=255, blank=True, default="")
+    receipt_url = models.URLField(blank=True, default="")
+    livemode = models.BooleanField(default=False)
+    metadata = models.JSONField(default=dict, blank=True)
+    raw_response = models.JSONField(default=dict, blank=True)
+    amount_received = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    amount_refunded = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    captured_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["stripe_payment_intent_id"], name="payment_intent_idx"),
+            models.Index(fields=["status"], name="payment_status_idx"),
+        ]
+
+    def __str__(self):
+        return f"Payment {self.amount} {self.currency} for {self.appointment_id}"
 
 # --- 5. PREPAYMENTS ---
 

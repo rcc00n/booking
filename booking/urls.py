@@ -10,7 +10,7 @@ from django.contrib import admin
 from django.urls import path, include
 from core.autocomplete import ServiceAutocomplete
 from django.views.generic import RedirectView
-from core.views import service_search, service_price, service_promocodes_api
+from core.views import service_search, service_price, service_promocodes_api, stripe_webhook
 from core.admin import stats_view
 from accounts.views import health_view, health_edit
 urlpatterns = [
@@ -28,10 +28,11 @@ urlpatterns = [
         name="service_promocodes_api",
     ),
 
-     path("", RedirectView.as_view(pattern_name="client-dashboard", permanent=False)),
+    path("", RedirectView.as_view(pattern_name="client-dashboard", permanent=False)),
     # Ничего из core тут не монтируем, чтобы не перехватывать /accounts/
     path('accounts/api/services/search/', service_search, name='service-search'),
 
     path("health/edit/", health_edit, name="health-edit"),
     path("health/", health_view, name="health-view"),
+    path("stripe/webhook/", stripe_webhook, name="stripe-webhook"),
 ]

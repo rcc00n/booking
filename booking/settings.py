@@ -164,6 +164,21 @@ STATICFILES_DIRS = [ BASE_DIR / "static" ]
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# --- Payments / Stripe ---
+STRIPE_PUBLIC_KEY = env("STRIPE_PUBLIC_KEY", default="")
+STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
+STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
+STRIPE_CURRENCY = env("STRIPE_CURRENCY", default="cad")
+STRIPE_API_VERSION = env("STRIPE_API_VERSION", default="2024-11-20")
+STRIPE_PAYMENT_METHOD_TYPES = env.list(
+    "STRIPE_PAYMENT_METHOD_TYPES",
+    default=["card"],
+)
+STRIPE_ALLOW_PROMISE_PAYMENT = env.bool(
+    "STRIPE_ALLOW_PROMISE_PAYMENT",
+    default=False,
+)
+
 # # Use S3 as default storage for uploaded media
 # DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 

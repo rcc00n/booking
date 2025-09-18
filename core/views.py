@@ -1,28 +1,31 @@
 # core/views.py
+from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
 from django.forms import inlineformset_factory
 from django.shortcuts import render, get_object_or_404, redirect
 from django.db.models import Prefetch, Q
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
-from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 from datetime import datetime
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import transaction
 import json
+import stripe
 
 from core.models import (
     Appointment, ServiceCategory, Service, PromoCode,
     AppointmentStatusHistory, MasterProfile, UserProfile, CancellationReason,
-    AppointmentItem, BookingCart, BookingCartItem,
+    AppointmentItem, BookingCart, BookingCartItem, Payment,
 )
 from core.services.booking import (
     get_available_slots, get_service_masters,
     get_or_create_status, get_default_payment_status, _tz_aware,
     create_appointment_from_cart_items,
 )
+from core.services import payments as payment_services
 
 def _build_catalog_context(request):
     """Общий конструктор контекста каталога."""
@@ -74,6 +77,8 @@ def public_mainmenu(request):
         # чтобы шаблон не спотыкался, если где-то используешь эти ключи
         ctx.setdefault("profile", None)
         ctx.setdefault("appointments", [])
+
+    ctx["stripe_public_key"] = settings.STRIPE_PUBLIC_KEY
 
     return render(request, "client/mainmenu.html", ctx)
 
@@ -369,7 +374,26 @@ def api_cart_checkout(request):
             messages.extend(getattr(exc, "messages", [str(exc)]))
         return JsonResponse({"error": messages[0] if messages else "Invalid data"}, status=400)
 
+    try:
+        bundle = payment_services.create_or_update_payment_intent(appt)
+    except ImproperlyConfigured as cfg_err:
+        return JsonResponse({"error": str(cfg_err)}, status=500)
+    except stripe.error.StripeError as err:
+        return JsonResponse({"error": getattr(err, "user_message", str(err))}, status=502)
+
     cart.clear()
+
+    payment_payload = {
+        "id": str(bundle.payment.id),
+        "status": bundle.payment.status,
+        "amount": str(bundle.payment.amount),
+        "amount_received": str(bundle.payment.amount_received),
+        "currency": bundle.payment.currency,
+        "livemode": bundle.payment.livemode,
+        "client_secret": getattr(bundle.intent, "client_secret", None) if bundle.intent else None,
+        "payment_intent_id": getattr(bundle.intent, "id", None) if bundle.intent else bundle.payment.stripe_payment_intent_id,
+        "publishable_key": settings.STRIPE_PUBLIC_KEY,
+    }
 
     return JsonResponse({
         "ok": True,
@@ -385,11 +409,89 @@ def api_cart_checkout(request):
                 for it in appt.items.select_related("service", "master__user")
             ],
         },
+        "payment": payment_payload,
     }, status=201)
 
+
+@login_required
+@require_POST
+@csrf_protect
+def api_payment_verify(request, appt_id):
+    appt = get_object_or_404(
+        Appointment.objects.select_related("client", "payment_status").prefetch_related("payments"),
+        pk=appt_id,
+    )
+
+    profile = getattr(request.user, "userprofile", None)
+    if not (request.user.is_staff or (profile and appt.client_id == profile.id)):
+        return JsonResponse({"error": "not allowed"}, status=403)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    intent_id = payload.get("payment_intent_id")
+    if not intent_id:
+        return JsonResponse({"error": "payment_intent_id required"}, status=400)
+
+    try:
+        payment = payment_services.sync_payment_from_intent(intent_id)
+    except Payment.DoesNotExist:
+        return JsonResponse({"error": "payment not found"}, status=404)
+    except ImproperlyConfigured as cfg_err:
+        return JsonResponse({"error": str(cfg_err)}, status=500)
+    except stripe.error.StripeError as err:
+        return JsonResponse({"error": getattr(err, "user_message", str(err))}, status=502)
+
+    appt.refresh_from_db(fields=["payment_status"])
+
+    return JsonResponse({
+        "ok": True,
+        "payment": {
+            "id": str(payment.id),
+            "status": payment.status,
+            "amount": str(payment.amount),
+            "amount_received": str(payment.amount_received),
+            "amount_refunded": str(payment.amount_refunded),
+            "currency": payment.currency,
+            "receipt_url": payment.receipt_url,
+        },
+        "appointment": {
+            "id": str(appt.pk),
+            "payment_status": getattr(appt.payment_status, "name", ""),
+        },
+    })
+
+
+@csrf_exempt
+@require_POST
+def stripe_webhook(request):
+    payload = request.body
+    sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
+
+    if not settings.STRIPE_WEBHOOK_SECRET:
+        return HttpResponse(status=503)
+
+    if not sig_header:
+        return HttpResponse(status=400)
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+        )
+    except (ValueError, stripe.error.SignatureVerificationError):
+        return HttpResponse(status=400)
+
+    try:
+        payment_services.handle_webhook_event(event)
+    except (Payment.DoesNotExist, ValueError):
+        return HttpResponse(status=202)
+
+    return HttpResponse(status=200)
 # --- API: отмена/перенос записи ---
 from django.views.decorators.http import require_POST
-from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden, Http404
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden, HttpResponse, Http404
 from django.shortcuts import get_object_or_404
 
 from core.models import (

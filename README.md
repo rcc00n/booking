@@ -52,5 +52,30 @@ Test accounts:
   
     UN: user
     
-    P: useruser!!!
+P: useruser!!!
 
+### Stripe payments
+
+Add these variables to your `.env` (or environment) before running the server:
+
+```
+STRIPE_PUBLIC_KEY=pk_live_or_test
+STRIPE_SECRET_KEY=sk_live_or_test
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_CURRENCY=cad
+STRIPE_PAYMENT_METHOD_TYPES=card
+```
+
+Run migrations to apply the new payment fields:
+
+```
+python manage.py migrate
+```
+
+Expose the webhook endpoint when running locally, e.g. with Stripe CLI:
+
+```
+stripe listen --forward-to localhost:8000/stripe/webhook/
+```
+
+Client checkout now requires Stripe.js. The cart checkout API returns a PaymentIntent client secret; the portal will open a secure modal where the customer can finish payment.

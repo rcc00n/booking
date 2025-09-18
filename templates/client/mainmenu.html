@@ -6,6 +6,7 @@
   <title data-i18n="services.meta.title">Malva Booking — Services</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="{% static 'js/i18n.js' %}"></script>
+  <script src="https://js.stripe.com/v3/"></script>
 
   <style>
     /* =========================
@@ -146,6 +147,9 @@
     .cart-empty{color:var(--muted);font-size:.95rem;text-align:center;padding:1rem 0}
     .cart-footer{display:flex;justify-content:space-between;align-items:center;width:100%;gap:.75rem}
     .cart-summary{font-size:.95rem;color:var(--muted)}
+    .payment-body{display:flex;flex-direction:column;gap:1rem}
+    .stripe-card-element{padding:.75rem;border:1px solid var(--grid-border);border-radius:var(--radius-sm);background:#fff}
+    .status{font-size:.9rem;color:var(--muted)}
     .hint{font-size:.85rem;color:var(--muted)}
     .error{color:#b00020;font-size:.9rem;margin-top:.5rem}
     .success{color:#0a7a3b;font-size:.95rem;margin-top:.5rem}
@@ -442,6 +446,29 @@
     </div>
   </div>
 
+  <!-- ===== Modal: payment ===== -->
+  <div class="modal" id="paymentModal" aria-hidden="true">
+    <div class="modal__dialog modal__dialog--narrow" role="dialog" aria-modal="true" aria-labelledby="paymentTitle">
+      <div class="modal__header">
+        <div class="modal__title" id="paymentTitle" data-i18n="services.payment.title">Secure payment</div>
+        <button class="modal__close" id="paymentClose" aria-label="Close" data-i18n-attr="aria-label:common.close">×</button>
+      </div>
+      <div class="payment-body" id="paymentBody">
+        <p class="mb-4" id="paymentSummary" data-i18n="services.payment.summary" data-i18n-vars='{"amount":"$0"}'>Complete your payment of $0.</p>
+        <div id="paymentCardWrapper" style="display:none;">
+          <label for="paymentCardElement" class="block text-sm font-semibold mb-2" data-i18n="services.payment.cardLabel">Card details</label>
+          <div id="paymentCardElement" class="stripe-card-element"></div>
+        </div>
+        <div class="status" id="paymentStatus" style="display:none;"></div>
+        <div class="error" id="paymentError" style="display:none;"></div>
+        <div class="success" id="paymentSuccess" style="display:none;"></div>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--primary" id="paymentConfirm" data-i18n="services.payment.pay">Pay now</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       const I18N = window.MalvaI18n;
@@ -467,6 +494,11 @@
         }
         return fallback !== undefined ? fallback : key;
       };
+      const stripePublicKey = "{{ stripe_public_key|default:''|escapejs }}";
+      let stripeClient = null;
+      let stripeElements = null;
+      let stripeCard = null;
+      let currentPaymentContext = null;
       const setTextKey = (el, key, vars, fallback) => {
         if (!el) return;
         if (I18N && key) {
@@ -513,6 +545,7 @@
       const apiCartAdd = "/accounts/api/cart/add/";
       const apiCartCheckout = "/accounts/api/cart/checkout/";
       const cartRemoveUrl = (id)=>`/accounts/api/cart/${id}/remove/`;
+      const paymentVerifyUrl = (id)=>`/accounts/api/appointment/${id}/payments/verify/`;
 
       // ===== helpers =====
       function getCookie(name){ const m=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return m?m.pop():''; }
@@ -541,6 +574,15 @@
       const cartSummary=document.getElementById('cartSummary');
       const cartCheckout=document.getElementById('cartCheckout');
       const cartCount=document.getElementById('cartCount');
+      const paymentModal=document.getElementById('paymentModal');
+      const paymentClose=document.getElementById('paymentClose');
+      const paymentConfirm=document.getElementById('paymentConfirm');
+      const paymentSummary=document.getElementById('paymentSummary');
+      const paymentCardWrapper=document.getElementById('paymentCardWrapper');
+      const paymentCardElement=document.getElementById('paymentCardElement');
+      const paymentStatus=document.getElementById('paymentStatus');
+      const paymentError=document.getElementById('paymentError');
+      const paymentSuccess=document.getElementById('paymentSuccess');
 
       let summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
       let cartState = { items: [], count: 0, total_price: '0', total_duration_min: 0 };
@@ -551,6 +593,14 @@
           return `${d.toLocaleDateString(getLocale())} ${d.toLocaleTimeString(getLocale(), {hour:'2-digit', minute:'2-digit'})}`;
         }catch(_){
           return iso;
+        }
+      }
+
+      function formatCurrency(amount, currency){
+        try{
+          return new Intl.NumberFormat(getLocale(), {style:'currency', currency:(currency||'CAD').toUpperCase()}).format(Number(amount||0));
+        }catch(_){
+          return `${(currency||'CAD').toUpperCase()} ${amount}`;
         }
       }
 
@@ -574,6 +624,53 @@
         } else if (fallback !== undefined) {
           target.textContent = fallback;
         }
+      }
+
+      function setPaymentMessage(kind, key, vars, fallback){
+        if (paymentError) {
+          paymentError.style.display='none';
+          paymentError.textContent='';
+          clearTextKey(paymentError);
+        }
+        if (paymentSuccess) {
+          paymentSuccess.style.display='none';
+          paymentSuccess.textContent='';
+          clearTextKey(paymentSuccess);
+        }
+        if (!paymentStatus) return;
+        paymentStatus.style.display='none';
+        paymentStatus.textContent='';
+        clearTextKey(paymentStatus);
+        if (!kind) return;
+        let target;
+        if (kind === 'error') {
+          target = paymentError;
+        } else if (kind === 'success') {
+          target = paymentSuccess;
+        } else {
+          target = paymentStatus;
+        }
+        if (!target) return;
+        target.style.display='block';
+        if (key) {
+          setTextKey(target, key, vars, fallback);
+        } else if (fallback !== undefined) {
+          target.textContent = fallback;
+        }
+      }
+
+      function ensureStripe(){
+        if (!stripePublicKey) return null;
+        if (!window.Stripe) return null;
+        if (!stripeClient){
+          stripeClient = window.Stripe(stripePublicKey);
+          stripeElements = stripeClient.elements();
+          if (paymentCardElement && !stripeCard){
+            stripeCard = stripeElements.create('card', {hidePostalCode:true});
+            stripeCard.mount('#paymentCardElement');
+          }
+        }
+        return stripeClient;
       }
 
       function updateCartUI(data){
@@ -730,8 +827,17 @@
             throw new Error(msg);
           }
           await refreshCart(true);
-          setCartMessage('success','services.cart.checkoutSuccess');
-          setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
+          const context = {
+            payment: data.payment || null,
+            appointment: data.appointment || null,
+          };
+          if (context.payment && (context.payment.client_secret || Number(context.payment.amount||0) > 0)){
+            closeCartModal();
+            openPaymentModal(context);
+          } else {
+            setCartMessage('success','services.cart.checkoutSuccess');
+            setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
+          }
         }catch(err){
           const fallback = err && err.message;
           const defaultMessage = translate('services.cart.checkoutFailed');
@@ -756,6 +862,121 @@
       function closeCartModal(){
         if(cartModal){ cartModal.classList.remove('modal--open'); }
         setCartMessage(null);
+      }
+
+      function openPaymentModal(context){
+        if(!context || !context.payment) return;
+        currentPaymentContext = context;
+        setPaymentMessage(null);
+
+        const amountText = formatCurrency(context.payment.amount, context.payment.currency);
+        if (paymentSummary) {
+          setTextKey(paymentSummary, 'services.payment.summary', { amount: amountText }, `Complete your payment of ${amountText}.`);
+        }
+
+        if (paymentCardWrapper) {
+          const needCard = Boolean(context.payment.client_secret);
+          paymentCardWrapper.style.display = needCard ? 'block' : 'none';
+          if (needCard) {
+            const stripe = ensureStripe();
+            if (!stripe) {
+          setPaymentMessage('error', 'services.payment.missingKey', null, translate('services.payment.missingKey', null, 'Payments are temporarily unavailable.'));
+            }
+            if (paymentConfirm) {
+              paymentConfirm.disabled = !stripe;
+            }
+          } else if (paymentConfirm) {
+            paymentConfirm.disabled = false;
+          }
+        }
+
+        if (paymentModal) {
+          paymentModal.classList.add('modal--open');
+        }
+
+        if (!context.payment.client_secret) {
+          // No payment required → show success and redirect
+          setPaymentMessage('success', 'services.payment.noCharge', { amount: amountText }, translate('services.payment.noCharge', { amount: amountText }, `No payment needed (${amountText}).`));
+          if (paymentConfirm) {
+            paymentConfirm.disabled = true;
+          }
+          window.setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
+        } else {
+          setPaymentMessage('status', 'services.payment.enterCard', null, translate('services.payment.enterCard', null, 'Enter your card details to finish.'));
+        }
+      }
+
+      function closePaymentModal(){
+        if(paymentModal){ paymentModal.classList.remove('modal--open'); }
+        setPaymentMessage(null);
+        currentPaymentContext = null;
+      }
+
+      function redirectAfterPayment(){
+        window.setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 1200);
+      }
+
+      async function verifyPayment(apptId, intentId){
+        if(!apptId || !intentId) return;
+        try{
+          const resp = await fetch(paymentVerifyUrl(apptId), {
+            method:'POST',
+            headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
+            credentials:'same-origin',
+            body:JSON.stringify({payment_intent_id:intentId})
+          });
+          const data = await resp.json().catch(()=>({}));
+          if(!resp.ok){
+            throw new Error((data && data.error) || translate('services.payment.verifyFailed', null, 'Unable to verify payment.'));
+          }
+
+          const status = data?.payment?.status;
+          if (status === 'processing' || status === 'requires_action' || status === 'requires_confirmation'){
+            setPaymentMessage('status', 'services.payment.processing', null, translate('services.payment.processing', null, 'Processing payment…'));
+            window.setTimeout(()=>verifyPayment(apptId, intentId), 1500);
+            return;
+          }
+
+          if (status !== 'succeeded'){
+            throw new Error(translate('services.payment.failedGeneric', null, 'Payment did not complete. Please try again.'));
+          }
+
+          setPaymentMessage('success', 'services.payment.success', null, translate('services.payment.success', null, 'Payment confirmed!'));
+          if (paymentConfirm) paymentConfirm.disabled = true;
+          redirectAfterPayment();
+        }catch(err){
+          setPaymentMessage('error', null, null, err && err.message ? err.message : translate('services.payment.failedGeneric', null, 'Payment failed.'));
+          if (paymentConfirm) paymentConfirm.disabled = false;
+        }
+      }
+
+      async function confirmPayment(){
+        if (!currentPaymentContext || !currentPaymentContext.payment) return;
+        const { payment, appointment } = currentPaymentContext;
+        if (!payment.client_secret){
+          setPaymentMessage('success', 'services.payment.success', null, translate('services.payment.success', null, 'Payment confirmed!'));
+          redirectAfterPayment();
+          return;
+        }
+        const stripe = ensureStripe();
+        if (!stripe || !stripeCard){
+          setPaymentMessage('error', 'services.payment.missingKey', null, translate('services.payment.missingKey', null, 'Payments unavailable.'));
+          return;
+        }
+        if (paymentConfirm) paymentConfirm.disabled = true;
+        setPaymentMessage('status', 'services.payment.processing', null, translate('services.payment.processing', null, 'Processing payment…'));
+        try{
+          const result = await stripe.confirmCardPayment(payment.client_secret, {
+            payment_method: { card: stripeCard }
+          });
+          if (result.error){
+            throw new Error(result.error.message || translate('services.payment.failedGeneric', null, 'Payment failed.'));
+          }
+          await verifyPayment(appointment.id, payment.payment_intent_id || result.paymentIntent?.id);
+        }catch(err){
+          setPaymentMessage('error', null, null, err && err.message ? err.message : translate('services.payment.failedGeneric', null, 'Payment failed.'));
+          if (paymentConfirm) paymentConfirm.disabled = false;
+        }
       }
 
       // outlook
@@ -1042,6 +1263,9 @@
         });
       }
       if(cartCheckout){ cartCheckout.addEventListener('click', checkoutCart); }
+      if(paymentClose){ paymentClose.addEventListener('click', closePaymentModal); }
+      if(paymentModal){ paymentModal.addEventListener('click',(e)=>{ if(e.target===paymentModal) closePaymentModal(); }); }
+      if(paymentConfirm){ paymentConfirm.addEventListener('click', confirmPayment); }
 
       // UX: Shift+wheel горизонтально
       olWrap.addEventListener('wheel', (e)=>{

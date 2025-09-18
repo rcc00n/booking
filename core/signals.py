@@ -451,8 +451,15 @@ from django.db import transaction
 
 def ensure_payment_statuses(sender, **kwargs):
     PaymentStatus = apps.get_model('core', 'PaymentStatus')
+    defaults = ["Not Paid", "Pending", "Paid", "Failed"]
     with transaction.atomic():
-        PaymentStatus.objects.get_or_create(name="Not Paid")
+        for name in defaults:
+            PaymentStatus.objects.get_or_create(name=name)
+
+    PaymentMethod = apps.get_model('core', 'PaymentMethod')
+    with transaction.atomic():
+        for name in ("Stripe", "Cash", "Manual"):
+            PaymentMethod.objects.get_or_create(name=name)
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
@@ -476,4 +483,3 @@ def ensure_user_profile(sender, instance, created, **kwargs):
         UserProfile.objects.get_or_create(user=instance, defaults={"phone": None})
 
 post_save.connect(ensure_user_profile, sender=get_user_model())
-

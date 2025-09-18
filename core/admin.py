@@ -1671,14 +1671,34 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
     """
     Admin interface for payments.
     """
-    list_display = ('appointment', 'amount', 'method')
-    list_filter = ('method',)
-    export_fields = ['appointment', 'amount', 'method']
+    list_display = (
+        'appointment',
+        'amount',
+        'currency',
+        'status',
+        'amount_received',
+        'method',
+        'livemode',
+        'created_at',
+    )
+    list_filter = ('method', 'status', 'livemode')
     search_fields = (
         'appointment__client__user__first_name', 'appointment__client__user__last_name',
+        'appointment__client__user__email',
         'appointment__master__user__first_name', 'appointment__master__user__last_name',
         'appointment__service__name',
+        'stripe_payment_intent_id', 'stripe_charge_id',
     )
+    readonly_fields = (
+        'created_at', 'updated_at', 'stripe_payment_intent_id', 'stripe_charge_id',
+        'stripe_payment_method_id', 'receipt_url', 'raw_response', 'metadata',
+        'amount_received', 'amount_refunded', 'captured_at', 'livemode',
+    )
+    export_fields = [
+        'appointment', 'amount', 'currency', 'status', 'amount_received',
+        'amount_refunded', 'method', 'livemode', 'stripe_payment_intent_id',
+        'stripe_charge_id', 'created_at',
+    ]
 
 
 # -----------------------------
