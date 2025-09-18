@@ -4,9 +4,14 @@ from dal import autocomplete
 from django import forms
 from django.contrib.admin import TabularInline
 from django.contrib.auth import get_user_model
-from django.contrib.auth.forms import UserCreationForm, UserChangeForm
+from django.contrib.auth.forms import (
+    UserCreationForm,
+    UserChangeForm,
+    AdminUserCreationForm,
+)
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.template import TemplateDoesNotExist, engines
+from django.utils.text import slugify
 from django.utils.safestring import mark_safe
 from django.db.models import Prefetch, Q
 from django.forms import inlineformset_factory, BaseInlineFormSet
@@ -296,7 +301,7 @@ class HealthFieldsMixin(forms.Form):
             "health_notes": cd.get("health_notes", "").strip(),
         }
 
-class CustomUserCreationForm(HealthFieldsMixin, UserCreationForm):
+class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
     """
     Custom user creation form with additional fields:
     - Email, phone, birth date, and roles
@@ -336,7 +341,7 @@ class CustomUserCreationForm(HealthFieldsMixin, UserCreationForm):
         fields = [
             'username', 'email', 'first_name', 'last_name',
             'phone', 'birth_date',
-            'password1', 'password2',
+            'usable_password', 'password1', 'password2',
             'is_staff', 'is_active', 'is_superuser',
             'groups', "postal_code", "email_marketing_consent",
             "notes", 'personal_discount_percent'
@@ -352,32 +357,50 @@ class CustomUserCreationForm(HealthFieldsMixin, UserCreationForm):
         - Assign roles to the new user
         """
         user = super().save(commit=False)
-        user.set_password(self.cleaned_data["password1"])
-        user.save()
 
-        # Create or update UserProfile
-        phone = self.cleaned_data.get('phone')
-        birth_date = self.cleaned_data.get('birth_date')
-        how_heard = self.cleaned_data.get('how_heard')
-        email_marketing_consent = self.cleaned_data.get('email_marketing_consent')
-        notes = self.cleaned_data.get('notes')
-        profile, created = UserProfile.objects.get_or_create(user=user)
-        profile.phone = phone
-        profile.birth_date = birth_date
-        profile.how_heard = how_heard
-        profile.personal_discount_percent = self.cleaned_data.get('personal_discount_percent') or 0
-        profile.set_marketing_consent(email_marketing_consent)
-        profile.notes = notes
+        # Ensure identity fields are in sync (ModelForm should handle, keep explicit for clarity)
+        user.email = self.cleaned_data['email']
+        user.first_name = self.cleaned_data['first_name']
+        user.last_name = self.cleaned_data['last_name']
 
-        profile.health_conditions = self._collect_health_payload()
-        profile.postal_code = self.cleaned_data.get('postal_code', "")
+        if not (self.cleaned_data.get('username') or user.username):
+            base = slugify(user.email.split('@')[0]) or 'user'
+            candidate = base
+            idx = 1
+            User = get_user_model()
+            while User.objects.filter(username=candidate).exists():
+                candidate = f"{base}{idx}"
+                idx += 1
+            user.username = candidate
 
-        if created and not hasattr(self, "is_client_register"):
-            profile.source = "offline"
-        profile.save()
+        user = self.set_password_and_save(user, commit=commit)
 
-        client_role, _ = Role.objects.get_or_create(name="Client")
-        UserRole.objects.get_or_create(user=profile, role=client_role)
+        if commit and hasattr(self, 'save_m2m'):
+            self.save_m2m()
+
+        if commit:
+            phone = self.cleaned_data.get('phone')
+            birth_date = self.cleaned_data.get('birth_date')
+            how_heard = self.cleaned_data.get('how_heard')
+            email_marketing_consent = self.cleaned_data.get('email_marketing_consent')
+            notes = self.cleaned_data.get('notes')
+
+            profile, created = UserProfile.objects.get_or_create(user=user)
+            profile.phone = phone
+            profile.birth_date = birth_date
+            profile.how_heard = how_heard
+            profile.personal_discount_percent = self.cleaned_data.get('personal_discount_percent') or 0
+            profile.set_marketing_consent(email_marketing_consent)
+            profile.notes = notes
+            profile.health_conditions = self._collect_health_payload()
+            profile.postal_code = self.cleaned_data.get('postal_code', "")
+
+            if created and not hasattr(self, "is_client_register"):
+                profile.source = "offline"
+            profile.save()
+
+            client_role, _ = Role.objects.get_or_create(name="Client")
+            UserRole.objects.get_or_create(user=profile, role=client_role)
 
         return user
 
@@ -689,6 +712,18 @@ class MasterCreateFullForm(forms.ModelForm):
 
         return phone
 
+    def clean_username(self):
+        username = self.cleaned_data.get("username")
+        if not username:
+            return username
+        User = get_user_model()
+        qs = User.objects.filter(username=username)
+        if self.instance.pk and hasattr(self.instance, "user"):
+            qs = qs.exclude(pk=self.instance.user.user_id)
+        if qs.exists():
+            raise forms.ValidationError("A user with this username already exists.")
+        return username
+
     def save(self, commit=True):
         """
        На создании:
@@ -715,13 +750,12 @@ class MasterCreateFullForm(forms.ModelForm):
             user.save()
 
             # Профиль пользователя
-            user_profile = UserProfile.objects.create(
-                user=user,
-                phone=self.cleaned_data.get('phone'),
-                postal_code=self.cleaned_data.get('postal_code') or "",
-                email_marketing_consent=True,
-                birth_date=self.cleaned_data.get('birth_date')
-            )
+            user_profile, _ = UserProfile.objects.get_or_create(user=user)
+            user_profile.phone = self.cleaned_data.get('phone')
+            user_profile.postal_code = self.cleaned_data.get('postal_code') or ""
+            user_profile.email_marketing_consent = True
+            user_profile.birth_date = self.cleaned_data.get('birth_date')
+            user_profile.save()
 
             # Назначаем роль Master
             master_role = Role.objects.filter(name="Master").first()

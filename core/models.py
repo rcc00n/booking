@@ -60,7 +60,7 @@ class UserProfile(models.Model):
     ]
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    phone = models.CharField(max_length=32, unique=True)
+    phone = models.CharField(max_length=32, unique=True, null=True, blank=True, default=None)
     birth_date = models.DateField(null=True, blank=True)
 
     # === NEW ===
@@ -85,6 +85,8 @@ class UserProfile(models.Model):
     )
     def save(self, *args, **kwargs):
         # Нормализуем индекс (uppercase, без пробелов). Пустое — ок.
+        if self.phone == "":
+            self.phone = None
         if self.postal_code:
             self.postal_code = clean_ab_postal_code(self.postal_code)
         super().save(*args, **kwargs)
@@ -317,10 +319,21 @@ class Appointment(models.Model):
     """
     Represents a scheduled appointment between a client and a master for a service.
     """
+    def get_default_payment_status_id():
+        PaymentStatus = apps.get_model('core', 'PaymentStatus')
+        obj = PaymentStatus.objects.filter(name="Not Paid").only('id').first()
+        return obj.id if obj else None  # ок, если записи ещё нет
+
+    payment_status = models.ForeignKey(
+        'core.PaymentStatus',
+        on_delete=models.CASCADE,
+        default=get_default_payment_status_id,  # ленивый default
+        null=True, blank=True,                  # временно допускаем пусто
+    )
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     client = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='appointments_as_client')
     start_time = models.DateTimeField(null=True, blank=True)
-    payment_status = models.ForeignKey(PaymentStatus, on_delete=models.CASCADE, default=PaymentStatus.objects.get(name="Not Paid").id)
+    # payment_status = models.ForeignKey(PaymentStatus, on_delete=models.CASCADE, default=PaymentStatus.objects.get(name="Not Paid").id)
     final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -332,6 +345,47 @@ class Appointment(models.Model):
         editable=False,
         help_text="Personal discount snapshot at booking time"
     )
+
+    def _prefetched_items(self):
+        """Return prefetched items list or fallback queryset."""
+        cache = getattr(self, "_prefetched_objects_cache", {})
+        if "items" in cache:
+            return cache["items"]
+        return self.items.all()
+
+    def _first_item(self):
+        """Compatibility helper: earliest appointment item."""
+        items = self._prefetched_items()
+        if hasattr(items, "order_by"):
+            return items.order_by("start_time").first()
+        earliest = None
+        for it in items:
+            if earliest is None:
+                earliest = it
+                continue
+            if it.start_time and (earliest.start_time is None or it.start_time < earliest.start_time):
+                earliest = it
+        return earliest
+
+    @property
+    def primary_item(self):
+        """Expose main AppointmentItem for legacy consumers."""
+        return self._first_item()
+
+    @property
+    def service(self):
+        item = self._first_item()
+        return getattr(item, "service", None)
+
+    @property
+    def master(self):
+        item = self._first_item()
+        return getattr(item, "master", None)
+
+    @property
+    def price(self):
+        return self.final_price
+
 
 
     def items_qs(self):

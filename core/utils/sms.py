@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.conf import settings
 from twilio.rest import Client
 
+
 def send_sms(to_number: str, body: str) -> str | None:
     """
     Отправка SMS через Twilio. Возвращает message SID или None при ошибке.

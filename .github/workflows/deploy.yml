@@ -1,0 +1,26 @@
+name: Deploy to Dokku
+on:
+  push:
+    branches: [ "deploy" ]   # деплой из ветки deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Start ssh-agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add Dokku host to known_hosts
+        run: ssh-keyscan -p 22 ${{ secrets.DOKKU_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Push to Dokku
+        run: |
+          git remote add dokku dokku@${{ secrets.DOKKU_HOST }}:${{ secrets.DOKKU_APP }} || true
+          git push dokku HEAD:main -f

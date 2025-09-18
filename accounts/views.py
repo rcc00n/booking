@@ -13,14 +13,15 @@ from django.views.generic import TemplateView, ListView
 from django.views.generic.edit import CreateView
 
 from django.utils import timezone
-from django.db.models import OuterRef, Subquery, Count
+from django.db.models import OuterRef, Subquery, Count, Prefetch
 from django.db.models.functions import TruncMonth
 
 from core.models import (
     Service,
     Appointment,
     AppointmentStatusHistory,
-    UserProfile
+    UserProfile,
+    AppointmentItem,
 )
 
 from .forms import (
@@ -116,10 +117,15 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         )
 
         # все записи клиента (для статистики/истории)
+        items_prefetch = Prefetch(
+            "items",
+            queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
+        )
+
         qs = (
             Appointment.objects
             .filter(client=getattr(user, "userprofile", None))
-            .select_related("service", "master")
+            .prefetch_related(items_prefetch)
             .annotate(current_status=Subquery(latest_status))
             .order_by("-start_time")
         )
@@ -187,7 +193,12 @@ class ClientAppointmentsListView(RoleRequiredMixin, ListView):
         return (
             Appointment.objects
             .filter(client=self.request.user.userprofile)
-            .select_related("service", "master")
+            .prefetch_related(
+                Prefetch(
+                    "items",
+                    queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
+                )
+            )
             .order_by("-start_time")
         )
 

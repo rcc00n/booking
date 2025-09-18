@@ -445,3 +445,35 @@ def on_appointment_status_changing(sender, instance: Appointment, **kwargs):
                 channel="email",
                 message="Appointment cancelled email queued (direct status change)",
             )
+
+from django.apps import apps
+from django.db import transaction
+
+def ensure_payment_statuses(sender, **kwargs):
+    PaymentStatus = apps.get_model('core', 'PaymentStatus')
+    with transaction.atomic():
+        PaymentStatus.objects.get_or_create(name="Not Paid")
+
+from django.apps import apps
+from django.contrib.auth import get_user_model
+from django.db.models.signals import post_save
+
+def ensure_user_profile(sender, instance, created, **kwargs):
+    UserProfile = apps.get_model('core', 'UserProfile')
+    if created:
+        UserProfile.objects.get_or_create(user=instance)
+
+post_save.connect(ensure_user_profile, sender=get_user_model())
+
+# core/signals.py
+from django.apps import apps
+from django.contrib.auth import get_user_model
+from django.db.models.signals import post_save
+
+def ensure_user_profile(sender, instance, created, **kwargs):
+    UserProfile = apps.get_model('core', 'UserProfile')
+    if created:
+        UserProfile.objects.get_or_create(user=instance, defaults={"phone": None})
+
+post_save.connect(ensure_user_profile, sender=get_user_model())
+
