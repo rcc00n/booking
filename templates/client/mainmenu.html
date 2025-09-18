@@ -130,6 +130,15 @@
       width:min(940px,96vw); border:1px solid color-mix(in srgb, var(--green) 14%, var(--lgray));
       padding:1.2rem 1.25rem 1rem; max-height:92vh; display:flex; flex-direction:column; overflow:hidden;
     }
+    .modal__dialog--payment{
+      width:min(960px,96vw);
+      max-height:88vh;
+      padding:0;
+    }
+    .modal__dialog--payment .modal__header{padding:1.5rem 1.75rem 0;margin-bottom:1rem}
+    .modal__dialog--payment .modal__title{font-size:1.35rem}
+    .modal__dialog--payment .payment-body{flex:1 1 auto;padding:0 1.75rem 1.75rem;overflow-y:auto;scrollbar-gutter:stable}
+    .modal__dialog--payment .modal__footer{padding:1.1rem 1.75rem;border-top:1px solid color-mix(in srgb, var(--green) 10%, #dadada);background:#fff;position:sticky;bottom:0}
     .modal__header{display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-bottom:1rem}
     .modal__title{font:900 1.18rem/1 var(--font-heading); color:var(--green)}
     .modal__close{background:transparent;border:none;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)}
@@ -168,11 +177,13 @@
     .field input, .field select{height:2.7rem;padding:.55rem .75rem;border-radius:.75rem;border:1.5px solid var(--grid-border);background:#fff;font-size:.95rem;transition:.2s ease;border-color:color-mix(in srgb, var(--grid-border) 92%, #fff 8%)}
     .field input:focus,.field select:focus{outline:none;border-color:color-mix(in srgb, var(--green) 55%, transparent);box-shadow:0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent)}
     .stripe-card-element{padding:.95rem;border:1.5px solid var(--grid-border);border-radius:.85rem;background:#fff;box-shadow:inset 0 1px 4px rgba(32,64,41,.08)}
-    .payment-meta{display:flex;justify-content:space-between;align-items:center;font-size:.85rem;color:var(--muted)}
+    .payment-meta{display:flex;justify-content:space-between;align-items:center;font-size:.85rem;color:var(--muted);flex-wrap:wrap;gap:.65rem}
     .payment-meta__secure{display:flex;align-items:center;gap:.35rem;font-weight:600}
-    .payment-badges{display:flex;gap:.4rem;margin-top:.75rem}
+    .payment-meta__logos{display:flex;gap:.4rem;flex-wrap:wrap}
+    .payment-meta__chip{padding:.25rem .55rem;border-radius:.6rem;background:rgba(32,64,41,.08);font-size:.72rem;font-weight:700;color:var(--green-dark);letter-spacing:.08em;text-transform:uppercase;display:flex;align-items:center;justify-content:center}
+    .payment-badges{display:flex;gap:.4rem;margin-top:.75rem;flex-wrap:wrap}
     .payment-badge{height:24px;border-radius:6px;background:rgba(32,64,41,.08);padding:.2rem .55rem;font-size:.7rem;font-weight:700;color:var(--green-dark);letter-spacing:.08em;text-transform:uppercase;display:flex;align-items:center;justify-content:center}
-    .status{font-size:.9rem;color:var(--muted);line-height:1.4}
+    .status, #paymentMessage{font-size:.92rem;color:var(--muted);line-height:1.45}
     .payment-status--error{color:#d6453d}
     .payment-status--success{color:var(--green)}
     .payment-status--info{color:var(--muted)}
@@ -239,6 +250,10 @@
       .modal__dialog{width:min(96vw, 720px)}
       .grid-2{grid-template-columns:1fr}
       .outlook__wrap{max-height:50vh}
+      .modal__dialog--payment .modal__header{padding:1.1rem 1.25rem 0}
+      .modal__dialog--payment .payment-body{padding:0 1.25rem 1.25rem}
+      .modal__dialog--payment .modal__footer{padding:1rem 1.25rem}
+      .payment-fieldset{grid-template-columns:1fr}
     }
   </style>
 </head>
@@ -474,7 +489,7 @@
 
   <!-- ===== Modal: payment ===== -->
   <div class="modal" id="paymentModal" aria-hidden="true">
-    <div class="modal__dialog modal__dialog--narrow" role="dialog" aria-modal="true" aria-labelledby="paymentTitle">
+    <div class="modal__dialog modal__dialog--payment" role="dialog" aria-modal="true" aria-labelledby="paymentTitle">
       <div class="modal__header">
         <div class="modal__title" id="paymentTitle">Secure payment</div>
         <button class="modal__close" id="paymentClose" aria-label="Close">×</button>
@@ -546,7 +561,12 @@
             </div>
             <div class="payment-meta">
               <div class="payment-meta__secure">🔒 Encrypted by Stripe</div>
-              <div class="payment-meta__logos"><img src="https://js.stripe.com/v3/fingerprinted/img/payment-methods/logo-visa-03cb36b5dbaa34e8658f93f3f1a5150d.svg" alt="Visa" height="18"><img src="https://js.stripe.com/v3/fingerprinted/img/payment-methods/logo-mastercard-1749107923382d6a3d79042f2f1c5a20.svg" alt="Mastercard" height="18" style="margin-left:8px;"></div>
+              <div class="payment-meta__logos">
+                <div class="payment-meta__chip">Visa</div>
+                <div class="payment-meta__chip">Mastercard</div>
+                <div class="payment-meta__chip">Amex</div>
+                <div class="payment-meta__chip">Apple Pay</div>
+              </div>
             </div>
             <div class="status" id="paymentMessage" style="display:none;"></div>
           </form>
@@ -729,6 +749,12 @@
       function resetPaymentForm(){
         if (paymentForm) {
           paymentForm.reset();
+        }
+        if (paymentConfirm) {
+          paymentConfirm.onclick = null;
+        }
+        if (stripeCard) {
+          stripeCard.clear();
         }
         stripeCardComplete = false;
         if (inputCountry) {
@@ -1548,6 +1574,14 @@
           }
         });
       }
+      if (paymentTitle) paymentTitle.textContent = PAYMENT_COPY.title;
+      if (paymentSummary) paymentSummary.textContent = PAYMENT_COPY.summary('CA$0.00');
+      if (paymentSummaryAmount) paymentSummaryAmount.textContent = 'CA$0.00';
+      if (paymentSummaryTime) paymentSummaryTime.textContent = '—';
+      if (paymentSummaryItems) {
+        paymentSummaryItems.innerHTML = '<div class="payment-panel__meta">Service details will appear here once confirmed.</div>';
+      }
+
       if(cartCheckout){ cartCheckout.addEventListener('click', checkoutCart); }
       if(paymentClose){ paymentClose.addEventListener('click', closePaymentModal); }
       if(paymentModal){ paymentModal.addEventListener('click',(e)=>{ if(e.target===paymentModal) closePaymentModal(); }); }
