@@ -450,13 +450,13 @@
   <div class="modal" id="paymentModal" aria-hidden="true">
     <div class="modal__dialog modal__dialog--narrow" role="dialog" aria-modal="true" aria-labelledby="paymentTitle">
       <div class="modal__header">
-        <div class="modal__title" id="paymentTitle" data-i18n="services.payment.title">Secure payment</div>
-        <button class="modal__close" id="paymentClose" aria-label="Close" data-i18n-attr="aria-label:common.close">×</button>
+        <div class="modal__title" id="paymentTitle">Secure payment</div>
+        <button class="modal__close" id="paymentClose" aria-label="Close">×</button>
       </div>
       <div class="payment-body" id="paymentBody">
-        <p class="mb-4" id="paymentSummary" data-i18n="services.payment.summary" data-i18n-vars='{"amount":"$0"}'>Complete your payment of $0.</p>
+        <p class="mb-4" id="paymentSummary">Complete your payment of $0.</p>
         <div id="paymentCardWrapper" style="display:none;">
-          <label for="paymentCardElement" class="block text-sm font-semibold mb-2" data-i18n="services.payment.cardLabel">Card details</label>
+          <label for="paymentCardElement" class="block text-sm font-semibold mb-2">Card details</label>
           <div id="paymentCardElement" class="stripe-card-element"></div>
         </div>
         <div class="status" id="paymentStatus" style="display:none;"></div>
@@ -464,7 +464,7 @@
         <div class="success" id="paymentSuccess" style="display:none;"></div>
       </div>
       <div class="modal__footer">
-        <button class="btn btn--primary" id="paymentConfirm" data-i18n="services.payment.pay">Pay now</button>
+        <button class="btn btn--primary" id="paymentConfirm">Pay now</button>
       </div>
     </div>
   </div>
@@ -499,6 +499,18 @@
       let stripeElements = null;
       let stripeCard = null;
       let currentPaymentContext = null;
+      const PAYMENT_COPY = {
+        title: 'Secure payment',
+        summary: (amount) => `Complete your payment of ${amount}.`,
+        missingKey: 'Payments are temporarily unavailable.',
+        noCharge: (amount) => `No payment needed (${amount}).`,
+        enterCard: 'Enter your card details to finish.',
+        processing: 'Processing payment…',
+        verifyFailed: 'Unable to verify payment.',
+        failedGeneric: 'Payment did not complete. Please try again.',
+        failedShort: 'Payment failed.',
+        success: 'Payment confirmed! Redirecting…',
+      };
       const setTextKey = (el, key, vars, fallback) => {
         if (!el) return;
 
@@ -637,21 +649,19 @@
         }
       }
 
-      function setPaymentMessage(kind, key, vars, fallback){
+      function setPaymentMessage(kind, message){
         if (paymentError) {
           paymentError.style.display='none';
           paymentError.textContent='';
-          clearTextKey(paymentError);
         }
         if (paymentSuccess) {
           paymentSuccess.style.display='none';
           paymentSuccess.textContent='';
-          clearTextKey(paymentSuccess);
         }
-        if (!paymentStatus) return;
-        paymentStatus.style.display='none';
-        paymentStatus.textContent='';
-        clearTextKey(paymentStatus);
+        if (paymentStatus) {
+          paymentStatus.style.display='none';
+          paymentStatus.textContent='';
+        }
         if (!kind) return;
         let target;
         if (kind === 'error') {
@@ -663,11 +673,7 @@
         }
         if (!target) return;
         target.style.display='block';
-        if (key) {
-          setTextKey(target, key, vars, fallback);
-        } else if (fallback !== undefined) {
-          target.textContent = fallback;
-        }
+        target.textContent = message || '';
       }
 
       function ensureStripe(){
@@ -882,7 +888,7 @@
 
         const amountText = formatCurrency(context.payment.amount, context.payment.currency);
         if (paymentSummary) {
-          setTextKey(paymentSummary, 'services.payment.summary', { amount: amountText }, `Complete your payment of ${amountText}.`);
+          paymentSummary.textContent = PAYMENT_COPY.summary(amountText);
         }
 
         if (paymentCardWrapper) {
@@ -891,7 +897,7 @@
           if (needCard) {
             const stripe = ensureStripe();
             if (!stripe) {
-          setPaymentMessage('error', 'services.payment.missingKey', null, translate('services.payment.missingKey', null, 'Payments are temporarily unavailable.'));
+              setPaymentMessage('error', PAYMENT_COPY.missingKey);
             }
             if (paymentConfirm) {
               paymentConfirm.disabled = !stripe;
@@ -907,13 +913,13 @@
 
         if (!context.payment.client_secret) {
           // No payment required → show success and redirect
-          setPaymentMessage('success', 'services.payment.noCharge', { amount: amountText }, translate('services.payment.noCharge', { amount: amountText }, `No payment needed (${amountText}).`));
+          setPaymentMessage('success', PAYMENT_COPY.noCharge(amountText));
           if (paymentConfirm) {
             paymentConfirm.disabled = true;
           }
           window.setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
         } else {
-          setPaymentMessage('status', 'services.payment.enterCard', null, translate('services.payment.enterCard', null, 'Enter your card details to finish.'));
+          setPaymentMessage('status', PAYMENT_COPY.enterCard);
         }
       }
 
@@ -938,25 +944,26 @@
           });
           const data = await resp.json().catch(()=>({}));
           if(!resp.ok){
-            throw new Error((data && data.error) || translate('services.payment.verifyFailed', null, 'Unable to verify payment.'));
+            throw new Error((data && data.error) || PAYMENT_COPY.verifyFailed);
           }
 
           const status = data?.payment?.status;
           if (status === 'processing' || status === 'requires_action' || status === 'requires_confirmation'){
-            setPaymentMessage('status', 'services.payment.processing', null, translate('services.payment.processing', null, 'Processing payment…'));
+            setPaymentMessage('status', PAYMENT_COPY.processing);
             window.setTimeout(()=>verifyPayment(apptId, intentId), 1500);
             return;
           }
 
           if (status !== 'succeeded'){
-            throw new Error(translate('services.payment.failedGeneric', null, 'Payment did not complete. Please try again.'));
+            throw new Error(PAYMENT_COPY.failedGeneric);
           }
 
-          setPaymentMessage('success', 'services.payment.success', null, translate('services.payment.success', null, 'Payment confirmed!'));
+          setPaymentMessage('success', PAYMENT_COPY.success);
           if (paymentConfirm) paymentConfirm.disabled = true;
           redirectAfterPayment();
         }catch(err){
-          setPaymentMessage('error', null, null, err && err.message ? err.message : translate('services.payment.failedGeneric', null, 'Payment failed.'));
+          const msg = err && err.message ? err.message : PAYMENT_COPY.failedShort;
+          setPaymentMessage('error', msg);
           if (paymentConfirm) paymentConfirm.disabled = false;
         }
       }
@@ -965,27 +972,28 @@
         if (!currentPaymentContext || !currentPaymentContext.payment) return;
         const { payment, appointment } = currentPaymentContext;
         if (!payment.client_secret){
-          setPaymentMessage('success', 'services.payment.success', null, translate('services.payment.success', null, 'Payment confirmed!'));
+          setPaymentMessage('success', PAYMENT_COPY.success);
           redirectAfterPayment();
           return;
         }
         const stripe = ensureStripe();
         if (!stripe || !stripeCard){
-          setPaymentMessage('error', 'services.payment.missingKey', null, translate('services.payment.missingKey', null, 'Payments unavailable.'));
+          setPaymentMessage('error', PAYMENT_COPY.missingKey);
           return;
         }
         if (paymentConfirm) paymentConfirm.disabled = true;
-        setPaymentMessage('status', 'services.payment.processing', null, translate('services.payment.processing', null, 'Processing payment…'));
+        setPaymentMessage('status', PAYMENT_COPY.processing);
         try{
           const result = await stripe.confirmCardPayment(payment.client_secret, {
             payment_method: { card: stripeCard }
           });
           if (result.error){
-            throw new Error(result.error.message || translate('services.payment.failedGeneric', null, 'Payment failed.'));
+            throw new Error(result.error.message || PAYMENT_COPY.failedGeneric);
           }
           await verifyPayment(appointment.id, payment.payment_intent_id || result.paymentIntent?.id);
         }catch(err){
-          setPaymentMessage('error', null, null, err && err.message ? err.message : translate('services.payment.failedGeneric', null, 'Payment failed.'));
+          const msg = err && err.message ? err.message : PAYMENT_COPY.failedShort;
+          setPaymentMessage('error', msg);
           if (paymentConfirm) paymentConfirm.disabled = false;
         }
       }
@@ -1278,11 +1286,10 @@
       if(paymentModal){ paymentModal.addEventListener('click',(e)=>{ if(e.target===paymentModal) closePaymentModal(); }); }
       if(paymentConfirm){ paymentConfirm.addEventListener('click', confirmPayment); }
 
-      // Ensure fallbacks render even before translations are loaded
-      setTextKey(paymentTitle, 'services.payment.title', null, 'Secure payment');
-      setTextKey(paymentConfirm, 'services.payment.pay', null, 'Pay now');
-      setTextKey(paymentCardLabel, 'services.payment.cardLabel', null, 'Card details');
-      setTextKey(paymentSummary, 'services.payment.summary', { amount: '$0' }, 'Complete your payment of $0.');
+      if (paymentTitle) paymentTitle.textContent = PAYMENT_COPY.title;
+      if (paymentConfirm) paymentConfirm.textContent = 'Pay now';
+      if (paymentCardLabel) paymentCardLabel.textContent = 'Card details';
+      if (paymentSummary) paymentSummary.textContent = PAYMENT_COPY.summary('$0');
 
       // UX: Shift+wheel горизонтально
       olWrap.addEventListener('wheel', (e)=>{
