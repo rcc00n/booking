@@ -68,12 +68,11 @@
     .site-header{background:var(--green-dark);box-shadow:var(--shadow);position:sticky;top:0;z-index:100;padding-block:.75rem}
     .site-header__inner{display:flex;align-items:center;justify-content:space-between}
     .logo{font:900 1.25rem/1 var(--font-heading);color:var(--gold);letter-spacing:.3px}
-    .header-actions{display:flex;align-items:center;gap:.5rem}
-    .lang-switcher{display:inline-flex;align-items:center;gap:.4rem;margin-right:.75rem;color:var(--taupe);font-weight:700;font-size:.85rem}
-    .lang-switcher__label{opacity:.8;margin-right:.25rem}
-    .lang-switcher__btn{border:1px solid transparent;background:rgba(255,255,255,.12);color:inherit;font:inherit;padding:.35rem .5rem;border-radius:.5rem;cursor:pointer;transition:.2s ease;min-width:2.6rem;text-transform:uppercase}
-    .lang-switcher__btn:hover{background:rgba(255,255,255,.18)}
-    .lang-switcher__btn.is-active{background:#fff;color:var(--green-dark);border-color:#fff}
+    .header-actions{display:flex;align-items:center;gap:.75rem}
+    .lang-picker{display:inline-flex;align-items:center;gap:.4rem;margin-right:.5rem;color:var(--taupe);font-size:.82rem}
+    .lang-picker__label{opacity:.75;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+    .lang-picker__select{appearance:none;background:rgba(255,255,255,.12);color:var(--taupe);border:1px solid rgba(255,255,255,.25);padding:.35rem .75rem;border-radius:.55rem;font-weight:600;cursor:pointer;min-width:5.5rem}
+    .lang-picker__select:focus{outline:2px solid color-mix(in srgb, var(--gold) 70%, #fff);outline-offset:2px}
     .cart-bubble{display:inline-flex;align-items:center;justify-content:center;min-width:1.5rem;padding:0 .35rem;border-radius:999px;background:rgba(255,255,255,.2);font-size:.85rem;font-weight:700}
 
     .hero{
@@ -220,10 +219,9 @@
     <div class="container site-header__inner">
       <span class="logo" data-i18n="common.brand">Malva Booking</span>
       <nav class="header-actions">
-        <div class="lang-switcher" role="group" data-i18n-attr="aria-label:common.language">
-          <span class="lang-switcher__label" data-i18n="common.language">Language</span>
-          <button type="button" class="lang-switcher__btn" data-lang-switch="en" data-i18n="languages.en">English</button>
-          <button type="button" class="lang-switcher__btn" data-lang-switch="ru" data-i18n="languages.ru">Русский</button>
+        <div class="lang-picker" data-i18n-attr="aria-label:common.language">
+          <label for="langSelect" class="lang-picker__label" data-i18n="common.language">Language</label>
+          <select id="langSelect" class="lang-picker__select" data-lang-switch></select>
         </div>
         <button type="button" class="btn btn--primary" id="cartButton">
           <span data-i18n="services.nav.cart">Cart</span>
@@ -276,7 +274,7 @@
             <article class="service-card">
               <div class="service-card__img">IMG</div>
               <div class="muted">{{ s.category.name }}</div>
-              <h3>{{ s.name }}</h3>
+              <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
               {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
               <div class="service-meta">
                 {% with disc=s.get_active_discount %}
@@ -306,7 +304,7 @@
           {% for s in c.service_set.all %}
             <article class="service-card">
               <div class="service-card__img">IMG</div>
-              <h3>{{ s.name }}</h3>
+              <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
               {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
               <div class="service-meta">
                 {% with disc=s.get_active_discount %}
@@ -335,7 +333,7 @@
           {% for s in uncategorized %}
             <article class="service-card">
               <div class="service-card__img">IMG</div>
-              <h3>{{ s.name }}</h3>
+              <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
               {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
               <div class="service-meta">
                 {% with disc=s.get_active_discount %}
@@ -489,6 +487,24 @@
         el.removeAttribute('data-i18n-vars');
       };
       const formatMinutes = (minutes) => translate('services.units.minutes', { value: String(minutes) }, `${minutes} min`);
+      const getLocale = () => (I18N && typeof I18N.getLocale === 'function'
+        ? I18N.getLocale()
+        : (navigator.languages && navigator.languages[0]) || navigator.language || 'en');
+      const translateServiceNameText = (name) => {
+        if (!name) return '';
+        if (I18N && typeof I18N.translateServiceName === 'function') {
+          return I18N.translateServiceName(name);
+        }
+        return name;
+      };
+      const applyServiceNameTranslations = (root) => {
+        const scope = root || document;
+        scope.querySelectorAll('[data-service-name-original]').forEach((el) => {
+          const original = el.getAttribute('data-service-name-original') || el.textContent;
+          if (!original) return;
+          el.textContent = translateServiceNameText(original) || original;
+        });
+      };
 
       const isAuth  = {{ user.is_authenticated|yesno:"true,false" }};
       const loginUrl= "{% url 'login' %}?next={{ request.path }}";
@@ -502,8 +518,8 @@
       function getCookie(name){ const m=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return m?m.pop():''; }
       function ymd(d){ const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${d.getFullYear()}-${m}-${day}`; }
       function parseISO(iso){ try{return new Date(iso);}catch(_){return null;} }
-      function fmtHM(d){ return d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}); }
-      function fmtTime(iso){ try { return new Date(iso).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch(e){ return iso; } }
+      function fmtHM(d){ return d.toLocaleTimeString(getLocale(), {hour:'numeric', minute:'2-digit'}); }
+      function fmtTime(iso){ try { return new Date(iso).toLocaleTimeString(getLocale(), {hour:'2-digit', minute:'2-digit'}); } catch(e){ return iso; } }
 
       // ===== modal nodes =====
       const modal=document.getElementById('bookModal');
@@ -532,7 +548,7 @@
       function fmtDateTime(iso){
         try{
           const d=new Date(iso);
-          return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+          return `${d.toLocaleDateString(getLocale())} ${d.toLocaleTimeString(getLocale(), {hour:'2-digit', minute:'2-digit'})}`;
         }catch(_){
           return iso;
         }
@@ -578,8 +594,10 @@
               const info=document.createElement('div');
               info.className='cart-item__info';
 
+              const rawName = item?.service?.name || '';
+              const translatedName = translateServiceNameText(rawName) || translate('common.service', null, 'Service');
               const title=document.createElement('strong');
-              title.textContent=item?.service?.name || translate('common.service', null, 'Service');
+              title.textContent=translatedName;
               info.appendChild(title);
 
               const meta=document.createElement('div');
@@ -632,11 +650,18 @@
 
       if (I18N && typeof I18N.onChange === 'function') {
         I18N.onChange(() => {
+          applyServiceNameTranslations();
+          if (elServiceName && elServiceName.getAttribute('data-service-name-original')) {
+            elServiceName.textContent = translateServiceNameText(elServiceName.getAttribute('data-service-name-original'));
+          }
           if (cartState) {
             updateCartUI(cartState);
           }
           if (summaryState && summaryState.key) {
             setTextKey(elSummary, summaryState.key, summaryState.vars);
+          }
+          if (modal.classList.contains('modal--open')) {
+            renderWindow().catch(()=>{});
           }
         });
       }
@@ -755,7 +780,10 @@
       function openModal(serviceId, serviceName){
         if(!isAuth){ window.location=loginUrl; return; }
         current={ serviceId, serviceName, masterId:null, slot:null, mastersData:[] };
-        elServiceName.textContent=serviceName;
+        if (elServiceName) {
+          elServiceName.setAttribute('data-service-name-original', serviceName || '');
+          elServiceName.textContent = translateServiceNameText(serviceName);
+        }
         elError.style.display='none'; elSuccess.style.display='none';
         clearTextKey(elError); clearTextKey(elSuccess);
         btnSubmit.disabled=true;
@@ -863,13 +891,15 @@
       async function renderWindow(){
         await ensureRangeLoaded(baseStart, WINDOW_DAYS);
 
+        const locale = getLocale();
+
         const days = Array.from({length:WINDOW_DAYS}, (_,i)=>{ const d=new Date(baseStart); d.setDate(d.getDate()+i); return d;});
         const dayStrs=days.map(ymd);
         const dayData = dayStrs.map(ds => availabilityCache.get(ds));
         const timeRows = buildTimeRows(dayData.map(x=>x?.set));
 
-        const from = days[0].toLocaleDateString([], {month:'short', day:'numeric'});
-        const to   = days[days.length-1].toLocaleDateString([], {month:'short', day:'numeric'});
+        const from = days[0].toLocaleDateString(locale, {month:'short', day:'numeric'});
+        const to   = days[days.length-1].toLocaleDateString(locale, {month:'short', day:'numeric'});
         olRange.textContent = `${from} – ${to}`;
         olGrid.style.setProperty('--days', String(WINDOW_DAYS));
 
@@ -883,8 +913,8 @@
           h.className='outlook__cell outlook__head';
           if (new Date().toDateString()===d.toDateString()) h.classList.add('day--today');
           h.innerHTML = `<div class="day-head">
-            <div class="day-title">${d.toLocaleDateString([], {weekday:'long'})}</div>
-            <div class="day-sub">${d.toLocaleDateString([], {month:'short', day:'numeric'})}</div>
+            <div class="day-title">${d.toLocaleDateString(locale, {weekday:'long'})}</div>
+            <div class="day-sub">${d.toLocaleDateString(locale, {month:'short', day:'numeric'})}</div>
           </div>`;
           olGrid.appendChild(h);
         });
@@ -912,7 +942,7 @@
                 const summaryVars = {
                   master: masterText,
                   time: chip.textContent,
-                  date: d.toLocaleDateString()
+                  date: d.toLocaleDateString(locale)
                 };
                 summaryState = { key: 'services.modal.summarySelected', vars: summaryVars };
                 setTextKey(elSummary, 'services.modal.summarySelected', summaryVars, `Master: ${summaryVars.master}. Time: ${summaryVars.time}, ${summaryVars.date}.`);
@@ -1049,6 +1079,8 @@
       }
       function cardHTML(s){
         const hasDisc = Number.isFinite(+s.discount_percent) && +s.discount_percent > 0;
+        const rawName = s.name || '';
+        const translatedName = translateServiceNameText(rawName);
         const priceBlock = hasDisc
           ? `<span class="old">$${escapeHtml(s.base_price)}</span>
              <strong>$${escapeHtml(s.price)}</strong>
@@ -1056,17 +1088,17 @@
           : `<strong>$${escapeHtml(s.price || s.base_price)}</strong>`;
         const desc = s.description ? `<p class="muted">${escapeHtml(s.description)}</p>` : '';
         const cat  = s.category ? `<div class="muted">${escapeHtml(s.category)}</div>` : '';
-        const durationValue = escapeHtml(String(s.duration_min || 0));
+        const durationLabel = escapeHtml(formatMinutes(s.duration_min || 0));
         return `
           <article class="service-card">
             <div class="service-card__img">IMG</div>
             ${cat}
-            <h3>${escapeHtml(s.name)}</h3>
+            <h3 data-service-name-original="${escapeHtml(rawName)}">${escapeHtml(translatedName)}</h3>
             ${desc}
-            <div class="service-meta">${priceBlock} · <span class="meta-duration" data-i18n="services.units.minutes" data-i18n-vars="value=${durationValue}">${durationValue} min</span></div>
+            <div class="service-meta">${priceBlock} · <span class="meta-duration">${durationLabel}</span></div>
             <button class="btn btn--primary book-btn"
               data-service-id="${escapeHtml(s.id)}"
-              data-service-name="${escapeHtml(s.name)}"
+              data-service-name="${escapeHtml(rawName)}"
               data-i18n="services.cards.addToCart">${translate('services.cards.addToCart')}</button>
           </article>`;
       }
@@ -1099,6 +1131,7 @@
             return;
           }
           liveGrid.innerHTML = items.map(cardHTML).join('');
+          applyServiceNameTranslations(liveGrid);
           queueRefresh();
         }catch(e){
           liveGrid.innerHTML = `<div class="stub" data-i18n="services.search.error">${translate('services.search.error')}</div>`;
@@ -1117,6 +1150,8 @@
           document.getElementById('services')?.scrollIntoView({behavior:'smooth', block:'start'});
         });
       }
+
+      applyServiceNameTranslations(document.getElementById('serverContent'));
     });
   </script>
 </body>

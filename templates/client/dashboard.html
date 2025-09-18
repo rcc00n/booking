@@ -35,10 +35,10 @@
     .chip--busy{color:#fff;background:var(--busy);opacity:.92}
     .chip--sel{background:var(--free)!important;color:#fff;border-color:var(--free)!important;box-shadow:0 0 0 2px color-mix(in srgb, var(--free) 20%, transparent)}
     @media (max-width: 900px){ .ol2__wrap{max-height:50vh} }
-    .lang-switcher{display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:#DAD3C1;opacity:.9}
-    .lang-switcher__btn{border:1px solid transparent;padding:.25rem .55rem;border-radius:.5rem;background:rgba(255,255,255,.12);color:inherit;cursor:pointer;transition:.2s ease;text-transform:uppercase;font-weight:600}
-    .lang-switcher__btn:hover{background:rgba(255,255,255,.2)}
-    .lang-switcher__btn.is-active{background:#fff;color:#204029;border-color:#fff}
+    .lang-picker{display:flex;flex-direction:column;gap:.35rem;color:#DAD3C1;font-size:.72rem;opacity:.95}
+    .lang-picker__label{font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
+    .lang-picker__select{appearance:none;background:rgba(255,255,255,.12);color:#DAD3C1;border:1px solid rgba(255,255,255,.25);padding:.35rem .65rem;border-radius:.5rem;font-weight:600;cursor:pointer}
+    .lang-picker__select:focus{outline:2px solid #AF9525;outline-offset:2px}
   </style>
 </head>
 <body class="h-full bg-[#DEDEDE] text-[#4D4D4D]">
@@ -51,10 +51,9 @@
     </div>
 
     <div class="px-6 pb-4">
-      <div class="lang-switcher" role="group" data-i18n-attr="aria-label:common.language">
-        <span class="uppercase tracking-wide text-[11px] font-semibold opacity-80" data-i18n="common.language">Language</span>
-        <button type="button" class="lang-switcher__btn" data-lang-switch="en" data-i18n="languages.en">English</button>
-        <button type="button" class="lang-switcher__btn" data-lang-switch="ru" data-i18n="languages.ru">Русский</button>
+      <div class="lang-picker" data-i18n-attr="aria-label:common.language">
+        <label for="dashLangSelect" class="lang-picker__label" data-i18n="common.language">Language</label>
+        <select id="dashLangSelect" class="lang-picker__select" data-lang-switch></select>
       </div>
     </div>
 
@@ -123,7 +122,7 @@
                     {{ a.start_time|localtime|date:"d M Y, H:i" }}
                   </p>
                   <p class="text-sm text-[#4D4D4D]">
-                    {{ a.service.name }} · {{ a.master.get_full_name }}
+                    <span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span> · {{ a.master.get_full_name }}
                   </p>
                   <div class="mt-2 flex gap-4 text-sm">
                     <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
@@ -168,7 +167,7 @@
                 {% for a in recent_appointments %}
                   <tr class="bg-white" data-appt-id="{{ a.id }}">
                     <td class="py-2 pr-4 pl-3 whitespace-nowrap">{{ a.start_time|localtime|date:"d.m.Y H:i" }}</td>
-                    <td class="py-2 pr-4">{{ a.service.name }}</td>
+                  <td class="py-2 pr-4"><span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span></td>
                     <td class="py-2 pr-4">{{ a.master.get_full_name }}</td>
                     <td class="py-2 pr-4">{{ a.current_status }}</td>
                     <td class="py-2 pr-3">{{ a.price|default:"—" }}</td>
@@ -200,7 +199,7 @@
                         {% if a.start_time < now %}opacity-70{% endif %}" data-appt-id="{{ a.id }}">
               <div class="appt-main">
                 <p class="font-medium text-[#204029] appt-dt">{{ a.start_time|localtime|date:"d M Y, H:i" }}</p>
-                <p class="text-sm text-[#4D4D4D]">{{ a.service.name }} · {{ a.master.get_full_name }}</p>
+                <p class="text-sm text-[#4D4D4D]"><span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span> · {{ a.master.get_full_name }}</p>
               </div>
 
               {% if a.start_time >= now %}
@@ -382,6 +381,24 @@ document.addEventListener('DOMContentLoaded', () => {
     el.removeAttribute('data-i18n');
     el.removeAttribute('data-i18n-vars');
   };
+  const getLocale = () => (I18N && typeof I18N.getLocale === 'function'
+    ? I18N.getLocale()
+    : (navigator.languages && navigator.languages[0]) || navigator.language || 'en');
+  const translateServiceNameText = (name) => {
+    if (!name) return '';
+    if (I18N && typeof I18N.translateServiceName === 'function') {
+      return I18N.translateServiceName(name);
+    }
+    return name;
+  };
+  const applyServiceNameTranslations = (root) => {
+    const scope = root || document;
+    scope.querySelectorAll('[data-service-name-original]').forEach((el) => {
+      const original = el.getAttribute('data-service-name-original') || el.textContent;
+      if (!original) return;
+      el.textContent = translateServiceNameText(original) || original;
+    });
+  };
 
   const links = document.querySelectorAll('.sidebar-link');
   const tabs  = document.querySelectorAll('.tab');
@@ -424,8 +441,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* helpers */
   const csrftoken = (document.cookie.match('(^|;)\\s*csrftoken\\s*=\\s*([^;]+)')||[])[2] || '';
-  const fmtHM = d => d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
-  const fmtTime = iso => { try { return new Date(iso).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});} catch(e){ return iso; } };
+  const fmtHM = d => d.toLocaleTimeString(getLocale(), {hour:'numeric', minute:'2-digit'});
+  const fmtTime = iso => { try { return new Date(iso).toLocaleTimeString(getLocale(), {hour:'2-digit', minute:'2-digit'});} catch(e){ return iso; } };
   const ymd = d => { const m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${d.getFullYear()}-${m}-${day}`; };
 
   /* ===== отмена с подтверждением + «перечёркивание» без перезагрузки ===== */
@@ -568,13 +585,15 @@ document.addEventListener('DOMContentLoaded', () => {
   async function renderWindow(){
     await ensureRangeLoaded(resState.baseStart, WINDOW_DAYS);
 
+    const locale = getLocale();
+
     const days = Array.from({length:WINDOW_DAYS}, (_,i)=>{ const d=new Date(resState.baseStart); d.setDate(d.getDate()+i); return d;});
     const dayStrs = days.map(ymd);
     const dayData = dayStrs.map(ds => resState.cache.get(ds));
     const timeRows = buildTimeRows(dayData.map(x=>x?.set));
 
-    const from = days[0].toLocaleDateString([], {month:'short', day:'numeric'});
-    const to   = days[days.length-1].toLocaleDateString([], {month:'short', day:'numeric'});
+    const from = days[0].toLocaleDateString(locale, {month:'short', day:'numeric'});
+    const to   = days[days.length-1].toLocaleDateString(locale, {month:'short', day:'numeric'});
     rsRange.textContent = `${from} – ${to}`;
     rsGrid.style.setProperty('--days', String(WINDOW_DAYS));
     rsGrid.innerHTML='';
@@ -588,8 +607,8 @@ document.addEventListener('DOMContentLoaded', () => {
       h.className='ol2__cell ol2__head';
       const today = (new Date()).toDateString()===d.toDateString();
       h.innerHTML = `<div class="ol2__day ${today?'today':''}">
-        <div class="t">${d.toLocaleDateString([], {weekday:'long'})}</div>
-        <div class="s">${d.toLocaleDateString([], {month:'short', day:'numeric'})}</div>
+        <div class="t">${d.toLocaleDateString(locale, {weekday:'long'})}</div>
+        <div class="s">${d.toLocaleDateString(locale, {month:'short', day:'numeric'})}</div>
       </div>`;
       rsGrid.appendChild(h);
     });
@@ -660,12 +679,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const data = await r.json().catch(()=> ({}));
     if(r.ok){
       const startISO = data.appointment?.start_time || '';
-      const localized = startISO ? new Date(startISO).toLocaleString() : '';
+      const locale = getLocale();
+      const localized = startISO ? new Date(startISO).toLocaleString(locale) : '';
       setTextKey(resOk, 'dashboard.reschedule.success', { datetime: localized }, `Rescheduled to ${localized}`);
       resOk.classList.remove('hidden');
       // мгновенно обновим дату в карточке (если она на странице)
       document.querySelectorAll(`[data-appt-id="${resState.apptId}"] .appt-dt`).forEach(dt=>{
-        try{ dt.textContent = new Date(data.appointment.start_time).toLocaleString(); }catch(_){}
+        try{ dt.textContent = new Date(data.appointment.start_time).toLocaleString(locale); }catch(_){}
       });
       setTimeout(()=> location.reload(), 700);
     }else{
@@ -691,8 +711,14 @@ document.addEventListener('DOMContentLoaded', () => {
   resModal.addEventListener('click', (e)=>{ if(e.target===resModal) closeRes(); });
   resSubmit.addEventListener('click', submitRes);
 
+  applyServiceNameTranslations();
+
   if (I18N && typeof I18N.onChange === 'function') {
     I18N.onChange(() => {
+      applyServiceNameTranslations();
+      if (resModal && resModal.classList.contains('flex')) {
+        renderWindow().catch(()=>{});
+      }
       if (statsChart) {
         statsChart.data.datasets[0].label = translate('dashboard.chartLabel', null, 'Appointments');
         statsChart.update();

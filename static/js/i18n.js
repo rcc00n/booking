@@ -4,12 +4,24 @@
   const LANG_DIRECTIONS = {
     ar: 'rtl'
   };
+  const LANG_LOCALES = {
+    en: 'en-US',
+    ru: 'ru-RU',
+    uk: 'uk-UA',
+    fr: 'fr-FR',
+    ar: 'ar',
+    hi: 'hi-IN'
+  };
 
   const translations = {
     en: {
       languages: {
         en: 'English',
-        ru: 'Русский'
+        ru: 'Russian',
+        uk: 'Ukrainian',
+        fr: 'French',
+        ar: 'Arabic',
+        hi: 'Hindi'
       },
       common: {
         brand: 'Malva Booking',
@@ -102,6 +114,13 @@
           checkoutSuccess: 'Appointment created! Redirecting…',
           remove: 'Remove item'
         },
+        dynamic: {
+          names: {
+            'service-one': 'Service One',
+            'service-two': 'Service Two',
+            'consultation': 'Consultation'
+          }
+        },
         footer: {
           copy: '© 2025 Malva Booking'
         }
@@ -177,8 +196,12 @@
     },
     ru: {
       languages: {
-        en: 'English',
-        ru: 'Русский'
+        en: 'Английский',
+        ru: 'Русский',
+        uk: 'Украинский',
+        fr: 'Французский',
+        ar: 'Арабский',
+        hi: 'Хинди'
       },
       common: {
         brand: 'Malva Booking',
@@ -271,6 +294,13 @@
           checkoutSuccess: 'Запись создана! Перенаправляем…',
           remove: 'Удалить'
         },
+        dynamic: {
+          names: {
+            'service-one': 'Услуга 1',
+            'service-two': 'Услуга 2',
+            'consultation': 'Консультация'
+          }
+        },
         footer: {
           copy: '© 2025 Malva Booking'
         }
@@ -346,6 +376,34 @@
     }
   };
 
+  function slugifyKey(str) {
+    if (!str) return '';
+    return str
+      .toString()
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  function getLocaleFromLang(lang) {
+    const code = SUPPORTED_LANGS.includes(lang) ? lang : FALLBACK_LANG;
+    return LANG_LOCALES[code] || LANG_LOCALES[FALLBACK_LANG] || code || 'en';
+  }
+
+  function getLanguageLabelFor(lang, targetLang) {
+    const dict = getDict(targetLang || currentLang || FALLBACK_LANG);
+    if (dict && dict.languages && dict.languages[lang]) {
+      return dict.languages[lang];
+    }
+    const fallbackDict = getDict(FALLBACK_LANG);
+    if (fallbackDict && fallbackDict.languages && fallbackDict.languages[lang]) {
+      return fallbackDict.languages[lang];
+    }
+    return lang;
+  }
+
   const SUPPORTED_LANGS = Object.keys(translations);
   let currentLang = null;
   const listeners = new Set();
@@ -385,6 +443,22 @@
       return vars ? formatText(value, vars) : value;
     }
     return value !== undefined ? value : key;
+  }
+
+  function translateServiceName(name, lang) {
+    if (!name) return '';
+    const slug = slugifyKey(name);
+    if (!slug) return name;
+    const target = SUPPORTED_LANGS.includes(lang) ? lang : (lang || currentLang || FALLBACK_LANG);
+    const dict = resolve(getDict(target), 'services.dynamic.names') || {};
+    if (dict && Object.prototype.hasOwnProperty.call(dict, slug)) {
+      return dict[slug];
+    }
+    const fallbackDict = resolve(getDict(FALLBACK_LANG), 'services.dynamic.names') || {};
+    if (fallbackDict && Object.prototype.hasOwnProperty.call(fallbackDict, slug)) {
+      return fallbackDict[slug];
+    }
+    return name;
   }
 
   function parseVars(el) {
@@ -444,6 +518,7 @@
       document.documentElement.lang = targetLang;
       document.documentElement.dir = LANG_DIRECTIONS[targetLang] || 'ltr';
       document.documentElement.setAttribute('data-lang', targetLang);
+      document.documentElement.setAttribute('data-locale', getLocaleFromLang(targetLang));
     }
 
     const elements = document.querySelectorAll('[data-i18n]');
@@ -486,6 +561,9 @@
     const target = lang || currentLang || FALLBACK_LANG;
     document.querySelectorAll('[data-lang-switch]').forEach(function (el) {
       if (el.tagName === 'SELECT') {
+        Array.from(el.options).forEach(function (opt) {
+          opt.textContent = getLanguageLabelFor(opt.value, target);
+        });
         if (el.value !== target) {
           el.value = target;
         }
@@ -531,6 +609,14 @@
     if (el._malvaI18nBound) return;
     el._malvaI18nBound = true;
     if (el.tagName === 'SELECT') {
+      if (!el.options.length) {
+        SUPPORTED_LANGS.forEach(function (code) {
+          const opt = document.createElement('option');
+          opt.value = code;
+          opt.textContent = getLanguageLabelFor(code, currentLang || FALLBACK_LANG);
+          el.appendChild(opt);
+        });
+      }
       el.addEventListener('change', function (event) {
         setLanguage(event.target.value);
       });
@@ -582,6 +668,10 @@
     t: function (key, vars, lang) {
       const target = lang || currentLang || FALLBACK_LANG;
       return translate(target, key, vars);
+    },
+    getLocale: function () { return getLocaleFromLang(currentLang || FALLBACK_LANG); },
+    translateServiceName: function (name, lang) {
+      return translateServiceName(name, lang);
     },
     onChange: function (callback) {
       if (typeof callback !== 'function') return function () {};
