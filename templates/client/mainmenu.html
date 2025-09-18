@@ -501,6 +501,14 @@
       let currentPaymentContext = null;
       const setTextKey = (el, key, vars, fallback) => {
         if (!el) return;
+
+        const resolved = key
+          ? translate(key, vars, fallback !== undefined ? fallback : el.textContent)
+          : fallback;
+        if (resolved !== undefined && resolved !== null) {
+          el.textContent = resolved;
+        }
+
         if (I18N && key) {
           el.setAttribute('data-i18n', key);
           if (vars) {
@@ -509,8 +517,9 @@
             el.removeAttribute('data-i18n-vars');
           }
           queueRefresh();
-        } else if (fallback !== undefined) {
-          el.textContent = fallback;
+        } else if (!key) {
+          el.removeAttribute('data-i18n');
+          el.removeAttribute('data-i18n-vars');
         }
       };
       const clearTextKey = (el) => {
@@ -578,8 +587,10 @@
       const paymentClose=document.getElementById('paymentClose');
       const paymentConfirm=document.getElementById('paymentConfirm');
       const paymentSummary=document.getElementById('paymentSummary');
+      const paymentTitle=document.getElementById('paymentTitle');
       const paymentCardWrapper=document.getElementById('paymentCardWrapper');
       const paymentCardElement=document.getElementById('paymentCardElement');
+      const paymentCardLabel=document.querySelector('label[for="paymentCardElement"]');
       const paymentStatus=document.getElementById('paymentStatus');
       const paymentError=document.getElementById('paymentError');
       const paymentSuccess=document.getElementById('paymentSuccess');
@@ -1266,6 +1277,12 @@
       if(paymentClose){ paymentClose.addEventListener('click', closePaymentModal); }
       if(paymentModal){ paymentModal.addEventListener('click',(e)=>{ if(e.target===paymentModal) closePaymentModal(); }); }
       if(paymentConfirm){ paymentConfirm.addEventListener('click', confirmPayment); }
+
+      // Ensure fallbacks render even before translations are loaded
+      setTextKey(paymentTitle, 'services.payment.title', null, 'Secure payment');
+      setTextKey(paymentConfirm, 'services.payment.pay', null, 'Pay now');
+      setTextKey(paymentCardLabel, 'services.payment.cardLabel', null, 'Card details');
+      setTextKey(paymentSummary, 'services.payment.summary', { amount: '$0' }, 'Complete your payment of $0.');
 
       // UX: Shift+wheel горизонтально
       olWrap.addEventListener('wheel', (e)=>{
