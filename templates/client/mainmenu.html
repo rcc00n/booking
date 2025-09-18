@@ -171,13 +171,11 @@
     .payment-panel__chip span{display:block;font-weight:700;color:var(--green-dark);font-size:.92rem}
     .payment-panel__meta{font-size:.78rem;color:var(--muted);line-height:1.3}
     .payment-form{display:flex;flex-direction:column;gap:1rem}
-    .payment-fieldset{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.85rem}
+    .payment-fieldset{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.85rem}
     .field{display:flex;flex-direction:column;gap:.35rem}
     .field label{font-weight:700;font-size:.85rem;color:var(--green-dark);text-transform:uppercase;letter-spacing:.06em}
     .field input, .field select{height:2.7rem;padding:.55rem .75rem;border-radius:.75rem;border:1.5px solid var(--grid-border);background:#fff;font-size:.95rem;transition:.2s ease;border-color:color-mix(in srgb, var(--grid-border) 92%, #fff 8%)}
     .field input:focus,.field select:focus{outline:none;border-color:color-mix(in srgb, var(--green) 55%, transparent);box-shadow:0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent)}
-    .payment-card-wrapper{position:relative;background:#fff;border-radius:.85rem;border:1.5px solid var(--grid-border);box-shadow:inset 0 1px 4px rgba(32,64,41,.08);padding:.45rem .55rem;min-height:56px;overflow:hidden}
-    .payment-card-wrapper .StripeElement{width:100%;height:100%;}
     .payment-meta{display:flex;justify-content:space-between;align-items:center;font-size:.85rem;color:var(--muted);flex-wrap:wrap;gap:.65rem}
     .payment-meta__secure{display:flex;align-items:center;gap:.35rem;font-weight:600}
     .payment-meta__logos{display:flex;gap:.4rem;flex-wrap:wrap}
@@ -520,24 +518,18 @@
                 <input type="email" id="paymentEmail" autocomplete="email" placeholder="you@example.com" required>
               </div>
             </div>
-            <div class="field">
-              <label for="cardNumberElement">Card number</label>
-              <div class="payment-card-wrapper" style="display:none;" id="paymentCardWrapper">
-                <div id="cardNumberElement" class="stripe-card-element"></div>
-              </div>
-            </div>
             <div class="payment-fieldset">
               <div class="field">
-                <label for="cardExpiryElement">Expiry</label>
-                <div class="payment-card-wrapper" style="display:none;" id="paymentExpiryWrapper">
-                  <div id="cardExpiryElement" class="stripe-card-element"></div>
-                </div>
+                <label for="cardNumberInput">Card number</label>
+                <input type="text" id="cardNumberInput" inputmode="numeric" autocomplete="cc-number" placeholder="4242 4242 4242 4242" maxlength="23" required>
               </div>
               <div class="field">
-                <label for="cardCvcElement">CVC</label>
-                <div class="payment-card-wrapper" style="display:none;" id="paymentCvcWrapper">
-                  <div id="cardCvcElement" class="stripe-card-element"></div>
-                </div>
+                <label for="cardExpiryInput">Expiry (MM/YY)</label>
+                <input type="text" id="cardExpiryInput" inputmode="numeric" autocomplete="cc-exp" placeholder="MM/YY" maxlength="7" required>
+              </div>
+              <div class="field">
+                <label for="cardCvcInput">CVC</label>
+                <input type="text" id="cardCvcInput" inputmode="numeric" autocomplete="cc-csc" placeholder="123" maxlength="4" required>
               </div>
             </div>
             <div class="payment-fieldset">
@@ -620,12 +612,7 @@
       };
       const stripePublicKey = "{{ stripe_public_key|default:''|escapejs }}";
       let stripeClient = null;
-      let stripeElements = null;
-      let stripeCardNumber = null;
-      let stripeCardExpiry = null;
-      let stripeCardCvc = null;
       let stripeCardComplete = false;
-      const stripeCardStatus = { number: false, expiry: false, cvc: false };
       let currentPaymentContext = null;
       const PAYMENT_COPY = {
         title: 'Secure payment',
@@ -728,12 +715,9 @@
       const paymentConfirm=document.getElementById('paymentConfirm');
       const paymentSummary=document.getElementById('paymentSummary');
       const paymentTitle=document.getElementById('paymentTitle');
-      const paymentCardWrapper=document.getElementById('paymentCardWrapper');
-      const paymentCardElement=document.getElementById('cardNumberElement');
-      const paymentExpiryWrapper=document.getElementById('paymentExpiryWrapper');
-      const paymentCvcWrapper=document.getElementById('paymentCvcWrapper');
-      const cardExpiryElement=document.getElementById('cardExpiryElement');
-      const cardCvcElement=document.getElementById('cardCvcElement');
+      const cardNumberInput=document.getElementById('cardNumberInput');
+      const cardExpiryInput=document.getElementById('cardExpiryInput');
+      const cardCvcInput=document.getElementById('cardCvcInput');
       const paymentForm=document.getElementById('paymentForm');
       const paymentSummaryAmount=document.getElementById('paymentSummaryAmount');
       const paymentSummaryTime=document.getElementById('paymentSummaryTime');
@@ -775,19 +759,10 @@
         if (paymentConfirm) {
           paymentConfirm.onclick = null;
         }
-        if (paymentCardWrapper) paymentCardWrapper.style.display = 'none';
-        if (paymentExpiryWrapper) paymentExpiryWrapper.style.display = 'none';
-        if (paymentCvcWrapper) paymentCvcWrapper.style.display = 'none';
-        if (stripeCardNumber) {
-          stripeCardNumber.clear();
-        }
-        if (stripeCardExpiry) {
-          stripeCardExpiry.clear();
-        }
-        if (stripeCardCvc) {
-          stripeCardCvc.clear();
-        }
-        resetCardStatus();
+        if (cardNumberInput) cardNumberInput.value = '';
+        if (cardExpiryInput) cardExpiryInput.value = '';
+        if (cardCvcInput) cardCvcInput.value = '';
+        stripeCardComplete = false;
         if (inputCountry) {
           const defaultOption = Array.from(inputCountry.options).find(opt => opt.value === 'CA');
           inputCountry.value = defaultOption ? 'CA' : (inputCountry.options[0]?.value || '');
@@ -802,6 +777,53 @@
           return raw.replace(/(.{3})(?=.)/, '$1 ');
         }
         return raw;
+      }
+
+      function normalizeCardNumber(value){
+        return (value || '').replace(/\D/g, '').slice(0, 19);
+      }
+
+      function formatCardNumberDisplay(value){
+        return normalizeCardNumber(value).replace(/(\d{4})(?=\d)/g, '$1 ').trim();
+      }
+
+      function normalizeExpiry(value){
+        const digits = (value || '').replace(/[^\d]/g, '').slice(0, 4);
+        if (digits.length <= 2) return digits;
+        return digits.slice(0, 2) + '/' + digits.slice(2);
+      }
+
+      function parseExpiry(value){
+        const clean = (value || '').replace(/\s/g, '');
+        const match = clean.match(/^(\d{2})[\/\-]?(\d{2,4})$/);
+        if (!match) return null;
+        let month = parseInt(match[1], 10);
+        let year = parseInt(match[2], 10);
+        if (Number.isNaN(month) || Number.isNaN(year)) return null;
+        if (month < 1 || month > 12) return null;
+        if (year < 100) year += 2000;
+        if (year < 2000 || year > 2100) return null;
+        return { month, year };
+      }
+
+      function normalizeCvc(value){
+        return (value || '').replace(/\D/g, '').slice(0, 4);
+      }
+
+      function gatherCardDetails(){
+        const number = normalizeCardNumber(cardNumberInput?.value || '');
+        const expiry = parseExpiry(cardExpiryInput?.value || '');
+        const cvc = normalizeCvc(cardCvcInput?.value || '');
+        const valid = Boolean(
+          number && number.length >= 13 && expiry && cvc && cvc.length >= 3
+        );
+        return {
+          valid,
+          number,
+          exp_month: expiry ? expiry.month : null,
+          exp_year: expiry ? expiry.year : null,
+          cvc,
+        };
       }
 
       const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -842,7 +864,15 @@
           details.address.postal_code,
           details.address.country,
         ].every(Boolean);
-        const ready = requiresCard ? (requiredFilled && stripeCardComplete) : requiredFilled;
+        let cardReady = true;
+        if (requiresCard) {
+          const card = gatherCardDetails();
+          stripeCardComplete = card.valid;
+          cardReady = card.valid;
+        } else {
+          stripeCardComplete = true;
+        }
+        const ready = requiredFilled && cardReady;
         paymentConfirm.disabled = !ready;
       }
 
@@ -897,75 +927,11 @@
         paymentMessage.classList.add(cls);
       }
 
-      function resetCardStatus(){
-        stripeCardStatus.number = false;
-        stripeCardStatus.expiry = false;
-        stripeCardStatus.cvc = false;
-        stripeCardComplete = false;
-      }
-
-      function updateCardCompletion(event, field){
-        if (typeof stripeCardStatus[field] === 'boolean') {
-          stripeCardStatus[field] = Boolean(event.complete);
-        }
-        stripeCardComplete = Object.values(stripeCardStatus).every(Boolean);
-        if (event.error) {
-          setPaymentMessage('error', event.error.message);
-        } else if (paymentMessage && paymentMessage.classList.contains('payment-status--error')) {
-          setPaymentMessage(null);
-        }
-        checkPaymentForm();
-      }
-
       function ensureStripe(){
         if (!stripePublicKey) return null;
         if (!window.Stripe) return null;
         if (!stripeClient){
           stripeClient = window.Stripe(stripePublicKey);
-        const appearance = {
-          theme: 'flat',
-          variables: {
-            colorText: '#204029',
-            colorPrimary: '#AF9525',
-            colorBackground: '#FFFFFF',
-            borderRadius: '14px',
-            fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-          },
-        };
-        stripeElements = stripeClient.elements({ appearance });
-        const cardStyle = {
-          base: {
-            color: '#204029',
-            fontFamily: 'Inter, "Segoe UI", sans-serif',
-            fontSize: '16px',
-            '::placeholder': { color: 'rgba(77,77,77,.55)' },
-            iconColor: '#AF9525',
-          },
-          invalid: {
-            color: '#d6453d',
-          },
-        };
-        if (!stripeCardNumber && paymentCardElement){
-          stripeCardNumber = stripeElements.create('cardNumber', { style: cardStyle });
-          stripeCardNumber.mount('#cardNumberElement');
-          stripeCardNumber.on('change', (event) => {
-            updateCardCompletion(event, 'number');
-          });
-        }
-        if (!stripeCardExpiry && cardExpiryElement){
-          stripeCardExpiry = stripeElements.create('cardExpiry', { style: cardStyle });
-          stripeCardExpiry.mount('#cardExpiryElement');
-          stripeCardExpiry.on('change', (event) => {
-            updateCardCompletion(event, 'expiry');
-          });
-        }
-        if (!stripeCardCvc && cardCvcElement){
-          stripeCardCvc = stripeElements.create('cardCvc', { style: cardStyle });
-          stripeCardCvc.mount('#cardCvcElement');
-          stripeCardCvc.on('change', (event) => {
-            updateCardCompletion(event, 'cvc');
-          });
-        }
         }
         return stripeClient;
       }
@@ -1205,36 +1171,33 @@
           }
         }
 
-        if (paymentCardWrapper) {
-          const needCard = Boolean(context.payment.client_secret);
-          const displayMode = needCard ? 'flex' : 'none';
-          paymentCardWrapper.style.display = displayMode;
-          if (paymentExpiryWrapper) paymentExpiryWrapper.style.display = displayMode;
-          if (paymentCvcWrapper) paymentCvcWrapper.style.display = displayMode;
-          if (needCard) {
-            resetCardStatus();
-          } else {
-            stripeCardStatus.number = true;
-            stripeCardStatus.expiry = true;
-            stripeCardStatus.cvc = true;
-            stripeCardComplete = true;
+        const needCard = Boolean(context.payment.client_secret);
+        if (cardNumberInput) {
+          cardNumberInput.disabled = !needCard;
+          cardNumberInput.value = '';
+        }
+        if (cardExpiryInput) {
+          cardExpiryInput.disabled = !needCard;
+          cardExpiryInput.value = '';
+        }
+        if (cardCvcInput) {
+          cardCvcInput.disabled = !needCard;
+          cardCvcInput.value = '';
+        }
+
+        if (needCard) {
+          stripeCardComplete = false;
+          const stripe = ensureStripe();
+          if (!stripe) {
+            setPaymentMessage('error', PAYMENT_COPY.missingKey);
           }
-          if (needCard) {
-            const stripe = ensureStripe();
-            if (!stripe) {
-              setPaymentMessage('error', PAYMENT_COPY.missingKey);
-            }
-            if (paymentConfirm) {
-              paymentConfirm.disabled = !stripe;
-            }
-            setTimeout(() => {
-              if (stripeCardNumber && typeof stripeCardNumber.focus === 'function') {
-                stripeCardNumber.focus();
-              }
-            }, 120);
-          } else if (paymentConfirm) {
-            paymentConfirm.disabled = false;
+          if (paymentConfirm) {
+            paymentConfirm.disabled = !stripe;
           }
+          setTimeout(() => { cardNumberInput?.focus(); }, 80);
+        } else {
+          stripeCardComplete = true;
+          if (paymentConfirm) paymentConfirm.disabled = false;
         }
 
         if (paymentModal) {
@@ -1317,8 +1280,14 @@
           return;
         }
         const stripe = ensureStripe();
-        if (!stripe || !stripeCardNumber || !stripeCardExpiry || !stripeCardCvc){
+        if (!stripe){
           setPaymentMessage('error', PAYMENT_COPY.missingKey);
+          return;
+        }
+        const card = gatherCardDetails();
+        if (!card.valid){
+          setPaymentMessage('error', 'Enter a valid card number, expiry, and CVC.');
+          checkPaymentForm();
           return;
         }
         const details = gatherBillingDetails();
@@ -1332,7 +1301,12 @@
         try{
           const result = await stripe.confirmCardPayment(payment.client_secret, {
             payment_method: {
-              card: stripeCardNumber,
+              card: {
+                number: card.number,
+                exp_month: card.exp_month,
+                exp_year: card.exp_year,
+                cvc: card.cvc,
+              },
               billing_details: {
                 name: details.name || undefined,
                 email: details.email || undefined,
@@ -1679,6 +1653,25 @@
           });
         }
       });
+
+      if (cardNumberInput){
+        cardNumberInput.addEventListener('input', () => {
+          cardNumberInput.value = formatCardNumberDisplay(cardNumberInput.value);
+          checkPaymentForm();
+        });
+      }
+      if (cardExpiryInput){
+        cardExpiryInput.addEventListener('input', () => {
+          cardExpiryInput.value = normalizeExpiry(cardExpiryInput.value);
+          checkPaymentForm();
+        });
+      }
+      if (cardCvcInput){
+        cardCvcInput.addEventListener('input', () => {
+          cardCvcInput.value = normalizeCvc(cardCvcInput.value);
+          checkPaymentForm();
+        });
+      }
 
       if (paymentTitle) paymentTitle.textContent = PAYMENT_COPY.title;
       if (paymentConfirm) paymentConfirm.textContent = 'Pay now';
