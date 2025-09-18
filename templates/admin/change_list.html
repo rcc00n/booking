@@ -3,6 +3,11 @@
 
 {% block object-tools %}
     {{ block.super }}
+    {% if import_url %}
+            <a href="{{ import_url }}" class="btn btn-secondary float-right" style="margin-right: 0.5rem;">
+                {{ import_label|default:"Import" }}
+            </a>
+    {% endif %}
     {% if export_url %}
             <a href="{{ export_url }}" class="btn btn-success float-right">
                 📥 Export CSV

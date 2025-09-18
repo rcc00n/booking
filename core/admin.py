@@ -19,7 +19,7 @@ from django.utils.timezone import localtime, datetime, make_aware, localdate, ge
 from django.utils.html import escape
 from core.utils.admin_perms import is_master, master_obj
 from django.shortcuts import redirect
-from django.utils.html import format_html
+from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 from datetime import date, timedelta
 from django.contrib.admin.views.decorators import staff_member_required
@@ -42,6 +42,11 @@ from .filters import *
 from .models import *
 from .forms import *
 from .validators import *
+from core.services.user_import import (
+    import_users_from_file,
+    UserImportError,
+    UserImportSchemaError,
+)
 
 # -----------------------------
 # Custom filter for filtering users by Role
@@ -410,10 +415,79 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         )
     def get_urls(self):
         urls = super().get_urls()
+        opts = self.model._meta
         custom_urls = [
+            path(
+                'import-users/',
+                self.admin_site.admin_view(self.import_users_view),
+                name=f'{opts.app_label}_{opts.model_name}_import',
+            ),
             path('send_notification/', self.admin_site.admin_view(self.send_notification_view), name='send_notification'),
         ]
         return custom_urls + urls
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        try:
+            opts = self.model._meta
+            extra_context.setdefault(
+                'import_url',
+                reverse(f'admin:{opts.app_label}_{opts.model_name}_import'),
+            )
+            extra_context.setdefault('import_label', 'Import users')
+        except NoReverseMatch:
+            pass
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def import_users_view(self, request):
+        opts = self.model._meta
+        form = UserImportUploadForm()
+        if request.method == "POST":
+            form = UserImportUploadForm(request.POST, request.FILES)
+            if form.is_valid():
+                uploaded = form.cleaned_data["import_file"]
+                try:
+                    result = import_users_from_file(uploaded)
+                except UserImportSchemaError as exc:
+                    form.add_error("import_file", str(exc))
+                except UserImportError as exc:
+                    form.add_error(None, str(exc))
+                else:
+                    if result.created:
+                        messages.success(request, f"Imported {result.created} user(s).")
+                    if result.errors:
+                        snippet = result.errors[:10]
+                        list_html = format_html_join(
+                            '',
+                            '<li>Row {0} ({1}): {2}</li>',
+                            (
+                                (
+                                    message.row_number,
+                                    message.username or '-',
+                                    message.message,
+                                )
+                                for message in snippet
+                            ),
+                        )
+                        remaining = len(result.errors) - len(snippet)
+                        tail = ""
+                        if remaining > 0:
+                            tail = format_html('<p>... and {} more row(s) with issues.</p>', remaining)
+                        messages.error(
+                            request,
+                            format_html('Some rows could not be imported:<ul>{}</ul>{}', list_html, tail),
+                        )
+
+                    changelist_url = reverse(f'admin:{opts.app_label}_{opts.model_name}_changelist')
+                    return redirect(changelist_url)
+
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": opts,
+            "form": form,
+            "title": "Import users",
+        }
+        return TemplateResponse(request, "admin/user_import.html", context)
 
     @method_decorator(csrf_exempt)
     def send_notification_view(self, request):
