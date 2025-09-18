@@ -59,6 +59,9 @@
     .btn:focus-visible{outline:2px solid color-mix(in srgb, var(--gold) 70%, #fff); outline-offset:2px}
     .btn--primary{background:linear-gradient(135deg, var(--green-600) 0%, var(--gold) 100%); color:#fff; border:0}
     .btn--primary:hover{transform:translateY(-1px); filter:brightness(1.03); box-shadow:0 4px 14px rgba(175,149,37,.35)}
+    .btn--loading{position:relative;pointer-events:none;opacity:.8}
+    .btn--loading::after{content:'';position:absolute;width:1rem;height:1rem;border:2px solid rgba(255,255,255,.9);border-top-color:transparent;border-radius:999px;right:.75rem;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg);}}
     .btn--ghost{background:linear-gradient(135deg, var(--green-600) 0%, var(--gold) 100%); color:#fff; border:0}
     .btn--ghost:hover{transform:translateY(-1px); filter:brightness(1.03); box-shadow:0 4px 14px rgba(175,149,37,.35)}
     .btn--ghost[disabled], .btn--primary[disabled]{opacity:.5;cursor:not-allowed}
@@ -147,9 +150,32 @@
     .cart-empty{color:var(--muted);font-size:.95rem;text-align:center;padding:1rem 0}
     .cart-footer{display:flex;justify-content:space-between;align-items:center;width:100%;gap:.75rem}
     .cart-summary{font-size:.95rem;color:var(--muted)}
-    .payment-body{display:flex;flex-direction:column;gap:1rem}
-    .stripe-card-element{padding:.75rem;border:1px solid var(--grid-border);border-radius:var(--radius-sm);background:#fff}
-    .status{font-size:.9rem;color:var(--muted)}
+    .payment-body{display:flex;flex-direction:column;gap:1.25rem;background:#fff}
+    .payment-layout{display:grid;grid-template-columns: minmax(0,1fr) minmax(0,1.2fr);gap:1.5rem;align-items:flex-start}
+    @media(max-width:900px){.payment-layout{grid-template-columns:1fr;}}
+    .payment-panel{background:var(--chip);border:1px solid var(--grid-border);border-radius:var(--radius-lg);padding:1.25rem;box-shadow:0 6px 16px rgba(32,64,41,.08)}
+    .payment-panel__title{font-size:1rem;font-weight:800;color:var(--green-dark);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.08em}
+    .payment-panel__line{display:flex;justify-content:space-between;font-size:.95rem;margin:.35rem 0;color:var(--muted)}
+    .payment-panel__line strong{color:var(--green-dark)}
+    .payment-panel__items{margin-top:.75rem;display:flex;flex-direction:column;gap:.45rem}
+    .payment-panel__chip{display:flex;flex-direction:column;gap:.35rem;padding:.6rem .85rem;border-radius:.85rem;background:#fff;border:1px solid rgba(32,64,41,.12);font-size:.9rem;box-shadow:0 4px 12px rgba(32,64,41,.08)}
+    .payment-panel__chip span{display:block;font-weight:700;color:var(--green-dark);font-size:.92rem}
+    .payment-panel__meta{font-size:.78rem;color:var(--muted);line-height:1.3}
+    .payment-form{display:flex;flex-direction:column;gap:1rem}
+    .payment-fieldset{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.85rem}
+    .field{display:flex;flex-direction:column;gap:.35rem}
+    .field label{font-weight:700;font-size:.85rem;color:var(--green-dark);text-transform:uppercase;letter-spacing:.06em}
+    .field input, .field select{height:2.7rem;padding:.55rem .75rem;border-radius:.75rem;border:1.5px solid var(--grid-border);background:#fff;font-size:.95rem;transition:.2s ease;border-color:color-mix(in srgb, var(--grid-border) 92%, #fff 8%)}
+    .field input:focus,.field select:focus{outline:none;border-color:color-mix(in srgb, var(--green) 55%, transparent);box-shadow:0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent)}
+    .stripe-card-element{padding:.95rem;border:1.5px solid var(--grid-border);border-radius:.85rem;background:#fff;box-shadow:inset 0 1px 4px rgba(32,64,41,.08)}
+    .payment-meta{display:flex;justify-content:space-between;align-items:center;font-size:.85rem;color:var(--muted)}
+    .payment-meta__secure{display:flex;align-items:center;gap:.35rem;font-weight:600}
+    .payment-badges{display:flex;gap:.4rem;margin-top:.75rem}
+    .payment-badge{height:24px;border-radius:6px;background:rgba(32,64,41,.08);padding:.2rem .55rem;font-size:.7rem;font-weight:700;color:var(--green-dark);letter-spacing:.08em;text-transform:uppercase;display:flex;align-items:center;justify-content:center}
+    .status{font-size:.9rem;color:var(--muted);line-height:1.4}
+    .payment-status--error{color:#d6453d}
+    .payment-status--success{color:var(--green)}
+    .payment-status--info{color:var(--muted)}
     .hint{font-size:.85rem;color:var(--muted)}
     .error{color:#b00020;font-size:.9rem;margin-top:.5rem}
     .success{color:#0a7a3b;font-size:.95rem;margin-top:.5rem}
@@ -454,14 +480,77 @@
         <button class="modal__close" id="paymentClose" aria-label="Close">×</button>
       </div>
       <div class="payment-body" id="paymentBody">
-        <p class="mb-4" id="paymentSummary">Complete your payment of $0.</p>
-        <div id="paymentCardWrapper" style="display:none;">
-          <label for="paymentCardElement" class="block text-sm font-semibold mb-2">Card details</label>
-          <div id="paymentCardElement" class="stripe-card-element"></div>
+        <div class="payment-layout">
+          <aside class="payment-panel" id="paymentSummaryPanel">
+            <div class="payment-panel__title">Order summary</div>
+            <div class="payment-panel__line"><span>Amount due</span><strong id="paymentSummaryAmount">$0.00</strong></div>
+            <div class="payment-panel__line"><span>Appointment</span><strong id="paymentSummaryTime">—</strong></div>
+            <div class="payment-panel__items" id="paymentSummaryItems"></div>
+            <div class="payment-badges">
+              <div class="payment-badge">SSL Secure</div>
+              <div class="payment-badge">PCI-DSS</div>
+              <div class="payment-badge">Stripe</div>
+            </div>
+          </aside>
+          <form class="payment-form" id="paymentForm" novalidate>
+            <p id="paymentSummary" class="text-base font-medium text-[#204029]">Complete your payment of $0.</p>
+            <div class="payment-fieldset">
+              <div class="field">
+                <label for="paymentName">Cardholder name</label>
+                <input type="text" id="paymentName" autocomplete="name" placeholder="Jane Doe" required>
+              </div>
+              <div class="field">
+                <label for="paymentEmail">Email receipt</label>
+                <input type="email" id="paymentEmail" autocomplete="email" placeholder="you@example.com" required>
+              </div>
+            </div>
+            <div class="field">
+              <label for="paymentCardElement">Card details</label>
+              <div id="paymentCardWrapper" class="payment-card-wrapper" style="display:none;">
+                <div id="paymentCardElement" class="stripe-card-element"></div>
+              </div>
+            </div>
+            <div class="payment-fieldset">
+              <div class="field">
+                <label for="paymentAddress1">Billing address</label>
+                <input type="text" id="paymentAddress1" autocomplete="address-line1" placeholder="123 Main Street" required>
+              </div>
+              <div class="field">
+                <label for="paymentAddress2">Apartment/Suite (optional)</label>
+                <input type="text" id="paymentAddress2" autocomplete="address-line2" placeholder="Unit 4B">
+              </div>
+            </div>
+            <div class="payment-fieldset">
+              <div class="field">
+                <label for="paymentCity">City</label>
+                <input type="text" id="paymentCity" autocomplete="address-level2" placeholder="Calgary" required>
+              </div>
+              <div class="field">
+                <label for="paymentState">Province / State</label>
+                <input type="text" id="paymentState" autocomplete="address-level1" placeholder="Alberta" required>
+              </div>
+            </div>
+            <div class="payment-fieldset">
+              <div class="field">
+                <label for="paymentPostal">Postal / ZIP code</label>
+                <input type="text" id="paymentPostal" autocomplete="postal-code" placeholder="T2X 1A1" required>
+              </div>
+              <div class="field">
+                <label for="paymentCountry">Country</label>
+                <select id="paymentCountry" autocomplete="country" required>
+                  <option value="" disabled selected>Select country</option>
+                  <option value="CA">Canada</option>
+                  <option value="US">United States</option>
+                </select>
+              </div>
+            </div>
+            <div class="payment-meta">
+              <div class="payment-meta__secure">🔒 Encrypted by Stripe</div>
+              <div class="payment-meta__logos"><img src="https://js.stripe.com/v3/fingerprinted/img/payment-methods/logo-visa-03cb36b5dbaa34e8658f93f3f1a5150d.svg" alt="Visa" height="18"><img src="https://js.stripe.com/v3/fingerprinted/img/payment-methods/logo-mastercard-1749107923382d6a3d79042f2f1c5a20.svg" alt="Mastercard" height="18" style="margin-left:8px;"></div>
+            </div>
+            <div class="status" id="paymentMessage" style="display:none;"></div>
+          </form>
         </div>
-        <div class="status" id="paymentStatus" style="display:none;"></div>
-        <div class="error" id="paymentError" style="display:none;"></div>
-        <div class="success" id="paymentSuccess" style="display:none;"></div>
       </div>
       <div class="modal__footer">
         <button class="btn btn--primary" id="paymentConfirm">Pay now</button>
@@ -498,6 +587,7 @@
       let stripeClient = null;
       let stripeElements = null;
       let stripeCard = null;
+      let stripeCardComplete = false;
       let currentPaymentContext = null;
       const PAYMENT_COPY = {
         title: 'Secure payment',
@@ -602,10 +692,19 @@
       const paymentTitle=document.getElementById('paymentTitle');
       const paymentCardWrapper=document.getElementById('paymentCardWrapper');
       const paymentCardElement=document.getElementById('paymentCardElement');
-      const paymentCardLabel=document.querySelector('label[for="paymentCardElement"]');
-      const paymentStatus=document.getElementById('paymentStatus');
-      const paymentError=document.getElementById('paymentError');
-      const paymentSuccess=document.getElementById('paymentSuccess');
+      const paymentForm=document.getElementById('paymentForm');
+      const paymentSummaryAmount=document.getElementById('paymentSummaryAmount');
+      const paymentSummaryTime=document.getElementById('paymentSummaryTime');
+      const paymentSummaryItems=document.getElementById('paymentSummaryItems');
+      const paymentMessage=document.getElementById('paymentMessage');
+      const inputName=document.getElementById('paymentName');
+      const inputEmail=document.getElementById('paymentEmail');
+      const inputAddress1=document.getElementById('paymentAddress1');
+      const inputAddress2=document.getElementById('paymentAddress2');
+      const inputCity=document.getElementById('paymentCity');
+      const inputState=document.getElementById('paymentState');
+      const inputPostal=document.getElementById('paymentPostal');
+      const inputCountry=document.getElementById('paymentCountry');
 
       let summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
       let cartState = { items: [], count: 0, total_price: '0', total_duration_min: 0 };
@@ -624,6 +723,88 @@
           return new Intl.NumberFormat(getLocale(), {style:'currency', currency:(currency||'CAD').toUpperCase()}).format(Number(amount||0));
         }catch(_){
           return `${(currency||'CAD').toUpperCase()} ${amount}`;
+        }
+      }
+
+      function resetPaymentForm(){
+        if (paymentForm) {
+          paymentForm.reset();
+        }
+        stripeCardComplete = false;
+        if (inputCountry) {
+          const defaultOption = Array.from(inputCountry.options).find(opt => opt.value === 'CA');
+          inputCountry.value = defaultOption ? 'CA' : (inputCountry.options[0]?.value || '');
+        }
+        setPaymentMessage(null);
+        setConfirmLoading(false);
+      }
+
+      function normalizePostal(value){
+        const raw = (value || '').toUpperCase().replace(/\s+/g, '');
+        if (/^[A-Z]\d[A-Z]\d[A-Z]\d$/.test(raw)){
+          return raw.replace(/(.{3})(?=.)/, '$1 ');
+        }
+        return raw;
+      }
+
+      const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+      function gatherBillingDetails(){
+        const name = (inputName?.value || '').trim();
+        const email = (inputEmail?.value || '').trim();
+        const line1 = (inputAddress1?.value || '').trim();
+        const line2 = (inputAddress2?.value || '').trim();
+        const city = (inputCity?.value || '').trim();
+        const state = (inputState?.value || '').trim();
+        const postal = normalizePostal(inputPostal?.value || '');
+        const country = (inputCountry?.value || '').trim();
+        return {
+          name,
+          email,
+          address: {
+            line1,
+            line2: line2 || undefined,
+            city,
+            state,
+            postal_code: postal,
+            country,
+          },
+        };
+      }
+
+      function checkPaymentForm(){
+        if (!paymentConfirm) return;
+        const details = gatherBillingDetails();
+        const requiresCard = Boolean(currentPaymentContext?.payment?.client_secret);
+        const requiredFilled = [
+          details.name,
+          details.email && emailRegex.test(details.email),
+          details.address.line1,
+          details.address.city,
+          details.address.state,
+          details.address.postal_code,
+          details.address.country,
+        ].every(Boolean);
+        let ready;
+        if (requiresCard){
+          ready = requiredFilled && stripeCardComplete;
+        } else {
+          ready = true;
+        }
+        paymentConfirm.disabled = !ready;
+      }
+
+      function setConfirmLoading(loading){
+        if (!paymentConfirm) return;
+        if (loading){
+          paymentConfirm.classList.add('btn--loading');
+          paymentConfirm.textContent = 'Processing…';
+          paymentConfirm.disabled = true;
+        } else {
+          paymentConfirm.classList.remove('btn--loading');
+          const needsCard = currentPaymentContext ? Boolean(currentPaymentContext?.payment?.client_secret) : true;
+          paymentConfirm.textContent = needsCard ? 'Pay now' : 'Close';
+          checkPaymentForm();
         }
       }
 
@@ -650,30 +831,18 @@
       }
 
       function setPaymentMessage(kind, message){
-        if (paymentError) {
-          paymentError.style.display='none';
-          paymentError.textContent='';
-        }
-        if (paymentSuccess) {
-          paymentSuccess.style.display='none';
-          paymentSuccess.textContent='';
-        }
-        if (paymentStatus) {
-          paymentStatus.style.display='none';
-          paymentStatus.textContent='';
-        }
-        if (!kind) return;
-        let target;
-        if (kind === 'error') {
-          target = paymentError;
-        } else if (kind === 'success') {
-          target = paymentSuccess;
-        } else {
-          target = paymentStatus;
-        }
-        if (!target) return;
-        target.style.display='block';
-        target.textContent = message || '';
+        if (!paymentMessage) return;
+        paymentMessage.style.display = message ? 'block' : 'none';
+        paymentMessage.textContent = message || '';
+        paymentMessage.classList.remove('payment-status--error', 'payment-status--success', 'payment-status--info');
+        if (!message) return;
+        const map = {
+          error: 'payment-status--error',
+          success: 'payment-status--success',
+          status: 'payment-status--info',
+        };
+        const cls = map[kind] || map.status;
+        paymentMessage.classList.add(cls);
       }
 
       function ensureStripe(){
@@ -681,10 +850,43 @@
         if (!window.Stripe) return null;
         if (!stripeClient){
           stripeClient = window.Stripe(stripePublicKey);
-          stripeElements = stripeClient.elements();
+          const appearance = {
+            theme: 'flat',
+            variables: {
+              colorText: '#204029',
+              colorPrimary: '#AF9525',
+              colorBackground: '#FFFFFF',
+              borderRadius: '14px',
+              fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            },
+          };
+          stripeElements = stripeClient.elements({ appearance });
           if (paymentCardElement && !stripeCard){
-            stripeCard = stripeElements.create('card', {hidePostalCode:true});
+            stripeCard = stripeElements.create('card', {
+              hidePostalCode: true,
+              style: {
+                base: {
+                  color: '#204029',
+                  fontFamily: 'Inter, "Segoe UI", sans-serif',
+                  fontSize: '16px',
+                  '::placeholder': { color: 'rgba(77,77,77,.55)' },
+                  iconColor: '#AF9525',
+                },
+                invalid: {
+                  color: '#d6453d',
+                },
+              },
+            });
             stripeCard.mount('#paymentCardElement');
+            stripeCard.on('change', (event) => {
+              stripeCardComplete = Boolean(event.complete);
+              if (event.error) {
+                setPaymentMessage('error', event.error.message);
+              } else if (paymentMessage && paymentMessage.classList.contains('payment-status--error')) {
+                setPaymentMessage(null);
+              }
+              checkPaymentForm();
+            });
           }
         }
         return stripeClient;
@@ -884,11 +1086,45 @@
       function openPaymentModal(context){
         if(!context || !context.payment) return;
         currentPaymentContext = context;
-        setPaymentMessage(null);
+        resetPaymentForm();
 
         const amountText = formatCurrency(context.payment.amount, context.payment.currency);
         if (paymentSummary) {
           paymentSummary.textContent = PAYMENT_COPY.summary(amountText);
+        }
+        if (paymentSummaryAmount) {
+          paymentSummaryAmount.textContent = amountText;
+        }
+
+        const appointmentData = context.appointment || {};
+        const items = Array.isArray(appointmentData.items) ? appointmentData.items : [];
+        const primaryStart = appointmentData.start_time || items[0]?.start_time;
+        if (paymentSummaryTime) {
+          paymentSummaryTime.textContent = primaryStart ? fmtDateTime(primaryStart) : '—';
+        }
+        if (paymentSummaryItems) {
+          paymentSummaryItems.innerHTML = '';
+          if (items.length) {
+            items.forEach((it) => {
+              const chip = document.createElement('div');
+              chip.className = 'payment-panel__chip';
+              const title = document.createElement('span');
+              title.textContent = it?.service?.name || 'Service';
+              const meta = document.createElement('div');
+              meta.className = 'payment-panel__meta';
+              const masterName = it?.master?.name || it?.master?.user?.full_name || it?.master?.user?.username || 'Master';
+              const slot = it?.start_time ? fmtDateTime(it.start_time) : 'Scheduled';
+              meta.textContent = `${masterName} · ${slot}`;
+              chip.appendChild(title);
+              chip.appendChild(meta);
+              paymentSummaryItems.appendChild(chip);
+            });
+          } else {
+            const empty = document.createElement('div');
+            empty.className = 'payment-panel__meta';
+            empty.textContent = 'Service details will appear here once confirmed.';
+            paymentSummaryItems.appendChild(empty);
+          }
         }
 
         if (paymentCardWrapper) {
@@ -915,17 +1151,25 @@
           // No payment required → show success and redirect
           setPaymentMessage('success', PAYMENT_COPY.noCharge(amountText));
           if (paymentConfirm) {
-            paymentConfirm.disabled = true;
+            paymentConfirm.textContent = 'Close';
+            paymentConfirm.disabled = false;
+            paymentConfirm.addEventListener('click', () => window.location.href='/accounts/dashboard/', { once: true });
           }
           window.setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
         } else {
+          if (paymentConfirm) {
+            paymentConfirm.textContent = 'Pay now';
+          }
           setPaymentMessage('status', PAYMENT_COPY.enterCard);
         }
+
+        checkPaymentForm();
       }
 
       function closePaymentModal(){
         if(paymentModal){ paymentModal.classList.remove('modal--open'); }
         setPaymentMessage(null);
+        resetPaymentForm();
         currentPaymentContext = null;
       }
 
@@ -959,12 +1203,13 @@
           }
 
           setPaymentMessage('success', PAYMENT_COPY.success);
+          setConfirmLoading(false);
           if (paymentConfirm) paymentConfirm.disabled = true;
           redirectAfterPayment();
         }catch(err){
           const msg = err && err.message ? err.message : PAYMENT_COPY.failedShort;
           setPaymentMessage('error', msg);
-          if (paymentConfirm) paymentConfirm.disabled = false;
+          setConfirmLoading(false);
         }
       }
 
@@ -973,6 +1218,7 @@
         const { payment, appointment } = currentPaymentContext;
         if (!payment.client_secret){
           setPaymentMessage('success', PAYMENT_COPY.success);
+          setConfirmLoading(false);
           redirectAfterPayment();
           return;
         }
@@ -981,11 +1227,32 @@
           setPaymentMessage('error', PAYMENT_COPY.missingKey);
           return;
         }
-        if (paymentConfirm) paymentConfirm.disabled = true;
+        const details = gatherBillingDetails();
+        if (!emailRegex.test(details.email || '')){
+          setPaymentMessage('error', 'Please provide a valid email address for your receipt.');
+          checkPaymentForm();
+          return;
+        }
+        setConfirmLoading(true);
         setPaymentMessage('status', PAYMENT_COPY.processing);
         try{
           const result = await stripe.confirmCardPayment(payment.client_secret, {
-            payment_method: { card: stripeCard }
+            payment_method: {
+              card: stripeCard,
+              billing_details: {
+                name: details.name || undefined,
+                email: details.email || undefined,
+                address: {
+                  line1: details.address.line1 || undefined,
+                  line2: details.address.line2 || undefined,
+                  city: details.address.city || undefined,
+                  state: details.address.state || undefined,
+                  postal_code: details.address.postal_code || undefined,
+                  country: details.address.country || undefined,
+                },
+              },
+            },
+            receipt_email: details.email || undefined,
           });
           if (result.error){
             throw new Error(result.error.message || PAYMENT_COPY.failedGeneric);
@@ -994,7 +1261,7 @@
         }catch(err){
           const msg = err && err.message ? err.message : PAYMENT_COPY.failedShort;
           setPaymentMessage('error', msg);
-          if (paymentConfirm) paymentConfirm.disabled = false;
+          setConfirmLoading(false);
         }
       }
 
@@ -1285,6 +1552,31 @@
       if(paymentClose){ paymentClose.addEventListener('click', closePaymentModal); }
       if(paymentModal){ paymentModal.addEventListener('click',(e)=>{ if(e.target===paymentModal) closePaymentModal(); }); }
       if(paymentConfirm){ paymentConfirm.addEventListener('click', confirmPayment); }
+
+      const paymentInputs = [
+        inputName,
+        inputEmail,
+        inputAddress1,
+        inputAddress2,
+        inputCity,
+        inputState,
+        inputPostal,
+        inputCountry,
+      ].filter(Boolean);
+      paymentInputs.forEach((input) => {
+        input.addEventListener('input', () => {
+          if (input === inputPostal) {
+            input.value = normalizePostal(input.value);
+          }
+          checkPaymentForm();
+        });
+        if (input === inputPostal) {
+          input.addEventListener('blur', () => {
+            input.value = normalizePostal(input.value);
+            checkPaymentForm();
+          });
+        }
+      });
 
       if (paymentTitle) paymentTitle.textContent = PAYMENT_COPY.title;
       if (paymentConfirm) paymentConfirm.textContent = 'Pay now';
