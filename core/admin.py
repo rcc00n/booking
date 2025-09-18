@@ -276,7 +276,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     """
     add_form = CustomUserCreationForm
     form = CustomUserChangeForm
-    export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'postal_code', 'user_roles', 'is_staff', 'is_superuser', 'is_active', 'source']
+    export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
 
     add_fieldsets = (
         (None, {
@@ -307,7 +307,6 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         postal_code = obj.userprofile.postal_code if hasattr(obj, 'userprofile') else ''
         source = obj.userprofile.source if hasattr(obj, 'userprofile') else ''
         consent = obj.userprofile.email_marketing_consent if hasattr(obj, 'userprofile') else ''
-        roles = ", ".join([ur.role.name for ur in obj.userprofile.userrole_set.all()])
 
         return [
             obj.username,
@@ -317,7 +316,6 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             phone,
             birth_date,
             postal_code,
-            roles,
             obj.is_staff,
             obj.is_superuser,
             obj.is_active,
