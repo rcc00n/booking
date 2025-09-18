@@ -289,7 +289,29 @@ def api_cart_add(request):
     except Exception:
         return JsonResponse({"error": "invalid start_time"}, status=400)
 
+    # Validate that the chosen slot is actually available for this service/master/date
+    day_key = start_dt.date().isoformat()
+    slots_map = get_available_slots(service, _tz_aware(datetime(start_dt.year, start_dt.month, start_dt.day, 12, 0)), master=master)
+    allowed = set(s.isoformat() for s in slots_map.get(master.id, []))
+    if start_dt.isoformat() not in allowed:
+        return JsonResponse({"error": "Selected slot is no longer available."}, status=400)
+
     cart = BookingCart.for_user(profile)
+
+    # Check overlap against existing cart items for the same master
+    def _duration_min(svc: Service) -> int:
+        return int((svc.duration_min or 0) + (svc.extra_time_min or 0))
+
+    new_start = start_dt
+    new_end = start_dt + timezone.timedelta(minutes=_duration_min(service))
+    for it in cart.items.select_related("service", "master").all():
+        if it.master_id != master.id:
+            continue
+        it_start = it.start_time
+        it_end = it.start_time + timezone.timedelta(minutes=_duration_min(it.service))
+        if new_start < it_end and new_end > it_start:
+            return JsonResponse({"error": "Selected slot overlaps with another item in your cart."}, status=400)
+
     item = BookingCartItem(cart=cart, service=service, master=master, start_time=start_dt)
     try:
         item.full_clean()

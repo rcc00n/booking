@@ -215,7 +215,7 @@
       <span class="logo">Malva Booking</span>
       <nav class="header-actions">
         <button type="button" class="btn btn--primary" id="cartButton">
-          Корзина <span class="cart-bubble" id="cartCount">0</span>
+          Cart <span class="cart-bubble" id="cartCount">0</span>
         </button>
         {% if user.is_authenticated %}
           <a href="{% url 'dashboard' %}" class="btn btn--ghost">Client Profile</a>
@@ -278,7 +278,7 @@
                 {% endwith %}
                 · {{ s.duration_min }} min
               </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Добавить в корзину</button>
+              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Add to cart</button>
             </article>
           {% empty %}
             <div class="stub">No results for “{{ q }}”.</div>
@@ -307,7 +307,7 @@
                 {% endwith %}
                 · {{ s.duration_min }} min
               </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Добавить в корзину</button>
+              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Add to cart</button>
             </article>
           {% empty %}
             <div class="stub">No services in this category yet.</div>
@@ -335,7 +335,7 @@
                 {% endwith %}
                 · {{ s.duration_min }} min
               </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Добавить в корзину</button>
+              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}">Add to cart</button>
             </article>
           {% endfor %}
         </div>
@@ -353,7 +353,7 @@
   <div class="modal" id="bookModal" aria-hidden="true">
     <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="bookTitle">
       <div class="modal__header">
-        <div class="modal__title" id="bookTitle">Добавление услуги: <span id="bookServiceName"></span></div>
+        <div class="modal__title" id="bookTitle">Add service: <span id="bookServiceName"></span></div>
         <button class="modal__close" id="bookClose" aria-label="Close">×</button>
       </div>
 
@@ -393,8 +393,8 @@
 
         <div>
           <div class="field">
-            <label>Итог</label>
-            <div class="muted" id="bookSummary">Выберите мастера и время.</div>
+            <label>Summary</label>
+            <div class="muted" id="bookSummary">Pick a master and time.</div>
           </div>
           <div class="error" id="bookError" style="display:none;"></div>
           <div class="success" id="bookSuccess" style="display:none;"></div>
@@ -402,8 +402,8 @@
       </div>
 
       <div class="modal__footer">
-        <button class="btn btn--ghost" id="bookCancel">Отмена</button>
-        <button class="btn btn--primary" id="bookSubmit" disabled>Добавить в корзину</button>
+        <button class="btn btn--ghost" id="bookCancel">Cancel</button>
+        <button class="btn btn--primary" id="bookSubmit" disabled>Add to cart</button>
       </div>
   </div>
 </div>
@@ -412,16 +412,16 @@
   <div class="modal" id="cartModal" aria-hidden="true">
     <div class="modal__dialog modal__dialog--narrow" role="dialog" aria-modal="true" aria-labelledby="cartTitle">
       <div class="modal__header">
-        <div class="modal__title" id="cartTitle">Корзина</div>
-        <button class="modal__close" id="cartClose" aria-label="Закрыть">×</button>
+        <div class="modal__title" id="cartTitle">Cart</div>
+        <button class="modal__close" id="cartClose" aria-label="Close">×</button>
       </div>
       <div class="cart-list" id="cartItems"></div>
-      <div class="cart-empty" id="cartEmpty">Корзина пуста.</div>
+      <div class="cart-empty" id="cartEmpty">Your cart is empty.</div>
       <div class="error" id="cartError" style="display:none;"></div>
       <div class="success" id="cartSuccess" style="display:none;"></div>
       <div class="modal__footer cart-footer">
-        <div class="cart-summary" id="cartSummary">Итого: $0 · 0 мин</div>
-        <button class="btn btn--primary" id="cartCheckout" disabled>Оформить визит</button>
+        <div class="cart-summary" id="cartSummary">Total: $0 · 0 min</div>
+        <button class="btn btn--primary" id="cartCheckout" disabled>Checkout</button>
       </div>
     </div>
   </div>
@@ -509,10 +509,10 @@
 
               const meta=document.createElement('div');
               meta.className='cart-item__meta';
-              const masterName=item?.master?.name || '—';
-              const timeLabel=item?.start_time ? fmtDateTime(item.start_time) : 'Без времени';
+              const masterName=item?.master?.name || '-';
+              const timeLabel=item?.start_time ? fmtDateTime(item.start_time) : 'No time';
               const duration=item?.service?.duration_min || 0;
-              meta.textContent=`${masterName} · ${timeLabel} · ${duration} мин`;
+              meta.textContent=`${masterName} · ${timeLabel} · ${duration} min`;
               info.appendChild(meta);
 
               if(item?.service?.price){
@@ -546,7 +546,7 @@
           const num = Number(raw);
           const formatted = Number.isFinite(num) ? num.toFixed(2) : (raw || '0.00');
           const duration = data.total_duration_min || 0;
-          cartSummary.textContent = `Итого: $${formatted} · ${duration} мин`;
+          cartSummary.textContent = `Total: $${formatted} · ${duration} min`;
         }
       }
 
@@ -564,7 +564,7 @@
           if(!silent) setCartMessage(null);
         }catch(err){
           if(!silent){
-            setCartMessage('error', 'Не удалось загрузить корзину');
+            setCartMessage('error', 'Could not load cart');
             console.error(err);
           }
         }
@@ -584,10 +584,10 @@
             const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Не удалось удалить услугу';
             throw new Error(msg);
           }
-          setCartMessage('success','Услуга удалена из корзины.');
+          setCartMessage('success','Item removed from cart.');
           await refreshCart(true);
         }catch(err){
-          setCartMessage('error', err.message||'Не удалось удалить услугу');
+          setCartMessage('error', err.message||'Failed to remove item');
         }
       }
 
@@ -604,14 +604,14 @@
           });
           const data=await resp.json().catch(()=>({}));
           if(!resp.ok){
-            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Не удалось оформить визит';
+            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Checkout failed';
             throw new Error(msg);
           }
           await refreshCart(true);
-          setCartMessage('success','Запись создана! Перенаправляем…');
+          setCartMessage('success','Appointment created! Redirecting…');
           setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
         }catch(err){
-          setCartMessage('error', err.message||'Не удалось оформить визит');
+          setCartMessage('error', err.message||'Checkout failed');
           if(cartCheckout) cartCheckout.disabled=false;
         }
       }
@@ -656,7 +656,7 @@
         elServiceName.textContent=serviceName;
         elError.style.display='none'; elSuccess.style.display='none';
         btnSubmit.disabled=true;
-        elSummary.textContent='Выберите мастера и время.';
+        elSummary.textContent='Pick a master and time.';
 
         availabilityCache.clear();
         baseStart = new Date(); baseStart.setHours(0,0,0,0);
@@ -843,15 +843,15 @@
           });
           const data=await resp.json().catch(()=>({}));
           if(!resp.ok){
-            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Не удалось добавить услугу';
+          const msg=(data&&(data.error||data.detail))?(data.error||data.detail):'Could not add service to cart';
             throw new Error(msg);
           }
-          elSuccess.textContent='Услуга добавлена в корзину.';
+          elSuccess.textContent='Service added to cart.';
           elSuccess.style.display='block';
           await refreshCart(true);
           setTimeout(()=>{ closeModal(); }, 600);
         }catch(err){
-          elError.textContent=err.message||'Ошибка при добавлении';
+          elError.textContent=err.message||'Add to cart error';
           elError.style.display='block';
         }finally{
           btnSubmit.disabled=false;
