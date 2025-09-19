@@ -72,7 +72,7 @@
     .site-header{background:var(--green-dark);box-shadow:var(--shadow);position:sticky;top:0;z-index:100;padding-block:.75rem}
     .site-header__inner{display:flex;align-items:center;justify-content:space-between}
     .logo{font:900 1.25rem/1 var(--font-heading);color:var(--gold);letter-spacing:.3px}
-    .header-actions{display:flex;align-items:center;gap:.75rem}
+    .header-actions{display:flex;align-items:center;gap:.75rem;margin-left:auto}
     .lang-picker{display:inline-flex;align-items:center;gap:.4rem;margin-right:.5rem;color:var(--taupe);font-size:.82rem}
     .lang-picker__label{opacity:.75;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
     .lang-picker__select{appearance:none;background:rgba(255,255,255,.12);color:#111;border:1px solid rgba(255,255,255,.25);padding:.35rem .75rem;border-radius:.55rem;font-weight:600;cursor:pointer;min-width:5.5rem}
@@ -89,6 +89,12 @@
     }
     .hero h1{font:900 clamp(2rem,4vw,3.2rem)/1.1 var(--font-heading); color:var(--green-dark)}
     .hero p{font-size:1.08rem; max-width:52ch; color:var(--muted)}
+
+    .mobile-nav-btn{display:none;align-items:center;justify-content:center;width:2.75rem;height:2.75rem;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:var(--taupe);font-size:1.35rem;transition:.2s ease;}
+    .mobile-nav-btn:active{transform:scale(.94);}
+    .mobile-nav-backdrop{display:none;}
+    .mobile-close{display:none;}
+    .floating-cart{display:none;}
 
     h2{font:900 1.5rem/1.2 var(--font-heading)}
     h3{font:800 1.1rem/1.2 var(--font-heading)}
@@ -266,6 +272,43 @@
       .modal__dialog--payment .modal__footer{padding:1rem 1.25rem}
       .payment-fieldset{grid-template-columns:1fr}
     }
+
+    @media (max-width: 900px){
+      body.nav-open{overflow:hidden;}
+      .container{padding-inline:1.15rem;}
+      .site-header{padding-block:.65rem;}
+      .site-header__inner{gap:.9rem;}
+      .mobile-nav-btn{display:inline-flex;margin-left:auto;}
+      .header-actions{position:fixed;top:0;right:0;bottom:0;width:min(320px,92vw);background:linear-gradient(180deg,#204029 0%,#1b3626 100%);padding:1.75rem 1.5rem 2rem;border-radius:0;transform:translateX(100%);transition:transform .3s ease,opacity .3s ease;opacity:0;display:flex;flex-direction:column;align-items:stretch;gap:1.2rem;box-shadow:-18px 0 35px rgba(0,0,0,.32);z-index:120;margin-left:0;}
+      body.nav-open .header-actions{transform:translateX(0);opacity:1;}
+      .header-actions::before{content:'';width:72px;height:4px;border-radius:999px;background:rgba(255,255,255,.25);align-self:center;margin-bottom:.75rem;}
+      .header-actions .btn{width:100%;justify-content:center;}
+      .header-actions .lang-picker{flex-direction:column;align-items:stretch;gap:.5rem;margin-right:0;color:#fff;}
+      .header-actions .lang-picker__label{opacity:.85;}
+      .header-actions .lang-picker__select{width:100%;background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.35);}
+      .mobile-close{display:inline-flex;align-items:center;gap:.45rem;color:#fff;background:transparent;border:none;font-size:1rem;font-weight:700;justify-content:flex-start;padding:0;}
+      .mobile-nav-backdrop{position:fixed;inset:0;background:rgba(15,23,17,.55);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:110;}
+      body.nav-open .mobile-nav-backdrop{opacity:1;pointer-events:auto;}
+      .hero{padding:4rem 1.25rem 3.4rem;align-items:flex-start;text-align:left;gap:1.2rem;}
+      .hero h1{font-size:clamp(2rem,8vw,2.6rem);} 
+      .hero p{font-size:1rem;max-width:32ch;}
+      .filters{flex-direction:column;align-items:stretch;gap:.85rem;}
+      .filters input,.filters select{width:100%;}
+      .filters .btn{width:100%;justify-content:center;}
+      .services-grid{grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1.1rem;}
+      .service-card{border-radius:1.25rem;padding:1rem .95rem;}
+      .service-card__img{height:160px;}
+      .service-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;}
+      .floating-cart{display:flex;position:fixed;right:1.15rem;bottom:1.25rem;background:linear-gradient(135deg,var(--green) 0%,var(--gold) 100%);color:#fff;border:none;border-radius:999px;padding:.75rem 1.15rem;align-items:center;gap:.6rem;box-shadow:0 18px 28px rgba(32,64,41,.25);z-index:105;}
+      .floating-cart__icon{font-size:1.35rem;line-height:1;}
+      .floating-cart__count{min-width:1.9rem;height:1.9rem;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:rgba(255,255,255,.18);font-weight:800;}
+    }
+
+    @media (max-width: 540px){
+      .hero{padding-top:3.2rem;}
+      .btn{width:100%;justify-content:center;}
+      .services-grid{grid-template-columns:1fr;}
+    }
   </style>
 </head>
 <body>
@@ -274,7 +317,11 @@
   <header class="site-header">
     <div class="container site-header__inner">
       <span class="logo" data-i18n="common.brand">Malva Booking</span>
-      <nav class="header-actions">
+      <button type="button" class="mobile-nav-btn" data-menu-toggle aria-label="Open menu" aria-expanded="false">☰</button>
+      <nav class="header-actions" data-menu-drawer>
+        <button type="button" class="mobile-close" data-menu-close aria-label="Close menu">
+          ✕ <span data-i18n="common.close">Close</span>
+        </button>
         <div class="lang-picker" data-i18n-attr="aria-label:common.language">
           <label for="langSelect" class="lang-picker__label" data-i18n="common.language">Language</label>
           <select id="langSelect" class="lang-picker__select" data-lang-switch></select>
@@ -291,6 +338,7 @@
       </nav>
     </div>
   </header>
+  <div class="mobile-nav-backdrop" data-menu-backdrop></div>
 
   <!-- hero -->
   <section class="hero">
@@ -415,6 +463,11 @@
       {% endif %}
     </div>
   </main>
+
+  <button type="button" class="floating-cart" id="floatingCart" aria-label="Open cart">
+    <span class="floating-cart__icon" aria-hidden="true">🛒</span>
+    <span class="floating-cart__count" id="floatingCartCount">0</span>
+  </button>
 
   <footer class="site-footer" data-i18n="services.footer.copy">© 2025 Malva Booking</footer>
 
@@ -680,6 +733,41 @@
         });
       };
 
+      const menuToggle = document.querySelector('[data-menu-toggle]');
+      const menuClose = document.querySelector('[data-menu-close]');
+      const menuDrawer = document.querySelector('[data-menu-drawer]');
+      const menuBackdrop = document.querySelector('[data-menu-backdrop]');
+
+      const openMenuDrawer = () => {
+        document.body.classList.add('nav-open');
+        menuToggle?.setAttribute('aria-expanded', 'true');
+      };
+      const closeMenuDrawer = () => {
+        document.body.classList.remove('nav-open');
+        menuToggle?.setAttribute('aria-expanded', 'false');
+      };
+
+      menuToggle?.addEventListener('click', () => {
+        if (document.body.classList.contains('nav-open')) {
+          closeMenuDrawer();
+        } else {
+          openMenuDrawer();
+        }
+      });
+      menuClose?.addEventListener('click', closeMenuDrawer);
+      menuBackdrop?.addEventListener('click', closeMenuDrawer);
+      menuDrawer?.addEventListener('click', (event) => {
+        if (event.target.closest('a') && window.innerWidth <= 900) {
+          closeMenuDrawer();
+        }
+      });
+      window.addEventListener('resize', () => {
+        if (window.innerWidth > 900) closeMenuDrawer();
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeMenuDrawer();
+      });
+
       const isAuth  = {{ user.is_authenticated|yesno:"true,false" }};
       const loginUrl= "{% url 'login' %}?next={{ request.path }}";
       const apiAvail= "/accounts/api/availability/";
@@ -716,6 +804,8 @@
       const cartSummary=document.getElementById('cartSummary');
       const cartCheckout=document.getElementById('cartCheckout');
       const cartCount=document.getElementById('cartCount');
+      const floatingCartBtn=document.getElementById('floatingCart');
+      const floatingCartCount=document.getElementById('floatingCartCount');
       const paymentModal=document.getElementById('paymentModal');
       const paymentClose=document.getElementById('paymentClose');
       const paymentConfirm=document.getElementById('paymentConfirm');
@@ -965,6 +1055,7 @@
         if(!data) return;
         cartState = data;
         if(cartCount){ cartCount.textContent = data.count || 0; }
+        if(floatingCartCount){ floatingCartCount.textContent = data.count || 0; }
 
         const items = Array.isArray(data.items) ? data.items : [];
         if(cartItems){
@@ -1057,6 +1148,7 @@
           const resp=await fetch(apiCart, {credentials:'same-origin'});
           if(resp.status===401){
             if(cartCount) cartCount.textContent='0';
+            if(floatingCartCount) floatingCartCount.textContent='0';
             return;
           }
           if(!resp.ok) throw new Error(translate('services.cart.loadFailed'));
@@ -1139,6 +1231,7 @@
       }
 
       async function openCartModal(){
+        closeMenuDrawer();
         if(!isAuth){ window.location=loginUrl; return; }
         setCartMessage(null);
         if(cartModal){
@@ -1608,7 +1701,13 @@
       modal.addEventListener('click',(e)=>{ if(e.target===modal) closeModal(); });
       btnSubmit.addEventListener('click',addToCart);
 
-      if(cartBtn){ cartBtn.addEventListener('click', openCartModal); }
+      if(cartBtn){
+        cartBtn.addEventListener('click', () => {
+          closeMenuDrawer();
+          openCartModal();
+        });
+      }
+      if(floatingCartBtn){ floatingCartBtn.addEventListener('click', openCartModal); }
       if(cartClose){ cartClose.addEventListener('click', closeCartModal); }
       if(cartModal){ cartModal.addEventListener('click',(e)=>{ if(e.target===cartModal) closeCartModal(); }); }
       if(cartItems){
@@ -1669,8 +1768,9 @@
 
       if(isAuth){
         refreshCart(true);
-      }else if(cartCount){
-        cartCount.textContent='0';
+      } else {
+        if(cartCount) cartCount.textContent='0';
+        if(floatingCartCount) floatingCartCount.textContent='0';
       }
 
       /* ===== Live search (как было) ===== */
