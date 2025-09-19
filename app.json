@@ -5,12 +5,6 @@
       "postdeploy": "python manage.py collectstatic --noinput"
     }
   },
-  "formation": {
-    "web": {
-      "quantity": 1,
-      "size": "standard-1x"
-    }
-  },
   "checks": {
     "web": [
       {
