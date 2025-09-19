@@ -240,7 +240,6 @@ env = Env()
 USE_SENDGRID = env.bool("USE_SENDGRID", default=False)
 
 
-INSTALLED_APPS += ["sendgrid_backend"]
 DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="noreply@example.com")
 SENDGRID_SANDBOX_MODE_IN_DEBUG = env.bool("SENDGRID_SANDBOX_MODE_IN_DEBUG", default=False)
 SENDGRID_ECHO_TO_STDOUT = env.bool("SENDGRID_ECHO_TO_STDOUT", default=False)
