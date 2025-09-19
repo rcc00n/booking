@@ -45,18 +45,14 @@
                                 <div class="appt-details">
                                     <div class="appt-top">
                                         <span class="appt-time">{{ app.start_time|date:"D, d M Y H:i" }}</span>
-                                        {% with last=app.appointmentstatushistory_set.last %}
+                                        {% with last=app.appointment.appointmentstatushistory_set.last %}
                                             {% if last %}<span class="appt-status {{ last.status.name|lower }}">{{ last.status.name }}</span>{% endif %}
                                         {% endwith %}
+
                                     </div>
-                                    {# первый item встречи #}
-                                    {% for it in app.items.all|slice:":1" %}
-                                        <div class="appt-service">{{ it.service.name }}</div>
-                                        <div class="appt-master">{% if it.master %}with {{ it.master.user.get_full_name }}{% endif %}</div>
-                                    {% empty %}
-                                        <div class="appt-service">—</div>
-                                        <div class="appt-master">&nbsp;</div>
-                                    {% endfor %}
+                                    <div class="appt-service">{{ app.service.name }}</div>
+                                    <div class="appt-master">{% if app.master %}with {{ app.master.user.get_full_name }}{% endif %}</div>
+
                                 </div>
                                 <div class="appt-price">
                                     {% if app.final_price %}CA$ {{ app.final_price|floatformat:2 }}

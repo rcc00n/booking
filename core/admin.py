@@ -97,12 +97,12 @@ def custom_index(request):
     confirmed = AppointmentStatus.objects.filter(name="Confirmed").first()
     cancelled = AppointmentStatus.objects.filter(name="Cancelled").first()
 
-    upcoming = Appointment.objects.filter(
+    upcoming = AppointmentItem.objects.filter(
         start_time__date__range=(today, today + timedelta(days=7))
     )
-    confirmed_count = upcoming.filter(appointmentstatushistory__status=confirmed) \
+    confirmed_count = upcoming.filter(appointment__appointmentstatushistory__status=confirmed) \
         .distinct().count() if confirmed else 0
-    cancelled_count = upcoming.filter(appointmentstatushistory__status=cancelled) \
+    cancelled_count = upcoming.filter(appointment__appointmentstatushistory__status=cancelled) \
         .distinct().count() if cancelled else 0
 
     # Top services (текущий месяц) — считаем позиции у Service через обратную связь "appointmentitem"
@@ -115,73 +115,63 @@ def custom_index(request):
         )
         .order_by("-count")[:10]
     )
-    first_day = today.replace(day=1)
+    first_day = localdate().replace(day=1)
+    if first_day.month == 12:
+        first_day_next = date(first_day.year + 1, 1, 1)
+    else:
+        first_day_next = date(first_day.year, first_day.month + 1, 1)
 
-    # Берём уникальные пары (master, appointment), где есть хотя бы один Item этого мастера
-    pairs = (
-        AppointmentItem.objects
-        .filter(appointment__start_time__date__gte=first_day)
-        .values("master_id", "appointment_id")
-        .distinct()
-    )
-
-    # Сколько мастеров участвует в каждой встрече (для деления платежа)
-    masters_count_sq = (
-        Appointment.objects
-        .filter(pk=OuterRef("appointment_id"))
-        .annotate(mc=Count("items__master", distinct=True))
-        .values("mc")[:1]
-    )
-
-    # Сумма платежей по каждой встрече (на случай если платежей несколько)
-    paid_total_sq = (
+    # 2) Агрегация денег по мастеру из AppointmentItem.final_price
+    paid_by_appt = dict(
         Payment.objects
-        .filter(appointment_id=OuterRef("appointment_id"))
+        .filter(created_at__date__gte=first_day, created_at__date__lt=first_day_next)
         .values("appointment_id")
-        .annotate(total=Sum("amount"))
-        .values("total")[:1]
+        .annotate(total=Coalesce(Sum("amount"), Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))))
+        .values_list("appointment_id", "total")
     )
 
-    pairs = pairs.annotate(
-        masters_count=Subquery(masters_count_sq, output_field=IntegerField()),
-        paid_total=Subquery(paid_total_sq, output_field=DecimalField(max_digits=12, decimal_places=2)),
-    ).annotate(
-        # вклад мастера в эту встречу: total_payment / masters_count
-        contrib=ExpressionWrapper(
-            Coalesce(F("paid_total"), Value(0))
-            / Greatest(Coalesce(F("masters_count"), Value(1)), Value(1)),
-            output_field=DecimalField(max_digits=12, decimal_places=2),
-            )
-    )
+    if not paid_by_appt:
+        top_masters = []
+    else:
+    # 3) Сумма final_price по мастеру в каждом визите из оплаченных
+        rows = (
+            AppointmentItem.objects
+            .filter(appointment_id__in=paid_by_appt.keys())
+            .values("appointment_id", "master_id")
+            .annotate(msum=Coalesce(Sum("final_price"), Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))))
+        )
 
-    # Суммируем вклады по всем встречам для каждого мастера
-    agg = (
-        pairs.values("master_id")
-        .annotate(total=Sum("contrib"))
-        .order_by("-total")[:10]
-    )
+        # 4) Сумма final_price по визиту (для нормализации долей мастеров)
+        appt_total = {}
+        for r in rows:
+            aid = r["appointment_id"]
+            appt_total[aid] = (appt_total.get(aid, 0) or 0) + (r["msum"] or 0)
 
-    # Берём сами профили мастеров и прикрепляем им поле .total
-    master_totals = {row["master_id"]: (row["total"] or 0) for row in agg}
-    top_masters_qs = MasterProfile.objects.filter(pk__in=master_totals.keys()).select_related("user")
-    top_masters = list(top_masters_qs)
-    for m in top_masters:
-        m.total = master_totals.get(m.pk, 0)
+        # 5) Распределяем деньги визита пропорционально долям мастеров
+        master_totals = {}
+        for r in rows:
+            aid = r["appointment_id"]
+            mid = r["master_id"]
+            msum = r["msum"] or 0
+            paid = paid_by_appt.get(aid, 0) or 0
+            total = appt_total.get(aid, 0) or 0
+            if paid and total > 0 and msum > 0:
+                part = paid * (msum / total)
+                master_totals[mid] = (master_totals.get(mid, 0) or 0) + part
 
-    # Отсортировать финально по total (на случай несохранённого порядка)
-    top_masters = sorted(top_masters, key=lambda m: m.total or 0, reverse=True)[:10]
+        # 6) Топ-10 мастеров по начисленной сумме
+        top_ids = sorted(master_totals.keys(), key=lambda k: master_totals[k], reverse=True)[:10]
+        top_masters_qs = MasterProfile.objects.filter(pk__in=top_ids).select_related("user")
+        top_masters = list(top_masters_qs)
+        for m in top_masters:
+            m.total = master_totals.get(m.pk, 0)
+
+        # Сохранить порядок по total
+        top_masters = sorted(top_masters, key=lambda m: m.total or 0, reverse=True)[:10]
 
     # Недавние встречи (20) с префетчем позиций
     recent_appointments = (
-        Appointment.objects.select_related("client__user")
-        .prefetch_related(
-            Prefetch(
-                "items",
-                queryset=AppointmentItem.objects.select_related("service", "master__user")
-                .order_by("start_time"),
-                )
-        )
-        .order_by("-start_time")[:20]
+        AppointmentItem.objects.select_related("appointment__client__user").order_by("-start_time")[:20]
     )
 
     # Сегодняшние предстоящие встречи (Appointment + items); мастеру — только его
@@ -2170,7 +2160,7 @@ def _client_source_aggregation(qs):
 # view
 # ──────────────────────────────────────────────────────────────────────────────
 
-@staff_member_required
+
 @staff_member_required
 def stats_view(request: HttpRequest) -> HttpResponse:
     # ── Период
