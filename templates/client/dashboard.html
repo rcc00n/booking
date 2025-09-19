@@ -49,6 +49,21 @@
     .appointments-list{display:grid;gap:1rem;}
     .table-label{display:none;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#204029;font-size:.75rem;}
 
+    .rs-mobile-days{display:flex;gap:.5rem;overflow-x:auto;padding:.4rem 0;margin-top:.35rem;scrollbar-width:thin;}
+    .rs-mobile-days::-webkit-scrollbar{height:6px}
+    .rs-mobile-days::-webkit-scrollbar-thumb{background:rgba(32,64,41,.25);border-radius:999px}
+    .rs-mobile-day{flex:0 0 auto;min-width:120px;padding:.6rem .75rem;border-radius:.85rem;border:1px solid #DAD3C1;background:#fff;color:#204029;font-weight:700;line-height:1.3;text-align:left;box-shadow:0 8px 18px rgba(32,64,41,.08);transition:.2s ease;}
+    .rs-mobile-day strong{display:block;font-size:.95rem;font-weight:800;color:#204029;}
+    .rs-mobile-day span{display:block;font-size:.78rem;color:#6b7a6f;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-top:.15rem;}
+    .rs-mobile-day--active{background:#204029;color:#fff;border-color:#204029;box-shadow:0 12px 28px rgba(32,64,41,.22);}
+    .rs-mobile-day--active strong,.rs-mobile-day--active span{color:#fff;}
+    .rs-mobile-times{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin-top:1rem;}
+    .rs-mobile-time{padding:.65rem .75rem;border-radius:.75rem;border:1px solid #DAD3C1;background:#fff;font-weight:700;color:#204029;box-shadow:0 6px 18px rgba(32,64,41,.12);transition:.2s ease;}
+    .rs-mobile-time--selected{background:#204029;color:#fff;border-color:#204029;box-shadow:0 12px 28px rgba(32,64,41,.22);}
+    .rs-mobile-empty{font-size:.85rem;color:#6b7a6f;padding:1rem 0;text-align:center;}
+
+    @media (max-width:480px){ .rs-mobile-times{grid-template-columns:1fr;} }
+
     @media (max-width:1023px){
       body{background:#F7F6F1;}
       .dashboard-shell{min-height:100dvh;display:flex;flex-direction:column;}
@@ -412,7 +427,14 @@
       <!-- Новый горизонтальный выбор даты/времени -->
       <div>
         <label class="text-sm" data-i18n="dashboard.reschedule.chooseTime">Choose time</label>
-        <div class="ol2 mt-1" id="rsOl">
+
+        <div class="lg:hidden mt-2" id="rsMobileContainer">
+          <div class="rs-mobile-days" id="rsMobileDays" aria-live="polite"></div>
+          <div class="rs-mobile-times" id="rsMobileTimes" aria-live="polite"></div>
+          <div class="rs-mobile-empty hidden" id="rsMobileEmpty">No available times on this day.</div>
+        </div>
+
+        <div class="ol2 mt-1 hidden lg:flex" id="rsOl">
           <div class="ol2__toolbar">
             <div class="flex gap-2">
               <button id="rsPrev" type="button" class="px-2 py-1 border rounded-md" data-i18n="dashboard.reschedule.prev">← Prev</button>
@@ -426,7 +448,8 @@
           </div>
         </div>
 
-        <p class="text-xs text-[#4D4D4D]/80 mt-2" data-i18n="dashboard.reschedule.hint">Scroll horizontally. Red slots are busy.</p>
+        <p class="text-xs text-[#4D4D4D]/80 mt-2 hidden lg:block" data-i18n="dashboard.reschedule.hint">Scroll horizontally. Red slots are busy.</p>
+        <p class="text-xs text-[#4D4D4D]/80 mt-2 lg:hidden" id="rsMobileHint">Tap a date to see available times.</p>
         <p class="text-sm text-red-600 mt-1 hidden" id="resErr"></p>
         <p class="text-sm text-emerald-700 mt-1 hidden" id="resOk"></p>
       </div>
@@ -618,17 +641,40 @@ document.addEventListener('DOMContentLoaded', () => {
   const rsPrev = document.getElementById('rsPrev');
   const rsNext = document.getElementById('rsNext');
   const rsToday= document.getElementById('rsToday');
+  const rsMobileContainer = document.getElementById('rsMobileContainer');
+  const rsMobileDays = document.getElementById('rsMobileDays');
+  const rsMobileTimes = document.getElementById('rsMobileTimes');
+  const rsMobileEmpty = document.getElementById('rsMobileEmpty');
+  const rsMobileHint = document.getElementById('rsMobileHint');
 
   const WINDOW_DAYS = 14, START=6, END=23, STEP=30;
 
   let resState = {
     apptId:null, serviceId:null, masterId:null, slot:null, masters:[],
     baseStart: (()=>{const d=new Date(); d.setHours(0,0,0,0); return d;})(),
-    cache: new Map() // dateStr -> { set:Set('HH:MM'), iso:Map('HH:MM'->iso) }
+    cache: new Map(), // dateStr -> { set:Set('HH:MM'), iso:Map('HH:MM'->iso) }
+    selectedDayIndex:0,
+    days: [],
+    dayData: [],
+    timeRows: [],
+    locale: getLocale()
   };
 
   function openRes(apptId, serviceId){
-    resState = { ...resState, apptId, serviceId, masterId:null, slot:null, masters:[], cache:new Map() };
+    const startOfDay = new Date();
+    startOfDay.setHours(0,0,0,0);
+    resState.apptId = apptId;
+    resState.serviceId = serviceId;
+    resState.masterId = null;
+    resState.slot = null;
+    resState.masters = [];
+    resState.cache = new Map();
+    resState.baseStart = startOfDay;
+    resState.selectedDayIndex = 0;
+    resState.days = [];
+    resState.dayData = [];
+    resState.timeRows = [];
+    resState.locale = getLocale();
     resMaster.innerHTML = '';
     resSubmit.disabled = true;
     resErr.classList.add('hidden'); resOk.classList.add('hidden');
@@ -692,6 +738,12 @@ document.addEventListener('DOMContentLoaded', () => {
         opt.setAttribute('data-i18n', 'dashboard.reschedule.noMasters');
         resMaster.appendChild(opt);
         rsGrid.innerHTML = `<div class="p-4 text-sm" data-i18n="dashboard.reschedule.noAvailability">${translate('dashboard.reschedule.noAvailability', null, 'No availability')}</div>`;
+        if (rsMobileDays) rsMobileDays.innerHTML='';
+        if (rsMobileTimes) rsMobileTimes.innerHTML='';
+        if (rsMobileEmpty){
+          setTextKey(rsMobileEmpty, 'dashboard.reschedule.noAvailability', null, 'No availability yet.');
+          rsMobileEmpty.classList.remove('hidden');
+        }
         queueRefresh();
         return;
       }
@@ -726,26 +778,81 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const from = days[0].toLocaleDateString(locale, {month:'short', day:'numeric'});
     const to   = days[days.length-1].toLocaleDateString(locale, {month:'short', day:'numeric'});
-    rsRange.textContent = `${from} – ${to}`;
+    if (rsRange) {
+      rsRange.textContent = `${from} – ${to}`;
+    }
+
+    resState.locale = locale;
+    resState.days = days;
+    resState.dayData = dayData;
+    resState.timeRows = timeRows;
+
+    if (resState.slot){
+      let stillExists = false;
+      for (const data of dayData){
+        if (data?.iso){
+          for (const value of data.iso.values()){
+            if (value === resState.slot){ stillExists = true; break; }
+          }
+        }
+        if (stillExists) break;
+      }
+      if (!stillExists){
+        resState.slot = null;
+      }
+    }
+
+    if (typeof resState.selectedDayIndex !== 'number' || resState.selectedDayIndex < 0){
+      resState.selectedDayIndex = 0;
+    }
+    if (resState.selectedDayIndex >= days.length){
+      resState.selectedDayIndex = Math.max(days.length - 1, 0);
+    }
+    const firstAvailableIndex = dayData.findIndex(entry => entry && entry.set && entry.set.size);
+    if (firstAvailableIndex !== -1){
+      const currentData = dayData[resState.selectedDayIndex];
+      if (!currentData || !currentData.set || !currentData.set.size){
+        resState.selectedDayIndex = firstAvailableIndex;
+        resState.slot = null;
+      }
+    }
+
+    if (rsMobileHint){
+      setTextKey(rsMobileHint, 'dashboard.reschedule.mobileHint', null, 'Tap a date to see available times.');
+    }
+
+    renderDesktopGrid(locale);
+    renderMobileLayout(locale);
+
+    resSubmit.disabled = !resState.slot;
+  }
+
+  function renderDesktopGrid(locale = resState.locale || getLocale()){
+    if (!rsGrid) return;
+    const days = resState.days || [];
+    const dayData = resState.dayData || [];
+    const timeRows = resState.timeRows || [];
+
     rsGrid.style.setProperty('--days', String(WINDOW_DAYS));
     rsGrid.innerHTML='';
 
-    // head corner
-    const corner=document.createElement('div'); corner.className='ol2__cell ol2__head time'; rsGrid.appendChild(corner);
+    const corner=document.createElement('div');
+    corner.className='ol2__cell ol2__head time';
+    rsGrid.appendChild(corner);
 
-    // day headers
+    const todayString = (new Date()).toDateString();
+
     days.forEach(d=>{
-      const h=document.createElement('div');
-      h.className='ol2__cell ol2__head';
-      const today = (new Date()).toDateString()===d.toDateString();
-      h.innerHTML = `<div class="ol2__day ${today?'today':''}">
+      const header=document.createElement('div');
+      const isToday = todayString === d.toDateString();
+      header.className='ol2__cell ol2__head';
+      header.innerHTML = `<div class="ol2__day ${isToday?'today':''}">
         <div class="t">${d.toLocaleDateString(locale, {weekday:'long'})}</div>
         <div class="s">${d.toLocaleDateString(locale, {month:'short', day:'numeric'})}</div>
       </div>`;
-      rsGrid.appendChild(h);
+      rsGrid.appendChild(header);
     });
 
-    // rows
     timeRows.forEach(t=>{
       const [hh,mm]=t.split(':').map(Number);
       const fake=new Date(); fake.setHours(hh,mm,0,0);
@@ -755,38 +862,179 @@ document.addEventListener('DOMContentLoaded', () => {
 
       days.forEach((d, idx)=>{
         const cell=document.createElement('div'); cell.className='ol2__cell';
-        const data = dayData[idx]; const isFree = data?.set?.has(t);
+        const data = dayData[idx];
+        const isFree = data?.set?.has(t);
         const chip=document.createElement('button');
         chip.type='button'; chip.className='chip ' + (isFree?'chip--free':'chip--busy');
         chip.textContent = fmtHM(fake);
+        chip.disabled = !isFree;
 
         if(isFree){
-          chip.addEventListener('click', ()=>{
-            rsGrid.querySelectorAll('.chip--sel').forEach(x=>x.classList.remove('chip--sel'));
+          const isoValue = data.iso.get(t);
+          if (isoValue === resState.slot){
             chip.classList.add('chip--sel');
-            resState.slot = data.iso.get(t);
-            resSubmit.disabled=false;
+            resState.selectedDayIndex = idx;
+          }
+          chip.addEventListener('click', ()=>{
+            resState.slot = isoValue;
+            resState.selectedDayIndex = idx;
+            resSubmit.disabled = false;
+            renderDesktopGrid(locale);
+            renderMobileLayout(locale);
           });
-        }else{
-          chip.disabled=true;
         }
         cell.appendChild(chip);
         rsGrid.appendChild(cell);
       });
     });
 
-    const todayIdx = days.findIndex(x=>x.toDateString()===(new Date()).toDateString());
-    if (todayIdx>0){ rsWrap.scrollLeft = todayIdx*140 - 140; }
+    if (rsWrap){
+      const selectedChip = rsGrid.querySelector('.chip--sel');
+      if (selectedChip){
+        selectedChip.scrollIntoView({ block:'nearest', inline:'center' });
+      }else{
+        const todayIdx = days.findIndex(x=>x.toDateString()===todayString);
+        if (todayIdx>0){
+          rsWrap.scrollLeft = Math.max(todayIdx*140 - 140, 0);
+        } else {
+          rsWrap.scrollLeft = 0;
+        }
+      }
+    }
+
+    resSubmit.disabled = !resState.slot;
   }
+
+  function renderMobileLayout(locale = resState.locale || getLocale()){
+    if (!rsMobileContainer || !rsMobileDays || !rsMobileTimes) return;
+    const days = resState.days || [];
+
+    rsMobileDays.innerHTML = '';
+
+    if (!days.length){
+      rsMobileTimes.innerHTML = '';
+      if (rsMobileEmpty){
+        setTextKey(rsMobileEmpty, 'dashboard.reschedule.noAvailability', null, 'No availability yet.');
+        rsMobileEmpty.classList.remove('hidden');
+      }
+      return;
+    }
+
+    days.forEach((day, idx) => {
+      const btn=document.createElement('button');
+      btn.type='button';
+      btn.className='rs-mobile-day';
+      if (idx === resState.selectedDayIndex){
+        btn.classList.add('rs-mobile-day--active');
+      }
+      const dateLabel = day.toLocaleDateString(locale, {month:'short', day:'numeric'});
+      const weekdayLabel = day.toLocaleDateString(locale, {weekday:'short'});
+      btn.innerHTML = `<strong>${dateLabel}</strong><span>${weekdayLabel}</span>`;
+      btn.addEventListener('click', ()=>{
+        if (resState.selectedDayIndex === idx) return;
+        resState.selectedDayIndex = idx;
+        resState.slot = null;
+        resSubmit.disabled = true;
+        renderMobileTimes(locale);
+      });
+      rsMobileDays.appendChild(btn);
+    });
+
+    renderMobileTimes(locale);
+
+    const activeBtn = rsMobileDays.querySelector('.rs-mobile-day--active');
+    if (activeBtn){
+      activeBtn.scrollIntoView({ block:'nearest', inline:'center', behavior:'smooth' });
+    }
+  }
+
+  function renderMobileTimes(locale = resState.locale || getLocale()){
+    if (!rsMobileTimes) return;
+    const dayData = resState.dayData || [];
+    const days = resState.days || [];
+
+    let idx = typeof resState.selectedDayIndex === 'number' ? resState.selectedDayIndex : 0;
+    if (idx < 0) idx = 0;
+    if (idx >= days.length) idx = Math.max(days.length - 1, 0);
+    resState.selectedDayIndex = idx;
+
+    if (rsMobileDays){
+      const buttons = rsMobileDays.querySelectorAll('.rs-mobile-day');
+      buttons.forEach((btn, buttonIdx) => {
+        btn.classList.toggle('rs-mobile-day--active', buttonIdx === idx);
+      });
+    }
+
+    rsMobileTimes.innerHTML = '';
+
+    const data = dayData[idx];
+    if (!data || !data.set || !data.set.size){
+      if (rsMobileEmpty){
+        setTextKey(rsMobileEmpty, 'dashboard.reschedule.noAvailability', null, 'No available times on this day.');
+        rsMobileEmpty.classList.remove('hidden');
+      }
+      resSubmit.disabled = true;
+      return;
+    }
+
+    if (rsMobileEmpty){
+      rsMobileEmpty.classList.add('hidden');
+    }
+
+    const times = Array.from(data.set).sort();
+    times.forEach(timeKey => {
+      const iso = data.iso.get(timeKey);
+      if (!iso) return;
+      const btn=document.createElement('button');
+      btn.type='button';
+      btn.className='rs-mobile-time';
+      btn.textContent = fmtHM(new Date(iso));
+      if (iso === resState.slot){
+        btn.classList.add('rs-mobile-time--selected');
+      }
+      btn.addEventListener('click', ()=>{
+        resState.slot = iso;
+        resState.selectedDayIndex = idx;
+        resSubmit.disabled = false;
+        rsMobileTimes.querySelectorAll('.rs-mobile-time--selected').forEach(el=>el.classList.remove('rs-mobile-time--selected'));
+        btn.classList.add('rs-mobile-time--selected');
+        renderDesktopGrid(locale);
+      });
+      rsMobileTimes.appendChild(btn);
+    });
+
+    if (!times.length){
+      if (rsMobileEmpty){
+        setTextKey(rsMobileEmpty, 'dashboard.reschedule.noAvailability', null, 'No available times on this day.');
+        rsMobileEmpty.classList.remove('hidden');
+      }
+      resSubmit.disabled = true;
+    }
+
+    resSubmit.disabled = !resState.slot;
+  }
+
+  let resWindowResizeTimer = null;
+  window.addEventListener('resize', ()=>{
+    if (!resModal || resModal.classList.contains('hidden')) return;
+    if (resWindowResizeTimer) window.clearTimeout(resWindowResizeTimer);
+    resWindowResizeTimer = window.setTimeout(()=>{
+      renderWindow().catch(()=>{});
+    }, 180);
+  });
 
   async function shiftWindow(delta){
     const d=new Date(resState.baseStart); d.setDate(d.getDate()+delta); d.setHours(0,0,0,0); resState.baseStart = d;
+    resState.selectedDayIndex = 0;
+    resState.slot = null;
+    resSubmit.disabled = true;
     await renderWindow();
   }
 
   resMaster.addEventListener('change', async ()=>{
     resState.masterId = Number(resMaster.value);
     resState.slot = null; resSubmit.disabled=true; resState.cache.clear();
+    resState.selectedDayIndex = 0;
     resErr.classList.add('hidden'); clearTextKey(resErr);
     resOk.classList.add('hidden'); clearTextKey(resOk);
     await renderWindow();
