@@ -410,6 +410,49 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
         if UserProfile.objects.filter(phone=phone).exists():
             raise forms.ValidationError("User with such phone number already exists.")
         return phone
+
+
+class UserImportUploadForm(forms.Form):
+    import_file = forms.FileField(label="Upload file")
+
+    SUPPORTED_EXTENSIONS = (".csv", ".xlsx", ".xlsm")
+
+    def clean_import_file(self):
+        uploaded = self.cleaned_data["import_file"]
+        filename = uploaded.name.lower()
+        if not any(filename.endswith(ext) for ext in self.SUPPORTED_EXTENSIONS):
+            raise forms.ValidationError("Unsupported file type. Please upload CSV or XLSX.")
+        uploaded.seek(0)
+        return uploaded
+
+
+class UserImportRowForm(forms.Form):
+    username = forms.CharField(max_length=150)
+    email = forms.EmailField()
+    password = forms.CharField()
+    first_name = forms.CharField(max_length=150)
+    last_name = forms.CharField(max_length=150)
+
+    def clean_username(self):
+        username = self.cleaned_data["username"].strip()
+        if not username:
+            raise forms.ValidationError("Username is required.")
+        User = get_user_model()
+        if User.objects.filter(username=username).exists():
+            raise forms.ValidationError("Username already exists.")
+        return username
+
+    def clean_email(self):
+        email = self.cleaned_data["email"].strip().lower()
+        User = get_user_model()
+        if User.objects.filter(email__iexact=email).exists():
+            raise forms.ValidationError("Email already exists.")
+        return email
+
+    def clean_password(self):
+        password = self.cleaned_data["password"]
+        validate_password(password)
+        return password
 # -----------------------------
 # Custom User Change Form
 # -----------------------------

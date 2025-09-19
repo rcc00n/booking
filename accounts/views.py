@@ -1,6 +1,7 @@
 # accounts/views.py
 from __future__ import annotations
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -125,6 +126,7 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         qs = (
             Appointment.objects
             .filter(client=getattr(user, "userprofile", None))
+            .select_related("payment_status")
             .prefetch_related(items_prefetch)
             .annotate(current_status=Subquery(latest_status))
             .order_by("-start_time")
@@ -153,6 +155,8 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         )
         ctx["chart_labels"] = [m["month"].strftime("%b") for m in month_counts]
         ctx["chart_data"] = [m["cnt"] for m in month_counts]
+
+        ctx["stripe_public_key"] = settings.STRIPE_PUBLIC_KEY
 
         return ctx
 

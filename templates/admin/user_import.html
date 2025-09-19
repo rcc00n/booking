@@ -1,0 +1,32 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+{% load admin_urls %}
+
+{% block breadcrumbs %}
+    <div class="breadcrumbs">
+        <a href="{% url 'admin:index' %}">Home</a>
+        &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+        &rsaquo; {{ title }}
+    </div>
+{% endblock %}
+
+{% block content %}
+    <div class="module">
+        <h1>{{ title }}</h1>
+        <p>Upload a CSV or XLSX file that contains the following columns: <code>Username</code>, <code>Email</code>, <code>Password</code>, <code>First name</code>, <code>Last name</code>.</p>
+        <p>You can start from the <a href="{% static 'samples/users_import_template.csv' %}">downloadable template</a>.</p>
+        <form method="post" enctype="multipart/form-data" novalidate>
+            {% csrf_token %}
+            {{ form.non_field_errors }}
+            <div class="form-row">
+                {{ form.import_file.errors }}
+                {{ form.import_file }}
+            </div>
+            <div class="submit-row">
+                <input type="submit" value="Start import" class="default">
+                <a class="button cancel-link" href="{% url opts|admin_urlname:'changelist' %}">Cancel</a>
+            </div>
+        </form>
+        <p class="help">Passwords must pass the active password validators. Existing usernames or emails are skipped with a detailed report.</p>
+    </div>
+{% endblock %}
