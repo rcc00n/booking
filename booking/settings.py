@@ -372,7 +372,33 @@ JAZZMIN_SETTINGS = {
 }
 ],
 }
+EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
+ANYMAIL = {
+    "SENDGRID_API_KEY": env("SENDGRID_API_KEY"),
+}
+DEFAULT_FROM_EMAIL=env("DEFAULT_FROM_EMAIL")
+SERVER_EMAIL=env("SERVER_EMAIL")
 
+  # для административных уведомлений
+# хороший дефолт, чтобы Django формировал абсолютные ссылки в письмах:
+
+# --- Celery ---
+CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
+CELERY_RESULT_BACKEND = default="redis://127.0.0.1:6379/1"
+CELERY_TIMEZONE = "America/Edmonton"
+CELERY_ENABLE_UTC = True
+
+# Периодический запуск: каждые 5 минут — одна задача сама решит, кому слать 48h и 3h
+CELERY_BEAT_SCHEDULE = {
+    "run-all-schedulers-every-5-min": {
+        "task": "core.tasks.run_all_schedulers",
+        "schedule": timedelta(minutes=5),
+    },
+}
+
+TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = env("TWILIO_AUTH_TOKEN")
+TWILIO_FROM_NUMBER = env("TWILIO_FROM_NUMBER")
 JAZZMIN_UI_TWEAKS = {
     "navbar_small_text": False,
     "footer_small_text": False,
