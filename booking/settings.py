@@ -38,7 +38,7 @@ SECRET_KEY = env("SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["malvabeauty.duckdns.org"]
+ALLOWED_HOSTS = ["malvabeauty.duckdns.org", "127.0.0.1"]
 
 
 # Application definition
@@ -97,23 +97,23 @@ WSGI_APPLICATION = 'booking.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'Malva', # Change to your local DB name
-#         'USER': 'postgres', # Change to your local user name
-#         'PASSWORD': 'admin', # Change to your local user password
-#         'HOST': 'localhost',
-#         'PORT': '5433',
-#     }
-# }
-
 DATABASES = {
-    "default": env.db(
-        "DATABASE_URL",
-        default="postgres://postgres@localhost:5432/postgres",
-    )
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'Malva', # Change to your local DB name
+        'USER': 'postgres', # Change to your local user name
+        'PASSWORD': 'admin', # Change to your local user password
+        'HOST': 'localhost',
+        'PORT': '5433',
+    }
 }
+
+# DATABASES = {
+#     "default": env.db(
+#         "DATABASE_URL",
+#         default="postgres://postgres@localhost:5432/postgres",
+#     )
+# }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -239,21 +239,16 @@ env = Env()
 # ===== Email =====
 USE_SENDGRID = env.bool("USE_SENDGRID", default=False)
 
-if USE_SENDGRID:
-    INSTALLED_APPS += ["sendgrid_backend"]
-    SENDGRID_API_KEY = env.str("SENDGRID_API_KEY")          # без default, чтобы в проде падало, если забыли
-    EMAIL_BACKEND = "sendgrid_backend.SendgridBackend"
-    DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="noreply@example.com")
-    SENDGRID_SANDBOX_MODE_IN_DEBUG = env.bool("SENDGRID_SANDBOX_MODE_IN_DEBUG", default=False)
-    SENDGRID_ECHO_TO_STDOUT = env.bool("SENDGRID_ECHO_TO_STDOUT", default=False)
-else:
-    # дев-режим без ключей
-    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
-    DEFAULT_FROM_EMAIL = "dev@local.test"
+
+INSTALLED_APPS += ["sendgrid_backend"]
+DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="noreply@example.com")
+SENDGRID_SANDBOX_MODE_IN_DEBUG = env.bool("SENDGRID_SANDBOX_MODE_IN_DEBUG", default=False)
+SENDGRID_ECHO_TO_STDOUT = env.bool("SENDGRID_ECHO_TO_STDOUT", default=False)
+
 
 # --- Celery ---
-CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
-CELERY_RESULT_BACKEND = default="redis://127.0.0.1:6379/1"
+CELERY_BROKER_URL = env.str("CELERY_BROKER_URL")
+CELERY_RESULT_BACKEND = env.str("CELERY_RESULT_BACKEND")
 CELERY_TIMEZONE = "America/Edmonton"
 CELERY_ENABLE_UTC = True
 
@@ -379,26 +374,10 @@ ANYMAIL = {
 DEFAULT_FROM_EMAIL=env("DEFAULT_FROM_EMAIL")
 SERVER_EMAIL=env("SERVER_EMAIL")
 
-  # для административных уведомлений
+# для административных уведомлений
 # хороший дефолт, чтобы Django формировал абсолютные ссылки в письмах:
 
-# --- Celery ---
-CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
-CELERY_RESULT_BACKEND = default="redis://127.0.0.1:6379/1"
-CELERY_TIMEZONE = "America/Edmonton"
-CELERY_ENABLE_UTC = True
 
-# Периодический запуск: каждые 5 минут — одна задача сама решит, кому слать 48h и 3h
-CELERY_BEAT_SCHEDULE = {
-    "run-all-schedulers-every-5-min": {
-        "task": "core.tasks.run_all_schedulers",
-        "schedule": timedelta(minutes=5),
-    },
-}
-
-TWILIO_ACCOUNT_SID = env("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = env("TWILIO_AUTH_TOKEN")
-TWILIO_FROM_NUMBER = env("TWILIO_FROM_NUMBER")
 JAZZMIN_UI_TWEAKS = {
     "navbar_small_text": False,
     "footer_small_text": False,
