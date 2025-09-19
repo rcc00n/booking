@@ -10,12 +10,16 @@ from django.contrib.auth.forms import (
     AdminUserCreationForm,
 )
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
-from django.template import TemplateDoesNotExist, engines
-from django.utils.text import slugify
-from django.utils.safestring import mark_safe
-from django.db.models import Prefetch, Q
-from django.forms import inlineformset_factory, BaseInlineFormSet
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+from django.db.models import Prefetch, Q
+from django.forms import BaseInlineFormSet, inlineformset_factory
+from django.template import TemplateDoesNotExist, engines
+from django.utils.safestring import mark_safe
+from django.utils.text import slugify
+
+import phonenumbers
+
 from .models import *
 from .validators import *
 
@@ -37,6 +41,27 @@ HEALTH_CONTRA_CHOICES = [
 EDITABLE_FIELDS_FOR_MASTER = (
     "service", "start_time", "end_time", "unit_price", "promocode",
 )
+
+
+def _normalize_phone(value: str) -> str:
+    """Bring phone number to E.164, default country +1."""
+    raw = (value or "").strip()
+    if not raw:
+        raise ValidationError("Phone number is required.")
+
+    filtered = "".join(ch for ch in raw if ch.isdigit() or ch == "+")
+    if filtered and not filtered.startswith("+"):
+        filtered = "+1" + filtered
+
+    try:
+        parsed = phonenumbers.parse(filtered, None)
+    except phonenumbers.NumberParseException as exc:
+        raise ValidationError("Invalid phone number format.") from exc
+
+    if not phonenumbers.is_possible_number(parsed) or not phonenumbers.is_valid_number(parsed):
+        raise ValidationError("Invalid phone number format.")
+
+    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
 # -----------------------------
 # Appointment Form
@@ -313,6 +338,11 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
     last_name = forms.CharField(required=True)
     phone = forms.CharField(required=True)
     birth_date = forms.DateField(required=False, widget=forms.SelectDateWidget(years=range(1950, 2030)))
+    address = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Street, Apt, City, ZIP"}),
+        label="Address",
+    )
     personal_discount_percent = forms.IntegerField(
         required=False, min_value=0, max_value=100, initial=0, label="Personal discount, %"
     )
@@ -341,6 +371,7 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
         fields = [
             'username', 'email', 'first_name', 'last_name',
             'phone', 'birth_date',
+            'address',
             'usable_password', 'password1', 'password2',
             'is_staff', 'is_active', 'is_superuser',
             'groups', "postal_code", "email_marketing_consent",
@@ -384,6 +415,7 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
             how_heard = self.cleaned_data.get('how_heard')
             email_marketing_consent = self.cleaned_data.get('email_marketing_consent')
             notes = self.cleaned_data.get('notes')
+            address = (self.cleaned_data.get('address') or "").strip()
 
             profile, created = UserProfile.objects.get_or_create(user=user)
             profile.phone = phone
@@ -394,8 +426,9 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
             profile.notes = notes
             profile.health_conditions = self._collect_health_payload()
             profile.postal_code = self.cleaned_data.get('postal_code', "")
+            profile.address = address
 
-            if created and not hasattr(self, "is_client_register"):
+            if not hasattr(self, "is_client_register"):
                 profile.source = "offline"
             profile.save()
 
@@ -406,7 +439,12 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
 
 
     def clean_phone(self):
-        phone = self.cleaned_data.get('phone')
+        raw_phone = self.cleaned_data.get('phone', "")
+        try:
+            phone = _normalize_phone(raw_phone)
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.message)
+
         if UserProfile.objects.filter(phone=phone).exists():
             raise forms.ValidationError("User with such phone number already exists.")
         return phone
@@ -477,7 +515,7 @@ class UserProfileChangeForm(forms.ModelForm):
         model = UserProfile
         fields = (
             "user",
-            "phone", "birth_date", "postal_code",
+            "phone", "birth_date", "address", "postal_code",
             "how_heard",
             "notes",
             # ВАЖНО: тут только реальные поля UserProfile!
@@ -531,6 +569,11 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
     last_name = forms.CharField(required=False)
     phone = forms.CharField(required=True)
     birth_date = forms.DateField(required=False, widget=forms.SelectDateWidget(years=range(1950, 2030)))
+    address = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Street, Apt, City, ZIP"}),
+        label="Address",
+    )
     personal_discount_percent = forms.IntegerField(
         required=False, min_value=0, max_value=100, label="Personal discount, %"
     )
@@ -569,6 +612,7 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
             'user_permissions',
             'password',
             'postal_code',
+            'address',
             'how_heard',
             'email_marketing_consent',
             'notes',
@@ -596,6 +640,7 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
             self.fields['email_marketing_consent'].initial = self.instance.userprofile.email_marketing_consent
             self.fields['notes'].initial = self.instance.userprofile.notes
             self.fields['postal_code'].initial = getattr(up, 'postal_code', "")
+            self.fields['address'].initial = getattr(up, 'address', "")
 
     def clean_postal_code(self):
         val = self.cleaned_data.get("postal_code", "").strip()
@@ -615,6 +660,7 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         birth_date = self.cleaned_data.get('birth_date', None)
         how_heard = self.cleaned_data.get('how_heard', None)
         notes = self.cleaned_data.get('notes', None)
+        address = (self.cleaned_data.get('address') or "").strip()
 
         email_marketing_consent = self.cleaned_data.get('email_marketing_consent', False)
         profile, created = UserProfile.objects.get_or_create(user=user)
@@ -626,6 +672,7 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         profile.set_marketing_consent(email_marketing_consent)
         profile.health_conditions = self._collect_health_payload()
         profile.postal_code = self.cleaned_data.get('postal_code', "")
+        profile.address = address
         profile.save()
 
 
@@ -640,7 +687,12 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
 
 
     def clean_phone(self):
-        phone = self.cleaned_data.get('phone')
+        raw_phone = self.cleaned_data.get('phone', "")
+        try:
+            phone = _normalize_phone(raw_phone)
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.message)
+
         qs = UserProfile.objects.filter(phone=phone)
         if self.instance.pk:
             qs = qs.exclude(user=self.instance)

@@ -9,6 +9,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from core.forms import CustomUserCreationForm, CustomUserChangeForm
 from core.models import (
     Appointment,
     MasterProfile,
@@ -184,3 +185,102 @@ class CartApiTests(TestCase):
         summary_after = self.client.get("/accounts/api/cart/")
         self.assertEqual(summary_after.status_code, 200)
         self.assertEqual(summary_after.json()["count"], 0)
+
+
+class AdminUserFormTests(TestCase):
+    def test_admin_creation_form_saves_profile_fields(self):
+        form_data = {
+            "username": "adminclient",
+            "email": "client_admin@example.com",
+            "first_name": "Admin",
+            "last_name": "Client",
+            "phone": "403-555-7890",
+            "address": "42 Flower Road",  # optional
+            "postal_code": "T2X1A1",
+            "how_heard": "instagram",
+            "email_marketing_consent": "on",
+            "notes": "VIP client",
+            "personal_discount_percent": "5",
+            "password1": "StrongPass123!",
+            "password2": "StrongPass123!",
+            "usable_password": "true",
+            "is_active": "on",
+            "is_staff": "",
+            "is_superuser": "",
+            "groups": [],
+            "chronic_conditions": [],
+            "contraindications": [],
+            "birth_date_year": "1991",
+            "birth_date_month": "2",
+            "birth_date_day": "20",
+        }
+
+        creation_form = CustomUserCreationForm(data=form_data)
+        self.assertTrue(creation_form.is_valid(), creation_form.errors)
+        self.assertEqual(creation_form.cleaned_data['phone'], "+14035557890")
+
+        user = creation_form.save()
+        profile = user.userprofile
+        profile.refresh_from_db()
+
+        self.assertEqual(user.email, "client_admin@example.com")
+        self.assertEqual(profile.phone, "+14035557890")
+        self.assertEqual(profile.address, "42 Flower Road")
+        self.assertEqual(profile.how_heard, "instagram")
+        self.assertTrue(profile.email_marketing_consent)
+        self.assertIsNotNone(profile.email_marketing_consented_at)
+        self.assertEqual(profile.personal_discount_percent, 5)
+        self.assertEqual(profile.source, "offline")
+
+    def test_admin_change_form_updates_profile(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="change_client",
+            email="change_client@example.com",
+            password="OldPass123!",
+            first_name="Change",
+            last_name="Client",
+        )
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.phone = "+14035550000"
+        profile.address = "Initial address"
+        profile.save()
+
+        form_data = {
+            "username": user.username,
+            "email": "change_client@example.com",
+            "first_name": "Change",
+            "last_name": "Client",
+            "phone": "(403) 777-1111",
+            "address": "500 Updated Ave",
+            "postal_code": "T2Y7B1",
+            "how_heard": "google",
+            "email_marketing_consent": "on",
+            "notes": "Updated note",
+            "personal_discount_percent": "7",
+            "is_active": "on",
+            "is_staff": "",
+            "is_superuser": "",
+            "groups": [],
+            "user_permissions": [],
+            "password": user.password,
+            "chronic_conditions": [],
+            "contraindications": [],
+            "birth_date_year": "1990",
+            "birth_date_month": "1",
+            "birth_date_day": "15",
+        }
+
+        change_form = CustomUserChangeForm(data=form_data, instance=user)
+        self.assertTrue(change_form.is_valid(), change_form.errors)
+        self.assertEqual(change_form.cleaned_data['phone'], "+14037771111")
+
+        updated_user = change_form.save()
+        updated_profile = updated_user.userprofile
+        updated_profile.refresh_from_db()
+
+        self.assertEqual(updated_profile.phone, "+14037771111")
+        self.assertEqual(updated_profile.address, "500 Updated Ave")
+        self.assertEqual(updated_profile.how_heard, "google")
+        self.assertTrue(updated_profile.email_marketing_consent)
+        self.assertEqual(updated_profile.personal_discount_percent, 7)

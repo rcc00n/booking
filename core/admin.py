@@ -276,7 +276,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     """
     add_form = CustomUserCreationForm
     form = CustomUserChangeForm
-    export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
+    export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
 
     add_fieldsets = (
         (None, {
@@ -284,7 +284,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             'fields': (
                 'username', 'usable_password', 'password1', 'password2',
                 'email', 'first_name', 'last_name',
-                'phone', 'birth_date', 'postal_code',
+                'phone', 'birth_date', 'address', 'postal_code',
                 'personal_discount_percent', 'how_heard', 'email_marketing_consent',
                 'notes',
                 'is_active', 'is_staff', 'is_superuser', 'groups',
@@ -304,6 +304,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     def get_export_row(self, obj):
         phone = obj.userprofile.phone if hasattr(obj, 'userprofile') else ''
         birth_date = obj.userprofile.birth_date if hasattr(obj, 'userprofile') else ''
+        address = obj.userprofile.address if hasattr(obj, 'userprofile') else ''
         postal_code = obj.userprofile.postal_code if hasattr(obj, 'userprofile') else ''
         source = obj.userprofile.source if hasattr(obj, 'userprofile') else ''
         consent = obj.userprofile.email_marketing_consent if hasattr(obj, 'userprofile') else ''
@@ -315,6 +316,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             obj.last_name,
             phone,
             birth_date,
+            address,
             postal_code,
             obj.is_staff,
             obj.is_superuser,
@@ -333,7 +335,10 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     # Field layout when editing a user
     fieldsets = (
         (None, {'fields': ('username', 'email', 'password', 'personal_discount_percent')}),
-        ('Personal Info', {'fields': ('first_name', 'last_name', 'phone', 'birth_date', 'postal_code', 'how_heard', 'email_marketing_consent')}),
+        ('Personal Info', {'fields': (
+            'first_name', 'last_name', 'phone', 'birth_date', 'address',
+            'postal_code', 'how_heard', 'email_marketing_consent'
+        )}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Files', {'fields': ('files',)}),
         ('Notes', {'fields': ('notes',)}),
