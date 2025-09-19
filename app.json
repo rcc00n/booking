@@ -1,7 +1,17 @@
 {
   "checks": {
     "web": [
-      { "type": "http", "path": "/", "port": 5000, "attempts": 3, "timeout": 5 }
+      {
+        "type": "http",
+        "port": 5000,
+        "path": "/",
+        "attempts": 3,
+        "timeout": 5,
+        "grace": 10,
+        "headers": {
+          "Host": "malvabeauty.duckdns.org"
+        }
+      }
     ]
   }
 }
