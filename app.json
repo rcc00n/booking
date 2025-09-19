@@ -1,0 +1,20 @@
+{
+  "scripts": {},
+  "formation": {
+    "web": {
+      "quantity": 1
+    }
+  },
+  "dokku": {
+    "dependencies": []
+  },
+  "checks": {
+    "web": [
+      {
+        "path": "/",
+        "timeout": 5,
+        "attempts": 3
+      }
+    ]
+  }
+}
