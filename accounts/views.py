@@ -7,7 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import LoginView
 from django.core.exceptions import PermissionDenied
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponseRedirect
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.views.generic import TemplateView, ListView
@@ -216,14 +216,25 @@ class ClientRegisterView(CreateView):
     success_url = None  # вычисляем в get_success_url()
 
     def form_valid(self, form):
-        form.save()
         user = form.save()
+
+        profile = getattr(user, "userprofile", None)
+        if profile and profile.source != "online":
+            profile.source = "online"
+            profile.save(update_fields=["source"])
+
         if self.request.headers.get("x-requested-with") == "XMLHttpRequest":
-            return HttpResponse("OK")
-        if hasattr(user, "userprofile"):
-            user.userprofile.source = "online"
-            user.userprofile.save(update_fields=["source"])
-        return super().form_valid(form)
+            return JsonResponse(
+                {
+                    "status": "ok",
+                    "username": user.username,
+                    "redirect": self.get_success_url(),
+                },
+                status=201,
+            )
+
+        self.object = user
+        return HttpResponseRedirect(self.get_success_url())
 
     def form_invalid(self, form):
         if self.request.headers.get("x-requested-with") == "XMLHttpRequest":

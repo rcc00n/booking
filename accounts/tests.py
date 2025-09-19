@@ -1,8 +1,12 @@
 import json
 from datetime import timedelta, time
+from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from core.models import (
@@ -17,8 +21,85 @@ from core.models import (
 )
 
 
+class RegistrationTests(TestCase):
+    def setUp(self):
+        self.User = get_user_model()
+        self.url = reverse('register')
+
+    def test_password_mismatch_does_not_create_user(self):
+        data = {
+            "username": "",
+            "email": "newclient@example.com",
+            "phone": "+1 (403) 555-1234",
+            "password1": "StrongPass123!",
+            "password2": "Mismatch123!",
+        }
+        response = self.client.post(self.url, data, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.User.objects.count(), 0)
+        self.assertIn('password2', response.json())
+
+    def test_successful_registration_creates_profile_and_allows_login(self):
+        data = {
+            "username": "",  # разрешаем автогенерацию
+            "email": "Client@Example.com",
+            "phone": "403-555-1234",
+            "address": "123 Test Street",
+            "how_heard": "google",
+            "email_marketing_consent": "on",
+            "password1": "StrongPass123!",
+            "password2": "StrongPass123!",
+        }
+        response = self.client.post(self.url, data, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload.get('status'), 'ok')
+        generated_username = payload.get('username')
+        self.assertTrue(generated_username)
+        self.assertEqual(payload.get('redirect'), f"{reverse('login')}?registered=1")
+
+        self.assertEqual(self.User.objects.count(), 1)
+        user = self.User.objects.get()
+        self.assertEqual(user.username, generated_username)
+        self.assertEqual(user.email, data['email'].lower())
+
+        profile = getattr(user, 'userprofile', None)
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile.phone, '+14035551234')
+        self.assertEqual(profile.address, data['address'])
+        self.assertEqual(profile.how_heard, data['how_heard'])
+        self.assertTrue(profile.email_marketing_consent)
+        self.assertIsNotNone(profile.email_marketing_consented_at)
+        self.assertEqual(profile.source, 'online')
+        self.assertTrue(profile.userrole_set.filter(role__name='Client').exists())
+
+        self.assertTrue(self.client.login(username=generated_username, password=data['password1']))
+        self.client.logout()
+        self.assertTrue(self.client.login(username=data['email'], password=data['password1']))
+
+        self.assertEqual(self.User.objects.count(), 1)
+        self.assertEqual(UserProfile.objects.count(), 1)
+
+
+@override_settings(STRIPE_SECRET_KEY='sk_test_dummy', STRIPE_PUBLIC_KEY='pk_test_dummy')
 class CartApiTests(TestCase):
     def setUp(self):
+        create_intent_patcher = patch('core.views.payment_services.create_or_update_payment_intent')
+        self.addCleanup(create_intent_patcher.stop)
+        self.mock_create_intent = create_intent_patcher.start()
+
+        payment_stub = SimpleNamespace(
+            id='pay_test',
+            status='requires_payment_method',
+            amount=Decimal('0'),
+            amount_received=Decimal('0'),
+            currency='cad',
+            livemode=False,
+            stripe_payment_intent_id='pi_test',
+        )
+        intent_stub = SimpleNamespace(id='pi_test', client_secret='secret_test')
+        self.mock_create_intent.return_value = SimpleNamespace(payment=payment_stub, intent=intent_stub)
+
         User = get_user_model()
         self.password = "testpass123"
         self.user = User.objects.create_user(username="client", password=self.password, email="client@example.com")

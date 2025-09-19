@@ -89,8 +89,13 @@ class ClientRegistrationForm(UserCreationForm):
 
     def clean_username(self):
         username = (self.cleaned_data.get("username") or "").strip()
-        if username and CustomUserDisplay.objects.filter(username=username).exists():
-            raise forms.ValidationError("Такой логин уже занят.")
+        if username:
+            qs = CustomUserDisplay.objects.filter(username=username)
+            instance_pk = getattr(self.instance, "pk", None)
+            if instance_pk:
+                qs = qs.exclude(pk=instance_pk)
+            if qs.exists():
+                raise forms.ValidationError("Такой логин уже занят.")
         return username or None
 
     # --- Save ---
@@ -100,36 +105,45 @@ class ClientRegistrationForm(UserCreationForm):
 
         # email / username
         user.email = self.cleaned_data["email"]
-        if not self.cleaned_data.get("username"):
-            # генерируем из e-mail: "john@example.com" → "john"
-            user.username = slugify(user.email.split("@")[0])
-            # гарантируем уникальность
+        provided_username = self.cleaned_data.get("username")
+        if provided_username:
+            user.username = provided_username
+        else:
+            base = slugify(user.email.split("@")[0]) or "user"
+            candidate = base
             suffix = 1
-            base = user.username
-            while CustomUserDisplay.objects.filter(username=user.username).exists():
-                user.username = f"{base}{suffix}"
+            while CustomUserDisplay.objects.filter(username=candidate).exclude(pk=user.pk).exists():
+                candidate = f"{base}{suffix}"
                 suffix += 1
+            user.username = candidate
 
         if commit:
             user.save()
 
-            # профиль
             phone = self.cleaned_data["phone"]  # уже в E.164
-            profile = UserProfile.objects.create(
+            address = self.cleaned_data.get("address") or ""
+            how_heard = self.cleaned_data.get("how_heard") or ""
+
+            profile, created = UserProfile.objects.get_or_create(
                 user=user,
-                phone=phone,
-                address=self.cleaned_data.get("address") or "",
-                how_heard=self.cleaned_data.get("how_heard") or "",
+                defaults={
+                    "phone": phone,
+                    "address": address,
+                    "how_heard": how_heard,
+                },
             )
-            # согласие на e-mail-рассылки (+ timestamp)
+            if not created:
+                profile.phone = phone
+                profile.address = address
+                profile.how_heard = how_heard
+
             consent = bool(self.cleaned_data.get("email_marketing_consent"))
             profile.set_marketing_consent(consent)
             profile.save(update_fields=[
-                "address", "how_heard",
+                "phone", "address", "how_heard",
                 "email_marketing_consent", "email_marketing_consented_at",
             ])
 
-            # роль «Client»
             client_role, _ = Role.objects.get_or_create(name="Client")
             profile.userrole_set.get_or_create(role=client_role)
 

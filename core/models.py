@@ -62,6 +62,7 @@ class UserProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     phone = models.CharField(max_length=32, unique=True, null=True, blank=True, default=None)
     birth_date = models.DateField(null=True, blank=True)
+    address = models.TextField(blank=True)
 
     # === NEW ===
     email_marketing_consent = models.BooleanField(default=False)   # согласие на рассылки
