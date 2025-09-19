@@ -37,7 +37,7 @@
                     <div class="appt-list">
                         {% for app in recent_appointments %}
                             <div class="appt-item{% if app.start_time.date == today %} appt-today{% endif %}"
-                                 onclick="window.location.href='{% url 'admin:core_appointment_change' app.id %}'">
+                                 onclick="window.location.href='{% url 'admin:core_appointment_change' app.appointment.id %}'">
                                 <div class="appt-date">
                                     <span class="appt-day">{{ app.start_time|date:"d" }}</span>
                                     <span class="appt-month">{{ app.start_time|date:"b" }}</span>
