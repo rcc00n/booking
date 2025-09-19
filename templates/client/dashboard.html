@@ -679,8 +679,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadMastersAndRender(){
-    elError.classList.add('hidden');
-    clearTextKey(elError);
+    resErr.classList.add('hidden');
+    clearTextKey(resErr);
     try{
       const first = await fetchAvail(ymd(resState.baseStart), null);
       resState.masters = (first.raw && first.raw.masters) || [];

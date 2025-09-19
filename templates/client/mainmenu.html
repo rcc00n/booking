@@ -287,8 +287,8 @@
       .header-actions .lang-picker__label{opacity:.85;}
       .header-actions .lang-picker__select{width:100%;background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.35);}
       .mobile-close{display:inline-flex;align-items:center;gap:.45rem;color:#fff;background:transparent;border:none;font-size:1rem;font-weight:700;justify-content:flex-start;padding:0;}
-      .mobile-nav-backdrop{position:fixed;inset:0;background:rgba(15,23,17,.55);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:110;}
-      body.nav-open .mobile-nav-backdrop{opacity:1;pointer-events:auto;}
+      .mobile-nav-backdrop{position:fixed;inset:0;background:rgba(15,23,17,.55);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:110;display:none;}
+      body.nav-open .mobile-nav-backdrop{opacity:1;pointer-events:auto;display:block;}
       .hero{padding:4rem 1.25rem 3.4rem;align-items:flex-start;text-align:left;gap:1.2rem;}
       .hero h1{font-size:clamp(2rem,8vw,2.6rem);} 
       .hero p{font-size:1rem;max-width:32ch;}
@@ -299,9 +299,12 @@
       .service-card{border-radius:1.25rem;padding:1rem .95rem;}
       .service-card__img{height:160px;}
       .service-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;}
-      .floating-cart{display:flex;position:fixed;right:1.15rem;bottom:1.25rem;background:linear-gradient(135deg,var(--green) 0%,var(--gold) 100%);color:#fff;border:none;border-radius:999px;padding:.75rem 1.15rem;align-items:center;gap:.6rem;box-shadow:0 18px 28px rgba(32,64,41,.25);z-index:105;}
+      .floating-cart{display:none;position:fixed;right:1.15rem;bottom:1.25rem;background:linear-gradient(135deg,var(--green) 0%,var(--gold) 100%);color:#fff;border:none;border-radius:999px;padding:.75rem 1.15rem;align-items:center;gap:.6rem;box-shadow:0 18px 28px rgba(32,64,41,.25);z-index:105;transition:transform .2s ease,opacity .2s ease;}
+      .floating-cart.floating-cart--visible{display:flex;}
       .floating-cart__icon{font-size:1.35rem;line-height:1;}
       .floating-cart__count{min-width:1.9rem;height:1.9rem;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:rgba(255,255,255,.18);font-weight:800;}
+      body.modal-open .floating-cart,
+      body.nav-open .floating-cart{display:none;}
     }
 
     @media (max-width: 540px){
@@ -827,6 +830,27 @@
       const inputPostal=document.getElementById('paymentPostal');
       const inputCountry=document.getElementById('paymentCountry');
 
+      const BODY_MODAL_CLASS = 'modal-open';
+
+      function openModalElement(el){
+        if(!el) return;
+        el.classList.add('modal--open');
+        document.body.classList.add(BODY_MODAL_CLASS);
+      }
+
+      function closeModalElement(el){
+        if(!el) return;
+        el.classList.remove('modal--open');
+        if(!document.querySelector('.modal.modal--open')){
+          document.body.classList.remove(BODY_MODAL_CLASS);
+        }
+      }
+
+      if(floatingCartBtn){
+        floatingCartBtn.setAttribute('aria-hidden','true');
+        floatingCartBtn.tabIndex = -1;
+      }
+
       let summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
       let cartState = { items: [], count: 0, total_price: '0', total_duration_min: 0 };
 
@@ -1054,8 +1078,15 @@
       function updateCartUI(data){
         if(!data) return;
         cartState = data;
-        if(cartCount){ cartCount.textContent = data.count || 0; }
-        if(floatingCartCount){ floatingCartCount.textContent = data.count || 0; }
+        const count = Number(data.count || 0);
+        if(cartCount){ cartCount.textContent = count; }
+        if(floatingCartCount){ floatingCartCount.textContent = count; }
+        if(floatingCartBtn){
+          const hasItems = count > 0;
+          floatingCartBtn.classList.toggle('floating-cart--visible', hasItems);
+          floatingCartBtn.setAttribute('aria-hidden', hasItems ? 'false' : 'true');
+          floatingCartBtn.tabIndex = hasItems ? 0 : -1;
+        }
 
         const items = Array.isArray(data.items) ? data.items : [];
         if(cartItems){
@@ -1149,6 +1180,11 @@
           if(resp.status===401){
             if(cartCount) cartCount.textContent='0';
             if(floatingCartCount) floatingCartCount.textContent='0';
+            if(floatingCartBtn){
+              floatingCartBtn.classList.remove('floating-cart--visible');
+              floatingCartBtn.setAttribute('aria-hidden','true');
+              floatingCartBtn.tabIndex = -1;
+            }
             return;
           }
           if(!resp.ok) throw new Error(translate('services.cart.loadFailed'));
@@ -1235,13 +1271,13 @@
         if(!isAuth){ window.location=loginUrl; return; }
         setCartMessage(null);
         if(cartModal){
-          cartModal.classList.add('modal--open');
+          openModalElement(cartModal);
         }
         await refreshCart(true);
       }
 
       function closeCartModal(){
-        if(cartModal){ cartModal.classList.remove('modal--open'); }
+        if(cartModal){ closeModalElement(cartModal); }
         setCartMessage(null);
       }
 
@@ -1310,7 +1346,7 @@
         }
 
         if (paymentModal) {
-          paymentModal.classList.add('modal--open');
+          openModalElement(paymentModal);
         }
 
         if (!context.payment.client_secret) {
@@ -1333,7 +1369,7 @@
       }
 
       function closePaymentModal(){
-        if(paymentModal){ paymentModal.classList.remove('modal--open'); }
+        if(paymentModal){ closeModalElement(paymentModal); }
         setPaymentMessage(null);
         resetPaymentForm();
         currentPaymentContext = null;
@@ -1466,10 +1502,10 @@
         availabilityCache.clear();
         baseStart = new Date(); baseStart.setHours(0,0,0,0);
 
-        modal.classList.add('modal--open');
+        openModalElement(modal);
         loadMastersAndRender();
       }
-      function closeModal(){ modal.classList.remove('modal--open'); }
+      function closeModal(){ closeModalElement(modal); }
 
       // ===== availability by day/master =====
       async function fetchAvailability(dayISO, masterId){
@@ -1702,10 +1738,7 @@
       btnSubmit.addEventListener('click',addToCart);
 
       if(cartBtn){
-        cartBtn.addEventListener('click', () => {
-          closeMenuDrawer();
-          openCartModal();
-        });
+        cartBtn.addEventListener('click', openCartModal);
       }
       if(floatingCartBtn){ floatingCartBtn.addEventListener('click', openCartModal); }
       if(cartClose){ cartClose.addEventListener('click', closeCartModal); }
@@ -1771,6 +1804,11 @@
       } else {
         if(cartCount) cartCount.textContent='0';
         if(floatingCartCount) floatingCartCount.textContent='0';
+        if(floatingCartBtn){
+          floatingCartBtn.classList.remove('floating-cart--visible');
+          floatingCartBtn.setAttribute('aria-hidden','true');
+          floatingCartBtn.tabIndex = -1;
+        }
       }
 
       /* ===== Live search (как было) ===== */
