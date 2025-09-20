@@ -235,6 +235,7 @@
     .outlook__cell{border-bottom:1px solid var(--grid-border); border-right:1px solid var(--grid-border); padding:.25rem .4rem; background:#fff; white-space:nowrap; text-overflow:ellipsis}
     .outlook__cell.time{position:sticky;left:0;background:#fff;z-index:2;font-size:.85rem;color:#666}
     .outlook__head{position:sticky;top:0;background:#fff;z-index:3;border-bottom:2px solid var(--grid-border);box-shadow:0 1px 0 rgba(0,0,0,.04); padding:.4rem .45rem}
+    .outlook__head.day--selected{box-shadow:0 0 0 2px color-mix(in srgb, var(--gold) 45%, transparent);border-bottom-color:color-mix(in srgb, var(--gold) 55%, transparent);}
     .day-head{display:flex;flex-direction:column}
     .day-title{font:800 .92rem/1.1 var(--font-heading); color:var(--green-dark); text-transform:capitalize}
     .day-sub{font-size:.75rem;color:#666;margin-top:.15rem}
@@ -257,20 +258,15 @@
     .legend .lg-free i{background:var(--chip-bg);border:2px solid color-mix(in srgb, var(--free) 60%, #fff)}
     .legend .lg-busy i{background:var(--busy)}
 
-    .book-mobile{display:none}
-    .book-mobile__hint{font-size:.78rem;color:#6a756c;margin-top:.5rem;text-align:left}
-    .book-mobile__days{display:flex;gap:.6rem;overflow-x:auto;padding:.5rem 0;margin-top:.4rem;scrollbar-width:thin}
-    .book-mobile__days::-webkit-scrollbar{height:6px}
-    .book-mobile__days::-webkit-scrollbar-thumb{background:rgba(32,64,41,.25);border-radius:999px}
-    .book-mobile__day{flex:0 0 auto;min-width:116px;border-radius:.85rem;border:1px solid #DAD3C1;padding:.65rem .8rem;background:#fff;color:#204029;font-weight:700;line-height:1.3;text-align:left;box-shadow:0 10px 22px rgba(32,64,41,.08);transition:.2s ease;}
-    .book-mobile__day strong{display:block;font-size:.95rem;color:#204029;font-weight:800;}
-    .book-mobile__day span{display:block;font-size:.78rem;color:#6b7a6f;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;}
-    .book-mobile__day.is-active{background:#204029;color:#fff;border-color:#204029;box-shadow:0 14px 28px rgba(32,64,41,.22);}
-    .book-mobile__day.is-active strong,
-    .book-mobile__day.is-active span{color:#fff;}
-    .book-mobile__times{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin-top:1rem;}
-    .book-mobile__time{padding:.65rem .8rem;border-radius:.75rem;border:1px solid #DAD3C1;background:#fff;font-weight:700;color:#204029;box-shadow:0 8px 20px rgba(32,64,41,.12);transition:.2s ease;}
-    .book-mobile__time.is-selected{background:#204029;color:#fff;border-color:#204029;box-shadow:0 12px 28px rgba(32,64,41,.22);}
+    .book-mobile{display:none;margin-top:.75rem;border:1px solid #DAD3C1;border-radius:1rem;padding:1rem;background:#fff;box-shadow:0 16px 30px rgba(32,64,41,.12)}
+    .book-mobile__date{display:flex;flex-direction:column;gap:.45rem}
+    .book-mobile__date label{font-size:.82rem;font-weight:700;color:#204029;text-transform:uppercase;letter-spacing:.06em}
+    .book-mobile__date input{height:2.65rem;border:1px solid #DAD3C1;border-radius:.65rem;padding:0 .75rem;font:600 .95rem/1 var(--font-ui);color:#204029;background:#fff}
+    .book-mobile__date input:focus{outline:2px solid color-mix(in srgb, var(--green) 45%, transparent);outline-offset:2px}
+    .book-mobile__times{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin-top:1rem}
+    .book-mobile__time{padding:.7rem .8rem;border-radius:.75rem;border:1.5px solid #DAD3C1;background:#fff;font-weight:700;color:#204029;box-shadow:0 12px 26px rgba(32,64,41,.14);transition:.18s ease;text-align:center}
+    .book-mobile__time:focus-visible{outline:2px solid color-mix(in srgb, var(--gold) 55%, transparent);outline-offset:2px}
+    .book-mobile__time.is-selected{background:#204029;color:#fff;border-color:#204029;box-shadow:0 16px 32px rgba(32,64,41,.26)}
     .book-mobile__empty{margin-top:1rem;font-size:.85rem;color:#6b7a6f;text-align:center;display:none}
 
     /* Zoom-proof modal sizes */
@@ -289,7 +285,6 @@
       .payment-fieldset{grid-template-columns:1fr}
       .book-desktop{display:none}
       .book-mobile{display:block}
-      .book-mobile__times{grid-template-columns:1fr 1fr}
     }
 
     @media (max-width: 560px){
@@ -521,10 +516,12 @@
             <label data-i18n="services.modal.chooseTime">Choose time</label>
 
             <div class="book-mobile" id="bookMobile" aria-live="polite">
-              <div class="book-mobile__days" id="bookMobileDays"></div>
+              <div class="book-mobile__date">
+                <label for="bookMobileDate" data-i18n="services.modal.mobileDate">Date</label>
+                <input type="date" id="bookMobileDate" name="bookMobileDate">
+              </div>
               <div class="book-mobile__times" id="bookMobileTimes"></div>
               <div class="book-mobile__empty" id="bookMobileEmpty">No availability yet.</div>
-              <div class="book-mobile__hint" id="bookMobileHint">Tap a date to see available times.</div>
             </div>
 
             <div class="outlook book-desktop" id="ol">
@@ -1505,10 +1502,9 @@
       const olNext=document.getElementById('olNext');
       const olToday=document.getElementById('olToday');
       const mobileScheduleContainer = document.getElementById('bookMobile');
-      const mobileDayList = document.getElementById('bookMobileDays');
+      const mobileDateInput = document.getElementById('bookMobileDate');
       const mobileTimeList = document.getElementById('bookMobileTimes');
       const mobileEmpty = document.getElementById('bookMobileEmpty');
-      const mobileHint = document.getElementById('bookMobileHint');
 
       // ===== state =====
       const WINDOW_DAYS = 14;
@@ -1524,7 +1520,7 @@
         dayData: [],
         timeRows: [],
         locale: getLocale(),
-        selectedDayIndex: 0,
+        selectedDate: null,
       };
 
       // ===== open/close =====
@@ -1549,12 +1545,14 @@
           dayData: [],
           timeRows: [],
           locale: getLocale(),
-          selectedDayIndex: 0,
+          selectedDate: null,
         };
-        if (mobileDayList) mobileDayList.innerHTML = '';
         if (mobileTimeList) mobileTimeList.innerHTML = '';
         if (mobileEmpty) mobileEmpty.style.display = 'none';
-        if (mobileHint) mobileHint.style.display = '';
+        if (mobileDateInput){
+          mobileDateInput.value = '';
+          mobileDateInput.disabled = true;
+        }
 
         openModalElement(modal);
         loadMastersAndRender();
@@ -1614,7 +1612,8 @@
       }
 
       function applySelection(day, iso, locale){
-        if (!iso) return;
+        if (!iso || !day) return;
+        current.masterId = Number(elMaster?.value || current.masterId || 0);
         current.slot = iso;
         const masterText = elMaster?.selectedOptions[0]?.text || '';
         const timeText = fmtHM(new Date(iso));
@@ -1632,6 +1631,14 @@
         btnSubmit.disabled = true;
       }
 
+      function selectSlot(day, iso, locale){
+        if (!iso || !day) return;
+        scheduleState.selectedDate = ymd(day);
+        applySelection(day, iso, locale);
+        renderDesktopSchedule(locale);
+        renderMobileSchedule(locale);
+      }
+
       async function loadMastersAndRender(){
         elError.style.display='none';
         resetSelection();
@@ -1647,11 +1654,14 @@
             opt.textContent = translate('services.modal.noMasters', null, 'No masters available');
             elMaster.appendChild(opt);
             olGrid.innerHTML=`<div class="p-4 text-sm text-center">${translate('services.modal.noAvailability', null, 'No availability')}</div>`;
-            if (mobileDayList) mobileDayList.innerHTML='';
             if (mobileTimeList) mobileTimeList.innerHTML='';
             if (mobileEmpty){
               mobileEmpty.style.display='block';
               setTextKey(mobileEmpty, 'services.modal.noAvailability', null, 'No availability yet.');
+            }
+            if (mobileDateInput){
+              mobileDateInput.value='';
+              mobileDateInput.disabled=true;
             }
             btnSubmit.disabled = true;
             return;
@@ -1693,11 +1703,13 @@
         scheduleState.timeRows = timeRows;
         scheduleState.locale = locale;
 
-        if (scheduleState.selectedDayIndex >= days.length){
-          scheduleState.selectedDayIndex = Math.max(days.length - 1, 0);
-        }
-        if (scheduleState.selectedDayIndex < 0){
-          scheduleState.selectedDayIndex = 0;
+        const firstDate = days[0] ? ymd(days[0]) : null;
+        const lastDate = days[days.length-1] ? ymd(days[days.length-1]) : null;
+
+        if (mobileDateInput){
+          mobileDateInput.disabled = !days.length;
+          mobileDateInput.min = firstDate || '';
+          mobileDateInput.max = lastDate || '';
         }
 
         let slotStillValid = false;
@@ -1718,23 +1730,21 @@
           resetSelection();
         }
 
-        const firstAvailableIndex = dayData.findIndex(data => data && data.set && data.set.size);
-        if (firstAvailableIndex !== -1){
-          if (!current.slot && scheduleState.selectedDayIndex >= dayData.length){
-            scheduleState.selectedDayIndex = firstAvailableIndex;
-          }
-          if (!current.slot && !dayData[scheduleState.selectedDayIndex]?.set?.size){
-            scheduleState.selectedDayIndex = firstAvailableIndex;
+        if (!scheduleState.selectedDate || (firstDate && scheduleState.selectedDate < firstDate) || (lastDate && scheduleState.selectedDate > lastDate)){
+          scheduleState.selectedDate = null;
+        }
+
+        if (!scheduleState.selectedDate){
+          const firstAvailable = dayData.findIndex(data => data && data.set && data.set.size);
+          if (firstAvailable !== -1){
+            scheduleState.selectedDate = ymd(days[firstAvailable]);
+          } else if (firstDate){
+            scheduleState.selectedDate = firstDate;
           }
         }
 
-        if (mobileHint) {
-          if (days.length){
-            setTextKey(mobileHint, 'services.modal.mobileHint', null, 'Tap a date to see available times.');
-            mobileHint.style.display = '';
-          }else{
-            mobileHint.style.display = 'none';
-          }
+        if (mobileDateInput && scheduleState.selectedDate){
+          mobileDateInput.value = scheduleState.selectedDate;
         }
 
         renderDesktopSchedule(locale);
@@ -1765,11 +1775,13 @@
         olGrid.appendChild(headTime);
 
         const todayStr = (new Date()).toDateString();
+        const selectedDateStr = scheduleState.selectedDate;
 
         days.forEach(d=>{
           const header=document.createElement('div');
           header.className='outlook__cell outlook__head';
           if (todayStr === d.toDateString()) header.classList.add('day--today');
+          if (selectedDateStr && selectedDateStr === ymd(d)) header.classList.add('day--selected');
           header.innerHTML = `<div class="day-head">
             <div class="day-title">${d.toLocaleDateString(locale, {weekday:'long'})}</div>
             <div class="day-sub">${d.toLocaleDateString(locale, {month:'short', day:'numeric'})}</div>
@@ -1798,15 +1810,9 @@
               const iso = data.iso.get(t);
               if (iso === current.slot){
                 chip.classList.add('slot-selected');
-                scheduleState.selectedDayIndex = idx;
               }
               chip.addEventListener('click', ()=>{
-                olGrid.querySelectorAll('.slot-selected').forEach(el=>el.classList.remove('slot-selected'));
-                chip.classList.add('slot-selected');
-                current.masterId = Number(elMaster.value);
-                applySelection(d, iso, locale);
-                scheduleState.selectedDayIndex = idx;
-                renderMobileSchedule(locale);
+                selectSlot(d, iso, locale);
               });
             }
             cell.appendChild(chip);
@@ -1831,11 +1837,10 @@
       }
 
       function renderMobileSchedule(locale = scheduleState.locale || getLocale()){
-        if (!mobileScheduleContainer || !mobileDayList || !mobileTimeList) return;
+        if (!mobileScheduleContainer || !mobileTimeList) return;
         const days = scheduleState.days;
         const dayData = scheduleState.dayData;
 
-        mobileDayList.innerHTML = '';
         mobileTimeList.innerHTML = '';
 
         if (!days.length){
@@ -1850,64 +1855,48 @@
           mobileEmpty.style.display = 'none';
         }
 
-        const todayStr = (new Date()).toDateString();
+        const selectedDateStr = scheduleState.selectedDate;
+        const selectedDayIndex = days.findIndex(d => ymd(d) === selectedDateStr);
+        const fallbackIndex = days.findIndex((_, idx) => dayData[idx] && dayData[idx].set && dayData[idx].set.size);
+        const useIndex = selectedDayIndex !== -1 ? selectedDayIndex : (fallbackIndex !== -1 ? fallbackIndex : 0);
+        const day = days[useIndex];
+        const dayKey = day ? ymd(day) : null;
+        if (dayKey && scheduleState.selectedDate !== dayKey){
+          scheduleState.selectedDate = dayKey;
+          if (mobileDateInput) mobileDateInput.value = dayKey;
+        }
 
-        days.forEach((day, idx)=>{
-          const btn=document.createElement('button');
-          btn.type='button';
-          btn.className='book-mobile__day';
-          if (day.toDateString() === todayStr) btn.setAttribute('data-today', 'true');
-          if (idx === scheduleState.selectedDayIndex){
-            btn.classList.add('is-active');
-          }
-          btn.innerHTML = `<strong>${day.toLocaleDateString(locale, {month:'short', day:'numeric'})}</strong><span>${day.toLocaleDateString(locale, {weekday:'short'})}</span>`;
-          btn.addEventListener('click', ()=>{
-            if (scheduleState.selectedDayIndex === idx) return;
-            scheduleState.selectedDayIndex = idx;
-            resetSelection();
-            renderMobileSchedule(locale);
-            renderDesktopSchedule(locale);
-          });
-          mobileDayList.appendChild(btn);
-        });
+        if (mobileDateInput && scheduleState.selectedDate){
+          mobileDateInput.value = scheduleState.selectedDate;
+        }
 
-        const selectedIdx = Math.min(Math.max(scheduleState.selectedDayIndex, 0), days.length - 1);
-        const selectedDay = days[selectedIdx];
-        const selectedData = dayData[selectedIdx];
-
-        const buttons = mobileDayList.querySelectorAll('.book-mobile__day');
-        buttons.forEach((btn, idx)=>{
-          btn.classList.toggle('is-active', idx === selectedIdx);
-        });
-
-        if (!selectedData || !selectedData.set || !selectedData.set.size){
+        const data = day ? dayData[useIndex] : null;
+        if (!data || !data.set || !data.set.size){
           if (mobileEmpty){
             mobileEmpty.style.display = 'block';
-            setTextKey(mobileEmpty, 'services.modal.noAvailabilityDay', null, 'No free slots on this day.');
+            setTextKey(mobileEmpty, 'services.modal.noAvailabilityDay', null, 'No available times on this date.');
           }
           btnSubmit.disabled = true;
           return;
         }
 
-        const times = Array.from(selectedData.set).sort();
+        if (mobileEmpty){
+          mobileEmpty.style.display = 'none';
+        }
+
+        const times = Array.from(data.set).sort();
         times.forEach(timeKey => {
-          const iso = selectedData.iso.get(timeKey);
+          const iso = data.iso.get(timeKey);
           if (!iso) return;
           const btn=document.createElement('button');
           btn.type='button';
           btn.className='book-mobile__time';
-          const label = fmtHM(new Date(iso));
-          btn.textContent = label;
+          btn.textContent = fmtHM(new Date(iso));
           if (iso === current.slot){
             btn.classList.add('is-selected');
           }
           btn.addEventListener('click', ()=>{
-            current.masterId = Number(elMaster.value);
-            applySelection(selectedDay, iso, locale);
-            scheduleState.selectedDayIndex = selectedIdx;
-            mobileTimeList.querySelectorAll('.book-mobile__time.is-selected').forEach(node=>node.classList.remove('is-selected'));
-            btn.classList.add('is-selected');
-            renderDesktopSchedule(locale);
+            selectSlot(day, iso, locale);
           });
           mobileTimeList.appendChild(btn);
         });
@@ -1915,25 +1904,27 @@
         if (!times.length){
           if (mobileEmpty){
             mobileEmpty.style.display = 'block';
-            setTextKey(mobileEmpty, 'services.modal.noAvailabilityDay', null, 'No free slots on this day.');
+            setTextKey(mobileEmpty, 'services.modal.noAvailabilityDay', null, 'No available times on this date.');
           }
           btnSubmit.disabled = true;
-        } else {
-          if (mobileEmpty) mobileEmpty.style.display = 'none';
-          if (!current.slot){
-            btnSubmit.disabled = true;
-          }
+        } else if (!current.slot){
+          btnSubmit.disabled = true;
         }
+      }
 
-        const activeBtn = mobileDayList.querySelector('.book-mobile__day.is-active');
-        if (activeBtn){
-          activeBtn.scrollIntoView({ block:'nearest', inline:'center' });
-        }
+      if (mobileDateInput){
+        mobileDateInput.addEventListener('change', ()=>{
+          const value = mobileDateInput.value;
+          scheduleState.selectedDate = value || null;
+          resetSelection();
+          renderDesktopSchedule(scheduleState.locale || getLocale());
+          renderMobileSchedule(scheduleState.locale || getLocale());
+        });
       }
 
       async function shiftWindow(deltaDays){
         baseStart = new Date(baseStart); baseStart.setDate(baseStart.getDate() + deltaDays);
-        scheduleState.selectedDayIndex = 0;
+        scheduleState.selectedDate = null;
         resetSelection();
         await renderWindow();
       }
@@ -1947,7 +1938,7 @@
         summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
         setTextKey(elSummary, 'services.modal.summaryPlaceholder');
         availabilityCache.clear();
-        scheduleState.selectedDayIndex = 0;
+        scheduleState.selectedDate = null;
         scheduleState.days = [];
         scheduleState.dayData = [];
         scheduleState.timeRows = [];
