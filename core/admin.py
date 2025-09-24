@@ -1762,7 +1762,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     list_display = ('name', 'base_price', 'category', 'duration_min')
     search_fields = ('name',)
     list_filter = ('category',)
-    export_fields = ['name', 'description','base_price', 'category','prepayment_option', 'duration_min', 'extra_time_min']
+    export_fields = ['name', 'description','base_price', 'category', 'duration_min', 'extra_time_min']
 # -----------------------------
 # Notification Admin
 # -----------------------------
