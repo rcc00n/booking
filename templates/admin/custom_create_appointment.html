@@ -501,7 +501,90 @@
                 hid.value = el.value || '';
                 el.insertAdjacentElement('afterend', hid);
             }
+            function makeComboFromSelect(selectEl, placeholder) {
+                if (!selectEl) return null;
 
+                // контейнер
+                const wrap = document.createElement('div');
+                wrap.className = 'combo';
+                selectEl.parentNode.insertBefore(wrap, selectEl);
+                wrap.appendChild(selectEl);
+
+                // видимый input
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'combo-input';
+                input.placeholder = placeholder || 'Type to search…';
+                input.autocomplete = 'off';
+                wrap.insertBefore(input, selectEl);
+
+                // список
+                const list = document.createElement('div');
+                list.className = 'combo-list';
+                wrap.appendChild(list);
+
+                // селект прячем, но оставляем в DOM (для формы и data-* на <option>)
+                selectEl.classList.add('ab-hidden');
+
+                function optionsToItems() {
+                    return Array.from(selectEl.options)
+                        .filter(o => o.value !== '')
+                        .map(o => ({ id: o.value, label: o.textContent, opt: o }));
+                }
+
+                let ALL = optionsToItems();
+                let filtered = ALL.slice();
+                let activeIdx = -1;
+
+                function render() {
+                    list.innerHTML = '';
+                    if (!filtered.length) {
+                        const em = document.createElement('div'); em.className='combo-empty'; em.textContent='No matches';
+                        list.appendChild(em); return;
+                    }
+                    filtered.forEach((it, idx) => {
+                        const div = document.createElement('div');
+                        div.className = 'combo-item'; div.setAttribute('role','option');
+                        if (idx === activeIdx) div.setAttribute('aria-selected','true');
+                        div.textContent = it.label;
+                        div.addEventListener('mousedown', (e) => { e.preventDefault(); choose(it); });
+                        list.appendChild(div);
+                    });
+                }
+                function open(){ wrap.classList.add('combo-open'); input.setAttribute('aria-expanded','true'); }
+                function close(){ wrap.classList.remove('combo-open'); input.setAttribute('aria-expanded','false'); activeIdx=-1; }
+                function filter(term){
+                    const t = (term||'').trim().toLowerCase();
+                    filtered = t ? ALL.filter(x => x.label.toLowerCase().includes(t)) : ALL.slice();
+                    activeIdx = filtered.length ? 0 : -1; render();
+                }
+                function choose(item){
+                    selectEl.value = item.id;                                // важно: меняем value у реального select
+                    selectEl.dispatchEvent(new Event('change', {bubbles:true}));
+                    input.value = item.label; close();
+                }
+
+                // события
+                input.addEventListener('focus', () => { filter(input.value); open(); });
+                input.addEventListener('click',  () => { filter(input.value); open(); });
+                input.addEventListener('input',  () => { filter(input.value); open(); selectEl.value=''; });
+                input.addEventListener('keydown', (e) => {
+                    if (!wrap.classList.contains('combo-open') && (e.key==='ArrowDown'||e.key==='ArrowUp')){ open(); render(); return; }
+                    if (e.key==='ArrowDown'){ e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx+1)%filtered.length; render(); } }
+                    if (e.key==='ArrowUp'){   e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx-1+filtered.length)%filtered.length; render(); } }
+                    if (e.key==='Enter'){ if (wrap.classList.contains('combo-open') && filtered[activeIdx]){ e.preventDefault(); choose(filtered[activeIdx]); } }
+                    if (e.key==='Escape'){ close(); }
+                });
+                document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) close(); });
+
+                // публичное API — нужно, чтобы пересобирать список услуг при смене мастера
+                return {
+                    rebuildFromSelect(){ ALL = optionsToItems(); filter(input.value); }, // пересчитать items из новых options
+                    clear(){ selectEl.value=''; input.value=''; filter(''); },
+                    syncFromSelect(){ const cur = Array.from(selectEl.options).find(o=>o.value===selectEl.value);
+                        input.value = cur ? cur.textContent : ''; filter(''); }
+                };
+            }
             // ---- Row wiring
             function hookRow(row, idx){
                 const name = (suffix)=> `items-${idx}-${suffix}`;
@@ -523,7 +606,7 @@
 
                 populateMasters(masterSel);
                 enhanceTimeInput(timeInp);
-
+                let serviceCombo = makeComboFromSelect(serviceSel, 'Type to search service…');
                 // MASTER-MODE: фиксируем мастера, дизейблим селект и подкидываем hidden
                 if (IS_MASTER && CURRENT_MASTER_ID){
                     masterSel.value = CURRENT_MASTER_ID;
@@ -546,6 +629,10 @@
 
                 masterSel.addEventListener('change', () => {
                     populateServices(serviceSel, masterSel.value);
+                    if (serviceCombo) {
+                        serviceCombo.rebuildFromSelect();   // перечитать options из select
+                        serviceCombo.clear();               // очистить видимое поле и value
+                    }
                     hint.textContent = '';
                     priceInp.value = '';
                     recalcGrandTotal();
@@ -604,6 +691,9 @@
                         const hint = row.querySelector('.js-service-hint');
                         hint.textContent = opt.dataset.duration ? (`Duration: ${opt.dataset.duration} min`) : '';
                     }
+                }
+                if (typeof serviceCombo !== 'undefined' && serviceCombo && serviceSel.value) {
+                    serviceCombo.syncFromSelect();
                 }
                 if (prefill && prefill.start_time_0) dateInp.value = prefill.start_time_0;
                 if (prefill && prefill.start_time_1){
