@@ -395,9 +395,9 @@
                 const rows = Array.from(container.querySelectorAll('.ab-item'));
                 totalForms.value = rows.length;
                 rows.forEach((row, i) => {
-                    const old = row.cloneNode(true);
-                    row.parentNode.replaceChild(old, row);
-                    hookRow(row, i);
+                    const clone = row.cloneNode(true);
+                    row.parentNode.replaceChild(clone, row);
+                    hookRow(clone, i); // ← важно: хукаем клон, который теперь в DOM
                 });
             }
             function rowIndexFromNames(row){
