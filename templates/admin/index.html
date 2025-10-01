@@ -57,7 +57,7 @@
                                 <div class="appt-price">
                                     {% if app.final_price %}CA$ {{ app.final_price|floatformat:2 }}
                                     {% elif app.total_price %}CA$ {{ app.total_price|floatformat:2 }}
-                                    {% else %}&nbsp;{% endif %}
+                                    {% else %}&nbsp;Free{% endif %}
                                 </div>
                             </div>
                         {% empty %}
