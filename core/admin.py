@@ -94,18 +94,44 @@ def custom_index(request):
         chart_data.append({"day": day.strftime("%a %d"), "sales": float(sales), "appointments": appts})
 
     # Статусы и счётчики на ближайшие 7 дней
+
     confirmed = AppointmentStatus.objects.filter(name="Confirmed").first()
     cancelled = AppointmentStatus.objects.filter(name="Cancelled").first()
 
-    upcoming = AppointmentItem.objects.filter(
-        start_time__date__range=(today, today + timedelta(days=7))
+    # Подзапрос «последний статус для визита»
+    last_status_sq_items = (
+        AppointmentStatusHistory.objects
+        .filter(appointment_id=OuterRef("appointment_id"))
+        .order_by("-set_at")
+        .values("status_id")[:1]
     )
-    confirmed_count = upcoming.filter(appointment__appointmentstatushistory__status=confirmed) \
-        .distinct().count() if confirmed else 0
-    cancelled_count = upcoming.filter(appointment__appointmentstatushistory__status=cancelled) \
-        .distinct().count() if cancelled else 0
 
-    # Top services (текущий месяц) — считаем позиции у Service через обратную связь "appointmentitem"
+    # берём позиции ближайшей недели (как и было), но аннотируем последний статус визита
+    upcoming_items = (
+        AppointmentItem.objects
+        .filter(start_time__date__range=(today, today + timedelta(days=7)))
+        .annotate(last_status_id=Subquery(last_status_sq_items))
+    )
+
+    # считаем КОЛ-ВО ВИЗИТОВ (distinct по appointment_id), где последний статус == нужному
+    confirmed_count = (
+        upcoming_items
+        .filter(last_status_id=getattr(confirmed, "id", None))
+        .values("appointment_id")
+        .distinct()
+        .count()
+    ) if confirmed else 0
+
+    cancelled_count = (
+        upcoming_items
+        .filter(last_status_id=getattr(cancelled, "id", None))
+        .values("appointment_id")
+        .distinct()
+        .count()
+    ) if cancelled else 0
+
+
+# Top services (текущий месяц) — считаем позиции у Service через обратную связь "appointmentitem"
     top_services = (
         Service.objects.annotate(
             count=Count(
@@ -200,7 +226,7 @@ def custom_index(request):
         "daily_appointments": daily_counts,
         "chart_data": chart_data,
         "total_sales": total_sales,
-        "upcoming_total": upcoming.count(),
+        "upcoming_total": upcoming_items.count(),
         "confirmed_count": confirmed_count,
         "cancelled_count": cancelled_count,
         "top_services": top_services,      # Service с .name и .count
