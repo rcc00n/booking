@@ -374,11 +374,27 @@
             if (panel) panel.classList.add("active");
         }));
     }
-
+    function stripDateTimeLabels(root=document){
+        root.querySelectorAll('p.datetime').forEach(p => {
+            // убрать <br>
+            [...p.querySelectorAll('br')].forEach(br => br.remove());
+            // убрать текстовые узлы "Date:" / "Time:"
+            [...p.childNodes].forEach(n => {
+                if (n.nodeType === Node.TEXT_NODE) {
+                    const t = n.textContent.replace(/\bDate:\s*/i, '').replace(/\bTime:\s*/i, '');
+                    if (t.trim().length === 0) {
+                        n.remove();
+                    } else {
+                        n.textContent = t;
+                    }
+                }
+            });
+        });
+    }
     document.addEventListener("DOMContentLoaded", () => {
         initExistingRows();
         initTabs();
-
+        stripDateTimeLabels(document);
         const btnAdd = $("#btn-add-item");
         if (btnAdd) btnAdd.addEventListener("click", addItem);
         // при с   абмите — убедимся, что все disabled реальные поля имеют hidden-клоны
@@ -400,6 +416,15 @@
                     // master всегда не редактируем: UI disabled, но нативное поле активно — ничего делать не нужно
                 });
             });
+        }
+        const container = document.getElementById('items-container');
+        if (container) {
+            const mo = new MutationObserver(muts => {
+                muts.forEach(m => m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) stripDateTimeLabels(node);
+                }));
+            });
+            mo.observe(container, { childList: true, subtree: true });
         }
     });
 
