@@ -1,6 +1,7 @@
 from bisect import bisect_left
 from collections import defaultdict
-from typing import Dict, Any, List
+from io import BytesIO
+from typing import Dict, Any, List, Sequence, Iterable
 from urllib.parse import urlencode
 
 from django.contrib.admin import DateFieldListFilter
@@ -15,13 +16,13 @@ from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField
 from itertools import cycle
 
 from django.utils.formats import number_format
-from django.utils.timezone import localtime, datetime, make_aware, localdate, get_current_timezone, make_naive
+from django.utils.timezone import localtime, datetime, make_aware, localdate, get_current_timezone, make_naive, is_aware
 from django.utils.html import escape
 from core.utils.admin_perms import is_master, master_obj
 from django.shortcuts import redirect
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
-from datetime import date, timedelta
+from datetime import date, timedelta, time as time_cls
 from django.contrib.admin.views.decorators import staff_member_required
 from django.http import HttpRequest, HttpResponse, Http404
 from django.contrib.auth.models import Permission
@@ -59,6 +60,11 @@ from django.db.models import Count, Sum, Q, F
 from django.template.response import TemplateResponse
 from django.utils import timezone
 from django.utils.timezone import localdate
+from datetime import timezone as py_tz
+
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, Alignment, numbers
 
 from core.models import (
     Appointment, AppointmentItem, Payment,
@@ -283,7 +289,269 @@ class ExportCsvMixin:
             extra_context['export_url'] = None
 
         return super().changelist_view(request, extra_context=extra_context)
-# -----------------------------
+
+
+
+class ExportXlsxMixin:
+    """
+    Универсальный XLSX-экспорт для Django Admin.
+    Дает:
+      - URL 'export-xlsx/' для полной выгрузки текущего changelist с учетом фильтров
+      - Экшены: export_appointments_xlsx / export_appointment_items_xlsx
+    Подключение: наследуй нужный ModelAdmin от этого миксина.
+    """
+
+    # ============ ПУБЛИЧНЫЕ ТОЧКИ ============
+
+    def get_urls(self):
+        opts = self.model._meta
+        return [
+            path(
+                "export-xlsx/",
+                self.admin_site.admin_view(self._export_all_xlsx_view),
+                name=f"{opts.app_label}_{opts.model_name}_export_xlsx",
+            ),
+        ] + super().get_urls()
+
+    # Экшен: 1 строка = 1 Appointment
+    def export_appointments_xlsx(self, request, queryset):
+        qs = self._qs_for_export(request, queryset)
+        headers = [
+            "Appointment ID",
+            "Start",
+            "Client",
+            "Status",
+            "Payment Status",
+            "Personal Discount",
+            "Items Count",
+            "Total (sum of items)",
+            "Items (preview)",
+        ]
+        rows = []
+        for appt in qs:
+            items = getattr(appt, "appointmentitem_set").all()
+            total = sum([(getattr(it, "final_price", None) or 0) for it in items])
+            preview = " | ".join(
+                f"{getattr(getattr(it, 'service', None), 'name', getattr(it, 'service', ''))} ×{getattr(it, 'quantity', 1)}"
+                for it in items[:6]
+            )
+            if items.count() > 6:
+                preview += " …"
+            rows.append([
+                str(getattr(appt, "pk", "")),
+                self._to_naive_dt(getattr(appt, "start_time", None)),
+                self._client_name(getattr(appt, "client", None)),
+                self._safe_str(getattr(appt, "status", "")),
+                self._safe_str(getattr(appt, "payment_status", "")),
+                getattr(appt, "personal_discount", None),
+                items.count(),
+                self._as_decimal(total),
+                preview,
+            ])
+
+        # Start = колонка 2 (datetime), Total = колонка 8 (денежный)
+        return self._xlsx_response(
+            "appointments.xlsx", "Appointments", headers, rows,
+            money_cols={8}, datetime_cols={2}
+        )
+
+    export_appointments_xlsx.short_description = "Export Appointments (XLSX, 1 row per appointment)"
+
+    # Экшен: 1 строка = 1 Appointment Item
+    def export_appointment_items_xlsx(self, request, queryset):
+        qs = self._qs_for_export(request, queryset)
+        headers = [
+            "Appointment ID",
+            "Item ID",
+            "Item Start",
+            "Service",
+            "Master",
+            "Quantity",
+            "Unit Price",
+            "Service Discount",
+            "Promocode",
+            "Final Price",
+            "Client",
+            "Appointment Status",
+            "Payment Status",
+            "Personal Discount (Appointment)",
+        ]
+        rows = []
+        for appt in qs:
+            items = getattr(appt, "appointmentitem_set").all()
+            for it in items:
+                rows.append([
+                    str(getattr(appt, "pk", "")),
+                    str(getattr(it, "pk", "")),
+                    self._to_naive_dt(getattr(it, "start_time", None)),
+                    self._safe_str(getattr(getattr(it, "service", None), "name", getattr(it, "service", ""))),
+                    self._safe_str(getattr(getattr(it, "master", None), "short_name",
+                                           getattr(getattr(getattr(it, "master", None), "user", None), "username", ""))),
+                    getattr(it, "quantity", 1),
+                    self._as_decimal(getattr(it, "unit_price", None)),
+                    self._safe_str(getattr(getattr(it, "service_discount", None), "name", getattr(it, "service_discount", ""))),
+                    self._safe_str(getattr(getattr(it, "promocode", None), "code", getattr(it, "promocode", ""))),
+                    self._as_decimal(getattr(it, "final_price", None)),
+                    self._client_name(getattr(appt, "client", None)),
+                    self._safe_str(getattr(appt, "status", "")),
+                    self._safe_str(getattr(appt, "payment_status", "")),
+                    getattr(appt, "personal_discount", None),
+                ])
+
+        # Item Start = 3 (datetime), Unit Price = 7, Final Price = 10 (денежные)
+        return self._xlsx_response(
+            "appointment_items.xlsx", "Items", headers, rows,
+            money_cols={7, 10}, datetime_cols={3}
+        )
+
+    export_appointment_items_xlsx.short_description = "Export Appointment Items (XLSX, 1 row per item)"
+
+    # Зарегистрируй экшены в админ-классе:
+    # actions = ["export_appointments_xlsx", "export_appointment_items_xlsx"]
+
+    # ============ ВСПОМОГАТЕЛЬНОЕ ============
+
+    def _export_all_xlsx_view(self, request):
+        """
+        Полная выгрузка текущего списка (как в changelist, с учетом фильтров).
+        По умолчанию — 1 строка = 1 объект self.model с его ._meta.fields.
+        """
+        queryset = self.get_queryset(request)
+        fields = [f.name for f in self.model._meta.fields]
+        headers = fields
+        rows = ([self._xlsx_safe(getattr(obj, f)) for f in fields] for obj in queryset)
+        return self._xlsx_response(f"{self.model._meta.model_name}.xlsx", "Export", headers, rows)
+
+    def _qs_for_export(self, request, queryset=None):
+        """
+        Оптимизация выборки для экшенов по встречам и их позициям.
+        Переопредели под свою модель при необходимости.
+        """
+        qs = (queryset or self.get_queryset(request)).select_related(
+            "client",
+        ).prefetch_related(
+            "appointmentitem_set__service",
+            "appointmentitem_set__master",
+            "appointmentitem_set__promocode",
+            "appointmentitem_set__service_discount",
+        )
+        return qs
+
+    # ============ НИЗКИЙ УРОВЕНЬ (XLSX) ============
+
+    def _xlsx_response(
+            self,
+            filename: str,
+            sheet_title: str,
+            headers: Sequence[str],
+            rows: Iterable[Sequence],
+            *,
+            money_cols: set[int] | None = None,
+            datetime_cols: set[int] | None = None,
+    ) -> HttpResponse:
+        """
+        Возвращает HttpResponse с XLSX.
+        money_cols / datetime_cols — 1-based индексы колонок для number_format.
+        """
+        money_cols = money_cols or set()
+        datetime_cols = datetime_cols or set()
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = sheet_title[:31] if sheet_title else "Export"
+
+        # Заголовок
+        ws.append(list(headers))
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(vertical="center")
+
+        # Данные
+        row_idx = 1
+        for row in rows:
+            row_idx += 1
+            safe_row = [self._xlsx_safe(v) for v in row]
+            ws.append(safe_row)
+
+            # Форматы
+            for col_idx, _ in enumerate(headers, start=1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                if col_idx in money_cols and isinstance(cell.value, (int, float, Decimal)):
+                    cell.number_format = numbers.FORMAT_CURRENCY_USD_SIMPLE
+                if col_idx in datetime_cols and isinstance(cell.value, datetime):
+                    cell.number_format = "yyyy-mm-dd hh:mm"
+
+        # Авто-ширина
+        for col_idx in range(1, ws.max_column + 1):
+            letter = get_column_letter(col_idx)
+            max_len = 0
+            for cell in ws[letter]:
+                v = "" if cell.value is None else str(cell.value)
+                if len(v) > max_len:
+                    max_len = len(v)
+            ws.column_dimensions[letter].width = min(max_len + 2, 60)
+
+        buff = BytesIO()
+        wb.save(buff)
+        buff.seek(0)
+
+        resp = HttpResponse(
+            buff.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        if not filename.endswith(".xlsx"):
+            filename += ".xlsx"
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return resp
+
+    # ============ ПРИВЕДЕНИЕ ТИПОВ ============
+
+    def _xlsx_safe(self, v):
+        """Конвертирует произвольные значения в Excel-дружелюбные."""
+        if v is None:
+            return ""
+        # datetime → naive (локальная TZ), time → без tzinfo
+        if isinstance(v, datetime):
+            return self._to_naive_dt(v)
+        if isinstance(v, time_cls):
+            # Excel не поддерживает tz-aware time; сбрасываем tzinfo
+            return time_cls(v.hour, v.minute, v.second, v.microsecond)
+        if isinstance(v, (date, )):
+            return v
+        if isinstance(v, (str, int, float, bool, Decimal)):
+            return v
+        # Модели/Enums/Objects → строка (использует __str__)
+        return str(v)
+
+    def _to_naive_dt(self, dt: datetime) -> datetime | None:
+        """Excel не любит tz-aware; переводим в naive (settings.TIME_ZONE)."""
+        if not isinstance(dt, datetime):
+            return dt
+        return make_naive(dt) if is_aware(dt) else dt
+
+    def _as_decimal(self, v):
+        if v is None:
+            return None
+        if isinstance(v, Decimal):
+            return v
+        if isinstance(v, (int, float)):
+            return Decimal(str(v))
+        try:
+            return Decimal(str(v))
+        except Exception:
+            return str(v)
+
+    def _safe_str(self, v, default=""):
+        return default if v in (None, "") else str(v)
+
+    def _client_name(self, client):
+        if client is None:
+            return ""
+        full = getattr(client, "full_name", "")
+        if full:
+            return full
+        user = getattr(client, "user", None)
+        return getattr(user, "username", "") if user else ""# -----------------------------
 # Customized User Admin
 # -----------------------------
 class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
@@ -707,7 +975,7 @@ def _money(x):
 
 
 @admin.register(Appointment)
-class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
+class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     """
     Полнофункциональная админка:
       • обычный список + календарный вид (?view=calendar)
@@ -1454,128 +1722,17 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
 
     # ── CSV действия (через твой миксин) ─────────────────────────────────────
 
-    actions = ["export_appointments_csv", "export_appointment_items_csv"]
+    actions = ["export_appointments_xlsx", "export_appointment_items_xlsx"]
 
-    def _csv_export(self, request, filename, headers, rows):
-        """
-        Универсальный адаптер под разные реализации твоего миксина.
-        1) export_as_csv(request, filename, headers, rows)
-        2) stream_csv(filename, headers, rows)
-        3) fallback — HttpResponse (если миксин ничего не определяет)
-        """
-        if hasattr(self, "export_as_csv") and callable(getattr(self, "export_as_csv")):
-            return self.export_as_csv(request, filename, headers, rows)
-        if hasattr(self, "stream_csv") and callable(getattr(self, "stream_csv")):
-            return self.stream_csv(filename, headers, rows)
 
-        import csv
-        resp = HttpResponse(content_type="text/csv; charset=utf-8")
-        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
-        writer = csv.writer(resp)
-        writer.writerow(headers)
-        for r in rows:
-            writer.writerow(r)
-        return resp
-
-    def _qs_for_export(self, request, queryset=None):
-        qs = (queryset or self.get_queryset(request)).select_related(
-            "client",
-        ).prefetch_related(
-            "appointmentitem_set__service",
-            "appointmentitem_set__master",
-            "appointmentitem_set__promocode",
-            "appointmentitem_set__service_discount",
-        )
-        return qs
-
-    def export_appointments_csv(self, request, queryset):
-        qs = self._qs_for_export(request, queryset)
-        headers = [
-            "Appointment ID",
-            "Start",
-            "Client",
-            "Status",
-            "Payment Status",
-            "Personal Discount",
-            "Items Count",
-            "Total (sum of items)",
-            "Items (preview)",
-        ]
-        rows = []
-        for appt in qs:
-            items = getattr(appt, "appointmentitem_set").all()
-            total = sum([(it.final_price or 0) for it in items])
-            preview = " | ".join(
-                f"{getattr(it.service, 'name', it.service)} ×{getattr(it, 'quantity', 1)}"
-                for it in items[:6]
-            )
-            if items.count() > 6:
-                preview += " …"
-            rows.append([
-                str(appt.pk),
-                getattr(appt, "start_time", None),
-                getattr(appt.client, "full_name", getattr(getattr(appt.client, "user", None), "username", "")),
-                getattr(appt, "status", ""),
-                getattr(appt, "payment_status", ""),
-                getattr(appt, "personal_discount", ""),
-                items.count(),
-                _money(total),
-                preview,
-            ])
-        return self._csv_export(request, "appointments.csv", headers, rows)
-    export_appointments_csv.short_description = "Export Appointments (1 row per appointment)"
-
-    def export_appointment_items_csv(self, request, queryset):
-        qs = self._qs_for_export(request, queryset)
-        headers = [
-            "Appointment ID",
-            "Item ID",
-            "Item Start",
-            "Service",
-            "Master",
-            "Quantity",
-            "Unit Price",
-            "Service Discount",
-            "Promocode",
-            "Final Price",
-            "Client",
-            "Appointment Status",
-            "Payment Status",
-            "Personal Discount (Appointment)",
-        ]
-        rows = []
-        for appt in qs:
-            items = getattr(appt, "appointmentitem_set").all()
-            for it in items:
-                rows.append([
-                    str(appt.pk),
-                    str(getattr(it, "pk", "")),
-                    getattr(it, "start_time", None),
-                    getattr(it.service, "name", str(it.service)),
-                    getattr(it.master, "short_name", getattr(getattr(it.master, "user", None), "username", "")),
-                    getattr(it, "quantity", 1),
-                    _money(getattr(it, "unit_price", None)),
-                    getattr(getattr(it, "service_discount", None), "name", getattr(it, "service_discount", "")),
-                    getattr(getattr(it, "promocode", None), "code", getattr(it, "promocode", "")),
-                    _money(getattr(it, "final_price", None)),
-                    getattr(appt.client, "full_name", getattr(getattr(appt.client, "user", None), "username", "")),
-                    getattr(appt, "status", ""),
-                    getattr(appt, "payment_status", ""),
-                    getattr(appt, "personal_discount", ""),
-                ])
-        return self._csv_export(request, "appointment_items.csv", headers, rows)
-    export_appointment_items_csv.short_description = "Export Appointment Items (1 row per item)"
 
     # ── AJAX КАЛЕНДАРЬ (список → календарь + JSON) ──────────────────────────
 
 
     def changelist_view(self, request, extra_context=None):
-
         selected_date = request.GET.get('date')
-
         if selected_date:
             selected_date = datetime.strptime(selected_date, '%Y-%m-%d').date()
-
         else:
             selected_date = timezone.localdate()
 
@@ -1583,12 +1740,14 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         appointment_statuses = AppointmentStatus.objects.all()
         payment_statuses = PaymentStatus.objects.all()
 
-        appointments = AppointmentItem.objects.select_related('appointment__client', 'service', 'master').prefetch_related('appointment__items__service')
-
+        appointments = AppointmentItem.objects.select_related(
+            'appointment__client', 'service', 'master'
+        ).prefetch_related('appointment__items__service')
 
         masters = MasterProfile.objects.filter(
             id__in=appointments.values_list('master_id', flat=True)
         ).distinct()
+
         start_of_day = make_aware(datetime.combine(selected_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(selected_date, datetime.max.time()))
 
@@ -1596,12 +1755,17 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             start_time__lte=end_of_day,
             end_time__gte=start_of_day
         )
+
         if request.GET.get("service"):
             appointments = appointments.filter(service_id=request.GET["service"])
         if request.GET.get("status"):
-            appointments = appointments.filter(appointment__appointmentstatushistory__status_id=request.GET["status"])
+            appointments = appointments.filter(
+                appointment__appointmentstatushistory__status_id=request.GET["status"]
+            )
         if request.GET.get("payment_status"):
-            appointments = appointments.filter(appointment__payment_status_id__in=request.GET.getlist("payment_status"))
+            appointments = appointments.filter(
+                appointment__payment_status_id__in=request.GET.getlist("payment_status")
+            )
 
         # Слоты по 15 минут
         start_hour = 8
@@ -1610,37 +1774,46 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         time_pointer = datetime(2000, 1, 1, start_hour, 0)
         end_time = datetime(2000, 1, 1, end_hour, 0)
 
-
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             action = request.GET.get("action")
+            calendar_table = createTable(
+                selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities
+            )
 
-            calendar_table = createTable(selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities)
-
-            if action == "filter":  # Фильтрация по форме
-
+            if action == "filter":
                 html = render_to_string('admin/appointments_calendar_partial.html', {
                     "calendar_table": calendar_table,
                     'masters': masters,
                 })
                 return JsonResponse({"html": html})
 
-            elif action == "calendar":  # Подгрузка календаря (твоя текущая логика)
-
+            elif action == "calendar":
                 html = render_to_string('admin/appointments_calendar_partial.html', {
                     'calendar_table': calendar_table,
                     'masters': masters,
                 }, request=request)
-
                 return JsonResponse({'html': html})
 
-        calendar_table = createTable(selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities)
+        calendar_table = createTable(
+            selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities
+        )
 
         response = super().changelist_view(request, extra_context=extra_context)
 
         if hasattr(response, "context_data"):
             context = response.context_data
-            context.update({
 
+            # Собираем URL для XLSX-экспорта (с сохранением текущих фильтров)
+            try:
+                opts = self.model._meta
+                q = f"?{request.GET.urlencode()}" if request.GET else ""
+                export_url_xlsx = reverse(
+                    f'admin:{opts.app_label}_{opts.model_name}_export_xlsx'
+                ) + q
+            except NoReverseMatch:
+                export_url_xlsx = None
+
+            context.update({
                 "calendar_table": calendar_table,
                 "masters": masters,
                 "selected_date": selected_date,
@@ -1650,6 +1823,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "services": services,
                 "appointment_statuses": appointment_statuses,
                 "payment_statuses": payment_statuses,
+                "export_url_xlsx": export_url_xlsx,  # <-- вот это добавили
             })
 
         return response

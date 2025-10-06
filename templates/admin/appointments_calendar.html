@@ -46,8 +46,8 @@
 
             <div class="calendar-right">
 
-                {% if export_url %}
-                    <button onclick='window.location.href="{{ export_url }}"' class="add-appointment-btn" style="text-decoration:none; width:13vh; margin-right: 1vh;">
+                {% if export_url_xlsx %}
+                    <button onclick='window.location.href="{{ export_url_xlsx }}"' class="add-appointment-btn" style="text-decoration:none; width:13vh; margin-right: 1vh;">
                         Export CSV
                     </button>
                 {% endif %}
