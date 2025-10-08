@@ -24,6 +24,8 @@
     const itemsContainer = $("#items-container");
     const salesContainer = document.getElementById("product-sales-container");
     const SALES_PREFIX = "product_sales";
+    const SALE_DEFAULTS = parseJSON("product-sale-defaults", {});
+    const appointmentClientSelect = document.getElementById("id_client");
     if (!itemsContainer) return;
 
     function buildOption(value, text) {
@@ -51,7 +53,12 @@
             const opt = document.createElement("option");
             opt.value = val;
             opt.textContent = String(labelIfAdd ?? val);
+            opt.selected = true;
             select.appendChild(opt);
+        } else {
+            Array.from(select.options).forEach(o => {
+                o.selected = (o.value === val);
+            });
         }
         select.value = val;
     }
@@ -343,6 +350,65 @@
         }
     }
 
+    function applySaleDefaults(row) {
+        if (!row || row.dataset.defaultsApplied === "1") return;
+        const objIdInput = row.querySelector('input[name$="-id"]');
+        if (objIdInput && objIdInput.value) {
+            row.dataset.defaultsApplied = "1";
+            return;
+        }
+        const defaults = SALE_DEFAULTS || {};
+
+        const quantityInput = row.querySelector('input[name$="-quantity"]');
+        if (quantityInput && !quantityInput.value && defaults.quantity) {
+            quantityInput.value = defaults.quantity;
+        }
+
+        const soldBySelect = row.querySelector('select[name$="-sold_by"]');
+        const soldByDefault = defaults.sold_by;
+        if (soldBySelect && soldByDefault && !soldBySelect.value) {
+            const soldId = String(soldByDefault.id || soldByDefault);
+            const soldLabel = soldByDefault.label || soldByDefault.name || soldId;
+            setSelectValueEnsuringOption(soldBySelect, soldId, soldLabel);
+            const changeEvent = new Event("change", { bubbles: true });
+            soldBySelect.dispatchEvent(changeEvent);
+            if (window.django && window.django.jQuery) {
+                window.django.jQuery(soldBySelect).trigger("change");
+            } else if (window.jQuery) {
+                window.jQuery(soldBySelect).trigger("change");
+            }
+        }
+
+        const clientSelect = row.querySelector('select[name$="-client"]');
+        const clientDefault = defaults.client;
+        if (clientSelect && clientDefault && !clientSelect.value) {
+            const clientId = String(clientDefault.id || clientDefault);
+            const clientLabel = clientDefault.label || clientDefault.name || clientId;
+            setSelectValueEnsuringOption(clientSelect, clientId, clientLabel);
+            const changeEvent = new Event("change", { bubbles: true });
+            clientSelect.dispatchEvent(changeEvent);
+            if (window.django && window.django.jQuery) {
+                window.django.jQuery(clientSelect).trigger("change");
+            } else if (window.jQuery) {
+                window.jQuery(clientSelect).trigger("change");
+            }
+        }
+        row.dataset.defaultsApplied = "1";
+    }
+
+    function refreshSaleClientDefaultFromAppointment() {
+        if (!appointmentClientSelect || !SALE_DEFAULTS) return;
+        const val = appointmentClientSelect.value;
+        if (val) {
+            const options = Array.from(appointmentClientSelect.options || []);
+            const match = options.find(opt => opt.value === val);
+            const label = match ? match.textContent.trim() : val;
+            SALE_DEFAULTS.client = { id: val, label };
+        } else {
+            delete SALE_DEFAULTS.client;
+        }
+    }
+
     function addItem() {
         const tpl = $("#empty-form-tpl");
         if (!tpl) return;
@@ -394,7 +460,10 @@
     }
     function initExistingSales() {
         if (!salesContainer) return;
-        $$(".ps-item", salesContainer).forEach(initSaleRow);
+        $$(".ps-item", salesContainer).forEach(row => {
+            applySaleDefaults(row);
+            initSaleRow(row);
+        });
     }
     function addProductSale() {
         if (!salesContainer) return;
@@ -406,8 +475,15 @@
         const fragment = tpl.content.cloneNode(true);
         const node = fragment.firstElementChild;
         replacePrefixAttributes(node, idx);
+        applySaleDefaults(node);
         salesContainer.appendChild(node);
         bumpSalesForms();
+        if (window.django && window.django.jQuery) {
+            window.django.jQuery(document).trigger("formset:added", [node, SALES_PREFIX]);
+        } else if (window.jQuery) {
+            window.jQuery(document).trigger("formset:added", [node, SALES_PREFIX]);
+        }
+        document.dispatchEvent(new CustomEvent("formset:added", { detail: { form: node, name: SALES_PREFIX } }));
         initSaleRow(node);
     }
 
@@ -442,8 +518,15 @@
         });
     }
     document.addEventListener("DOMContentLoaded", () => {
+        refreshSaleClientDefaultFromAppointment();
+        if (appointmentClientSelect) {
+            appointmentClientSelect.addEventListener("change", refreshSaleClientDefaultFromAppointment);
+        }
         initExistingRows();
         initExistingSales();
+        if (salesContainer && !salesContainer.querySelector(".ps-item")) {
+            addProductSale();
+        }
         initTabs();
         stripDateTimeLabels(document);
         const btnAdd = $("#btn-add-item");

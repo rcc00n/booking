@@ -1283,11 +1283,49 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         if items_inline is not None:
             ctx["items_formset"] = items_inline.formset
+            ctx["items_inline"] = items_inline
         if sales_inline is not None:
             ctx["product_sales_formset"] = sales_inline.formset
             ctx["product_sales_inline"] = sales_inline
             ctx["product_sales_prefix"] = sales_inline.formset.prefix
             ctx["product_sales_can_delete"] = sales_inline.formset.can_delete
+
+        sale_forms_to_render = []
+        if sales_inline is not None:
+            for form in sales_inline.formset.forms:
+                instance_exists = getattr(form.instance, "pk", None)
+                if form.is_bound:
+                    if form.errors or not form.empty_permitted or form.has_changed():
+                        sale_forms_to_render.append(form)
+                elif instance_exists:
+                    sale_forms_to_render.append(form)
+        ctx["product_sales_forms"] = sale_forms_to_render
+
+        sale_defaults = {"quantity": 1}
+        if obj and getattr(obj, "client", None):
+            client_obj = obj.client
+            client_user = getattr(client_obj, "user", None)
+            raw_client_label = (
+                getattr(client_user, "get_full_name", lambda: "")() or getattr(client_user, "username", "") or str(client_obj)
+            )
+            client_label = (str(raw_client_label) or "").strip() or str(client_obj)
+            sale_defaults["client"] = {
+                "id": str(obj.client_id),
+                "label": client_label,
+            }
+        profile = getattr(request.user, "userprofile", None)
+        if profile:
+            user = getattr(profile, "user", None)
+            raw_sold_by_label = (
+                getattr(user, "get_full_name", lambda: "")() or getattr(user, "username", "") or str(profile)
+            )
+            sold_by_label = (str(raw_sold_by_label) or "").strip() or str(profile)
+            sale_defaults["sold_by"] = {
+                "id": str(profile.pk),
+                "label": sold_by_label,
+            }
+        ctx["product_sale_defaults"] = sale_defaults
+        ctx["product_sale_price_endpoint"] = reverse("admin:core_productsale_product_price")
         # ===== данные для кастомных селектов =====
         # ограничим пул мастеров, если текущий пользователь — мастер
         mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
@@ -1346,7 +1384,6 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         # Админка валидирует формы, но мы дополнительно страхуемся:
-        print(f"obj:{obj}")
         obj.full_clean()  # вызывает Appointment.clean()
         super().save_model(request, obj, form, change)
         new_status = form.cleaned_data.get("current_status")
@@ -1377,14 +1414,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     def save_formset(self, request, form, formset, change):
         # Забираем инстансы без сохранения
         instances = formset.save(commit=False)
-        print(f"formset: {formset}")
         # Удаления — отдельно
         for deleted in formset.deleted_objects:
             deleted.delete()
 
         # Прогоняем full_clean() на каждом дочернем объекте
         for inst in instances:
-            print(f"inst: {inst}")
             if isinstance(inst, ProductSale):
                 if form.instance and not inst.client_id and getattr(form.instance, "client_id", None):
                     inst.client_id = form.instance.client_id

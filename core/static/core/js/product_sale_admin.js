@@ -79,7 +79,9 @@
       return;
     }
 
-    const priceEndpoint = productField.dataset.priceEndpoint || "";
+    const priceEndpointValue = productField.dataset.priceEndpoint || window.PRODUCT_SALE_PRICE_ENDPOINT || "";
+    productField.dataset.priceEndpoint = priceEndpointValue;
+    const priceEndpoint = priceEndpointValue;
 
     function updateTotal() {
       const quantity = parseDecimal(quantityInput.value);
@@ -88,7 +90,7 @@
         const total = Math.round(quantity * unitPrice * 100) / 100;
         totalDisplay.textContent = formatMoney(total);
       } else {
-        totalDisplay.textContent = quantity || unitPrice ? "—" : "$0.00";
+        totalDisplay.textContent = "$0.00";
       }
     }
 

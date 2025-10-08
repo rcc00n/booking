@@ -114,30 +114,51 @@ class AppointmentProductSaleForm(ProductSaleAdminForm):
         appointment = kwargs.get("appointment")
         super().__init__(*args, **kwargs)
 
-        sold_at = self.fields.get("sold_at")
-        if sold_at:
-            sold_at.widget = forms.HiddenInput()
-            sold_at.required = False
+        if "sold_at" in self.fields:
+            self.fields.pop("sold_at")
 
-        # Default client to the appointment's client for new sales.
-        if (
-            appointment
-            and appointment.client_id
-            and "client" in self.fields
-            and not self.instance.pk
-            and not self.initial.get("client")
-        ):
-            self.fields["client"].initial = appointment.client_id
+        client_field = self.fields.get("client")
+        if client_field:
+            qs = UserProfile.objects.select_related("user").all()
+            client_field.queryset = qs.order_by(
+                "user__first_name",
+                "user__last_name",
+                "user__username",
+            )
 
-        # Default sold_by to the creator if available.
-        if (
-            request
-            and hasattr(request.user, "userprofile")
-            and "sold_by" in self.fields
-            and not self.instance.pk
-            and not self.initial.get("sold_by")
-        ):
-            self.fields["sold_by"].initial = getattr(request.user, "userprofile").pk
+        sold_by_field = self.fields.get("sold_by")
+        if sold_by_field:
+            filters = Q(user__is_superuser=True) | Q(user__is_staff=True)
+            profile = getattr(request.user, "userprofile", None) if request else None
+            if profile:
+                filters |= Q(pk=profile.pk)
+            if self.instance and getattr(self.instance, "sold_by_id", None):
+                filters |= Q(pk=self.instance.sold_by_id)
+            sold_by_field.queryset = (
+                UserProfile.objects.select_related("user")
+                .filter(filters)
+                .order_by(
+                    "user__first_name",
+                    "user__last_name",
+                    "user__username",
+                )
+            )
+
+        defaults = {}
+        if appointment and appointment.client_id and "client" in self.fields:
+            defaults["client"] = appointment.client_id
+        profile = getattr(request.user, "userprofile", None) if request else None
+        if profile and "sold_by" in self.fields:
+            defaults["sold_by"] = profile.pk
+        if "quantity" in self.fields:
+            defaults.setdefault("quantity", 1)
+
+        for key, value in defaults.items():
+            if key in self.fields and key not in self.initial:
+                self.initial[key] = value
+            field = self.fields.get(key)
+            if field and not field.initial:
+                field.initial = value
 
         # Keep notes compact in inline UI.
         notes = self.fields.get("notes")

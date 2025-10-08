@@ -23,6 +23,9 @@
 
     <script src="{% url 'admin:jsi18n' %}"></script>
     <script src="{% static 'admin/js/quarter_timepicker.js' %}"></script>
+    <script>
+        window.PRODUCT_SALE_PRICE_ENDPOINT = "{{ product_sale_price_endpoint }}";
+    </script>
     {{ media }}
 {% endblock %}
 
@@ -311,8 +314,9 @@
                         {% endif %}
 
                         {{ product_sales_formset.management_form }}
+                        {% with sales_forms=product_sales_forms|default:product_sales_formset.forms %}
                         <div id="product-sales-container" class="ab-items">
-                            {% for f in product_sales_formset.forms %}
+                            {% for f in sales_forms %}
                                 <div class="ab-item ps-item" data-form-index="{{ forloop.counter0 }}" data-product-sale-form="1">
                                     {% if f.non_field_errors %}<div class="ab-err">{{ f.non_field_errors }}</div>{% endif %}
                                     {% for h in f.hidden_fields %}{{ h }}{% endfor %}
@@ -369,6 +373,7 @@
                                 <div class="ab-muted ps-placeholder">No product sales linked to this appointment yet.</div>
                             {% endfor %}
                         </div>
+                        {% endwith %}
 
                         <div class="ab-r">
                             <button type="button" class="ab-btn secondary" id="btn-add-product-sale">＋ Add product sale</button>
@@ -434,6 +439,7 @@
     {{ svc_discounts_data|json_script:"svc-discounts-data" }}
     {{ promos_by_service_data|json_script:"promos-by-service-data" }}
     {{ promos_global_data|json_script:"promos-global-data" }}
+    {{ product_sale_defaults|json_script:"product-sale-defaults" }}
 
     <script>
         window.APPOINTMENT_CTX = {
