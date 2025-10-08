@@ -26,10 +26,10 @@
                         </span>
                     </a>
                     <ul class="submenu">
-                        <li><a href="{% url 'admin:core_appointment_changelist' %}">All Appointments</a></li>
+                        <li><a href="{% url 'admin:core_appointment_changelist' %}" data-icon="AP">All Appointments</a></li>
                         {% if not request.user|is_master_user %}
-                        <li><a href="{% url 'admin:core_appointmentstatushistory_changelist' %}">Status History</a></li>
-                        <li><a href="{% url 'admin:core_appointmentitempromocode_changelist' %}">Appointment Promocode</a></li>
+                        <li><a href="{% url 'admin:core_appointmentstatushistory_changelist' %}" data-icon="ST">Status History</a></li>
+                        <li><a href="{% url 'admin:core_appointmentitempromocode_changelist' %}" data-icon="PR">Appointment Promocode</a></li>
                         {% endif %}
                     </ul>
                 </li>
@@ -42,10 +42,10 @@
                        </span>
                     </a>
                     <ul class="submenu">
-                        <li><a href="{% url 'admin:auth_user_changelist' %}">All Users</a></li>
-                        <li><a href="{% url 'admin:core_masterprofile_changelist' %}">Masters</a></li>
-                        <li><a href="{% url 'admin:core_masteravailability_changelist' %}">Master's time off</a></li>
-                        <li><a href="{% url 'admin:core_clientreview_changelist' %}">Reviews</a></li>
+                        <li><a href="{% url 'admin:auth_user_changelist' %}" data-icon="US">All Users</a></li>
+                        <li><a href="{% url 'admin:core_masterprofile_changelist' %}" data-icon="MA">Masters</a></li>
+                        <li><a href="{% url 'admin:core_masteravailability_changelist' %}" data-icon="TO">Master's time off</a></li>
+                        <li><a href="{% url 'admin:core_clientreview_changelist' %}" data-icon="RV">Reviews</a></li>
                     </ul>
                 </li>
                 <li class="dropdown">
@@ -56,10 +56,10 @@
                        </span>
                     </a>
                     <ul class="submenu">
-                        <li><a href="{% url 'admin:core_payment_changelist' %}">All Payments</a></li>
-                        <li><a href="{% url 'admin:core_appointmentprepayment_changelist' %}">Prepayment</a></li>
-                        <li><a href="{% url 'admin:core_servicediscount_changelist' %}">Discounts</a></li>
-                        <li><a href="{% url 'admin:core_promocode_changelist' %}">Promo Codes</a></li>
+                        <li><a href="{% url 'admin:core_payment_changelist' %}" data-icon="PA">All Payments</a></li>
+                        <li><a href="{% url 'admin:core_appointmentprepayment_changelist' %}" data-icon="PP">Prepayment</a></li>
+                        <li><a href="{% url 'admin:core_servicediscount_changelist' %}" data-icon="DC">Discounts</a></li>
+                        <li><a href="{% url 'admin:core_promocode_changelist' %}" data-icon="PC">Promo Codes</a></li>
                     </ul>
                 </li>
                 <li class="dropdown">
@@ -70,9 +70,9 @@
                         </span>
                     </a>
                     <ul class="submenu">
-                        <li><a href="{% url 'admin:core_product_changelist' %}">Products</a></li>
-                        <li><a href="{% url 'admin:core_productcategory_changelist' %}">Product Categories</a></li>
-                        <li><a href="{% url 'admin:core_productsale_changelist' %}">Product Sales</a></li>
+                        <li><a href="{% url 'admin:core_product_changelist' %}" data-icon="PD">Products</a></li>
+                        <li><a href="{% url 'admin:core_productcategory_changelist' %}" data-icon="CT">Product Categories</a></li>
+                        <li><a href="{% url 'admin:core_productsale_changelist' %}" data-icon="SL">Product Sales</a></li>
                     </ul>
                 </li>
                     <li>
@@ -89,8 +89,8 @@
                        </span>
                     </a>
                     <ul class="submenu">
-                        <li><a href="{% url 'admin:core_service_changelist' %}">All Services</a></li>
-                        <li><a href="{% url 'admin:core_servicemaster_changelist' %}">Master - Service</a></li>
+                        <li><a href="{% url 'admin:core_service_changelist' %}" data-icon="SV">All Services</a></li>
+                        <li><a href="{% url 'admin:core_servicemaster_changelist' %}" data-icon="MS">Master - Service</a></li>
 
                     </ul>
                 </li>
@@ -102,8 +102,8 @@
                         </span>
                     </a>
                     <ul class="submenu">
-                        <li><a href="{% url 'admin:core_notification_changelist' %}">Notifications</a></li>
-                        <li><a href="{% url 'admin:core_reminderschedule_changelist' %}">Reminder Schedule</a></li>
+                        <li><a href="{% url 'admin:core_notification_changelist' %}" data-icon="NT">Notifications</a></li>
+                        <li><a href="{% url 'admin:core_reminderschedule_changelist' %}" data-icon="RS">Reminder Schedule</a></li>
 
                     </ul>
                 </li>
@@ -121,15 +121,15 @@
                        </span>
                     </a>
                     <ul class="submenu">
-                        <li><a href="{% url 'admin:core_appointmentstatus_changelist' %}">Appointment Statuses</a></li>
-                        <li><a href="{% url 'admin:core_paymentmethod_changelist' %}">Payment Methods</a></li>
-                        <li><a href="{% url 'admin:core_prepaymentoption_changelist' %}">Prepayment Options</a></li>
-                        <li><a href="{% url 'admin:core_servicecategory_changelist' %}">Service Category</a></li>
-                        <li><a href="{% url 'admin:core_role_changelist' %}">Roles</a></li>
-                        <li><a href="{% url 'admin:core_cancellationreason_changelist' %}">Cancellation Reasons</a></li>
-                        <li><a href="{% url 'admin:core_clientsource_changelist' %}">Client Source</a></li>
-                        <li><a href="{% url 'admin:core_paymentstatus_changelist' %}">Payment Status</a></li>
-                        <li><a href="{% url 'admin:core_masterroom_changelist' %}">Master Rooms</a></li>
+                        <li><a href="{% url 'admin:core_appointmentstatus_changelist' %}" data-icon="AS">Appointment Statuses</a></li>
+                        <li><a href="{% url 'admin:core_paymentmethod_changelist' %}" data-icon="PM">Payment Methods</a></li>
+                        <li><a href="{% url 'admin:core_prepaymentoption_changelist' %}" data-icon="PO">Prepayment Options</a></li>
+                        <li><a href="{% url 'admin:core_servicecategory_changelist' %}" data-icon="SC">Service Category</a></li>
+                        <li><a href="{% url 'admin:core_role_changelist' %}" data-icon="RL">Roles</a></li>
+                        <li><a href="{% url 'admin:core_cancellationreason_changelist' %}" data-icon="CR">Cancellation Reasons</a></li>
+                        <li><a href="{% url 'admin:core_clientsource_changelist' %}" data-icon="CS">Client Source</a></li>
+                        <li><a href="{% url 'admin:core_paymentstatus_changelist' %}" data-icon="PS">Payment Status</a></li>
+                        <li><a href="{% url 'admin:core_masterroom_changelist' %}" data-icon="MR">Master Rooms</a></li>
                     </ul>
                 </li>
                 {% endif %}
