@@ -2215,8 +2215,169 @@ class PromoCodeAdmin(ExportCsvMixin ,admin.ModelAdmin):
 
 
 # -----------------------------
+# Retail products & sales
+# -----------------------------
+
+
+class LowStockFilter(admin.SimpleListFilter):
+    title = "Low stock status"
+    parameter_name = "low_stock"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("1", "Needs restock"),
+            ("0", "Sufficient stock"),
+        )
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if value == "1":
+            return queryset.filter(
+                low_stock_threshold__gt=0,
+                quantity_in_stock__lte=F("low_stock_threshold"),
+            )
+        if value == "0":
+            return queryset.exclude(
+                low_stock_threshold__gt=0,
+                quantity_in_stock__lte=F("low_stock_threshold"),
+            )
+        return queryset
+
+
+class ProductCategoryAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active", "created_at", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("name",)
+    ordering = ("name",)
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("name", "description", "is_active")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+
+class ProductAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "category",
+        "price",
+        "quantity_in_stock",
+        "low_stock_indicator",
+        "is_active",
+        "updated_at",
+    )
+    list_filter = ("is_active", "category", LowStockFilter)
+    search_fields = ("name", "sku")
+    ordering = ("name",)
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("name", "sku", "category", "description", "is_active")}),
+        ("Pricing & Inventory", {"fields": ("price", "quantity_in_stock", "low_stock_threshold")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    @admin.display(description="Low stock", boolean=True)
+    def low_stock_indicator(self, obj):
+        return obj.is_low_on_stock
+
+
+class ProductSaleAdmin(admin.ModelAdmin):
+    date_hierarchy = "sold_at"
+    list_display = (
+        "sold_at",
+        "product",
+        "quantity",
+        "unit_price",
+        "total_amount",
+        "sold_by",
+        "client",
+    )
+    list_filter = (
+        "product__category",
+        "product",
+        "sold_by",
+        ("sold_at", DateFieldListFilter),
+    )
+    search_fields = (
+        "product__name",
+        "product__sku",
+        "client__user__first_name",
+        "client__user__last_name",
+        "client__user__username",
+        "notes",
+    )
+    ordering = ("-sold_at", "-id")
+    readonly_fields = ("total_amount", "created_at", "updated_at")
+    raw_id_fields = ("sold_by", "client")
+    autocomplete_fields = ("product",)
+    list_select_related = ("product", "sold_by__user", "client__user")
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "product",
+                    "sold_by",
+                    "client",
+                    "sold_at",
+                    "quantity",
+                    "unit_price",
+                    "total_amount",
+                    "notes",
+                )
+            },
+        ),
+        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj))
+        if obj:
+            readonly.extend(
+                [
+                    "product",
+                    "sold_by",
+                    "client",
+                    "sold_at",
+                    "quantity",
+                    "unit_price",
+                    "total_amount",
+                ]
+            )
+        return readonly
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "client":
+            kwargs["queryset"] = (
+                UserProfile.objects.filter(userrole__role__name="Client")
+                .select_related("user")
+                .order_by("user__first_name", "user__last_name", "user__username")
+                .distinct()
+            )
+        if db_field.name == "sold_by":
+            kwargs["queryset"] = (
+                UserProfile.objects.select_related("user").order_by(
+                    "user__first_name",
+                    "user__last_name",
+                    "user__username",
+                )
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def save_model(self, request, obj, form, change):
+        if not obj.sold_by_id:
+            profile = getattr(request.user, "userprofile", None)
+            if profile:
+                obj.sold_by = profile
+        super().save_model(request, obj, form, change)
+
+
+# -----------------------------
 # Register remaining models directly
 # -----------------------------
+admin.site.register(ProductCategory, ProductCategoryAdmin)
+admin.site.register(Product, ProductAdmin)
+admin.site.register(ProductSale, ProductSaleAdmin)
 admin.site.register(Role)
 admin.site.register(UserRole)
 admin.site.register(AppointmentStatus)

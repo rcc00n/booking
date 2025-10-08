@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django import forms
+from decimal import Decimal
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
@@ -14,6 +15,8 @@ from core.models import (
     UserProfile,
     Role,
     HowHeard,  # TextChoices со значениями источников
+    Product,
+    ProductSale,
 )
 
 
@@ -355,3 +358,109 @@ class HealthConditionsForm(forms.Form):
             "surgeries": join_csv(data.get("surgeries")),
             "notes": data.get("notes", ""),
         })
+
+
+# -----------------------------
+# Retail sales
+# -----------------------------
+
+class ProductSaleForm(forms.Form):
+    product = forms.ModelChoiceField(
+        label="Product",
+        queryset=Product.objects.none(),
+    )
+    client = forms.ModelChoiceField(
+        label="Client",
+        required=False,
+        queryset=UserProfile.objects.none(),
+        help_text="Optional: link sale to an existing client.",
+    )
+    quantity = forms.IntegerField(
+        label="Quantity",
+        min_value=1,
+        initial=1,
+    )
+    unit_price = forms.DecimalField(
+        label="Unit price (CAD)",
+        required=False,
+        min_value=Decimal("0.00"),
+        decimal_places=2,
+        max_digits=10,
+        help_text="Leave blank to use the product's default price.",
+        widget=forms.NumberInput(attrs={"step": "0.01"}),
+    )
+    sold_at = forms.DateTimeField(
+        label="Sale date & time",
+        required=False,
+        input_formats=["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"],
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
+    notes = forms.CharField(
+        label="Notes",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+
+    def __init__(self, *args, employee_profile: UserProfile | None = None, **kwargs):
+        self.employee_profile = employee_profile
+        super().__init__(*args, **kwargs)
+
+        self.fields["product"].queryset = Product.objects.filter(is_active=True).order_by("name")
+
+        client_qs = (
+            UserProfile.objects.filter(userrole__role__name="Client")
+            .select_related("user")
+            .order_by("user__first_name", "user__last_name", "user__username")
+            .distinct()
+        )
+        self.fields["client"].queryset = client_qs
+
+        if not self.is_bound:
+            local_now = timezone.localtime(timezone.now())
+            self.fields["sold_at"].initial = local_now.strftime("%Y-%m-%dT%H:%M")
+
+    def clean_unit_price(self):
+        price = self.cleaned_data.get("unit_price")
+        product = self.cleaned_data.get("product")
+        if price is None:
+            if product is None:
+                return price
+            return product.price
+        return price
+
+    def clean_sold_at(self):
+        value = self.cleaned_data.get("sold_at")
+        if not value:
+            return timezone.now()
+        if timezone.is_naive(value):
+            value = timezone.make_aware(value, timezone.get_current_timezone())
+        return value
+
+    def clean(self):
+        cleaned = super().clean()
+        product: Product | None = cleaned.get("product")
+        quantity = cleaned.get("quantity") or 0
+        if product and quantity and quantity > product.quantity_in_stock:
+            self.add_error(
+                "quantity",
+                f"Only {product.quantity_in_stock} unit(s) of {product.name} remaining in stock.",
+            )
+        return cleaned
+
+    def save(self, *, employee_profile: UserProfile | None = None) -> ProductSale:
+        profile = employee_profile or self.employee_profile
+        if profile is None:
+            raise ValidationError("Employee profile is required to register a sale.")
+
+        sale = ProductSale(
+            product=self.cleaned_data["product"],
+            sold_by=profile,
+            client=self.cleaned_data.get("client"),
+            quantity=self.cleaned_data["quantity"],
+            unit_price=self.cleaned_data["unit_price"],
+            sold_at=self.cleaned_data["sold_at"],
+            notes=self.cleaned_data.get("notes", ""),
+        )
+        sale.full_clean()
+        sale.save()
+        return sale

@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from datetime import timedelta, time
 import os
 
-from django.db.models import OuterRef, Subquery, Sum, Prefetch
+from django.db.models import OuterRef, Subquery, Sum, Prefetch, F, Q
 from django.utils import timezone
 from django.utils.timezone import localtime
 from core.validators import clean_phone, clean_ab_postal_code
@@ -996,7 +996,195 @@ class AppointmentStatusHistory(models.Model):
         help_text="Reason for cancelling if status is 'Cancelled'"
     )
 
-# --- 4. PAYMENTS ---
+# --- 4. RETAIL PRODUCTS ---
+
+
+class ProductCategory(models.Model):
+    """
+    Top-level grouping for retail products (e.g. Hair Care, Skin Care).
+    """
+    name = models.CharField(max_length=150, unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Product category"
+        verbose_name_plural = "Product categories"
+
+    def __str__(self):
+        return self.name
+
+
+class Product(models.Model):
+    """
+    Retail product that can be sold to clients.
+    """
+    category = models.ForeignKey(
+        ProductCategory,
+        on_delete=models.SET_NULL,
+        related_name="products",
+        blank=True,
+        null=True,
+    )
+    name = models.CharField(max_length=200, unique=True)
+    sku = models.CharField(max_length=64, blank=True, null=True, unique=True)
+    description = models.TextField(blank=True)
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Default retail price (CAD).",
+    )
+    quantity_in_stock = models.PositiveIntegerField(default=0)
+    low_stock_threshold = models.PositiveIntegerField(
+        default=0,
+        help_text="Set >0 to flag products that need restock.",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        indexes = [
+            models.Index(fields=["is_active", "name"], name="product_active_name_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.low_stock_threshold and self.low_stock_threshold < 0:
+            raise ValidationError({"low_stock_threshold": "Low stock threshold cannot be negative."})
+
+    @property
+    def is_low_on_stock(self) -> bool:
+        if not self.low_stock_threshold:
+            return False
+        return self.quantity_in_stock <= self.low_stock_threshold
+
+    def __str__(self):
+        return self.name
+
+
+class ProductSale(models.Model):
+    """
+    Immutable record describing the sale of a product to a client.
+    """
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        related_name="sales",
+    )
+    sold_by = models.ForeignKey(
+        UserProfile,
+        on_delete=models.PROTECT,
+        related_name="product_sales",
+        help_text="Employee who processed the sale.",
+    )
+    client = models.ForeignKey(
+        UserProfile,
+        on_delete=models.SET_NULL,
+        related_name="retail_purchases",
+        blank=True,
+        null=True,
+        help_text="Client receiving the product (optional).",
+    )
+    sold_at = models.DateTimeField(default=timezone.now, db_index=True)
+    quantity = models.PositiveIntegerField()
+    unit_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Price per unit at the time of sale.",
+    )
+    total_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        editable=False,
+        help_text="Computed total for reporting.",
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-sold_at", "-id"]
+        indexes = [
+            models.Index(fields=["sold_at"], name="product_sale_sold_at_idx"),
+            models.Index(fields=["product", "sold_at"], name="product_sale_product_idx"),
+            models.Index(fields=["sold_by", "sold_at"], name="product_sale_employee_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(check=Q(quantity__gt=0), name="product_sale_quantity_positive"),
+            models.CheckConstraint(check=Q(unit_price__gte=Decimal("0.00")), name="product_sale_unit_price_positive"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if not self.product_id:
+            raise ValidationError({"product": "Product is required."})
+        if not self.sold_by_id:
+            raise ValidationError({"sold_by": "Sold by user is required."})
+        if self.product_id and not self.product.is_active:
+            raise ValidationError({"product": "Cannot sell an inactive product."})
+
+    def _compute_total_amount(self) -> Decimal:
+        try:
+            return (self.unit_price * Decimal(self.quantity)).quantize(Decimal("0.01"))
+        except (InvalidOperation, TypeError) as exc:
+            raise ValidationError({"unit_price": "Invalid price precision."}) from exc
+
+    def save(self, *args, **kwargs):
+        if self.sold_at and timezone.is_naive(self.sold_at):
+            self.sold_at = timezone.make_aware(self.sold_at, timezone.get_current_timezone())
+
+        if self.product_id and self.unit_price is None:
+            self.unit_price = self.product.price
+
+        self.total_amount = self._compute_total_amount()
+
+        update_fields = kwargs.get("update_fields")
+        restrict_update = update_fields is not None
+
+        with transaction.atomic():
+            product = Product.objects.select_for_update().get(pk=self.product_id)
+
+            if self._state.adding:
+                if self.quantity > product.quantity_in_stock:
+                    raise ValidationError({"quantity": "Insufficient stock for this product."})
+                product.quantity_in_stock -= self.quantity
+                product.save(update_fields=["quantity_in_stock", "updated_at"])
+            else:
+                prev = type(self).objects.select_for_update().get(pk=self.pk)
+                if prev.product_id != self.product_id:
+                    raise ValidationError({"product": "Changing product on an existing sale is not supported."})
+                delta = self.quantity - prev.quantity
+                if delta:
+                    if delta > 0 and delta > product.quantity_in_stock:
+                        raise ValidationError({"quantity": "Insufficient stock for this product."})
+                    product.quantity_in_stock -= delta
+                    product.save(update_fields=["quantity_in_stock", "updated_at"])
+
+                if restrict_update:
+                    # ensure total_amount stays in sync even with update_fields
+                    kwargs["update_fields"] = list(set(update_fields) | {"total_amount", "updated_at"})
+
+            super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        with transaction.atomic():
+            product = Product.objects.select_for_update().get(pk=self.product_id)
+            product.quantity_in_stock += self.quantity
+            product.save(update_fields=["quantity_in_stock", "updated_at"])
+            super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.product} × {self.quantity} on {timezone.localtime(self.sold_at).strftime('%Y-%m-%d')}"
+
+
+# --- 5. PAYMENTS ---
 
 class PaymentMethod(models.Model):
     """
@@ -1065,7 +1253,7 @@ class Payment(models.Model):
     def __str__(self):
         return f"Payment {self.amount} {self.currency} for {self.appointment_id}"
 
-# --- 5. PREPAYMENTS ---
+# --- 6. PREPAYMENTS ---
 
 
 class AppointmentPrepayment(models.Model):
@@ -1075,7 +1263,7 @@ class AppointmentPrepayment(models.Model):
     appointment = models.OneToOneField(Appointment, on_delete=models.CASCADE)
     option = models.ForeignKey(PrepaymentOption, on_delete=models.CASCADE)
 
-# --- 6. FILES ---
+# --- 7. FILES ---
 
 class ClientFile(models.Model):
     """

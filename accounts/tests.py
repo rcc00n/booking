@@ -45,6 +45,9 @@ class RegistrationTests(TestCase):
             "username": "",  # разрешаем автогенерацию
             "email": "Client@Example.com",
             "phone": "403-555-1234",
+            "first_name": "Test",
+            "last_name": "User",
+            "birth_date": "1995-01-01",
             "address": "123 Test Street",
             "how_heard": "google",
             "email_marketing_consent": "on",

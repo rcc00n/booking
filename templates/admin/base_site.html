@@ -62,6 +62,19 @@
                         <li><a href="{% url 'admin:core_promocode_changelist' %}">Promo Codes</a></li>
                     </ul>
                 </li>
+                <li class="dropdown">
+                    <a href="javascript:void(0);" onclick="toggleDropdown(this)">
+                        <img src="{% static 'admin/icons/services.png' %}" alt="Retail">
+                        <span class="sidebar-label">Retail
+                        <span class="dropdown-arrow"> <img src="{% static 'admin/icons/arrow.png' %}" alt="Pointer"> </span>
+                        </span>
+                    </a>
+                    <ul class="submenu">
+                        <li><a href="{% url 'admin:core_product_changelist' %}">Products</a></li>
+                        <li><a href="{% url 'admin:core_productcategory_changelist' %}">Product Categories</a></li>
+                        <li><a href="{% url 'admin:core_productsale_changelist' %}">Product Sales</a></li>
+                    </ul>
+                </li>
                     <li>
                         <a href="{% url 'admin-stats' %}">
                             <img src="{% static 'admin/icons/statistics.png' %}" alt="Settings">
@@ -143,4 +156,3 @@
         {{ block.super }}
     </main>
 {% endblock %}
-
