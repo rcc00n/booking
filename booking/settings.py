@@ -16,18 +16,16 @@ from decouple import config, Csv
 import environ
 import os
 import os
-import environ
+import os
+import dj_database_url
+from environ import Env
+env = Env()
 
-env = environ.Env()
-environ.Env.read_env()
-env = environ.Env(
-    DEBUG=(bool, False)
-)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -108,10 +106,19 @@ WSGI_APPLICATION = 'booking.wsgi.application'
 #     }
 # }
 #
+# DATABASES = {
+#     "default": env.db(
+#         "DATABASE_URL",
+#         default="postgres://postgres@localhost:5432/postgres",
+#     )
+# }
+
+
 DATABASES = {
-    "default": env.db(
-        "DATABASE_URL",
-        default="postgres://postgres@localhost:5432/postgres",
+    "default": dj_database_url.parse(
+        os.environ["DATABASE_URL"],
+        conn_max_age=600,
+        ssl_require=False,
     )
 }
 
