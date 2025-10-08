@@ -22,6 +22,8 @@
     const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
     const itemsContainer = $("#items-container");
+    const salesContainer = document.getElementById("product-sales-container");
+    const SALES_PREFIX = "product_sales";
     if (!itemsContainer) return;
 
     function buildOption(value, text) {
@@ -361,6 +363,54 @@
         // Инициализация строки (селекты, таймпикер и т.д.)
         initRow(node);
     }
+
+    // Product sales helpers
+    function salesTotalFormsEl() {
+        return document.querySelector(`input[name="${SALES_PREFIX}-TOTAL_FORMS"]`);
+    }
+    function bumpSalesForms() {
+        const totalEl = salesTotalFormsEl();
+        if (totalEl) {
+            totalEl.value = String(parseInt(totalEl.value || "0", 10) + 1);
+        }
+    }
+    function nextSaleIndex() {
+        const totalEl = salesTotalFormsEl();
+        return totalEl ? parseInt(totalEl.value || "0", 10) : 0;
+    }
+    function initSaleRow(row) {
+        if (!row) return;
+        if (window.ProductSaleForm && typeof window.ProductSaleForm.enhanceScope === "function") {
+            window.ProductSaleForm.enhanceScope(row);
+        }
+        const deleteCheckbox = row.querySelector(`input[type="checkbox"][name$='-DELETE']`);
+        const removeBtn = $(".js-sale-remove", row);
+        if (deleteCheckbox && removeBtn) {
+            removeBtn.addEventListener("click", () => {
+                deleteCheckbox.checked = true;
+                row.classList.add("ab-hidden");
+            });
+        }
+    }
+    function initExistingSales() {
+        if (!salesContainer) return;
+        $$(".ps-item", salesContainer).forEach(initSaleRow);
+    }
+    function addProductSale() {
+        if (!salesContainer) return;
+        const tpl = document.getElementById("product-sale-empty-form");
+        if (!tpl) return;
+        const placeholder = salesContainer.querySelector(".ps-placeholder");
+        if (placeholder) placeholder.remove();
+        const idx = nextSaleIndex();
+        const fragment = tpl.content.cloneNode(true);
+        const node = fragment.firstElementChild;
+        replacePrefixAttributes(node, idx);
+        salesContainer.appendChild(node);
+        bumpSalesForms();
+        initSaleRow(node);
+    }
+
     // вкладки
     function initTabs() {
         const tabs = $$(".tab");
@@ -393,28 +443,34 @@
     }
     document.addEventListener("DOMContentLoaded", () => {
         initExistingRows();
+        initExistingSales();
         initTabs();
         stripDateTimeLabels(document);
         const btnAdd = $("#btn-add-item");
         if (btnAdd) btnAdd.addEventListener("click", addItem);
+        const btnAddSale = document.getElementById("btn-add-product-sale");
+        if (btnAddSale) btnAddSale.addEventListener("click", addProductSale);
         // при с   абмите — убедимся, что все disabled реальные поля имеют hidden-клоны
-        const form = itemsContainer.closest("form");
+        const containerForm = itemsContainer ? itemsContainer.closest("form") : (salesContainer ? salesContainer.closest("form") : null);
+        const form = containerForm;
         if (form) {
             form.addEventListener("submit", () => {
-                $$(".ab-item", itemsContainer).forEach(row => {
+                if (itemsContainer) {
+                    $$(".ab-item", itemsContainer).forEach(row => {
 
-                    syncRowToNative(row);
-                    if (row.classList.contains("readonly")) {
-                        const nativeStartDate = $("[name$='-start_time_0']", row);
-                        const nativeStartTime = $("[name$='-start_time_1']", row);
-                        const nativePrice = $("[name$='-unit_price']", row);
-                        if (nativeStartDate) ensureHiddenClone(nativeStartDate);
-                        if (nativeStartTime) ensureHiddenClone(nativeStartTime);
-                        if (nativePrice)     ensureHiddenClone(nativePrice);
-                    }
+                        syncRowToNative(row);
+                        if (row.classList.contains("readonly")) {
+                            const nativeStartDate = $("[name$='-start_time_0']", row);
+                            const nativeStartTime = $("[name$='-start_time_1']", row);
+                            const nativePrice = $("[name$='-unit_price']", row);
+                            if (nativeStartDate) ensureHiddenClone(nativeStartDate);
+                            if (nativeStartTime) ensureHiddenClone(nativeStartTime);
+                            if (nativePrice)     ensureHiddenClone(nativePrice);
+                        }
 
-                    // master всегда не редактируем: UI disabled, но нативное поле активно — ничего делать не нужно
-                });
+                        // master всегда не редактируем: UI disabled, но нативное поле активно — ничего делать не нужно
+                    });
+                }
             });
         }
         const container = document.getElementById('items-container');

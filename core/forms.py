@@ -44,6 +44,10 @@ EDITABLE_FIELDS_FOR_MASTER = (
 
 
 class ProductSaleAdminForm(forms.ModelForm):
+    """
+    Shared base form for product sale editing in admin UIs.
+    Supports enhanced widgets via data attributes consumed by custom JS.
+    """
     class Meta:
         model = ProductSale
         fields = "__all__"
@@ -52,6 +56,8 @@ class ProductSaleAdminForm(forms.ModelForm):
         js = ("core/js/product_sale_admin.js",)
 
     def __init__(self, *args, **kwargs):
+        self.request = kwargs.pop("request", None)
+        self.appointment = kwargs.pop("appointment", None)
         super().__init__(*args, **kwargs)
 
         sold_by = self.fields.get("sold_by")
@@ -75,6 +81,7 @@ class ProductSaleAdminForm(forms.ModelForm):
         product = self.fields.get("product")
         if product:
             product.widget.attrs.setdefault("data-price-endpoint", "")
+            product.widget.attrs.setdefault("data-product-sale-role", "product")
 
         unit_price = self.fields.get("unit_price")
         if unit_price:
@@ -82,12 +89,60 @@ class ProductSaleAdminForm(forms.ModelForm):
                 {
                     "data-unit-price-input": "1",
                     "autocomplete": "off",
+                    "data-product-sale-role": "unit-price",
                 }
             )
 
         quantity = self.fields.get("quantity")
         if quantity:
-            quantity.widget.attrs.update({"data-quantity-input": "1"})
+            quantity.widget.attrs.update(
+                {
+                    "data-quantity-input": "1",
+                    "data-product-sale-role": "quantity",
+                }
+            )
+
+
+class AppointmentProductSaleForm(ProductSaleAdminForm):
+    """
+    Specialized form for embedding product sales into the appointment change form.
+    Hides fields that should not be edited in that context and applies sensible defaults.
+    """
+
+    def __init__(self, *args, **kwargs):
+        request = kwargs.get("request")
+        appointment = kwargs.get("appointment")
+        super().__init__(*args, **kwargs)
+
+        sold_at = self.fields.get("sold_at")
+        if sold_at:
+            sold_at.widget = forms.HiddenInput()
+            sold_at.required = False
+
+        # Default client to the appointment's client for new sales.
+        if (
+            appointment
+            and appointment.client_id
+            and "client" in self.fields
+            and not self.instance.pk
+            and not self.initial.get("client")
+        ):
+            self.fields["client"].initial = appointment.client_id
+
+        # Default sold_by to the creator if available.
+        if (
+            request
+            and hasattr(request.user, "userprofile")
+            and "sold_by" in self.fields
+            and not self.instance.pk
+            and not self.initial.get("sold_by")
+        ):
+            self.fields["sold_by"].initial = getattr(request.user, "userprofile").pk
+
+        # Keep notes compact in inline UI.
+        notes = self.fields.get("notes")
+        if notes:
+            notes.widget.attrs.setdefault("rows", 2)
 
 
 def _normalize_phone(value: str) -> str:

@@ -97,6 +97,9 @@
                 <button type="button" class="tab active" data-tab="details">Appointment details</button>
                 <button type="button" class="tab" data-tab="discounts">Discounts & totals</button>
                 <button type="button" class="tab" data-tab="items">Items</button>
+                {% if product_sales_formset %}
+                    <button type="button" class="tab" data-tab="product-sales">Product sales</button>
+                {% endif %}
             </nav>
 
             {# ───────── 1) DETAILS ───────── #}
@@ -296,6 +299,127 @@
                     </template>
                 </div>
             </section>
+
+            {% if product_sales_formset %}
+                {# ───────── 4) PRODUCT SALES ───────── #}
+                <section class="tab-panel" data-tab-panel="product-sales">
+                    <div class="ab-section ab-card">
+                        <h3 class="ab-h">4) Product sales</h3>
+
+                        {% if product_sales_formset.non_form_errors %}
+                            <div class="ab-err">{{ product_sales_formset.non_form_errors }}</div>
+                        {% endif %}
+
+                        {{ product_sales_formset.management_form }}
+                        <div id="product-sales-container" class="ab-items">
+                            {% for f in product_sales_formset.forms %}
+                                <div class="ab-item ps-item" data-form-index="{{ forloop.counter0 }}" data-product-sale-form="1">
+                                    {% if f.non_field_errors %}<div class="ab-err">{{ f.non_field_errors }}</div>{% endif %}
+                                    {% for h in f.hidden_fields %}{{ h }}{% endfor %}
+
+                                    <div class="ab-row">
+                                        <div class="ab-field">
+                                            {{ f.product.label_tag }}{{ f.product }}
+                                            {% if f.product.errors %}<div class="ab-err">{{ f.product.errors }}</div>{% endif %}
+                                        </div>
+                                        <div class="ab-field">
+                                            {{ f.quantity.label_tag }}{{ f.quantity }}
+                                            {% if f.quantity.errors %}<div class="ab-err">{{ f.quantity.errors }}</div>{% endif %}
+                                        </div>
+                                        <div class="ab-field">
+                                            {{ f.unit_price.label_tag }}{{ f.unit_price }}
+                                            {% if f.unit_price.errors %}<div class="ab-err">{{ f.unit_price.errors }}</div>{% endif %}
+                                            <div class="ab-muted">Auto-filled from the selected product.</div>
+                                        </div>
+                                        <div class="ab-field">
+                                            <label>Total amount</label>
+                                            <div class="ab-pill" data-product-sale-role="total">
+                                                {% if f.instance and f.instance.total_amount %}
+                                                    ${{ f.instance.total_amount|floatformat:2 }}
+                                                {% else %}
+                                                    $0.00
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="ab-row">
+                                        <div class="ab-field">
+                                            {{ f.sold_by.label_tag }}{{ f.sold_by }}
+                                            {% if f.sold_by.errors %}<div class="ab-err">{{ f.sold_by.errors }}</div>{% endif %}
+                                            <div class="ab-muted">Defaults to the staff member saving the sale.</div>
+                                        </div>
+                                        <div class="ab-field">
+                                            {{ f.client.label_tag }}{{ f.client }}
+                                            {% if f.client.errors %}<div class="ab-err">{{ f.client.errors }}</div>{% endif %}
+                                            <div class="ab-muted">Defaults to the appointment client.</div>
+                                        </div>
+                                        <div class="ab-field" style="grid-column:3/5">
+                                            {{ f.notes.label_tag }}{{ f.notes }}
+                                            {% if f.notes.errors %}<div class="ab-err">{{ f.notes.errors }}</div>{% endif %}
+                                        </div>
+                                    </div>
+
+                                    {% if product_sales_can_delete %}
+                                        <div class="ab-hidden">{{ f.DELETE }}</div>
+                                        <div class="ab-r"><button type="button" class="ab-btn danger js-sale-remove">Remove</button></div>
+                                    {% endif %}
+                                </div>
+                            {% empty %}
+                                <div class="ab-muted ps-placeholder">No product sales linked to this appointment yet.</div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="ab-r">
+                            <button type="button" class="ab-btn secondary" id="btn-add-product-sale">＋ Add product sale</button>
+                        </div>
+
+                        <template id="product-sale-empty-form">
+                            <div class="ab-item ps-item" data-form-index="__prefix__" data-product-sale-form="1">
+                                {% with f=product_sales_formset.empty_form %}
+                                    {% for h in f.hidden_fields %}{{ h.as_widget }}{% endfor %}
+
+                                    <div class="ab-row">
+                                        <div class="ab-field">
+                                            {{ f.product.label_tag }}{{ f.product }}
+                                        </div>
+                                        <div class="ab-field">
+                                            {{ f.quantity.label_tag }}{{ f.quantity }}
+                                        </div>
+                                        <div class="ab-field">
+                                            {{ f.unit_price.label_tag }}{{ f.unit_price }}
+                                            <div class="ab-muted">Auto-filled from the selected product.</div>
+                                        </div>
+                                        <div class="ab-field">
+                                            <label>Total amount</label>
+                                            <div class="ab-pill" data-product-sale-role="total">$0.00</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="ab-row">
+                                        <div class="ab-field">
+                                            {{ f.sold_by.label_tag }}{{ f.sold_by }}
+                                            <div class="ab-muted">Defaults to the staff member saving the sale.</div>
+                                        </div>
+                                        <div class="ab-field">
+                                            {{ f.client.label_tag }}{{ f.client }}
+                                            <div class="ab-muted">Defaults to the appointment client.</div>
+                                        </div>
+                                        <div class="ab-field" style="grid-column:3/5">
+                                            {{ f.notes.label_tag }}{{ f.notes }}
+                                        </div>
+                                    </div>
+
+                                    {% if product_sales_can_delete %}
+                                        <div class="ab-hidden">{{ f.DELETE }}</div>
+                                        <div class="ab-r"><button type="button" class="ab-btn danger js-sale-remove">Remove</button></div>
+                                    {% endif %}
+                                {% endwith %}
+                            </div>
+                        </template>
+                    </div>
+                </section>
+            {% endif %}
 
             <div class="ab-r" style="margin-top:18px">
                 <button type="submit" class="ab-btn">Save</button>

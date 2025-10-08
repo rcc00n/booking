@@ -1115,6 +1115,48 @@ class AppointmentItemInline(admin.TabularInline):
         return True
 
 
+class AppointmentProductSaleInline(admin.StackedInline):
+    model = ProductSale
+    form = AppointmentProductSaleForm
+    fk_name = "appointment"
+    extra = 0
+    autocomplete_fields = ("product", "sold_by", "client")
+    verbose_name = "Product sale"
+    verbose_name_plural = "Product sales"
+    prefix = "product_sales"
+
+    def formfield_for_foreignkey(self, db_field, request=None, **kwargs):
+        if db_field.name == "client":
+            kwargs["queryset"] = (
+                UserProfile.objects.filter(userrole__role__name="Client")
+                .select_related("user")
+                .order_by("user__first_name", "user__last_name", "user__username")
+                .distinct()
+            )
+        if db_field.name == "sold_by" and request is not None:
+            profile = getattr(request.user, "userprofile", None)
+            filters = Q(user__is_superuser=True)
+            if profile:
+                filters |= Q(pk=profile.pk)
+            kwargs["queryset"] = (
+                UserProfile.objects.select_related("user")
+                .filter(filters)
+                .order_by("user__first_name", "user__last_name", "user__username")
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def get_formset(self, request, obj=None, **kwargs):
+        formset = super().get_formset(request, obj, **kwargs)
+        base_kwargs = getattr(formset, "form_kwargs", {}) or {}
+        formset.form_kwargs = {**base_kwargs, "request": request, "appointment": obj}
+
+        price_url = reverse("admin:core_productsale_product_price")
+        product_field = formset.form.base_fields.get("product")
+        if product_field:
+            product_field.widget.attrs["data-price-endpoint"] = price_url
+        return formset
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # CSV helpers
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1139,7 +1181,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
       • режим мастера: видит только свои записи, read-only, без действий
     """
     form = AppointmentAdminForm
-    inlines = [AppointmentItemInline]
+    inlines = [AppointmentItemInline, AppointmentProductSaleInline]
     add_form = AppointmentAddForm
     # NOTE: если хочешь отдельный шаблон для календаря — задай его здесь
     change_list_template = "admin/appointments_calendar.html"  # твой базовый шаблон списка
@@ -1229,20 +1271,23 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             ctx["form"] = adminform.form
 
         # отдаём инлайн-формсет позиций в шаблон
-        # ── НАЙТИ inline formset ДЛЯ AppointmentItem НАДЁЖНО ─────────────────
-        # === 1) Собираем formset для items принудительно ===
-        items_fs = None
+        # ── НАЙТИ inline formsets НАДЁЖНО ─────────────────
+        items_inline = None
+        sales_inline = None
         for inline in ctx.get("inline_admin_formsets", []):
+            model = getattr(inline.opts, "model", None)
+            if model is AppointmentItem:
+                items_inline = inline
+            elif model is ProductSale:
+                sales_inline = inline
 
-            if getattr(inline.opts, "model", None) is AppointmentItem:
-
-                items_fs = inline.formset
-
-                break
-
-
-        if items_fs is not None:
-            ctx["items_formset"] = items_fs
+        if items_inline is not None:
+            ctx["items_formset"] = items_inline.formset
+        if sales_inline is not None:
+            ctx["product_sales_formset"] = sales_inline.formset
+            ctx["product_sales_inline"] = sales_inline
+            ctx["product_sales_prefix"] = sales_inline.formset.prefix
+            ctx["product_sales_can_delete"] = sales_inline.formset.can_delete
         # ===== данные для кастомных селектов =====
         # ограничим пул мастеров, если текущий пользователь — мастер
         mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
@@ -1340,6 +1385,16 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         # Прогоняем full_clean() на каждом дочернем объекте
         for inst in instances:
             print(f"inst: {inst}")
+            if isinstance(inst, ProductSale):
+                if form.instance and not inst.client_id and getattr(form.instance, "client_id", None):
+                    inst.client_id = form.instance.client_id
+                if not inst.sold_by_id:
+                    profile = getattr(request.user, "userprofile", None)
+                    if profile:
+                        inst.sold_by = profile
+                if not inst.sold_at:
+                    base_dt = getattr(form.instance, "start_time", None)
+                    inst.sold_at = base_dt or timezone.now()
             inst.full_clean()  # вызывает AppointmentItem.clean()
             inst.save()
 
