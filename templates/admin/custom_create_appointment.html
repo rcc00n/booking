@@ -21,7 +21,7 @@
         .ab-item{padding:14px;border:1px dashed #e5e7eb;border-radius:12px;background:#fafafa}
 
         .ab-hidden{display:none}
-        .hint{color:#6b7280;font-size:12px;padding-top:4px}
+        .hint{color:#6b7280;font-size:12px;margin-top:4px}
 
         /* Ошибки */
         .ab-errornote{background:#FEF2F2;border:1px solid #FCA5A5;color:#991B1B;padding:10px 12px;border-radius:10px;margin:10px 0}
@@ -450,6 +450,17 @@
             const container = document.getElementById('items-container');
             const totalForms = document.getElementById('id_items-TOTAL_FORMS');
             const grandTotal = document.getElementById('grand-total');
+
+            container.addEventListener('click', (e) => {
+                const btn = e.target.closest('.js-remove');
+                if (!btn) return;
+                const row = btn.closest('.ab-item');
+                if (!row) return;
+
+                row.remove();
+                renumberRows();
+                recalcGrandTotal();
+            });
 
             (function clientComboBox(){
                 const input     = document.getElementById('client_combo_input');
@@ -902,11 +913,11 @@
 
                 priceInp.addEventListener('input', recalcGrandTotal);
 
-                row.querySelector('.js-remove').addEventListener('click', () => {
-                    row.remove();
-                    renumberRows();
-                    recalcGrandTotal();
-                });
+                {#row.querySelector('.js-remove').addEventListener('click', () => {#}
+                {#    row.remove();#}
+                {#    renumberRows();#}
+                {#    recalcGrandTotal();#}
+                {# });#}
             }
 
             function addRow(prefill){
@@ -965,13 +976,30 @@
                 totalForms.value = idx + 1;
             }
 
-            function renumberRows(){
+            function renumberRows() {
                 const rows = Array.from(container.querySelectorAll('.ab-item'));
                 totalForms.value = rows.length;
+
                 rows.forEach((row, i) => {
-                    const clone = row.cloneNode(true);
-                    row.parentNode.replaceChild(clone, row);
-                    hookRow(clone, i); // ← важно: хукаем клон, который теперь в DOM
+                    // для каждого элемента с name, начинающимся с items-
+                    row.querySelectorAll('[name^="items-"]').forEach(el => {
+                        const suffix = el.name.replace(/^items-\d+-/, ''); // master, service, start_time_0, ...
+                        el.name = `items-${i}-${suffix}`;
+                        el.id   = `id_items-${i}-${suffix}`;
+                    });
+
+                    // если мастер «задизейблен» (режим мастера) — синхронизируем скрытый клон
+                    const mSel = row.querySelector('select.js-master');
+                    if (mSel && mSel.disabled) {
+                        let hid = mSel.nextElementSibling;
+                        if (!(hid && hid.tagName === 'INPUT' && hid.type === 'hidden')) {
+                            hid = document.createElement('input');
+                            hid.type = 'hidden';
+                            mSel.insertAdjacentElement('afterend', hid);
+                        }
+                        hid.name  = mSel.name;
+                        hid.value = mSel.value || '';
+                    }
                 });
             }
             function rowIndexFromNames(row){
