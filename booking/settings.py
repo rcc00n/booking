@@ -17,6 +17,7 @@ import environ
 import os
 import os
 import environ
+import dj_database_url
 
 env = environ.Env()
 environ.Env.read_env()
@@ -109,9 +110,10 @@ WSGI_APPLICATION = 'booking.wsgi.application'
 # }
 
 DATABASES = {
-    "default": env.db(
-        "DATABASE_URL",
-        default="postgres://postgres@localhost:5432/postgres",
+    "default": dj_database_url.config(
+        default=os.environ.get("DATABASE_URL"),
+        conn_max_age=600,
+        ssl_require=False,   # True только если внешний managed PG требует SSL
     )
 }
 
