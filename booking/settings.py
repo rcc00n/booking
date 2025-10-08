@@ -97,23 +97,23 @@ WSGI_APPLICATION = 'booking.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'appdb', # Change to your local DB name
-        'USER': 'appuser', # Change to your local user name
-        'PASSWORD': 'strong_password', # Change to your local user password
-        'HOST': 'localhost',
-        'PORT': '5432',
-    }
-}
-#
 # DATABASES = {
-#     "default": env.db(
-#         "DATABASE_URL",
-#         default="postgres://postgres@localhost:5432/postgres",
-#     )
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'appdb', # Change to your local DB name
+#         'USER': 'appuser', # Change to your local user name
+#         'PASSWORD': 'strong_password', # Change to your local user password
+#         'HOST': 'localhost',
+#         'PORT': '5432',
+#     }
 # }
+#
+DATABASES = {
+    "default": env.db(
+        "DATABASE_URL",
+        default="postgres://postgres@localhost:5432/postgres",
+    )
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
