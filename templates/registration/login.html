@@ -26,6 +26,12 @@
   --field-bg:hsla(0 0% 100%/.9);
   --error-bg:#ffe5e5;
   --error-text:#c30000;
+
+  --control-radius:20px;
+  --control-padding-x:24px;
+  --control-padding-y:20px;
+  --control-outline:inset 0 0 0 1.5px rgba(0,0,0,.06);
+  --control-outline-active:inset 0 0 0 2px var(--primary);
 }
 
 /* ===== Background ===== */
@@ -70,24 +76,141 @@ html,body{
 }
 h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;letter-spacing:-.02em;color:var(--green);}
 
-/* ===== Form ===== */
-.login-form{display:flex;flex-direction:column;gap:1.6rem;}
-.field{position:relative;}
-.field svg{position:absolute;left:22px;top:50%;transform:translateY(-50%);
-  width:22px;height:22px;fill:var(--primary);opacity:.95;}
-.field input{
-  width:100%;box-sizing:border-box;height:64px;padding:0 22px 0 64px;line-height:64px;
-  font-size:16px;font-weight:500;border:none;border-radius:18px;background:var(--field-bg);
-  box-shadow:inset 0 0 0 2px rgba(0,0,0,.04);transition:box-shadow .3s,background .3s;
+/* ===== Form controls ===== */
+.login-form{
+  display:flex;
+  flex-direction:column;
+  gap:1.4rem;
 }
-.field input:focus{outline:none;background:#fff;box-shadow:inset 0 0 0 3px var(--primary);}
-.field input::placeholder{color:transparent;}
+.login-form .field{
+  --control-padding-y:26px;
+  --control-radius-local:24px;
+  --label-float-top:calc(var(--control-padding-y) - 6px);
+  --label-float-transform:translateY(-62%);
+  --control-padding-top:calc(var(--control-padding-y) + 10px);
+  --control-padding-bottom:calc(var(--control-padding-y) - 6px);
+}
+.login-form .field label{
+  font-size:16px;
+}
+.field{
+  position:relative;
+  display:block;
+  --control-padding-left:var(--control-padding-x);
+  --control-padding-right:var(--control-padding-x);
+  --control-padding-y:var(--control-padding-y);
+  --control-radius-local:var(--control-radius);
+  --label-float-top:calc(var(--control-padding-y) - 4px);
+  --label-float-transform:translateY(-60%);
+  --control-padding-top:calc(var(--control-padding-y) + 8px);
+  --control-padding-bottom:calc(var(--control-padding-y) - 4px);
+}
+.field input:not([type="checkbox"]),
+.field select,
+.field textarea{
+  width:100%;
+  box-sizing:border-box;
+  border:none;
+  border-radius:var(--control-radius-local);
+  background:var(--field-bg);
+  padding:var(--control-padding-top) var(--control-padding-right) var(--control-padding-bottom);
+  padding-left:var(--control-padding-left);
+  font-size:16px;
+  font-weight:500;
+  line-height:1.45;
+  color:var(--dgray);
+  box-shadow:var(--control-outline);
+  transition:background .25s ease, box-shadow .25s ease, transform .2s ease;
+}
+.field textarea{
+  min-height:112px;
+  padding-top:calc(var(--control-padding-top) + 4px);
+  padding-bottom:calc(var(--control-padding-bottom) + 8px);
+  font-size:15px;
+  line-height:1.55;
+  resize:vertical;
+}
+.field select{
+  appearance:none;
+  padding-right:calc(var(--control-padding-right) + 40px);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23204029' stroke-width='1.8' viewBox='0 0 24 24'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 22px center;
+  background-size:18px;
+}
+.field input::placeholder,
+.field textarea::placeholder{
+  color:transparent;
+}
+.field input:not([type="checkbox"]):focus,
+.field select:focus,
+.field textarea:focus{
+  outline:none;
+  background:#fff;
+  box-shadow:var(--control-outline-active);
+}
 .field label{
-  position:absolute;left:64px;top:50%;transform:translateY(-50%);pointer-events:none;
-  font-size:16px;font-weight:500;opacity:.6;transition:all .25s;
+  position:absolute;
+  left:var(--control-padding-left);
+  top:50%;
+  transform:translateY(-50%);
+  font-size:15px;
+  font-weight:500;
+  color:rgba(77,77,77,.68);
+  letter-spacing:-.01em;
+  pointer-events:none;
+  transition:top .22s cubic-bezier(.4,0,.2,1),
+             transform .22s cubic-bezier(.4,0,.2,1),
+             font-size .22s,
+             letter-spacing .22s,
+             opacity .22s;
 }
-.field input:focus+label,
-.field input:not(:placeholder-shown)+label{ top:10px;transform:none;font-size:12px;opacity:.9; }
+.field input:not([type="checkbox"]):focus + label,
+.field input:not([type="checkbox"]):not(:placeholder-shown) + label{
+  top:var(--label-float-top);
+  transform:var(--label-float-transform);
+  font-size:12px;
+  opacity:.95;
+  letter-spacing:.05em;
+  background:var(--card-bg);
+  padding:0 .6rem;
+}
+.field textarea + label{
+  top:calc(var(--control-padding-top) - 10px);
+  transform:none;
+}
+.field textarea:focus + label,
+.field textarea:not(:placeholder-shown) + label{
+  top:calc(var(--control-padding-top) - 16px);
+  transform:translateY(-45%);
+  font-size:12px;
+  opacity:.95;
+  letter-spacing:.05em;
+  background:var(--card-bg);
+  padding:0 .6rem;
+}
+.field select + label{
+  top:var(--label-float-top);
+  transform:translateY(-45%);
+  font-size:12px;
+  opacity:.95;
+  letter-spacing:.05em;
+  background:var(--card-bg);
+  padding:0 .6rem;
+}
+.field svg{
+  position:absolute;
+  left:22px;
+  top:50%;
+  transform:translateY(-50%);
+  width:22px;
+  height:22px;
+  fill:var(--primary);
+  opacity:.95;
+}
+.field.field--with-icon{
+  --control-padding-left:76px;
+}
 
 /* ===== Buttons ===== */
 .btn{
@@ -132,8 +255,6 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
 }
 .modal__close{position:absolute;top:18px;right:22px;border:none;background:none;font-size:26px;font-weight:600;cursor:pointer;color:#666;}
 .modal h2{margin:0 0 1.4rem;font-size:1.9rem;font-weight:600;text-align:center;color:var(--green);}
-.reg-form{display:flex;flex-direction:column;gap:1.2rem;}
-.reg-form .field input{height:56px;padding:0 20px;font-size:15px;}
 
 /* ===== Responsive ===== */
 @media(max-width:500px){
@@ -142,14 +263,37 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
 }
 
 /* === Password toggle (eye) === */
-.field .toggle-eye{
-  position:absolute; right:1px; top:50%; transform:translateY(-50%);
-  border:none; background:transparent; cursor:pointer; padding:6px; border-radius:10px;
-  display:flex; align-items:center; justify-content:center;
+.field input.has-eye{
+  padding-right:calc(var(--control-padding-right) + 46px);
 }
-.field .toggle-eye:focus{ outline: none; box-shadow:0 0 0 3px rgba(175,149,37,.35); }
-.field input.has-eye{ padding-right:64px; } /* место под глаз */
-.field .toggle-eye svg{ width:22px; height:22px; fill:var(--primary); opacity:.95; }
+.field .toggle-eye{
+  position:absolute;
+  top:50%;
+  right:14px;
+  transform:translateY(-50%);
+  border:none;
+  background:transparent;
+  cursor:pointer;
+  padding:8px;
+  border-radius:12px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  transition:background .2s ease, box-shadow .2s ease;
+}
+.field .toggle-eye:hover{
+  background:rgba(175,149,37,.16);
+}
+.field .toggle-eye:focus{
+  outline:none;
+  box-shadow:0 0 0 3px rgba(175,149,37,.35);
+}
+.field .toggle-eye svg{
+  width:22px;
+  height:22px;
+  fill:var(--primary);
+  opacity:.95;
+}
 /* === Modal: scroll & sizing === */
 .modal__dialog{
   max-height:92vh;           /* не выше экрана */
@@ -160,44 +304,75 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
   .modal__dialog{ max-height:96vh; }
 }
 
-/* === Registration form (modal) field styles === */
-/* В модалке нет левой иконки, поэтому подправляем отступы/лейблы отдельно */
-.reg-form .field input,
-.reg-form .field select,
-.reg-form .field textarea{
-  width:100%;
-  box-sizing:border-box;
-  border:none;
-  border-radius:18px;
-  background:var(--field-bg);
-  box-shadow:inset 0 0 0 2px rgba(0,0,0,.04);
+/* === Registration form (modal) specialization === */
+.reg-form{
+  display:flex;
+  flex-direction:column;
+  gap:1.25rem;
+}
+.reg-form .field{
+  --control-padding-y:18px;
+  --control-padding-x:22px;
+  --control-padding-left:var(--control-padding-x);
+  --control-padding-right:var(--control-padding-x);
+  --control-radius-local:18px;
+  --label-float-top:calc(var(--control-padding-y) - 2px);
+  --label-float-transform:translateY(-58%);
+  --control-padding-top:calc(var(--control-padding-y) + 8px);
+  --control-padding-bottom:calc(var(--control-padding-y) - 2px);
+}
+.reg-form .field input:not([type="checkbox"]),
+.reg-form .field select{
   font-size:15px;
 }
-
-/* высоты и паддинги по типам */
-.reg-form .field input{ height:56px; padding:0 20px; }
-.reg-form .field select{ height:56px; padding:0 20px; appearance:none; background-position:right 14px center; }
-.reg-form .field textarea{ min-height:88px; padding:14px 20px; line-height:1.4; resize:vertical; }
-
-/* плавающий лейбл в модалке (слева 20px, без иконки) */
-.reg-form .field label{ left:20px; }
-
-/* input/textarea: лейбл «всплывает», когда есть фокус или текст */
-.reg-form .field input:focus + label,
-.reg-form .field input:not(:placeholder-shown) + label,
+.reg-form .field textarea{
+  min-height:108px;
+  padding-top:calc(var(--control-padding-top) + 2px);
+  padding-bottom:calc(var(--control-padding-bottom) + 8px);
+  font-size:15px;
+}
+.reg-form .field textarea + label{
+  top:calc(var(--control-padding-top) - 8px);
+}
 .reg-form .field textarea:focus + label,
 .reg-form .field textarea:not(:placeholder-shown) + label{
-  top:10px; transform:none; font-size:12px; opacity:.9;
+  top:calc(var(--control-padding-top) - 14px);
 }
-
-/* select не умеет placeholder-shown — держим лейбл всегда «маленьким» сверху */
 .reg-form .field select + label{
-  top:10px; transform:none; font-size:12px; opacity:.9; left:20px;
+  left:var(--control-padding-left);
 }
 
-/* глазик: чуть внутрь и больше паддинг справа под кнопку */
-.field .toggle-eye{ right:12px; }      /* было 18px */
-.field input.has-eye{ padding-right:68px; } /* было 58px/64px — делаем запас */
+/* чекбокс согласия */
+.field.field--check{
+  display:flex;
+  align-items:flex-start;
+  gap:12px;
+  padding:0;
+}
+.field.field--check input{
+  width:auto;
+  min-width:18px;
+  min-height:18px;
+  margin-top:4px;
+  padding:0;
+  border-radius:6px;
+  box-shadow:none;
+  background:#fff;
+  accent-color:var(--primary);
+}
+.field.field--check input:focus{
+  outline:none;
+  box-shadow:0 0 0 2px var(--primary);
+}
+.field.field--check label{
+  position:static;
+  transform:none;
+  font-size:14px;
+  letter-spacing:0;
+  opacity:1;
+  color:var(--dgray);
+  line-height:1.45;
+}
 
 </style>
 </head>
@@ -206,7 +381,7 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
 <div class="halo"></div><canvas id="particles"></canvas>
 
 <div class="wrapper">
-  <div class="card" data-tilt>
+  <div class="card">
     <h1 class="title">Sign in to Malva Booking</h1>
     <div class="flash" id="authFlash" aria-live="polite" style="display:none;"></div>
 
@@ -214,25 +389,25 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
       {% csrf_token %}
       {{ form.non_field_errors }}
 
-      <div class="field">
+      <div class="field field--with-icon">
         {{ form.username }}
         <label for="{{ form.username.id_for_label }}">Username</label>
         <svg viewBox="0 0 24 24"><path d="M12 12c2.761 0 5-2.239 5-5S14.761 2 12 2 7 4.239 7 7s2.239 5 5 5zm0 2c-3.859 0-7 3.141-7 7 0 .552.448 1 1 1h12c.552 0 1-.448 1-1 0-3.859-3.141-7-7-7z"/></svg>
       </div>
 
-      <div class="field">
-  {{ form.password }}
-  <label for="{{ form.password.id_for_label }}">Password</label>
-  <svg viewBox="0 0 24 24"><path d="M17 9h-1V6a4 4 0 00-8 0v3H7a2 2 0 00-2 2v9a2 2 0 002 2h10a2 2 0 002-2v-9a2 2 0 00-2-2zm-6 7.73V18a1 1 0 002 0v-1.27a2 2 0 10-2 0zM9 6a3 3 0 016 0v3H9V6z"/></svg>
+      <div class="field field--with-icon">
+        {{ form.password }}
+        <label for="{{ form.password.id_for_label }}">Password</label>
+        <svg viewBox="0 0 24 24"><path d="M17 9h-1V6a4 4 0 00-8 0v3H7a2 2 0 00-2 2v9a2 2 0 002 2h10a2 2 0 002-2v-9a2 2 0 00-2-2zm-6 7.73V18a1 1 0 002 0v-1.27a2 2 0 10-2 0zM9 6a3 3 0 016 0v3H9V6z"/></svg>
 
-  <!-- eye -->
-  <button type="button" class="toggle-eye" aria-label="Show password" title="Show password">
-    <!-- eye open -->
-    <svg class="eye-open" viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
-    <!-- eye off (скрыта по умолчанию) -->
-    <svg class="eye-off" viewBox="0 0 24 24" style="display:none"><path d="M2 3.27L3.28 2 22 20.72 20.73 22l-3.1-3.1A10.86 10.86 0 0112 19c-7 0-10-7-10-7a18.2 18.2 0 014.4-5.38L2 3.27zM12 7a5 5 0 015 5 5 5 0 01-.39 1.94l-6.55-6.55A4.9 4.9 0 0112 7zm0 10a8.86 8.86 0 005.22-1.72l-2.15-2.15A5 5 0 017 12a5 5 0 01.28-1.65L5.18 8.25A17.2 17.2 0 002 12s3 5 10 5z"/></svg>
-  </button>
-</div>
+        <!-- eye -->
+        <button type="button" class="toggle-eye" aria-label="Show password" title="Show password">
+          <!-- eye open -->
+          <svg class="eye-open" viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
+          <!-- eye off (скрыта по умолчанию) -->
+          <svg class="eye-off" viewBox="0 0 24 24" style="display:none"><path d="M2 3.27L3.28 2 22 20.72 20.73 22l-3.1-3.1A10.86 10.86 0 0112 19c-7 0-10-7-10-7a18.2 18.2 0 014.4-5.38L2 3.27zM12 7a5 5 0 015 5 5 5 0 01-.39 1.94l-6.55-6.55A4.9 4.9 0 0112 7zm0 10a8.86 8.86 0 005.22-1.72l-2.15-2.15A5 5 0 017 12a5 5 0 01.28-1.65L5.18 8.25A17.2 17.2 0 002 12s3 5 10 5z"/></svg>
+        </button>
+      </div>
 
 
       <button type="submit" class="btn">Sign in</button>
@@ -252,63 +427,60 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
         <input type="text" name="username" placeholder=" " autocomplete="username">
         <label>Username (optional)</label>
       </div>
-      <div class="field"><input type="email" name="email" placeholder=" " required><label>E-mail</label></div>
       <div class="field">
-  <input
-    type="tel"
-    id="regPhone"
-    name="phone"
-    placeholder="(555) 123‑4567"
-    value="+1 "
-    required
-    inputmode="tel"
-    autocomplete="tel"
-  />
-  <label for="regPhone">Phone</label>
-</div>
+        <input type="email" name="email" placeholder=" " required autocomplete="email">
+        <label>E-mail</label>
+      </div>
       <div class="field">
-  <input type="password" name="password1" placeholder=" " required>
-  <label>Password</label>
-  <button type="button" class="toggle-eye" aria-label="Show password" title="Show password">
-    <svg class="eye-open" viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
-    <svg class="eye-off" viewBox="0 0 24 24" style="display:none"><path d="M2 3.27L3.28 2 22 20.72 20.73 22l-3.1-3.1A10.86 10.86 0 0112 19c-7 0-10-7-10-7a18.2 18.2 0 014.4-5.38L2 3.27zM12 7a5 5 0 015 5 5 5 0 01-.39 1.94l-6.55-6.55A4.9 4.9 0 0112 7zm0 10a8.86 8.86 0 005.22-1.72l-2.15-2.15A5 5 0 017 12a5 5 0 01.28-1.65L5.18 8.25A17.2 17.2 0 002 12s3 5 10 5z"/></svg>
-  </button>
-</div>
-
+        <input
+          type="tel"
+          id="regPhone"
+          name="phone"
+          placeholder="(555) 123‑4567"
+          value="+1 "
+          required
+          inputmode="tel"
+          autocomplete="tel"
+        >
+        <label for="regPhone">Phone</label>
+      </div>
       <div class="field">
-  <input type="password" name="password2" placeholder=" " required>
-  <label>Confirm password</label>
-  <button type="button" class="toggle-eye" aria-label="Show password" title="Show password">
-    <svg class="eye-open" viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
-    <svg class="eye-off" viewBox="0 0 24 24" style="display:none"><path d="M2 3.27L3.28 2 22 20.72 20.73 22l-3.1-3.1A10.86 10.86 0 0112 19c-7 0-10-7-10-7a18.2 18.2 0 014.4-5.38L2 3.27zM12 7a5 5 0 015 5 5 5 0 01-.39 1.94l-6.55-6.55A4.9 4.9 0 0112 7zm0 10a8.86 8.86 0 005.22-1.72l-2.15-2.15A5 5 0 017 12a5 5 0 01.28-1.65L5.18 8.25A17.2 17.2 0 002 12s3 5 10 5z"/></svg>
-  </button>
-</div>
-<!-- Address -->
-<div class="field">
-  <textarea name="address" placeholder=" " rows="2"></textarea>
-  <label>Address</label>
-</div>
-
-<!-- How did you hear about us -->
-<div class="field">
-  <select name="how_heard" placeholder=" ">
-    <option value="">— Select —</option>
-    <option value="google">Google search</option>
-    <option value="instagram">Instagram</option>
-    <option value="tiktok">TikTok</option>
-    <option value="friend">Friends/Family</option>
-    <option value="other">Other</option>
-  </select>
-  <label>How did you hear about us?</label>
-</div>
-
-<!-- Consent -->
-<div class="field" style="display:flex;align-items:center;gap:.6rem;">
-  <input id="consentEmail" type="checkbox" name="email_marketing_consent" style="width:auto;height:auto;">
-  <label for="consentEmail" style="position:static;transform:none;opacity:1;font-size:14px;">
-    I agree to receive e‑mail updates and offers
-  </label>
-</div>
+        <input type="password" name="password1" placeholder=" " required autocomplete="new-password">
+        <label>Password</label>
+        <button type="button" class="toggle-eye" aria-label="Show password" title="Show password">
+          <svg class="eye-open" viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
+          <svg class="eye-off" viewBox="0 0 24 24" style="display:none"><path d="M2 3.27L3.28 2 22 20.72 20.73 22l-3.1-3.1A10.86 10.86 0 0112 19c-7 0-10-7-10-7a18.2 18.2 0 014.4-5.38L2 3.27zM12 7a5 5 0 015 5 5 5 0 01-.39 1.94l-6.55-6.55A4.9 4.9 0 0112 7zm0 10a8.86 8.86 0 005.22-1.72l-2.15-2.15A5 5 0 017 12a5 5 0 01.28-1.65L5.18 8.25A17.2 17.2 0 002 12s3 5 10 5z"/></svg>
+        </button>
+      </div>
+      <div class="field">
+        <input type="password" name="password2" placeholder=" " required autocomplete="new-password">
+        <label>Confirm password</label>
+        <button type="button" class="toggle-eye" aria-label="Show password" title="Show password">
+          <svg class="eye-open" viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
+          <svg class="eye-off" viewBox="0 0 24 24" style="display:none"><path d="M2 3.27L3.28 2 22 20.72 20.73 22l-3.1-3.1A10.86 10.86 0 0112 19c-7 0-10-7-10-7a18.2 18.2 0 014.4-5.38L2 3.27zM12 7a5 5 0 015 5 5 5 0 01-.39 1.94l-6.55-6.55A4.9 4.9 0 0112 7zm0 10a8.86 8.86 0 005.22-1.72l-2.15-2.15A5 5 0 017 12a5 5 0 01.28-1.65L5.18 8.25A17.2 17.2 0 002 12s3 5 10 5z"/></svg>
+        </button>
+      </div>
+      <div class="field">
+        <textarea name="address" placeholder=" " rows="2" autocomplete="street-address"></textarea>
+        <label>Address</label>
+      </div>
+      <div class="field">
+        <select name="how_heard" placeholder=" ">
+          <option value="">— Select —</option>
+          <option value="google">Google search</option>
+          <option value="instagram">Instagram</option>
+          <option value="tiktok">TikTok</option>
+          <option value="friend">Friends/Family</option>
+          <option value="other">Other</option>
+        </select>
+        <label>How did you hear about us?</label>
+      </div>
+      <div class="field field--check">
+        <input id="consentEmail" type="checkbox" name="email_marketing_consent">
+        <label for="consentEmail">
+          I agree to receive email updates and offers and consent to the processing of my personal data
+        </label>
+      </div>
 
 
       <ul class="errorlist" id="regErrors" style="display:none;"></ul>
@@ -345,17 +517,6 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
     requestAnimationFrame(tick);
   })();
 })();
-
-/* 3D tilt */
-(function(){
-  const card=document.querySelector('.card[data-tilt]'),d=20;
-  card.addEventListener('mousemove',e=>{
-    const r=card.getBoundingClientRect(),x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2;
-    card.style.transform=`rotateX(${(-y/d)}deg) rotateY(${(x/d)}deg)`;
-  });
-  card.addEventListener('mouseleave',()=>card.style.transform='rotateX(0) rotateY(0)');
-})();
-
 /* modal toggle */
 const modal=document.getElementById('regModal');
 const regForm=document.getElementById('regForm');

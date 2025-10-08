@@ -470,6 +470,7 @@ class UserImportRowForm(forms.Form):
     password = forms.CharField()
     first_name = forms.CharField(max_length=150)
     last_name = forms.CharField(max_length=150)
+    phone = forms.CharField(max_length=32)
 
     def clean_username(self):
         username = self.cleaned_data["username"].strip()
@@ -491,6 +492,17 @@ class UserImportRowForm(forms.Form):
         password = self.cleaned_data["password"]
         validate_password(password)
         return password
+
+    def clean_phone(self):
+        raw_phone = self.cleaned_data.get("phone", "")
+        try:
+            phone = _normalize_phone(raw_phone)
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.message)
+
+        if UserProfile.objects.filter(phone=phone).exists():
+            raise forms.ValidationError("Phone already exists.")
+        return phone
 # -----------------------------
 # Custom User Change Form
 # -----------------------------

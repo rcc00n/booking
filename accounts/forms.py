@@ -50,7 +50,8 @@ class ClientRegistrationForm(UserCreationForm):
     )
 
     email_marketing_consent = forms.BooleanField(
-        required=False, label="I agree to receive e-mail updates and offers"
+        required=False,
+        label="I agree to receive e-mail updates and offers and consent to the processing of my personal data",
     )
 
     class Meta(UserCreationForm.Meta):

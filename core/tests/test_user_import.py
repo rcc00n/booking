@@ -16,7 +16,10 @@ class UserImportServiceTests(TestCase):
         self.User = get_user_model()
 
     def test_successful_csv_import_creates_user_profile_and_role(self):
-        data = "Username,Email,Password,First name,Last name\nnewuser,new.user@example.com,SecurePa55!,New,User\n"
+        data = (
+            "Username,Email,Password,First name,Last name,Phone\n"
+            "newuser,new.user@example.com,SecurePa55!,New,User,+1 (555) 000-1111\n"
+        )
         uploaded = SimpleUploadedFile("users.csv", data.encode("utf-8"), content_type="text/csv")
 
         result = import_users_from_file(uploaded)
@@ -27,6 +30,7 @@ class UserImportServiceTests(TestCase):
         user = self.User.objects.get(username="newuser")
         profile = UserProfile.objects.get(user=user)
         self.assertEqual(profile.source, "offline")
+        self.assertEqual(profile.phone, "+15550001111")
         role = Role.objects.get(name="Client")
         self.assertTrue(UserRole.objects.filter(user=profile, role=role).exists())
 
@@ -38,7 +42,10 @@ class UserImportServiceTests(TestCase):
             first_name="Old",
             last_name="User",
         )
-        data = "Username,Email,Password,First name,Last name\nexisting,new@example.com,SecurePa55!,New,User\n"
+        data = (
+            "Username,Email,Password,First name,Last name,Phone\n"
+            "existing,new@example.com,SecurePa55!,New,User,+1 (555) 222-3333\n"
+        )
         uploaded = SimpleUploadedFile("users.csv", data.encode("utf-8"), content_type="text/csv")
 
         result = import_users_from_file(uploaded)
@@ -62,8 +69,8 @@ class UserImportServiceTests(TestCase):
 
         workbook = openpyxl.Workbook()
         sheet = workbook.active
-        sheet.append(["Username", "Email", "Password", "First name", "Last name"])
-        sheet.append(["exceluser", "excel.user@example.com", "SecurePa55!", "Excel", "User"])
+        sheet.append(["Username", "Email", "Password", "First name", "Last name", "Phone"])
+        sheet.append(["exceluser", "excel.user@example.com", "SecurePa55!", "Excel", "User", "+1 555 444 5555"])
         buffer = BytesIO()
         workbook.save(buffer)
         workbook.close()
@@ -78,3 +85,6 @@ class UserImportServiceTests(TestCase):
         self.assertEqual(result.created, 1)
         self.assertFalse(result.errors)
         self.assertTrue(self.User.objects.filter(username="exceluser").exists())
+
+        profile = UserProfile.objects.get(user__username="exceluser")
+        self.assertEqual(profile.phone, "+15554445555")
