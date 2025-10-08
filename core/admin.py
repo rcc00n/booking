@@ -551,7 +551,161 @@ class ExportXlsxMixin:
         if full:
             return full
         user = getattr(client, "user", None)
-        return getattr(user, "username", "") if user else ""# -----------------------------
+        return getattr(user, "username", "") if user else ""
+
+    def _wb_new(self) -> Workbook:
+        wb = Workbook()
+        wb.remove(wb.active)  # удаляем дефолтный пустой лист
+        return wb
+
+    def _append_sheet(self, wb: Workbook, title: str, headers, rows, *, money_cols=None, datetime_cols=None):
+        money_cols = set(money_cols or [])
+        datetime_cols = set(datetime_cols or [])
+
+        ws = wb.create_sheet(title=title[:31] or "Export")
+        ws.append(list(headers))
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(vertical="center")
+
+        row_idx = 1
+        for row in rows:
+            row_idx += 1
+            safe_row = [self._xlsx_safe(v) for v in row]
+            ws.append(safe_row)
+
+            for col_idx, _ in enumerate(headers, start=1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                if col_idx in money_cols and isinstance(cell.value, (int, float, Decimal)):
+                    cell.number_format = numbers.FORMAT_CURRENCY_USD_SIMPLE
+                if col_idx in datetime_cols and isinstance(cell.value, datetime):
+                    cell.number_format = "yyyy-mm-dd hh:mm"
+                if col_idx in datetime_cols and isinstance(cell.value, date) and not isinstance(cell.value, datetime):
+                    cell.number_format = "yyyy-mm-dd"
+
+        # авто-ширина
+        for col_idx in range(1, ws.max_column + 1):
+            letter = get_column_letter(col_idx)
+            max_len = 0
+            for c in ws[letter]:
+                s = "" if c.value is None else str(c.value)
+                if len(s) > max_len:
+                    max_len = len(s)
+            ws.column_dimensions[letter].width = min(max_len + 2, 60)
+
+        return ws
+
+    def _wb_response(self, wb: Workbook, filename: str) -> HttpResponse:
+        buff = BytesIO()
+        wb.save(buff)
+        buff.seek(0)
+        resp = HttpResponse(
+            buff.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        if not filename.endswith(".xlsx"):
+            filename += ".xlsx"
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return resp
+
+    def build_statistics_workbook(
+            self,
+            *,
+            start, end,
+            kpi_total_revenue, kpi_total_appointments, kpi_with_discount,
+            top_bookers, top_spenders, ds_totals,
+            discount_breakdown, promo_breakdown, client_source_table,
+    ):
+        """
+        Собирает многолистовую книгу XLSX из данных статистики.
+        На вход подаются готовые QuerySet/списки, которые уже посчитаны в stats_view.
+        """
+        wb = self._wb_new()
+
+        # KPI
+        self._append_sheet(
+            wb, "KPI",
+            headers=["Start", "End", "Total Revenue", "Appointments", "With Discount"],
+            rows=[[start, end, kpi_total_revenue, kpi_total_appointments, kpi_with_discount]],
+            money_cols={3}, datetime_cols={1, 2},
+        )
+
+        # Top Bookers
+        self._append_sheet(
+            wb, "Top Bookers",
+            headers=["Client ID", "First Name", "Last Name", "Email", "Appointments", "Spent"],
+            rows=[
+                [
+                    r["client_id"],
+                    r["client__user__first_name"],
+                    r["client__user__last_name"],
+                    r["client__user__email"],
+                    r["appt_count"],
+                    r["spent"],
+                ] for r in top_bookers
+            ],
+            money_cols={6},
+        )
+
+        # Top Spenders
+        self._append_sheet(
+            wb, "Top Spenders",
+            headers=["Client ID", "First Name", "Last Name", "Email", "Spent", "Appointments"],
+            rows=[
+                [
+                    r["client_id"],
+                    r["client__user__first_name"],
+                    r["client__user__last_name"],
+                    r["client__user__email"],
+                    r["spent"],
+                    r["appt_count"],
+                ] for r in top_spenders
+            ],
+            money_cols={5},
+        )
+
+        # Discount Sources totals
+        self._append_sheet(
+            wb, "Discount Sources",
+            headers=["Discount Source", "Appointments (distinct)", "Revenue"],
+            rows=[[r["discount_source"], r["cnt"], r["revenue"]] for r in ds_totals],
+            money_cols={3},
+        )
+
+        # ServiceDiscount breakdown
+        self._append_sheet(
+            wb, "ServiceDiscount",
+            headers=["ServiceDiscount", "Service", "Uses", "Revenue(by items)", "Saved"],
+            rows=[
+                [str(d), getattr(d.service, "name", ""), d.uses, d.revenue, d.saved]
+                for d in discount_breakdown
+            ],
+            money_cols={4, 5},
+        )
+
+        # Promo breakdown
+        self._append_sheet(
+            wb, "Promo",
+            headers=["Code", "Uses", "Revenue (share)"],
+            rows=[[r["code"], r["uses"], r["revenue"]] for r in promo_breakdown],
+            money_cols={3},
+        )
+
+        # Client Source
+        self._append_sheet(
+            wb, "Client Source",
+            headers=["Key", "Label", "Revenue", "Appointments", "Clients"],
+            rows=[
+                [r["key"], r["label"], r["revenue"], r["appts"], r["clients"]]
+                for r in client_source_table
+            ],
+            money_cols={3},
+        )
+
+        return wb
+
+
+# -----------------------------
 # Customized User Admin
 # -----------------------------
 class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
@@ -2671,6 +2825,28 @@ def stats_view(request: HttpRequest) -> HttpResponse:
     src_labels = [r["label"] for r in client_source_stats]
     src_revenue = [float(r["revenue"]) for r in client_source_stats]
 
+
+    if request.GET.get("export") == "xlsx":
+        exporter = ExportXlsxMixin()  # просто используем миксин как helper
+        wb = exporter.build_statistics_workbook(
+            start=start, end=end,
+            kpi_total_revenue=kpi_total_revenue,
+            kpi_total_appointments=kpi_total_appointments,
+            kpi_with_discount=kpi_with_discount,
+            top_bookers=list(top_bookers),
+            top_spenders=list(top_spenders),
+            ds_totals=list(ds_totals),
+            discount_breakdown=list(discount_breakdown),
+            promo_breakdown=list(promo_breakdown),
+            client_source_table=list(client_source_table),
+        )
+        return exporter._wb_response(wb, "statistics.xlsx")
+
+    # === иначе — рендерим страницу и даём ссылку на экспорт с текущими фильтрами ===
+    params = request.GET.copy()
+    params["export"] = "xlsx"
+
+    export_xlsx_url = f"{request.path}?{params.urlencode()}"  # сохраняет все фильтры + export=xlsx
     # ── Контекст для шаблона
     context = {
         "title": "Statistics",
@@ -2693,6 +2869,7 @@ def stats_view(request: HttpRequest) -> HttpResponse:
 
         "client_source_stacked": client_source_stacked,
         "client_source_table": client_source_table,
+        "export_xlsx_url": export_xlsx_url
     }
     return render(request, "admin/statistics.html", context)
 

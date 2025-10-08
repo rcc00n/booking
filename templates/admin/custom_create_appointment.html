@@ -19,7 +19,7 @@
         .ab-btn.danger{background:#b91c1c}
         .ab-items{display:flex;flex-direction:column;gap:12px}
         .ab-item{padding:14px;border:1px dashed #e5e7eb;border-radius:12px;background:#fafafa}
-        .ab-total{margin-top:16px;text-align:right;color:#111827}
+
         .ab-hidden{display:none}
         .hint{color:#6b7280;font-size:12px;margin-top:4px}
 
@@ -152,6 +152,163 @@
             position:absolute; right:12px; top:50%; margin-top:-3px;
             border-left:5px solid transparent; border-right:5px solid transparent; border-top:6px solid #6b7280;
         }
+        :root{
+            --ab-border: #e5e7eb;
+            --ab-muted:  #6b7280;
+            --ab-bg:     #ffffff;
+            --ab-bg-sub: #fafafa;
+
+            --ab-green-500:#22c55e;
+            --ab-green-600:#16a34a;
+            --ab-green-700:#15803d;
+
+            --ab-red-500:#ef4444;
+            --ab-red-100:#fee2e2;
+            --ab-red-200:#fecaca;
+        }
+
+        /* Контейнеры */
+        .ab-card{
+            background: var(--ab-bg);
+            border:1px solid var(--ab-border);
+            border-radius:14px;
+            box-shadow:0 6px 24px rgba(0,0,0,.06);
+            padding:22px;
+        }
+
+        /* Заголовки/подписи */
+        .ab-sub{color:var(--ab-muted);margin:0 0 18px}
+
+        /* Поля формы — мягкий серый фон как на макете */
+        .ab-field label{display:block;font-size:13px;color:#374151;margin-bottom:6px}
+        .ab-field input,
+        .ab-field select,
+        .combo-input{
+            width:100%;
+            height:44px;
+            background:#f9fafb;
+            border:1px solid var(--ab-border);
+            border-radius:10px;
+            padding:10px 12px;
+        }
+        .ab-field input:focus,
+        .ab-field select:focus,
+        .combo:focus-within .combo-input{
+            border-color: var(--ab-green-600);
+            box-shadow:0 0 0 3px rgba(34,197,94,.18);
+            outline:0;
+        }
+
+        /* Disabled — бледнее */
+        .ab-field input:disabled,
+        .ab-field select:disabled,
+        .combo.is-disabled .combo-input{
+            color:#9ca3af;background:#f3f4f6;cursor:not-allowed;
+        }
+
+        /* Карточки услуг */
+        .ab-items{display:flex;flex-direction:column;gap:16px}
+        .ab-item{
+            padding:16px;
+            border:1px solid var(--ab-border);
+            border-radius:14px;
+            background:#fff;
+        }
+
+        /* Ряд полей внутри позиции */
+        .ab-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:12px;align-items:end}
+        @media (max-width:1100px){.ab-row{grid-template-columns:1fr 1fr}}
+        .hint{color:var(--ab-muted);font-size:12px;margin-top:4px}
+
+        /* Кнопки */
+        .ab-actions{display:flex;gap:10px;justify-content:flex-end}
+        .ab-btn{
+            display:inline-flex;align-items:center;gap:8px;
+            border-radius:10px;padding:10px 14px;cursor:pointer;
+            border:1px solid var(--ab-border);background:#111827;color:#fff;
+        }
+
+        /* Зелёная «Add Service» */
+        .ab-btn.success{
+            background: var(--ab-green-600);
+            border-color: var(--ab-green-600);
+            color:#fff;
+        }
+        .ab-btn.success:hover{background:var(--ab-green-700)}
+
+        /* Вторичная (Cancel) как была */
+        .ab-btn.secondary{background:#fff;color:#111827;border-color:var(--ab-border)}
+
+        /* Remove — как на макете: красная обводка, светлый hover */
+        .ab-btn.danger{
+            background:#fff;color:var(--ab-red-500);
+            border-color:var(--ab-red-200);
+        }
+        .ab-btn.danger:hover{background:var(--ab-red-100)}
+
+        /* Ошибки — мягче */
+        .ab-errornote{background:#fff5f5;border:1px solid #fecaca;color:#b91c1c;padding:10px 12px;border-radius:10px;margin:10px 0}
+        .ab-field.errors input,.ab-field.errors select,.ab-field.errors .combo-input{border-color:#ef4444}
+
+        /* Комбо-стрелочка в стиле нативного select */
+        .combo::after{
+            content:"";
+            position:absolute; right:12px; top:50%; margin-top:-3px;
+            border-left:5px solid transparent; border-right:5px solid transparent; border-top:6px solid #9ca3af;
+        }
+
+        /* Итого — «чип» справа, как на скрине */
+        .ab-total{
+            margin-top:18px;
+            width: 90%;
+        }
+        .ab-total #grand-total{
+            display:inline-block;
+            background:#f9fafb;
+            border:1px solid var(--ab-border);
+            border-radius:12px;
+            padding:12px 18px;
+            font-size:20px;
+            font-weight:700;
+            color:#111827;
+        }
+
+        /* Секции/низ карточки */
+        /* Контейнер для кнопок */
+        .ab-foot{display:flex;gap:12px;justify-content:flex-end;margin-top:20px}
+
+        /* Базовая кнопка */
+        .btn{
+            display:inline-flex;align-items:center;gap:10px;
+            font-weight:600; line-height:1;
+            padding:12px 18px; border-radius:12px;
+            border:1px solid transparent; cursor:pointer;
+            transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,transform .02s ease;
+            text-decoration:none; user-select:none;
+        }
+
+        /* Пилюльная форма */
+        .btn-pill{border-radius:999px}
+
+        /* Иконка слева */
+        .btn__icon{width:18px;height:18px;flex:0 0 18px}
+
+        /* Зелёная (Save Booking) */
+        .btn-success{
+            background:#15803d; border-color:#15803d; color:#fff;
+            box-shadow:0 1px 0 rgba(0,0,0,.04);
+        }
+        .btn-success:hover{background:#166534}
+        .btn-success:active{transform:translateY(1px)}
+        .btn-success:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(34,197,94,.25)}
+
+        /* Призрачная/обведённая (Cancel) */
+        .btn-ghost{
+            background:#fff; color:#111827; border-color:#e5e7eb;
+        }
+        .btn-ghost:hover{background:#f9fafb}
+        .btn-ghost:active{transform:translateY(1px)}
+        .btn-ghost:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(17,24,39,.08)}
     </style>
 {% endblock %}
 
@@ -205,7 +362,7 @@
             <!-- STEP 2: ITEMS -->
             <div id="items-section" class="ab-hidden" style="margin-top:20px">
                 <div class="ab-actions" style="margin-bottom:10px">
-                    <button type="button" class="ab-btn secondary" id="btn-add-item">＋ Add service</button>
+                    <button type="button" class="ab-btn success" id="btn-add-item">＋ Add service</button>
                 </div>
 
                 <!-- management form (согласовано с вашим view) -->
@@ -216,13 +373,28 @@
 
                 <div class="ab-items" id="items-container"></div>
 
-                <div class="ab-total"><strong id="grand-total">$0.00</strong></div>
+                <div class="ab-total"><strong id="grand-total"> Total: $0.00</strong></div>
             </div>
 
-            <div style="margin-top:20px;display:flex;gap:10px">
-                <button type="submit" class="ab-btn">Save</button>
-                <a href="{% url 'admin:core_appointment_changelist' %}" class="ab-btn secondary">Cancel</a>
-            </div>
+                <div class="ab-foot">
+                    <a href="{% url 'admin:core_appointment_changelist' %}" class="btn btn-ghost btn-pill">
+                        <!-- иконка X -->
+                        <svg aria-hidden="true" viewBox="0 0 24 24" class="btn__icon">
+                            <path d="M6 6l12 12M6 18L18 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        Cancel
+                    </a>
+
+                    <button type="submit" class="btn btn-success btn-pill">
+                        <!-- иконка «Save» -->
+                        <svg aria-hidden="true" viewBox="0 0 24 24" class="btn__icon">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                            <path d="M17 21v-8H7v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                            <path d="M7 3v5h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                        </svg>
+                        Save Booking
+                    </button>
+                </div>
         </form>
     </div>
 
