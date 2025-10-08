@@ -21,7 +21,7 @@
         .ab-item{padding:14px;border:1px dashed #e5e7eb;border-radius:12px;background:#fafafa}
 
         .ab-hidden{display:none}
-        .hint{color:#6b7280;font-size:12px;margin-top:4px}
+        .hint{color:#6b7280;font-size:12px;padding-top:4px}
 
         /* Ошибки */
         .ab-errornote{background:#FEF2F2;border:1px solid #FCA5A5;color:#991B1B;padding:10px 12px;border-radius:10px;margin:10px 0}
@@ -257,21 +257,6 @@
             border-left:5px solid transparent; border-right:5px solid transparent; border-top:6px solid #9ca3af;
         }
 
-        /* Итого — «чип» справа, как на скрине */
-        .ab-total{
-            margin-top:18px;
-            width: 90%;
-        }
-        .ab-total #grand-total{
-            display:inline-block;
-            background:#f9fafb;
-            border:1px solid var(--ab-border);
-            border-radius:12px;
-            padding:12px 18px;
-            font-size:20px;
-            font-weight:700;
-            color:#111827;
-        }
 
         /* Секции/низ карточки */
         /* Контейнер для кнопок */
@@ -309,6 +294,30 @@
         .btn-ghost:hover{background:#f9fafb}
         .btn-ghost:active{transform:translateY(1px)}
         .btn-ghost:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(17,24,39,.08)}
+        .ab-total{
+            margin-top:24px;
+            background:#f8fafc;                 /* очень светло-серый */
+            border:1px solid #e5e7eb;
+            border-radius:14px;
+            padding:18px 22px;
+            display:flex;
+            align-items:center;
+            justify-content:space-between;       /* текст слева, сумма справа */
+            box-shadow:0 2px 10px rgba(0,0,0,.03);
+        }
+
+        .ab-total::before{
+            content:"Total Amount";              /* подпись слева без изменения HTML */
+            font-size:18px;
+            font-weight:600;
+            color:#1f2937;                       /* тёмно-серый */
+        }
+
+        #grand-total{
+            font-size:22px;
+            font-weight:700;
+            color:#0f172a;
+        }
     </style>
 {% endblock %}
 
@@ -373,7 +382,9 @@
 
                 <div class="ab-items" id="items-container"></div>
 
-                <div class="ab-total"><strong id="grand-total"> Total: $0.00</strong></div>
+                <div class="ab-total">
+                    <strong id="grand-total">$0.00</strong>
+                </div>
             </div>
 
                 <div class="ab-foot">
@@ -676,13 +687,76 @@
             function makeComboFromSelect(selectEl, placeholder) {
                 if (!selectEl) return null;
 
-                // контейнер
+                // ── 0) Если уже преобразован (есть .combo-обертка) — НЕ создаём заново
+                const existingWrap = selectEl.closest('.combo');
+                if (existingWrap) {
+                    const input = existingWrap.querySelector('.combo-input');
+                    const list  = existingWrap.querySelector('.combo-list');
+
+                    function optionsToItems() {
+                        return Array.from(selectEl.options)
+                            .filter(o => o.value !== '')
+                            .map(o => ({ id: o.value, label: o.textContent, opt: o }));
+                    }
+                    let ALL = optionsToItems();
+                    let filtered = ALL.slice();
+                    let activeIdx = -1;
+
+                    function render() {
+                        if (!list) return;
+                        list.innerHTML = '';
+                        if (!filtered.length) {
+                            const em = document.createElement('div');
+                            em.className = 'combo-empty';
+                            em.textContent = 'No matches';
+                            list.appendChild(em);
+                            return;
+                        }
+                        filtered.forEach((it, idx) => {
+                            const div = document.createElement('div');
+                            div.className = 'combo-item';
+                            div.setAttribute('role', 'option');
+                            if (idx === activeIdx) div.setAttribute('aria-selected', 'true');
+                            div.textContent = it.label;
+                            div.addEventListener('mousedown', (e) => {
+                                e.preventDefault();
+                                selectEl.value = it.id;
+                                selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+                                if (input) input.value = it.label;
+                                existingWrap.classList.remove('combo-open');
+                            });
+                            list.appendChild(div);
+                        });
+                    }
+                    function filter(term) {
+                        const t = (term || '').trim().toLowerCase();
+                        filtered = t ? ALL.filter(x => x.label.toLowerCase().includes(t)) : ALL.slice();
+                        activeIdx = filtered.length ? 0 : -1;
+                        render();
+                    }
+
+                    // вернём совместимое API
+                    return {
+                        rebuildFromSelect() { ALL = optionsToItems(); filter(input ? input.value : ''); },
+                        clear() {
+                            selectEl.value = '';
+                            if (input) input.value = '';
+                            filter('');
+                        },
+                        syncFromSelect() {
+                            const cur = Array.from(selectEl.options).find(o => o.value === selectEl.value);
+                            if (input) input.value = cur ? cur.textContent : '';
+                            filter(input ? input.value : '');
+                        }
+                    };
+                }
+
+                // ── 1) Первый раз: строим оболочку
                 const wrap = document.createElement('div');
                 wrap.className = 'combo';
                 selectEl.parentNode.insertBefore(wrap, selectEl);
                 wrap.appendChild(selectEl);
 
-                // видимый input
                 const input = document.createElement('input');
                 input.type = 'text';
                 input.className = 'combo-input';
@@ -690,12 +764,10 @@
                 input.autocomplete = 'off';
                 wrap.insertBefore(input, selectEl);
 
-                // список
                 const list = document.createElement('div');
                 list.className = 'combo-list';
                 wrap.appendChild(list);
 
-                // селект прячем, но оставляем в DOM (для формы и data-* на <option>)
                 selectEl.classList.add('ab-hidden');
 
                 function optionsToItems() {
@@ -716,10 +788,17 @@
                     }
                     filtered.forEach((it, idx) => {
                         const div = document.createElement('div');
-                        div.className = 'combo-item'; div.setAttribute('role','option');
+                        div.className = 'combo-item';
+                        div.setAttribute('role','option');
                         if (idx === activeIdx) div.setAttribute('aria-selected','true');
                         div.textContent = it.label;
-                        div.addEventListener('mousedown', (e) => { e.preventDefault(); choose(it); });
+                        div.addEventListener('mousedown', (e) => {
+                            e.preventDefault();
+                            selectEl.value = it.id;
+                            selectEl.dispatchEvent(new Event('change', {bubbles:true}));
+                            input.value = it.label;
+                            wrap.classList.remove('combo-open');
+                        });
                         list.appendChild(div);
                     });
                 }
@@ -730,13 +809,7 @@
                     filtered = t ? ALL.filter(x => x.label.toLowerCase().includes(t)) : ALL.slice();
                     activeIdx = filtered.length ? 0 : -1; render();
                 }
-                function choose(item){
-                    selectEl.value = item.id;                                // важно: меняем value у реального select
-                    selectEl.dispatchEvent(new Event('change', {bubbles:true}));
-                    input.value = item.label; close();
-                }
 
-                // события
                 input.addEventListener('focus', () => { filter(input.value); open(); });
                 input.addEventListener('click',  () => { filter(input.value); open(); });
                 input.addEventListener('input',  () => { filter(input.value); open(); selectEl.value=''; });
@@ -744,19 +817,27 @@
                     if (!wrap.classList.contains('combo-open') && (e.key==='ArrowDown'||e.key==='ArrowUp')){ open(); render(); return; }
                     if (e.key==='ArrowDown'){ e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx+1)%filtered.length; render(); } }
                     if (e.key==='ArrowUp'){   e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx-1+filtered.length)%filtered.length; render(); } }
-                    if (e.key==='Enter'){ if (wrap.classList.contains('combo-open') && filtered[activeIdx]){ e.preventDefault(); choose(filtered[activeIdx]); } }
+                    if (e.key==='Enter'){ if (wrap.classList.contains('combo-open') && filtered[activeIdx]){ e.preventDefault();
+                        selectEl.value = filtered[activeIdx].id;
+                        selectEl.dispatchEvent(new Event('change', {bubbles:true}));
+                        input.value = filtered[activeIdx].label;
+                        close();
+                    } }
                     if (e.key==='Escape'){ close(); }
                 });
                 document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) close(); });
 
-                // публичное API — нужно, чтобы пересобирать список услуг при смене мастера
+                // публичное API
                 return {
-                    rebuildFromSelect(){ ALL = optionsToItems(); filter(input.value); }, // пересчитать items из новых options
+                    rebuildFromSelect(){ ALL = optionsToItems(); filter(input.value); },
                     clear(){ selectEl.value=''; input.value=''; filter(''); },
-                    syncFromSelect(){ const cur = Array.from(selectEl.options).find(o=>o.value===selectEl.value);
-                        input.value = cur ? cur.textContent : ''; filter(''); }
+                    syncFromSelect(){
+                        const cur = Array.from(selectEl.options).find(o=>o.value===selectEl.value);
+                        input.value = cur ? cur.textContent : ''; filter('');
+                    }
                 };
             }
+
             // ---- Row wiring
             function hookRow(row, idx){
                 const name = (suffix)=> `items-${idx}-${suffix}`;
