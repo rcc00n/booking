@@ -4,6 +4,7 @@ from django import forms
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from django.utils.text import slugify
 
 import phonenumbers
@@ -25,22 +26,44 @@ class ClientRegistrationForm(UserCreationForm):
         • назначает роль «Client».
     """
 
+    first_name = forms.CharField(
+        required=True,
+        max_length=150,
+        label="First name",
+        error_messages={"required": "First name is required."},
+    )
+
+    last_name = forms.CharField(
+        required=True,
+        max_length=150,
+        label="Last name",
+        error_messages={"required": "Last name is required."},
+    )
+
     email = forms.EmailField(required=True, label="E-mail")
 
     # Визуально предзаполняем +1 и показываем формат;
     # валидацию/нормализацию делаем в clean_phone()
     phone = forms.CharField(
         max_length=20,
-        label="Телефон",
+        label="Phone",
         initial="+1 ",
         widget=forms.TextInput(attrs={"placeholder": "(555) 123-4567"})
     )
 
-    username = forms.CharField(required=False, label="Логин (можно оставить пустым)")
+    birth_date = forms.DateField(
+        required=True,
+        label="Date of birth",
+        input_formats=["%Y-%m-%d"],
+        widget=forms.DateInput(attrs={"type": "date"}),
+        error_messages={"required": "Date of birth is required."},
+    )
+
+    username = forms.CharField(required=False, label="Username (optional)")
 
     # --- NEW: дополнительные поля регистрации ---
     address = forms.CharField(
-        required=False, label="Адрес",
+        required=False, label="Address",
         widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Street, Apt, City, ZIP"})
     )
 
@@ -57,7 +80,7 @@ class ClientRegistrationForm(UserCreationForm):
     class Meta(UserCreationForm.Meta):
         model = CustomUserDisplay
         fields = (
-            "username", "email", "phone",
+            "username", "first_name", "last_name", "email", "phone", "birth_date",
             "address", "how_heard", "email_marketing_consent",
             "password1", "password2"
         )
@@ -67,7 +90,7 @@ class ClientRegistrationForm(UserCreationForm):
     def clean_email(self):
         email = (self.cleaned_data.get("email") or "").lower().strip()
         if CustomUserDisplay.objects.filter(email__iexact=email).exists():
-            raise forms.ValidationError("Этот e-mail уже используется.")
+            raise forms.ValidationError("This e-mail is already in use.")
         return email
 
     def clean_phone(self):
@@ -81,11 +104,11 @@ class ClientRegistrationForm(UserCreationForm):
         try:
             parsed = phonenumbers.parse(raw, None)
         except phonenumbers.NumberParseException:
-            raise forms.ValidationError("Неверный формат телефона.")
+            raise forms.ValidationError("Invalid phone number format.")
         phone_e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
         # Проверка уникальности среди профилей
         if UserProfile.objects.filter(phone=phone_e164).exists():
-            raise forms.ValidationError("Этот телефон уже используется.")
+            raise forms.ValidationError("This phone number is already in use.")
         return phone_e164
 
     def clean_username(self):
@@ -96,8 +119,25 @@ class ClientRegistrationForm(UserCreationForm):
             if instance_pk:
                 qs = qs.exclude(pk=instance_pk)
             if qs.exists():
-                raise forms.ValidationError("Такой логин уже занят.")
+                raise forms.ValidationError("This username is already taken.")
         return username or None
+
+    def clean_birth_date(self):
+        birth_date = self.cleaned_data.get("birth_date")
+        if not birth_date:
+            return birth_date
+
+        today = timezone.now().date()
+        if birth_date > today:
+            raise forms.ValidationError("Birth date cannot be in the future.")
+
+        age = today.year - birth_date.year - (
+            (today.month, today.day) < (birth_date.month, birth_date.day)
+        )
+        if age < 18:
+            raise forms.ValidationError("You must be at least 18 years old to create an account.")
+
+        return birth_date
 
     # --- Save ---
 
@@ -106,6 +146,8 @@ class ClientRegistrationForm(UserCreationForm):
 
         # email / username
         user.email = self.cleaned_data["email"]
+        user.first_name = self.cleaned_data["first_name"]
+        user.last_name = self.cleaned_data["last_name"]
         provided_username = self.cleaned_data.get("username")
         if provided_username:
             user.username = provided_username
@@ -122,6 +164,7 @@ class ClientRegistrationForm(UserCreationForm):
             user.save()
 
             phone = self.cleaned_data["phone"]  # уже в E.164
+            birth_date = self.cleaned_data.get("birth_date")
             address = self.cleaned_data.get("address") or ""
             how_heard = self.cleaned_data.get("how_heard") or ""
 
@@ -129,19 +172,21 @@ class ClientRegistrationForm(UserCreationForm):
                 user=user,
                 defaults={
                     "phone": phone,
+                    "birth_date": birth_date,
                     "address": address,
                     "how_heard": how_heard,
                 },
             )
             if not created:
                 profile.phone = phone
+                profile.birth_date = birth_date
                 profile.address = address
                 profile.how_heard = how_heard
 
             consent = bool(self.cleaned_data.get("email_marketing_consent"))
             profile.set_marketing_consent(consent)
             profile.save(update_fields=[
-                "phone", "address", "how_heard",
+                "phone", "birth_date", "address", "how_heard",
                 "email_marketing_consent", "email_marketing_consented_at",
             ])
 
@@ -234,6 +279,24 @@ class ClientProfileForm(forms.Form):
         if qs.exists():
             raise ValidationError("Этот телефон уже используется.")
         return phone_e164
+
+    def clean_birth_date(self):
+        birth_date = self.cleaned_data.get("birth_date")
+        if not birth_date:
+            return birth_date
+
+        today = timezone.now().date()
+        if birth_date > today:
+            raise ValidationError("Can not be born in the future")
+
+        # минимальный возраст — 18 лет
+        age = today.year - birth_date.year - (
+            (today.month, today.day) < (birth_date.month, birth_date.day)
+        )
+        if age < 18:
+            raise ValidationError("Can not be below 18 yo")
+
+        return birth_date
 
     def save(self):
         self.user.first_name = self.cleaned_data.get("first_name", "") or ""
