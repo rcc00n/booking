@@ -3,17 +3,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     highlightActiveMenu(sidebar);
     enhanceBreadcrumbs(sidebar);
+    setupSidebarHover(sidebar);
+    updateSidebarOffsets();
 
-    if (sidebar) {
-        sidebar.addEventListener("mouseleave", function () {
-            const openDropdowns = sidebar.querySelectorAll(".dropdown.open");
-            openDropdowns.forEach(function (dropdown) {
-                if (!dropdown.classList.contains("is-current")) {
-                    dropdown.classList.remove("open");
-                }
-            });
-        });
-    }
+    window.addEventListener("resize", debounce(updateSidebarOffsets, 150));
 });
 
 function toggleDropdown(clickedElement) {
@@ -270,4 +263,70 @@ function getDashboardLabel(sidebar) {
     }
 
     return getSidebarLabel(dashboardLink);
+}
+
+function setupSidebarHover(sidebar) {
+    if (!sidebar) {
+        return;
+    }
+
+    const hoverClass = "sidebar-hover";
+
+    function applyHoverState() {
+        document.body.classList.add(hoverClass);
+    }
+
+    function clearHoverState() {
+        document.body.classList.remove(hoverClass);
+    }
+
+    sidebar.addEventListener("mouseenter", applyHoverState);
+
+    sidebar.addEventListener("mouseleave", function () {
+        clearHoverState();
+
+        const openDropdowns = sidebar.querySelectorAll(".dropdown.open");
+        openDropdowns.forEach(function (dropdown) {
+            if (!dropdown.classList.contains("is-current")) {
+                dropdown.classList.remove("open");
+            }
+        });
+    });
+
+    // Provide hover expansion without locking labels open when using the mouse.
+}
+
+function updateSidebarOffsets() {
+    const root = document.documentElement;
+    if (!root) {
+        return;
+    }
+
+    const header = document.querySelector(".main-header");
+    const hasHeader = Boolean(header);
+    let headerHeight = 0;
+
+    if (hasHeader) {
+        const rect = header.getBoundingClientRect();
+        headerHeight = rect.height;
+    }
+
+    const minimumOffset = hasHeader ? 72 : 0;
+    const computedOffset = hasHeader ? Math.round(headerHeight) + 16 : 0;
+    const offsetValue = Math.max(computedOffset, minimumOffset);
+
+    root.style.setProperty("--icon-sidebar-offset-top", offsetValue + "px");
+}
+
+function debounce(fn, wait) {
+    let timerId;
+    return function () {
+        const context = this;
+        const args = arguments;
+
+        clearTimeout(timerId);
+        timerId = setTimeout(function () {
+            fn.apply(context, args);
+        }, wait);
+    };
 }

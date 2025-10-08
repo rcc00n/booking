@@ -1,0 +1,37 @@
+/* Ensure Jazzmin collapsible sidebar shows icons only when collapsed */
+.sidebar-mini.sidebar-collapse .main-sidebar .brand-link .brand-text {
+    display: none !important;
+}
+
+.sidebar-mini.sidebar-collapse .main-sidebar .user-panel .info {
+    display: none !important;
+}
+
+.sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .nav-header {
+    display: none !important;
+}
+
+.sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .nav-link > p,
+.sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .nav-link > span,
+.sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .nav-link > .nav-link-text,
+.sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .nav-link > .menu-title,
+.sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .nav-link > .badge,
+.sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .nav-link > .right {
+    display: none !important;
+}
+
+.sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .nav-link {
+    justify-content: center;
+}
+
+.sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .nav-link .nav-icon {
+    margin-right: 0 !important;
+}
+
+.sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .nav-treeview {
+    display: none !important;
+}
+
+.sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .has-treeview.menu-open > .nav-link {
+    background-color: inherit !important;
+}
