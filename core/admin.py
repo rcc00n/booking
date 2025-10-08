@@ -1147,7 +1147,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     date_hierarchy = "start_time"  # поправь, если поле называется иначе
 
     list_select_related = ("client",)
-
+    search_fields = (
+        "id",
+        "client__user__first_name",
+        "client__user__last_name",
+        "client__user__username",
+    )
 
     ordering = ("-start_time",)
     autocomplete=["promocode",]
@@ -2282,6 +2287,7 @@ class ProductAdmin(admin.ModelAdmin):
 
 
 class ProductSaleAdmin(admin.ModelAdmin):
+    form = ProductSaleAdminForm
     date_hierarchy = "sold_at"
     list_display = (
         "sold_at",
@@ -2291,6 +2297,7 @@ class ProductSaleAdmin(admin.ModelAdmin):
         "total_amount",
         "sold_by",
         "client",
+        "appointment",
     )
     list_filter = (
         "product__category",
@@ -2301,6 +2308,7 @@ class ProductSaleAdmin(admin.ModelAdmin):
     search_fields = (
         "product__name",
         "product__sku",
+        "appointment__id",
         "client__user__first_name",
         "client__user__last_name",
         "client__user__username",
@@ -2308,9 +2316,13 @@ class ProductSaleAdmin(admin.ModelAdmin):
     )
     ordering = ("-sold_at", "-id")
     readonly_fields = ("total_amount", "created_at", "updated_at")
-    raw_id_fields = ("sold_by", "client")
-    autocomplete_fields = ("product",)
-    list_select_related = ("product", "sold_by__user", "client__user")
+    autocomplete_fields = ("product", "sold_by", "client", "appointment")
+    list_select_related = (
+        "product",
+        "sold_by__user",
+        "client__user",
+        "appointment__client__user",
+    )
     fieldsets = (
         (
             None,
@@ -2319,6 +2331,7 @@ class ProductSaleAdmin(admin.ModelAdmin):
                     "product",
                     "sold_by",
                     "client",
+                    "appointment",
                     "sold_at",
                     "quantity",
                     "unit_price",
@@ -2338,6 +2351,7 @@ class ProductSaleAdmin(admin.ModelAdmin):
                     "product",
                     "sold_by",
                     "client",
+                    # allow updating appointment if needed post creation
                     "sold_at",
                     "quantity",
                     "unit_price",
@@ -2355,14 +2369,59 @@ class ProductSaleAdmin(admin.ModelAdmin):
                 .distinct()
             )
         if db_field.name == "sold_by":
+            current_profile = getattr(request.user, "userprofile", None)
+            sold_by_filters = Q(user__is_superuser=True)
+            if current_profile:
+                sold_by_filters |= Q(pk=current_profile.pk)
             kwargs["queryset"] = (
-                UserProfile.objects.select_related("user").order_by(
+                UserProfile.objects.select_related("user")
+                .filter(sold_by_filters)
+                .order_by(
                     "user__first_name",
                     "user__last_name",
                     "user__username",
                 )
             )
+        if db_field.name == "appointment":
+            kwargs["queryset"] = (
+                Appointment.objects.select_related("client__user")
+                .order_by("-start_time")
+            )
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        profile = getattr(request.user, "userprofile", None)
+        if not obj and profile and "sold_by" in form.base_fields:
+            form.base_fields["sold_by"].initial = profile.pk
+
+        product_field = form.base_fields.get("product")
+        if product_field:
+            product_field.widget.attrs["data-price-endpoint"] = reverse(
+                "admin:core_productsale_product_price"
+            )
+        return form
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "product-price/",
+                self.admin_site.admin_view(self.product_price_lookup),
+                name="core_productsale_product_price",
+            ),
+        ]
+        return custom + urls
+
+    def product_price_lookup(self, request: HttpRequest):
+        product_id = request.GET.get("product")
+        if not product_id:
+            return JsonResponse({"error": "Missing product id"}, status=400)
+        try:
+            product = Product.objects.only("price").get(pk=product_id)
+        except Product.DoesNotExist:
+            return JsonResponse({"error": "Product not found"}, status=404)
+        return JsonResponse({"unit_price": str(product.price)})
 
     def save_model(self, request, obj, form, change):
         if not obj.sold_by_id:
@@ -2398,6 +2457,13 @@ class AppointmentItemPromoCodeAdmin(admin.ModelAdmin):
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
     form = UserProfileChangeForm
+    search_fields = (
+        "user__first_name",
+        "user__last_name",
+        "user__username",
+        "user__email",
+        "phone",
+    )
     # Явно перечислим поля на форме
     @admin.display(description="First name")
     def user_first_name(self, obj):

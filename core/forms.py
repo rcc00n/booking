@@ -43,6 +43,53 @@ EDITABLE_FIELDS_FOR_MASTER = (
 )
 
 
+class ProductSaleAdminForm(forms.ModelForm):
+    class Meta:
+        model = ProductSale
+        fields = "__all__"
+
+    class Media:
+        js = ("core/js/product_sale_admin.js",)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        sold_by = self.fields.get("sold_by")
+        if sold_by:
+            sold_by.widget.attrs.setdefault(
+                "data-placeholder", "Start typing to choose an employee"
+            )
+
+        client = self.fields.get("client")
+        if client:
+            client.widget.attrs.setdefault(
+                "data-placeholder", "Start typing to search clients"
+            )
+
+        appointment = self.fields.get("appointment")
+        if appointment:
+            appointment.widget.attrs.setdefault(
+                "data-placeholder", "Link to an appointment (optional)"
+            )
+
+        product = self.fields.get("product")
+        if product:
+            product.widget.attrs.setdefault("data-price-endpoint", "")
+
+        unit_price = self.fields.get("unit_price")
+        if unit_price:
+            unit_price.widget.attrs.update(
+                {
+                    "data-unit-price-input": "1",
+                    "autocomplete": "off",
+                }
+            )
+
+        quantity = self.fields.get("quantity")
+        if quantity:
+            quantity.widget.attrs.update({"data-quantity-input": "1"})
+
+
 def _normalize_phone(value: str) -> str:
     """Bring phone number to E.164, default country +1."""
     raw = (value or "").strip()

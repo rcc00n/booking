@@ -1091,6 +1091,14 @@ class ProductSale(models.Model):
         null=True,
         help_text="Client receiving the product (optional).",
     )
+    appointment = models.ForeignKey(
+        "core.Appointment",
+        on_delete=models.SET_NULL,
+        related_name="product_sales",
+        blank=True,
+        null=True,
+        help_text="Appointment associated with this sale (optional).",
+    )
     sold_at = models.DateTimeField(default=timezone.now, db_index=True)
     quantity = models.PositiveIntegerField()
     unit_price = models.DecimalField(
@@ -1115,6 +1123,7 @@ class ProductSale(models.Model):
             models.Index(fields=["sold_at"], name="product_sale_sold_at_idx"),
             models.Index(fields=["product", "sold_at"], name="product_sale_product_idx"),
             models.Index(fields=["sold_by", "sold_at"], name="product_sale_employee_idx"),
+            models.Index(fields=["appointment"], name="product_sale_appt_idx"),
         ]
         constraints = [
             models.CheckConstraint(check=Q(quantity__gt=0), name="product_sale_quantity_positive"),
