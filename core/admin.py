@@ -1798,6 +1798,11 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             return catalog
 
         # ---------------- GET: первичная отрисовка ----------------
+        try:
+            availability_url = reverse("api-availability")
+        except NoReverseMatch:
+            availability_url = ""
+
         mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
         if request.method == "GET" and request.GET.get("master") != 'undefined':
             clients, masters, services_by_master, service_forms_map, intake_forms_map = _context_lists()
@@ -1836,6 +1841,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
+                "availability_url": availability_url,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -2034,6 +2040,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
+                "availability_url": availability_url,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -2172,6 +2179,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "posted_intake_payload": intake_payload,
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
+                "availability_url": availability_url,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -2195,6 +2203,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "posted_intake_payload": intake_payload,
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
+                "availability_url": availability_url,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -2218,6 +2227,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "posted_intake_payload": intake_payload,
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
+                "availability_url": availability_url,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 

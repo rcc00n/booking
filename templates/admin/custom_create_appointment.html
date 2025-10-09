@@ -84,11 +84,94 @@
         .ab-field select:disabled,
         .combo.is-disabled .combo-input{background:var(--ab-gray-100);color:#9ca3af}
 
+        .ab-field--timeslots{grid-column:1 / -1;}
+
         /* “Duration” — абсолютная подсказка под полем Service, не влияет на раскладку */
         .hint{color:var(--ab-muted);font-size:12px}
         .hint--duration{
             position:absolute;left:12px;right:12px;bottom:0; /* <-- фиксируем снизу */
             margin:0;
+        }
+
+        /* ───────── Timeslots picker ───────── */
+        .ab-timeslots{
+            margin-top:10px;
+            display:flex;
+            flex-direction:column;
+            gap:8px;
+        }
+        .ab-timeslots__status{
+            font-size:12px;
+            color:var(--ab-muted);
+            display:flex;
+            align-items:center;
+            gap:6px;
+            min-height:18px;
+        }
+        .ab-timeslots__grid{
+            display:grid;
+            gap:10px;
+            grid-template-columns:repeat(auto-fit,minmax(110px,1fr));
+        }
+        .ab-timeslots__btn{
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            padding:10px 12px;
+            border-radius:10px;
+            border:1px solid var(--ab-border);
+            background:var(--ab-gray-50);
+            font-weight:600;
+            font-size:14px;
+            color:#1f2937;
+            cursor:pointer;
+            transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,color .15s ease,transform .12s ease;
+        }
+        .ab-timeslots__btn:hover{
+            border-color:var(--ab-green-600);
+            background:#f0fdf4;
+        }
+        .ab-timeslots__btn:active{
+            transform:scale(.97);
+        }
+        .ab-timeslots__btn.is-selected{
+            background:var(--ab-green-600);
+            border-color:var(--ab-green-600);
+            color:#fff;
+            box-shadow:0 10px 30px rgba(22,163,74,.35);
+        }
+        .ab-timeslots__btn.is-selected:hover{
+            background:var(--ab-green-600);
+        }
+        .ab-timeslots__btn:focus-visible{
+            outline:0;
+            box-shadow:0 0 0 3px rgba(22,163,74,.28);
+        }
+        .ab-timeslots[data-state="loading"] .ab-timeslots__grid{
+            pointer-events:none;
+            opacity:0.55;
+        }
+        .ab-timeslots[data-state="error"] .ab-timeslots__status,
+        .ab-timeslots[data-state="warning"] .ab-timeslots__status{
+            color:var(--ab-red-600);
+        }
+        .ab-timeslots[data-state="ready"] .ab-timeslots__status{
+            color:var(--ab-green-600);
+        }
+        .ab-timeslots[data-state="empty"] .ab-timeslots__status{
+            color:var(--ab-muted);
+        }
+        .ab-timeslots[data-state="loading"] .ab-timeslots__status::before{
+            content:"";
+            width:12px;
+            height:12px;
+            border-radius:50%;
+            border:2px solid rgba(22,163,74,.22);
+            border-top-color:var(--ab-green-600);
+            animation:ab-spin .7s linear infinite;
+        }
+        @keyframes ab-spin{
+            to{transform:rotate(360deg);}
         }
 
         /* ───────── Combobox (общий) ───────── */
@@ -317,6 +400,7 @@
     {{ initial_first_item|json_script:"ab-initial-first" }}
     {{ service_forms_map|json_script:"ab-service-forms" }}
     {{ intake_forms_catalog|json_script:"ab-intake-forms" }}
+    {{ availability_url|json_script:"ab-availability-url" }}
 
     {{ posted_items|default:'[]'|json_script:"ab-posted-items" }}
     {{ item_errors|default:'{}'|json_script:"ab-item-errors" }}
@@ -347,6 +431,7 @@
             const POSTED_CLIENT= JSON.parse(document.getElementById('ab-posted-client').textContent || '""');
             const POSTED_INTAKE = JSON.parse(document.getElementById('ab-posted-intake').textContent || '{"forms":[]}');
             const INTAKE_ERRORS = JSON.parse(document.getElementById('ab-intake-errors').textContent || '{}');
+            const AVAILABILITY_URL = JSON.parse(document.getElementById('ab-availability-url').textContent || 'null');
 
             const CTX = (window.APPOINTMENT_CTX || {is_master:false,current_master_id:null});
             const IS_MASTER = !!CTX.is_master;
@@ -474,31 +559,215 @@
                 grandTotal.textContent = money(sum);
             }
 
-            // timepicker 15m (селект рядом с input[type=time])
-            function buildTimeSelect() {
-                const sel = document.createElement('select');
-                sel.className = 'ab-select js-timepicker';
-                for (let h=0; h<24; h++){
-                    for (let m=0; m<60; m+=15){
-                        const v = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
-                        const opt = document.createElement('option'); opt.value=v; opt.textContent=v; sel.appendChild(opt);
+            function formatSlotLabel(dateObj){
+                const h = String(dateObj.getHours()).padStart(2, '0');
+                const m = String(dateObj.getMinutes()).padStart(2, '0');
+                return `${h}:${m}`;
+            }
+
+            function parseIsoSlot(iso){
+                if (!iso) return null;
+                const dt = new Date(iso);
+                return Number.isNaN(dt.getTime()) ? null : dt;
+            }
+
+            function availabilityUrlFor(serviceId, masterId, dateStr){
+                if (!AVAILABILITY_URL) return null;
+                const params = new URLSearchParams({ service: serviceId, date: dateStr });
+                if (masterId) params.append('master', masterId);
+                const divider = AVAILABILITY_URL.includes('?') ? '&' : '?';
+                return `${AVAILABILITY_URL}${divider}${params.toString()}`;
+            }
+
+            function fetchAvailability(serviceId, masterId, dateStr){
+                const url = availabilityUrlFor(serviceId, masterId, dateStr);
+                if (!url){
+                    return Promise.reject(new Error('Availability endpoint is not configured.'));
+                }
+                return fetch(url, { credentials: 'same-origin' }).then(resp => {
+                    if (!resp.ok){
+                        throw new Error(`Availability request failed with status ${resp.status}`);
+                    }
+                    return resp.json();
+                });
+            }
+
+            function initTimeslotPicker({ row, masterEl, serviceEl, dateEl, timeEl }){
+                const wrap = row.querySelector('.js-timeslots-wrap');
+                const statusEl = row.querySelector('.js-timeslots-status');
+                const grid = row.querySelector('.js-timeslots-grid');
+                if (!wrap || !statusEl || !grid){
+                    return null;
+                }
+
+                let activeBtn = null;
+                let requestSeq = 0;
+                const defaultMessage = 'Select master, service and date to view availability.';
+
+                function setStatus(state, message){
+                    wrap.dataset.state = state;
+                    statusEl.textContent = message || defaultMessage;
+                }
+
+                function activateButton(btn){
+                    if (activeBtn && activeBtn !== btn){
+                        activeBtn.classList.remove('is-selected');
+                        activeBtn.setAttribute('aria-selected', 'false');
+                    }
+                    activeBtn = btn || null;
+                    if (activeBtn){
+                        activeBtn.classList.add('is-selected');
+                        activeBtn.setAttribute('aria-selected', 'true');
                     }
                 }
-                return sel;
-            }
-            function enhanceTimeInput(input) {
-                if (!input || input.dataset.enhanced) return;
-                const sel = buildTimeSelect();
-                const raw = (input.value || '').slice(0,5);
-                if (raw && [...sel.options].some(o => o.value === raw)) sel.value = raw;
-                sel.addEventListener('change', () => {
-                    input.value = sel.value;
-                    input.dispatchEvent(new Event('input', { bubbles:true }));
-                    input.dispatchEvent(new Event('change', { bubbles:true }));
-                });
-                input.insertAdjacentElement('afterend', sel);
-                input.classList.add('ab-hidden');
-                input.dataset.enhanced = '1';
+
+                function updateInput(value, iso, emit = true){
+                    timeEl.value = value || '';
+                    if (iso){
+                        timeEl.dataset.selectedIso = iso;
+                    } else {
+                        delete timeEl.dataset.selectedIso;
+                    }
+                    if (emit){
+                        timeEl.dispatchEvent(new Event('input', { bubbles:true }));
+                        timeEl.dispatchEvent(new Event('change', { bubbles:true }));
+                    }
+                }
+
+                function clearSelection({ emit = true } = {}){
+                    activateButton(null);
+                    updateInput('', '', emit);
+                }
+
+                function highlightCurrent(){
+                    const val = (timeEl.value || '').slice(0, 5);
+                    if (!val){
+                        activateButton(null);
+                        return null;
+                    }
+                    const btn = grid.querySelector(`[data-time="${val}"]`);
+                    if (!btn){
+                        activateButton(null);
+                        return null;
+                    }
+                    activateButton(btn);
+                    return btn;
+                }
+
+                function missingInputsMessage(){
+                    const missing = [];
+                    if (!serviceEl.value) missing.push('service');
+                    if (!masterEl.value) missing.push('master');
+                    if (!dateEl.value) missing.push('date');
+
+                    if (!missing.length) return null;
+                    if (missing.length === 1){
+                        if (missing[0] === 'service') return 'Select a service to view availability.';
+                        if (missing[0] === 'master') return 'Select a master to view availability.';
+                        return 'Select a date to view availability.';
+                    }
+                    return defaultMessage;
+                }
+
+                function buildSlotButton(slotIso){
+                    const dt = parseIsoSlot(slotIso);
+                    if (!dt) return null;
+                    const label = formatSlotLabel(dt);
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'ab-timeslots__btn';
+                    btn.dataset.iso = slotIso;
+                    btn.dataset.time = label;
+                    btn.setAttribute('role', 'option');
+                    btn.setAttribute('aria-selected', 'false');
+                    btn.textContent = label;
+                    btn.addEventListener('click', () => {
+                        activateButton(btn);
+                        updateInput(label, slotIso, true);
+                        setStatus('ready', `Selected ${label}`);
+                    });
+                    return btn;
+                }
+
+                function renderSlots(slots){
+                    grid.innerHTML = '';
+                    if (!Array.isArray(slots) || !slots.length){
+                        clearSelection({ emit: true });
+                        setStatus('empty', 'No available slots for this date.');
+                        return;
+                    }
+                    slots.forEach(iso => {
+                        const btn = buildSlotButton(iso);
+                        if (btn) grid.appendChild(btn);
+                    });
+                    const highlighted = highlightCurrent();
+                    if (timeEl.value && !highlighted){
+                        clearSelection({ emit: true });
+                        setStatus('warning', 'Previous time is no longer available. Please choose another slot.');
+                        return;
+                    }
+                    if (highlighted){
+                        const label = highlighted.dataset.time || '';
+                        const remaining = slots.length > 1 ? ` · ${slots.length - 1} more` : '';
+                        setStatus('ready', `Selected ${label}${remaining}`);
+                    } else {
+                        const info = slots.length === 1 ? '1 available slot' : `${slots.length} available slots`;
+                        setStatus('ready', info);
+                    }
+                }
+
+                function refresh(options = {}){
+                    const preserveSelection = !!options.preserveSelection;
+                    const message = missingInputsMessage();
+                    if (!preserveSelection){
+                        clearSelection({ emit: true });
+                    }
+                    if (message){
+                        grid.innerHTML = '';
+                        setStatus('idle', message);
+                        return;
+                    }
+                    if (!AVAILABILITY_URL){
+                        grid.innerHTML = '';
+                        setStatus('error', 'Availability endpoint is not configured.');
+                        return;
+                    }
+
+                    const masterId = masterEl.value;
+                    const serviceId = serviceEl.value;
+                    const dateStr = dateEl.value;
+                    const seq = ++requestSeq;
+                    setStatus('loading', 'Loading available slots…');
+                    fetchAvailability(serviceId, masterId, dateStr)
+                        .then(payload => {
+                            if (seq !== requestSeq) return;
+                            const masters = payload && Array.isArray(payload.masters) ? payload.masters : [];
+                            const entry = masters.find(m => String(m.id) === String(masterId));
+                            const slots = entry ? entry.slots || [] : [];
+                            renderSlots(slots);
+                        })
+                        .catch(err => {
+                            if (seq !== requestSeq) return;
+                            console.error('Unable to load availability', err);
+                            setStatus('error', 'Unable to load availability. Try again.');
+                        });
+                }
+
+                timeEl.addEventListener('change', highlightCurrent);
+                timeEl.addEventListener('input', highlightCurrent);
+
+                if (!AVAILABILITY_URL){
+                    setStatus('error', 'Availability endpoint is not configured.');
+                } else {
+                    const initialMessage = missingInputsMessage();
+                    setStatus('idle', initialMessage || defaultMessage);
+                }
+
+                return {
+                    refresh,
+                    highlight: highlightCurrent,
+                    clear: clearSelection,
+                };
             }
 
             function ensureHiddenClone(el){
@@ -1006,9 +1275,15 @@
 
     <!-- Ряд 2: Time · Unit price · Promocode -->
     <div class="ab-row">
-      <div class="ab-field" data-field="start_time_1">
+      <div class="ab-field ab-field--timeslots" data-field="start_time_1">
         <label>Time <span style="color:#ef4444">*</span></label>
-        <input type="time" class="js-time ab-hidden" data-timepicker="15" required step="900">
+        <input type="time" class="js-time ab-hidden" required step="900">
+        <div class="ab-timeslots js-timeslots-wrap" data-state="idle">
+          <div class="ab-timeslots__status js-timeslots-status" aria-live="polite">
+            Select master, service and date to view availability.
+          </div>
+          <div class="ab-timeslots__grid js-timeslots-grid" role="listbox" aria-label="Available time slots"></div>
+        </div>
         <div class="ab-field-error js-err-time"></div>
       </div>
 
@@ -1060,7 +1335,13 @@
                 promoSel.name  = name('promocode');    promoSel.id  = `id_items-${idx}-promocode`;
 
                 populateMasters(masterSel);
-                enhanceTimeInput(timeInp);
+                const availability = initTimeslotPicker({
+                    row,
+                    masterEl: masterSel,
+                    serviceEl: serviceSel,
+                    dateEl: dateInp,
+                    timeEl: timeInp,
+                });
 
                 let serviceCombo = makeComboFromSelect(serviceSel, 'Type to search service…');
 
@@ -1079,6 +1360,7 @@
                     if (serviceCombo) { serviceCombo.rebuildFromSelect(); serviceCombo.clear(); }
                     hint.textContent = ''; priceInp.value = ''; recalcGrandTotal();
                     renderIntakeForms();
+                    if (availability) availability.refresh();
                 });
 
                 serviceSel.addEventListener('change', () => {
@@ -1089,12 +1371,17 @@
                     hint.textContent = dur ? (`Duration: ${dur} min`) : '';
                     recalcGrandTotal();
                     renderIntakeForms();
+                    if (availability) availability.refresh();
+                });
+
+                dateInp.addEventListener('change', () => {
+                    if (availability) availability.refresh();
                 });
 
                 priceInp.addEventListener('input', recalcGrandTotal);
 
                 // вернём наружу, чтобы синхронизировать при префилле
-                return { serviceCombo };
+                return { serviceCombo, availability };
             }
 
             function addRow(prefill){
@@ -1134,17 +1421,17 @@
                 if (prefill && prefill.start_time_0) dateInp.value = prefill.start_time_0;
                 if (prefill && prefill.start_time_1){
                     timeInp.value = prefill.start_time_1.length===5 ? prefill.start_time_1 : prefill.start_time_1.slice(0,5);
-                    const sel = timeInp.nextElementSibling;
-                    if (sel && sel.classList.contains('js-timepicker')){
-                        const v = timeInp.value.slice(0,5);
-                        if ([...sel.options].some(o=>o.value===v)) sel.value = v;
-                    }
                 }
                 if (prefill && prefill.unit_price) priceInp.value = prefill.unit_price;
                 if (prefill && prefill.promocode)  promoSel.value = prefill.promocode;
 
                 container.appendChild(row);
                 totalForms.value = idx + 1;
+                if (ref && ref.availability){
+                    const preserve = !!(prefill && prefill.start_time_1);
+                    ref.availability.refresh({ preserveSelection: preserve });
+                    if (preserve) ref.availability.highlight();
+                }
                 recalcGrandTotal();
                 renderIntakeForms();
             }
