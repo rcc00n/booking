@@ -654,6 +654,9 @@ def service_search(request):
     for s in qs:
         disc = s.get_active_discount()
         price = str(s.get_discounted_price()) if disc else str(s.base_price)
+        image_url = s.card_image_url
+        if image_url:
+            image_url = request.build_absolute_uri(image_url)
         results.append({
             "id": str(s.id),
             "name": s.name,
@@ -663,6 +666,8 @@ def service_search(request):
             "price": price,
             "discount_percent": disc.discount_percent if disc else None,
             "duration_min": s.duration_min,
+            "image": image_url,
+            "image_alt": s.card_image_alt,
             "forms": [
                 {
                     "id": str(form.id),

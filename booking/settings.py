@@ -25,7 +25,7 @@ env = Env()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
+Env.read_env(BASE_DIR / ".env")
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -98,11 +98,11 @@ WSGI_APPLICATION = 'booking.wsgi.application'
 # DATABASES = {
 #     'default': {
 #         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'appdb', # Change to your local DB name
-#         'USER': 'appuser', # Change to your local user name
-#         'PASSWORD': 'strong_password', # Change to your local user password
+#         'NAME': 'Malva', # Change to your local DB name
+#         'USER': 'postgres', # Change to your local user name
+#         'PASSWORD': 'admin', # Change to your local user password
 #         'HOST': 'localhost',
-#         'PORT': '5432',
+#         'PORT': '5433',
 #     }
 # }
 #
@@ -431,3 +431,4 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # за прокси HTTPS
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+

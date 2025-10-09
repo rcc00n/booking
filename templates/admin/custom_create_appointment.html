@@ -253,7 +253,7 @@
         .ab-btn.success{
             border-radius:9999px;
             background:#fff;color:var(--ab-green-600);
-            border:2px dashed var(--ab-green-600);
+            border:2px solid var(--ab-green-600);
         }
         .ab-btn.success:hover{background:#ecfdf5}
 
@@ -537,7 +537,8 @@
                 select.appendChild(buildOption('', '---------'));
                 masters.forEach(m => select.appendChild(buildOption(String(m.id), m.label)));
             }
-            function populateServices(select, masterId){
+            function populateServices(select, masterId, options){
+                const opts = options || {};
                 select.innerHTML = '';
                 select.appendChild(buildOption('', '---------'));
                 const mid = IS_MASTER && CURRENT_MASTER_ID ? CURRENT_MASTER_ID : String(masterId || '');
@@ -549,6 +550,25 @@
                     select.appendChild(o);
                 });
                 select.disabled = list.length === 0;
+
+                const combo = opts.combo;
+                if (combo && typeof combo.rebuildFromSelect === 'function'){
+                    combo.rebuildFromSelect();
+                    if (opts.resetSelection && typeof combo.clear === 'function'){
+                        combo.clear();
+                    }
+                } else if (opts.resetSelection){
+                    select.value = '';
+                }
+
+                const wrapper = select.closest('.combo');
+                if (wrapper){
+                    wrapper.classList.toggle('is-disabled', select.disabled);
+                    const input = wrapper.querySelector('.combo-input');
+                    if (input){
+                        input.disabled = select.disabled;
+                    }
+                }
             }
             function recalcGrandTotal(){
                 let sum = 0;
@@ -1350,14 +1370,13 @@
                     masterSel.value = CURRENT_MASTER_ID;
                     masterSel.setAttribute('disabled', 'disabled');
                     ensureHiddenClone(masterSel);
-                    populateServices(serviceSel, CURRENT_MASTER_ID);
+                    populateServices(serviceSel, CURRENT_MASTER_ID, { combo: serviceCombo });
                 } else {
-                    populateServices(serviceSel, masterSel.value);
+                    populateServices(serviceSel, masterSel.value, { combo: serviceCombo });
                 }
 
                 masterSel.addEventListener('change', () => {
-                    populateServices(serviceSel, masterSel.value);
-                    if (serviceCombo) { serviceCombo.rebuildFromSelect(); serviceCombo.clear(); }
+                    populateServices(serviceSel, masterSel.value, { combo: serviceCombo, resetSelection: true });
                     hint.textContent = ''; priceInp.value = ''; recalcGrandTotal();
                     renderIntakeForms();
                     if (availability) availability.refresh();
@@ -1396,17 +1415,18 @@
                 const priceInp  = row.querySelector('.js-price');
                 const promoSel  = row.querySelector('.js-promo');
 
+                const comboRef = ref && ref.serviceCombo ? ref.serviceCombo : null;
+                let resolvedMaster = masterSel.value;
                 if (IS_MASTER && CURRENT_MASTER_ID){
+                    resolvedMaster = CURRENT_MASTER_ID;
                     masterSel.value = CURRENT_MASTER_ID;
                     masterSel.setAttribute('disabled', 'disabled');
                     ensureHiddenClone(masterSel);
-                    populateServices(serviceSel, CURRENT_MASTER_ID);
                 } else if (prefill && prefill.master){
-                    masterSel.value = String(prefill.master);
-                    populateServices(serviceSel, masterSel.value);
-                } else {
-                    populateServices(serviceSel, masterSel.value);
+                    resolvedMaster = String(prefill.master);
+                    masterSel.value = resolvedMaster;
                 }
+                populateServices(serviceSel, resolvedMaster, { combo: comboRef });
 
                 if (prefill && prefill.service){
                     serviceSel.value = String(prefill.service);

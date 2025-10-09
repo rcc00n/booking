@@ -2536,20 +2536,50 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     Admin interface for services.
     """
-    list_display = ('name', 'base_price', 'category', 'duration_min')
+    list_display = ('name', 'base_price', 'category', 'duration_min', 'image_admin_thumb')
     search_fields = ('name',)
     list_filter = ('category',)
     filter_horizontal = ("pre_appointment_forms",)
-    fields = (
-        "name",
-        "description",
-        "category",
-        "base_price",
-        "duration_min",
-        "extra_time_min",
-        "pre_appointment_forms",
+    readonly_fields = ("image_preview",)
+    fieldsets = (
+        (None, {
+            "fields": (
+                "name",
+                "description",
+                "category",
+                "base_price",
+                "duration_min",
+                "extra_time_min",
+            )
+        }),
+        ("Media", {
+            "fields": (
+                "image",
+                "image_alt_text",
+                "image_preview",
+            )
+        }),
+        ("Pre-appointment forms", {
+            "fields": ("pre_appointment_forms",),
+        }),
     )
     export_fields = ['name', 'description','base_price', 'category', 'duration_min', 'extra_time_min']
+
+    @admin.display(description="Preview", ordering=False)
+    def image_admin_thumb(self, obj):
+        if obj.image:
+            return format_html('<img src="{}" style="height:48px;width:85px;object-fit:cover;border-radius:6px;" alt="{}"/>',
+                               obj.image.url,
+                               obj.card_image_alt)
+        return "—"
+
+    @admin.display(description="Current preview")
+    def image_preview(self, obj):
+        if obj.image:
+            return format_html('<img src="{}" style="max-width:320px;border-radius:10px;" alt="{}"/>',
+                               obj.image.url,
+                               obj.card_image_alt)
+        return "—"
 
 
 @admin.register(ClientIntakeForm)
@@ -3028,10 +3058,14 @@ class MasterWorkDayInline(admin.TabularInline):
     model = MasterWorkDay
     extra = 7  # сразу 7 строк для всех дней
 
+
 @admin.register(MasterProfile)
 class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
     inlines = [MasterWorkDayInline]
     add_form = MasterCreateFullForm
+    change_list_template = "admin/master/changelist_cards.html"
+    list_per_page = 24
+
     readonly_fields = ['password_display']
     export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","postal_code", "profession", 'bio', "room", "is_staff", "is_superuser", 'is_active']
     search_fields = ("user__user__username", "user__user__first_name", "user__user__last_name")
@@ -3060,6 +3094,9 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
         ]
     form = MasterCreateFullForm  # на редактирование тоже можно оставить ту же
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("user__user", "room")
 
     list_display = ("get_name", "room", "profession")
 

@@ -113,7 +113,9 @@
       box-shadow:var(--shadow);border:1px solid color-mix(in srgb, var(--green) 18%, transparent);transition:.18s ease;
     }
     .service-card:hover{transform:translateY(-3px);box-shadow:0 10px 22px color-mix(in srgb, var(--green) 18%, rgba(0,0,0,.16))}
-    .service-card__img{aspect-ratio:16/9;background:color-mix(in srgb, var(--green) 10%, #fff);border-radius:.7rem;display:flex;align-items:center;justify-content:center;font-size:.9rem;color:#6f7a75}
+    .service-card__img{aspect-ratio:16/9;background:color-mix(in srgb, var(--green) 10%, #fff);border-radius:.7rem;overflow:hidden;position:relative}
+    .service-card__img img{width:100%;height:100%;object-fit:cover;display:block}
+    .service-card__img--empty{display:flex;align-items:center;justify-content:center;font-size:.9rem;color:#6f7a75}
     .service-card h3{font-size:1.06rem;font-weight:900;color:var(--ink)}
     .service-meta{font-size:.92rem;color:var(--muted)}
     .stub{font-style:italic;color:#667;padding:1rem}
@@ -399,7 +401,13 @@
         <div class="services-grid">
           {% for s in search_results %}
             <article class="service-card">
-              <div class="service-card__img">IMG</div>
+              <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
+                {% if s.card_image_url %}
+                  <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
+                {% else %}
+                  <span data-i18n="services.cards.noImage">Preview coming soon</span>
+                {% endif %}
+              </div>
               <div class="muted">{{ s.category.name }}</div>
               <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
               {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
@@ -430,7 +438,13 @@
         <div class="services-grid">
           {% for s in c.service_set.all %}
             <article class="service-card">
-              <div class="service-card__img">IMG</div>
+              <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
+                {% if s.card_image_url %}
+                  <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
+                {% else %}
+                  <span data-i18n="services.cards.noImage">Preview coming soon</span>
+                {% endif %}
+              </div>
               <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
               {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
               <div class="service-meta">
@@ -459,7 +473,13 @@
         <div class="services-grid">
           {% for s in uncategorized %}
             <article class="service-card">
-              <div class="service-card__img">IMG</div>
+              <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
+                {% if s.card_image_url %}
+                  <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
+                {% else %}
+                  <span data-i18n="services.cards.noImage">Preview coming soon</span>
+                {% endif %}
+              </div>
               <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
               {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
               <div class="service-meta">
@@ -710,6 +730,7 @@
         summary: (amount) => `Complete your payment of ${amount}.`,
         missingKey: 'Payments are temporarily unavailable.',
         noCharge: (amount) => `No payment needed (${amount}).`,
+        offline: (amount) => `Payments are currently handled offline. Click "Confirm booking" to finish.`,
         enterCard: 'Enter your card details to finish.',
         processing: 'Processing payment…',
         verifyFailed: 'Unable to verify payment.',
@@ -788,9 +809,6 @@
       });
       menuClose?.addEventListener('click', closeMenuDrawer);
       menuBackdrop?.addEventListener('click', closeMenuDrawer);
-      if (menuDrawer){
-        menuDrawer.addEventListener('click', (event) => event.stopPropagation(), true);
-      }
       menuDrawer?.addEventListener('click', (event) => {
         if (window.innerWidth <= 900 && event.target.closest('a')) {
           closeMenuDrawer();
@@ -962,6 +980,10 @@
         if (!paymentConfirm) return;
         const details = gatherBillingDetails();
         const requiresCard = Boolean(currentPaymentContext?.payment?.client_secret);
+        if (!requiresCard){
+          paymentConfirm.disabled = false;
+          return;
+        }
         const requiredFilled = [
           details.name,
           details.email && emailRegex.test(details.email),
@@ -1277,17 +1299,11 @@
             throw new Error(msg);
           }
           await refreshCart(true);
-          const context = {
-            payment: data.payment || null,
-            appointment: data.appointment || null,
-          };
-          if (context.payment && (context.payment.client_secret || Number(context.payment.amount||0) > 0)){
-            closeCartModal();
-            openPaymentModal(context);
-          } else {
-            setCartMessage('success','services.cart.checkoutSuccess');
-            setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
-          }
+          // Temporary bypass: skip payment modal while backend flow is adjusted.
+          setCartMessage('success','services.cart.checkoutSuccess');
+          if(cartCheckout) cartCheckout.disabled=false;
+          setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 600);
+          return;
         }catch(err){
           const fallback = err && err.message;
           const defaultMessage = translate('services.cart.checkoutFailed');
@@ -1360,6 +1376,8 @@
         }
 
         const needCard = Boolean(context.payment.client_secret);
+        const amountNumeric = Number(context.payment.amount || 0);
+        const zeroDue = !Number.isNaN(amountNumeric) && amountNumeric <= 0;
         if (needCard) {
           stripeCardComplete = false;
           cardElementWrapper?.classList.add('is-visible');
@@ -1371,32 +1389,25 @@
           }
           if (paymentConfirm) {
             paymentConfirm.disabled = !stripe;
+            paymentConfirm.textContent = 'Pay now';
           }
           setTimeout(() => { stripeCardElement?.focus(); }, 120);
         } else {
           stripeCardComplete = true;
-          if (paymentConfirm) paymentConfirm.disabled = false;
+          if (paymentConfirm) {
+            paymentConfirm.disabled = false;
+            paymentConfirm.textContent = 'Confirm booking';
+          }
           cardElementWrapper?.classList.remove('is-visible');
+          if (zeroDue) {
+            setPaymentMessage('success', PAYMENT_COPY.noCharge(amountText));
+          } else {
+            setPaymentMessage('status', PAYMENT_COPY.offline(amountText));
+          }
         }
 
         if (paymentModal) {
           openModalElement(paymentModal);
-        }
-
-        if (!context.payment.client_secret) {
-          // No payment required → show success and redirect
-          setPaymentMessage('success', PAYMENT_COPY.noCharge(amountText));
-          if (paymentConfirm) {
-            paymentConfirm.textContent = 'Close';
-            paymentConfirm.disabled = false;
-            paymentConfirm.addEventListener('click', () => window.location.href='/accounts/dashboard/', { once: true });
-          }
-          window.setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
-        } else {
-          if (paymentConfirm) {
-            paymentConfirm.textContent = 'Pay now';
-          }
-          setPaymentMessage('status', PAYMENT_COPY.enterCard);
         }
 
         checkPaymentForm();
@@ -2090,7 +2101,7 @@
       function skeleton(n=8){
         return Array.from({length:n}).map(()=>`
           <article class="service-card">
-            <div class="service-card__img skeleton"></div>
+            <div class="service-card__img service-card__img--empty skeleton"></div>
             <div class="skeleton" style="height:18px;margin-top:10px;border-radius:6px;"></div>
             <div class="skeleton" style="height:14px;margin-top:6px;border-radius:6px;"></div>
             <div class="skeleton" style="height:36px;margin-top:12px;border-radius:10px;"></div>
@@ -2100,6 +2111,11 @@
         const hasDisc = Number.isFinite(+s.discount_percent) && +s.discount_percent > 0;
         const rawName = s.name || '';
         const translatedName = translateServiceNameText(rawName);
+        const fallbackImgLabel = translate('services.cards.noImage', null, 'Preview coming soon');
+        const imageAlt = s.image_alt || rawName || translate('services.cards.imageAltFallback', null, 'Service preview');
+        const imageBlock = s.image
+          ? `<div class="service-card__img"><img src="${escapeHtml(s.image)}" alt="${escapeHtml(imageAlt)}" loading="lazy"></div>`
+          : `<div class="service-card__img service-card__img--empty" aria-hidden="true">${escapeHtml(fallbackImgLabel)}</div>`;
         const priceBlock = hasDisc
           ? `<span class="old">$${escapeHtml(s.base_price)}</span>
              <strong>$${escapeHtml(s.price)}</strong>
@@ -2110,7 +2126,7 @@
         const durationLabel = escapeHtml(formatMinutes(s.duration_min || 0));
         return `
           <article class="service-card">
-            <div class="service-card__img">IMG</div>
+            ${imageBlock}
             ${cat}
             <h3 data-service-name-original="${escapeHtml(rawName)}">${escapeHtml(translatedName)}</h3>
             ${desc}
