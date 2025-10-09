@@ -1279,17 +1279,11 @@
             throw new Error(msg);
           }
           await refreshCart(true);
-          const context = {
-            payment: data.payment || null,
-            appointment: data.appointment || null,
-          };
-          if (context.payment && (context.payment.client_secret || Number(context.payment.amount||0) > 0)){
-            closeCartModal();
-            openPaymentModal(context);
-          } else {
-            setCartMessage('success','services.cart.checkoutSuccess');
-            setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
-          }
+          // Temporary bypass: skip payment modal while backend flow is adjusted.
+          setCartMessage('success','services.cart.checkoutSuccess');
+          if(cartCheckout) cartCheckout.disabled=false;
+          setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 600);
+          return;
         }catch(err){
           const fallback = err && err.message;
           const defaultMessage = translate('services.cart.checkoutFailed');
