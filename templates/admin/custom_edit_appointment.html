@@ -86,6 +86,14 @@
         .ab-foot{display:flex;justify-content:space-between;align-items:center}
 
         .ab-item.readonly{opacity:.75}
+        .ab-table{width:100%;border-collapse:collapse}
+        .ab-table th,.ab-table td{padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top}
+        .ab-table th{font-size:12px;text-transform:uppercase;color:#6b7280;letter-spacing:.05em}
+        .status-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;font-size:12px;padding:4px 10px}
+        .status-pill.complete{background:#dcfce7;color:#166534}
+        .status-pill.missing{background:#fef3c7;color:#92400e}
+        .ab-btn.small{padding:8px 12px;font-size:13px}
+        .table-responsive{overflow:auto}
 
     </style>
 {% endblock %}
@@ -100,6 +108,9 @@
                 <button type="button" class="tab active" data-tab="details">Appointment details</button>
                 <button type="button" class="tab" data-tab="discounts">Discounts & totals</button>
                 <button type="button" class="tab" data-tab="items">Items</button>
+                {% if intake_forms_overview %}
+                    <button type="button" class="tab" data-tab="forms">Forms</button>
+                {% endif %}
                 {% if product_sales_formset %}
                     <button type="button" class="tab" data-tab="product-sales">Product sales</button>
                 {% endif %}
@@ -303,11 +314,69 @@
                 </div>
             </section>
 
+            {% if intake_forms_overview %}
+                <section class="tab-panel" data-tab-panel="forms">
+                    <div class="ab-section ab-card">
+                        <h3 class="ab-h">4) Client forms</h3>
+                        <p class="ab-sub">Forms linked to services in this appointment. Use “Open” to review or update submissions.</p>
+                        <div class="table-responsive">
+                            <table class="ab-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:30%">Form</th>
+                                        <th>Services</th>
+                                        <th>Status</th>
+                                        <th>Last update</th>
+                                        <th style="width:140px">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for form_ctx in intake_forms_overview %}
+                                        <tr>
+                                            <td>
+                                                <strong>{{ form_ctx.name }}</strong>
+                                                {% if form_ctx.description %}
+                                                    <div class="ab-muted" style="margin-top:4px">{{ form_ctx.description }}</div>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if form_ctx.services %}
+                                                    {{ form_ctx.services|join:", " }}
+                                                {% else %}
+                                                    <span class="ab-muted">—</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if form_ctx.submitted %}
+                                                    <span class="status-pill complete">Completed</span>
+                                                {% else %}
+                                                    <span class="status-pill missing">Missing</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if form_ctx.submitted_at %}
+                                                    {{ form_ctx.submitted_at|date:"Y-m-d H:i" }}
+                                                {% else %}
+                                                    <span class="ab-muted">—</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <a href="{{ form_ctx.manage_url }}" class="ab-btn secondary small">Open</a>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            {% endif %}
+
             {% if product_sales_formset %}
                 {# ───────── 4) PRODUCT SALES ───────── #}
                 <section class="tab-panel" data-tab-panel="product-sales">
                     <div class="ab-section ab-card">
-                        <h3 class="ab-h">4) Product sales</h3>
+                        <h3 class="ab-h">{% if intake_forms_overview %}5{% else %}4{% endif %}) Product sales</h3>
 
                         {% if product_sales_formset.non_form_errors %}
                             <div class="ab-err">{{ product_sales_formset.non_form_errors }}</div>

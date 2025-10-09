@@ -8,6 +8,7 @@ import uuid
 from django.core.exceptions import ValidationError
 from datetime import timedelta, time
 import os
+from importlib import import_module
 
 from django.db.models import OuterRef, Subquery, Sum, Prefetch, F, Q
 from django.utils import timezone
@@ -196,6 +197,72 @@ class PrepaymentOption(models.Model):
     def __str__(self):
         return f"{self.percent}%"
 
+
+class ClientIntakeForm(models.Model):
+    """
+    Reusable questionnaire/consent form that can be assigned to services.
+    The actual Django form class used to render/validate the payload is referenced via `form_class`.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=150)
+    slug = models.SlugField(max_length=150, unique=True)
+    description = models.TextField(blank=True)
+    form_class = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Dotted path to a Django form class that handles rendering/validation.",
+    )
+    is_active = models.BooleanField(default=True)
+    schema = models.JSONField(default=dict, blank=True)
+    schema_version = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def get_form_class(self):
+        """
+        Resolve the dotted path from `form_class` into an actual form class.
+        Returns None if not configured.
+        """
+        if not self.form_class:
+            return None
+        module_path, class_name = self.form_class.rsplit(".", 1)
+        module = import_module(module_path)
+        return getattr(module, class_name)
+
+    def normalized_schema(self) -> dict:
+        """
+        Ensure schema always has expected structure.
+        """
+        schema = self.schema or {}
+        if not isinstance(schema, dict):
+            schema = {}
+        schema.setdefault("sections", [])
+        schema.setdefault("meta", {})
+        return schema
+
+    def build_bound_form(self, *, data=None, files=None, initial=None, client=None, prefix=None):
+        """
+        Build a Django form instance based on the stored schema.
+        """
+        from core.utils.intake_forms import build_intake_form
+
+        return build_intake_form(
+            intake_form=self,
+            data=data,
+            files=files,
+            initial=initial,
+            client=client,
+            prefix=prefix,
+        )
+
+
 class Service(models.Model):
     """
     Represents a service offered in the system (e.g., haircut, massage).
@@ -208,6 +275,12 @@ class Service(models.Model):
     base_price = models.DecimalField(max_digits=10, decimal_places=2)
     duration_min = models.IntegerField()
     extra_time_min = models.IntegerField(null=True, blank=True)
+    pre_appointment_forms = models.ManyToManyField(
+        "core.ClientIntakeForm",
+        blank=True,
+        related_name="services",
+        help_text="Forms the client must complete before attending this service.",
+    )
 
     def __str__(self):
         return self.name
@@ -227,6 +300,62 @@ class Service(models.Model):
             discount_multiplier = Decimal(1) - (Decimal(discount.discount_percent) / Decimal(100))
             return (self.base_price * discount_multiplier).quantize(Decimal('0.01'))
         return self.base_price
+
+    def active_forms(self):
+        """
+        Return only active pre-appointment forms assigned to this service.
+        """
+        prefetched = getattr(self, "_prefetched_objects_cache", {})
+        if prefetched and "pre_appointment_forms" in prefetched:
+            return [form for form in prefetched["pre_appointment_forms"] if form.is_active]
+        return self.pre_appointment_forms.filter(is_active=True)
+
+
+class ClientIntakeFormSubmission(models.Model):
+    """
+    Stores answers for a specific intake form, optionally linked to an appointment.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    form = models.ForeignKey(
+        ClientIntakeForm,
+        on_delete=models.CASCADE,
+        related_name="submissions",
+    )
+    client = models.ForeignKey(
+        UserProfile,
+        on_delete=models.CASCADE,
+        related_name="intake_submissions",
+    )
+    appointment = models.ForeignKey(
+        "core.Appointment",
+        on_delete=models.CASCADE,
+        related_name="intake_submissions",
+        null=True,
+        blank=True,
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="intake_submissions",
+        null=True,
+        blank=True,
+    )
+    data = models.JSONField(default=dict, blank=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
+    form_schema_snapshot = models.JSONField(default=dict, blank=True)
+    schema_version = models.PositiveIntegerField(default=1)
+    is_complete = models.BooleanField(default=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-submitted_at"]
+
+    def __str__(self):
+        base = f"{self.form.name} → {self.client}"
+        if self.appointment_id:
+            return f"{base} ({self.appointment_id})"
+        return base
 
 class MasterRoom(models.Model):
     """

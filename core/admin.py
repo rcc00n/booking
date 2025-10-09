@@ -1,5 +1,6 @@
 from bisect import bisect_left
 from collections import defaultdict
+from decimal import Decimal
 from io import BytesIO
 from typing import Dict, Any, List, Sequence, Iterable
 from urllib.parse import urlencode
@@ -7,19 +8,19 @@ from urllib.parse import urlencode
 from django.contrib.admin import DateFieldListFilter
 
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from django.core.exceptions import FieldError
+from django.core.exceptions import FieldError, PermissionDenied
 from django.db import transaction, IntegrityError
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.contrib import admin, messages
-from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField
+from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField, Prefetch
 from itertools import cycle
 
 from django.utils.formats import number_format
 from django.utils.timezone import localtime, datetime, make_aware, localdate, get_current_timezone, make_naive, is_aware
 from django.utils.html import escape
 from core.utils.admin_perms import is_master, master_obj
-from django.shortcuts import redirect
+from django.shortcuts import redirect, get_object_or_404
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 from datetime import date, timedelta, time as time_cls
@@ -66,9 +67,26 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, numbers
 
+
+def _coerce_json(value):
+    if isinstance(value, dict):
+        return {k: _coerce_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_coerce_json(v) for v in value]
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, time_cls):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
+
 from core.models import (
     Appointment, AppointmentItem, Payment,
-    AppointmentStatus, Role, MasterProfile, Service
+    AppointmentStatus, Role, MasterProfile, Service,
+    ClientIntakeForm, ClientIntakeFormSubmission,
 )
 
 
@@ -1368,6 +1386,39 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             else:
                 promos_global.append(payload)
 
+        intake_forms_overview: List[Dict[str, Any]] = []
+        intake_required_ids: List[str] = []
+        if obj:
+            submissions_map = {
+                str(sub.form_id): sub
+                for sub in ClientIntakeFormSubmission.objects.filter(appointment=obj).select_related("form")
+            }
+            required_forms_qs = (
+                ClientIntakeForm.objects
+                .filter(services__appointmentitem__appointment=obj)
+                .distinct()
+            )
+            for intake_form in required_forms_qs:
+                fid = str(intake_form.pk)
+                intake_required_ids.append(fid)
+                submission = submissions_map.get(fid)
+                service_names = list(
+                    intake_form.services
+                    .filter(appointmentitem__appointment=obj)
+                    .order_by("name")
+                    .values_list("name", flat=True)
+                    .distinct()
+                )
+                intake_forms_overview.append({
+                    "id": fid,
+                    "name": intake_form.name,
+                    "description": intake_form.description,
+                    "services": service_names,
+                    "submitted": bool(submission),
+                    "submitted_at": submission.submitted_at if submission else None,
+                    "manage_url": reverse("admin:core_appointment_manage_form", args=[obj.pk, intake_form.pk]),
+                })
+
         ctx.update({
             "masters_data": masters,
             "ms_map_data": dict(ms_map),
@@ -1375,12 +1426,82 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "promos_by_service_data": dict(promos_by_service),
             "promos_global_data": promos_global,
             "APPT_FIELDS_1": ("client", "start_time", "payment_status", "current_status"),
+            "intake_forms_overview": intake_forms_overview,
+            "intake_required_ids": intake_required_ids,
 
             # === важные флаги для шаблонов/JS ===
             "is_master": is_master(request.user),
             "current_master_id": mp.id if mp else None,
         })
         return super().render_change_form(request, ctx, add=add, change=change, form_url=form_url, obj=obj)
+
+    def manage_intake_form_view(self, request, appointment_id, form_id):
+        appointment = get_object_or_404(Appointment, pk=appointment_id)
+        if not self.has_change_permission(request, appointment):
+            raise PermissionDenied
+
+        intake_form = get_object_or_404(ClientIntakeForm, pk=form_id)
+        submission = (
+            ClientIntakeFormSubmission.objects
+            .filter(appointment=appointment, form=intake_form)
+            .first()
+        )
+
+        client_profile = getattr(appointment, "client", None)
+        if submission:
+            initial_data = submission.data or submission.raw_payload or {}
+        else:
+            initial_data = {}
+
+        if request.method == "POST":
+            bound_form = intake_form.build_bound_form(
+                data=request.POST,
+                files=request.FILES,
+                client=client_profile,
+            )
+            if bound_form.is_valid():
+                cleaned = _coerce_json(bound_form.cleaned_data)
+                ClientIntakeFormSubmission.objects.update_or_create(
+                    appointment=appointment,
+                    client=client_profile,
+                    form=intake_form,
+                    defaults={
+                        "submitted_by": request.user if getattr(request.user, "is_authenticated", False) else None,
+                        "data": cleaned,
+                        "raw_payload": cleaned,
+                        "form_schema_snapshot": intake_form.normalized_schema(),
+                        "schema_version": intake_form.schema_version,
+                        "is_complete": True,
+                    },
+                )
+                messages.success(request, f"{intake_form.name} saved.")
+                return redirect("admin:core_appointment_change", appointment.pk)
+        else:
+            bound_form = intake_form.build_bound_form(
+                data=None,
+                files=None,
+                initial=initial_data,
+                client=client_profile,
+            )
+
+        related_services = (
+            intake_form.services.filter(appointmentitem__appointment=appointment)
+            .order_by("name")
+            .values_list("name", flat=True)
+            .distinct()
+        )
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"{intake_form.name} — {appointment}",
+            "appointment": appointment,
+            "intake_form": intake_form,
+            "submission": submission,
+            "form": bound_form,
+            "related_services": list(related_services),
+            "back_url": reverse("admin:core_appointment_change", args=[appointment.pk]),
+        }
+        return TemplateResponse(request, "admin/appointment_manage_form.html", context)
 
     def save_model(self, request, obj, form, change):
         # Админка валидирует формы, но мы дополнительно страхуемся:
@@ -1460,6 +1581,11 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         urls = super().get_urls()
         custom = [
             path(
+                "<uuid:appointment_id>/forms/<uuid:form_id>/",
+                self.admin_site.admin_view(self.manage_intake_form_view),
+                name="core_appointment_manage_form",
+            ),
+            path(
                 "create/custom/",
                 self.admin_site.admin_view(self.custom_create_view),
                 name="core_appointment_custom_create",
@@ -1474,23 +1600,89 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         return obj.id
 
     def _context_lists(self):
-        clients = (UserProfile.objects.select_related("user")
-                   .annotate(label=Concat("user__first_name", Value(" "), "user__last_name"))
-                   .values("id", "label").order_by("label"))
-        masters = (MasterProfile.objects.select_related("user")
-                   .annotate(label=Concat("user__user__first_name", Value(" "), "user__user__last_name"))
-                   .values("id", "label").order_by("label"))
-        services_by_master = {}
-        qs = (ServiceMaster.objects.select_related("service", "master")
-              .values("master_id", "service__id", "service__name", "service__base_price", "service__duration_min"))
+        clients = (
+            UserProfile.objects.select_related("user")
+            .annotate(label=Concat("user__first_name", Value(" "), "user__last_name"))
+            .values("id", "label")
+            .order_by("label")
+        )
+        masters = (
+            MasterProfile.objects.select_related("user")
+            .annotate(label=Concat("user__user__first_name", Value(" "), "user__user__last_name"))
+            .values("id", "label")
+            .order_by("label")
+        )
+
+        service_forms_map: Dict[str, List[str]] = {}
+        intake_forms_map: Dict[str, ClientIntakeForm] = {}
+        services_info: Dict[str, Dict[str, Any]] = {}
+
+        services_qs = (
+            Service.objects
+            .select_related("category")
+            .prefetch_related(
+                Prefetch(
+                    "pre_appointment_forms",
+                    queryset=ClientIntakeForm.objects.filter(is_active=True),
+                )
+            )
+        )
+        for svc in services_qs:
+            sid = str(svc.pk)
+            active_forms = list(svc.active_forms())
+            form_ids = [str(form.pk) for form in active_forms]
+            service_forms_map[sid] = form_ids
+            services_info[sid] = {
+                "id": sid,
+                "name": svc.name,
+                "base_price": str(svc.base_price),
+                "duration_min": svc.duration_min,
+                "forms": form_ids,
+            }
+            for form in active_forms:
+                intake_forms_map[str(form.pk)] = form
+
+        services_by_master: Dict[str, List[Dict[str, Any]]] = {}
+        qs = (
+            ServiceMaster.objects
+            .select_related("service", "master")
+            .values(
+                "master_id",
+                "service__id",
+                "service__name",
+                "service__base_price",
+                "service__duration_min",
+            )
+        )
         for r in qs:
-            services_by_master.setdefault(str(r["master_id"]), []).append({
-                "id": str(r["service__id"]),
-                "name": r["service__name"],
-                "base_price": str(r["service__base_price"]),
-                "duration_min": r["service__duration_min"],
-            })
-        return list(clients), list(masters), services_by_master
+            sid = str(r["service__id"])
+            base = services_info.get(sid)
+            if not base:
+                forms = service_forms_map.get(sid, [])
+                base = {
+                    "id": sid,
+                    "name": r["service__name"],
+                    "base_price": str(r["service__base_price"]),
+                    "duration_min": r["service__duration_min"],
+                    "forms": forms,
+                }
+                services_info[sid] = base
+            payload = {
+                "id": base["id"],
+                "name": base["name"],
+                "base_price": base["base_price"],
+                "duration_min": base["duration_min"],
+                "forms": list(base.get("forms", [])),
+            }
+            services_by_master.setdefault(str(r["master_id"]), []).append(payload)
+
+        return (
+            list(clients),
+            list(masters),
+            services_by_master,
+            service_forms_map,
+            intake_forms_map,
+        )
 
     def _parse_start_dt(date_str: str | None, time_str: str | None):
         if not date_str or not time_str:
@@ -1540,6 +1732,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "__all__": [],                 # глобальные ошибки
                 "fields": defaultdict(list),   # ошибки по полям формы (вне айтемов)
                 "items": defaultdict(lambda: defaultdict(list)),  # ошибки по строкам айтемов
+                "intake": defaultdict(lambda: defaultdict(list)),  # ошибки по формам-анкетам
             }
 
         def _serialize_validation_error(exc, bag):
@@ -1566,6 +1759,14 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                             bag["__all__"].extend(msgs)
                     elif key in ("__all__", "non_field_errors"):
                         bag["__all__"].extend(msgs)
+                    elif key.startswith("intake:"):
+                        parts = key.split(":")
+                        if len(parts) >= 2:
+                            fintake = parts[1]
+                            field_name = parts[2] if len(parts) >= 3 else "__all__"
+                            bag["intake"][fintake][field_name].extend(msgs)
+                        else:
+                            bag["__all__"].extend(msgs)
                     else:
                         bag["fields"][key].extend(msgs)
             else:
@@ -1575,15 +1776,33 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         def _finalize_bag(bag):
             bag["fields"] = dict(bag["fields"])
             bag["items"] = {i: dict(fields) for i, fields in bag["items"].items()}
+            bag["intake"] = {form_id: dict(fields) for form_id, fields in bag["intake"].items()}
             return bag
 
         def _context_lists():
             """Ваш существующий метод, оставляю как есть; если у вас уже есть — используйте его."""
             return self._context_lists()
+
+        def _build_forms_catalog(forms_map):
+            catalog = {}
+            for fid, form in forms_map.items():
+                catalog[fid] = {
+                    "id": fid,
+                    "name": form.name,
+                    "slug": form.slug,
+                    "description": form.description or "",
+                    "version": form.schema_version,
+                    "schema": form.normalized_schema(),
+                    "updated_at": form.updated_at.isoformat() if form.updated_at else None,
+                }
+            return catalog
+
         # ---------------- GET: первичная отрисовка ----------------
         mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
         if request.method == "GET" and request.GET.get("master") != 'undefined':
-            clients, masters, services_by_master = _context_lists()
+            clients, masters, services_by_master, service_forms_map, intake_forms_map = _context_lists()
+            intake_forms_catalog = _build_forms_catalog(intake_forms_map)
+            posted_intake_payload = {"forms": []}
 
             q_date   = request.GET.get("date")
             q_time   = request.GET.get("time")
@@ -1610,6 +1829,10 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "services_by_master": services_by_master,
                 "initial_first_item": initial_first_item,
                 "prefill_query": {"date": q_date, "time": q_time, "master": str(q_master) if q_master else None},
+                "service_forms_map": service_forms_map,
+                "intake_forms_catalog": intake_forms_catalog,
+                "posted_intake_payload": posted_intake_payload,
+                "intake_error_map": {},
 
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
@@ -1618,7 +1841,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
 
         # ---------------- POST: создаём запись ----------------
-        clients, masters, services_by_master = _context_lists()
+        clients, masters, services_by_master, service_forms_map, intake_forms_map = _context_lists()
+        intake_forms_catalog = _build_forms_catalog(intake_forms_map)
 
         if is_master(request.user):
             masters = [m for m in masters if str(m["id"]) == str(mp.pk)]
@@ -1664,8 +1888,30 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 uniq.append(it)
             promos_by_service[sid] = sorted(uniq, key=lambda x: (x["text"] or "").lower())
 
+        intake_payload_raw = (request.POST.get("intake_payload") or "").strip()
+
         # state + первичная валидация
         bag = _empty_error_bag()
+        intake_payload = {"forms": []}
+        submitted_intake_map: dict[str, dict] = {}
+        if intake_payload_raw:
+            try:
+                intake_payload = json.loads(intake_payload_raw) or {"forms": []}
+            except json.JSONDecodeError:
+                bag["__all__"].append("Unable to parse submitted intake forms.")
+                intake_payload = {"forms": []}
+        if isinstance(intake_payload, dict):
+            entries = intake_payload.get("forms", [])
+            if isinstance(entries, list):
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    fid = entry.get("id")
+                    if fid:
+                        submitted_intake_map[str(fid)] = entry
+        else:
+            bag["__all__"].append("Invalid intake forms payload structure.")
+            intake_payload = {"forms": []}
         client_id = (request.POST.get("client") or "").strip()
         try:
             total_forms = int(request.POST.get("items-TOTAL_FORMS", 0))
@@ -1730,8 +1976,44 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "promocode_id": (row["promocode"] or None),
             })
 
+        required_form_ids: set[str] = set()
+        for row in valid_rows:
+            service_id = row.get("service_id")
+            if not service_id:
+                continue
+            required_form_ids.update(service_forms_map.get(str(service_id), []))
+
+        client_profile = None
+        if client_id:
+            client_profile = UserProfile.objects.filter(pk=client_id).select_related("user").first()
+
+        validated_intake: dict[str, dict] = {}
+        for form_id in required_form_ids:
+            form_obj = intake_forms_map.get(form_id)
+            if not form_obj:
+                continue
+            submission_entry = submitted_intake_map.get(form_id)
+            if not submission_entry:
+                bag["intake"][form_id]["__all__"].append("This form must be completed before booking.")
+                continue
+            payload = submission_entry.get("data") or {}
+            if not isinstance(payload, dict):
+                bag["intake"][form_id]["__all__"].append("Invalid payload for this form.")
+                continue
+            bound_form = form_obj.build_bound_form(data=payload, client=client_profile)
+            if not bound_form.is_valid():
+                for field_name, errors in bound_form.errors.items():
+                    target = field_name if field_name != "__all__" else "__all__"
+                    bag["intake"][form_id][target].extend([str(err) for err in errors])
+                continue
+            validated_intake[form_id] = {
+                "cleaned_data": bound_form.cleaned_data,
+                "raw_data": payload,
+                "form": form_obj,
+            }
+
         # если уже есть ошибки — просто показать страницу с ними
-        has_errors = bool(bag["__all__"] or bag["fields"] or bag["items"])
+        has_errors = bool(bag["__all__"] or bag["fields"] or bag["items"] or bag["intake"])
         if has_errors:
             ctx = {
                 **self.admin_site.each_context(request),
@@ -1742,8 +2024,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "form_errors": bag["__all__"],
                 "field_errors": dict(bag["fields"]),
                 "item_errors": {i: dict(v) for i, v in bag["items"].items()},
+                "intake_error_map": {fid: dict(fields) for fid, fields in bag["intake"].items()},
                 "posted_items": posted_items,
                 "posted_client": client_id,
+                "service_forms_map": service_forms_map,
+                "intake_forms_catalog": intake_forms_catalog,
+                "posted_intake_payload": intake_payload,
 
 
                 "is_master": is_master(request.user),
@@ -1842,6 +2128,26 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                         set_by=request.user.userprofile if set_by else None,
                     )
 
+                if validated_intake:
+                    profile_for_submission = getattr(appt, "client", None) or client_profile
+                    if profile_for_submission is None and client_id:
+                        profile_for_submission = UserProfile.objects.filter(pk=client_id).first()
+                    for payload in validated_intake.values():
+                        form_obj = payload["form"]
+                        if profile_for_submission is None:
+                            continue
+                        ClientIntakeFormSubmission.objects.create(
+                            form=form_obj,
+                            client=profile_for_submission,
+                            appointment=appt,
+                            submitted_by=request.user if getattr(request.user, "is_authenticated", False) else None,
+                            data=_coerce_json(payload["cleaned_data"]),
+                            raw_payload=_coerce_json(payload["raw_data"]),
+                            form_schema_snapshot=form_obj.normalized_schema(),
+                            schema_version=form_obj.schema_version,
+                            is_complete=True,
+                        )
+
             messages.success(request, "Appointment created.")
             return redirect("admin:core_appointment_change", appt.pk)
 
@@ -1858,8 +2164,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "form_errors": bag["__all__"],
                 "field_errors": bag["fields"],
                 "item_errors": bag["items"],
+                "intake_error_map": bag["intake"],
                 "posted_items": posted_items,
                 "posted_client": client_id,
+                "service_forms_map": service_forms_map,
+                "intake_forms_catalog": intake_forms_catalog,
+                "posted_intake_payload": intake_payload,
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
             }
@@ -1877,8 +2187,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "form_errors": bag["__all__"],
                 "field_errors": dict(bag["fields"]),
                 "item_errors": {i: dict(v) for i, v in bag["items"].items()},
+                "intake_error_map": {fid: dict(fields) for fid, fields in bag["intake"].items()},
                 "posted_items": posted_items,
                 "posted_client": client_id,
+                "service_forms_map": service_forms_map,
+                "intake_forms_catalog": intake_forms_catalog,
+                "posted_intake_payload": intake_payload,
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
             }
@@ -1896,8 +2210,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "form_errors": bag["__all__"],
                 "field_errors": dict(bag["fields"]),
                 "item_errors": {i: dict(v) for i, v in bag["items"].items()},
+                "intake_error_map": {fid: dict(fields) for fid, fields in bag["intake"].items()},
                 "posted_items": posted_items,
                 "posted_client": client_id,
+                "service_forms_map": service_forms_map,
+                "intake_forms_catalog": intake_forms_catalog,
+                "posted_intake_payload": intake_payload,
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
             }
@@ -2211,7 +2529,57 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     list_display = ('name', 'base_price', 'category', 'duration_min')
     search_fields = ('name',)
     list_filter = ('category',)
+    filter_horizontal = ("pre_appointment_forms",)
+    fields = (
+        "name",
+        "description",
+        "category",
+        "base_price",
+        "duration_min",
+        "extra_time_min",
+        "pre_appointment_forms",
+    )
     export_fields = ['name', 'description','base_price', 'category', 'duration_min', 'extra_time_min']
+
+
+@admin.register(ClientIntakeForm)
+class ClientIntakeFormAdmin(admin.ModelAdmin):
+    form = ClientIntakeFormAdminForm
+    list_display = ("name", "slug", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("name", "slug", "description")
+    prepopulated_fields = {"slug": ("name",)}
+    fieldsets = (
+        (None, {"fields": ("name", "slug", "description", "is_active")}),
+        (_("Builder"), {"fields": ("schema", "schema_version")} ),
+        (_("Form class"), {"fields": ("form_class",), "classes": ("collapse",)}),
+        (_("Timestamps"), {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(ClientIntakeFormSubmission)
+class ClientIntakeFormSubmissionAdmin(admin.ModelAdmin):
+    list_display = ("form", "client", "appointment", "submitted_by", "submitted_at")
+    list_filter = ("form", "submitted_at", "submitted_by")
+    search_fields = (
+        "form__name",
+        "client__user__first_name",
+        "client__user__last_name",
+        "appointment__id",
+    )
+    readonly_fields = (
+        "form",
+        "client",
+        "appointment",
+        "submitted_by",
+        "submitted_at",
+        "data",
+        "raw_payload",
+        "form_schema_snapshot",
+        "schema_version",
+        "is_complete",
+    )
 # -----------------------------
 # Notification Admin
 # -----------------------------

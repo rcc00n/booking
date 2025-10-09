@@ -117,6 +117,40 @@
         .ab-field.errors input,.ab-field.errors select,.ab-field.errors .combo-input{border-color:var(--ab-red-500)}
         .ab-field .ab-field-error{color:#b91c1c;font-size:12px;margin-top:6px}
 
+        /* ───────── Intake builder ───────── */
+        #intake-section{border:1px solid var(--ab-border);border-radius:14px;background:#fff;padding:22px;}
+        #intake-section h2{margin:0 0 6px}
+        .intake-card{border:1px solid var(--ab-border);border-radius:12px;padding:18px;margin-bottom:18px;background:#fff;box-shadow:0 2px 12px rgba(15,23,42,.06)}
+        .intake-card__header{margin-bottom:12px}
+        .intake-card__title{margin:0;font-size:16px;font-weight:600;color:var(--ab-gray-900)}
+        .intake-card__description{margin:4px 0 0;font-size:13px;color:var(--ab-muted)}
+        .intake-card__section{margin-top:16px}
+        .intake-card__section-title{margin:0 0 6px;font-size:14px;font-weight:600;color:var(--ab-gray-900)}
+        .intake-card__section-desc{margin:0 0 12px;font-size:13px;color:var(--ab-muted)}
+        .intake-card__alert{border:1px solid var(--ab-red-500);background:var(--ab-red-100);color:var(--ab-red-700);padding:10px 12px;border-radius:10px;margin-bottom:12px;font-size:13px}
+        .intake-grid{display:grid;gap:14px 16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+        .intake-field{display:flex;flex-direction:column}
+        .intake-field[data-width="full"]{grid-column:1 / -1}
+        .intake-field[data-width="half"]{grid-column:span 1}
+        .intake-field label{font-size:13px;margin-bottom:6px;font-weight:500;color:#374151}
+        .intake-field input,
+        .intake-field select,
+        .intake-field textarea{border:1px solid var(--ab-border);border-radius:10px;background:var(--ab-gray-50);padding:10px 12px;min-height:44px;font-size:14px;transition:border-color .15s ease, box-shadow .15s ease}
+        .intake-field textarea{min-height:96px;resize:vertical}
+        .intake-field input:focus,
+        .intake-field select:focus,
+        .intake-field textarea:focus{outline:0;border-color:var(--ab-green-600);box-shadow:0 0 0 3px rgba(34,197,94,.18)}
+        .intake-field.has-error input,
+        .intake-field.has-error select,
+        .intake-field.has-error textarea{border-color:var(--ab-red-500)}
+        .intake-field-error{color:var(--ab-red-600);font-size:12px;margin-top:6px}
+        .intake-field-help{color:var(--ab-muted);font-size:12px;margin-top:4px}
+        .intake-checkbox{display:flex;align-items:center;gap:8px}
+        .intake-checkbox input{width:18px;height:18px;min-height:auto}
+        .intake-radio-group{display:flex;flex-direction:column;gap:6px}
+        .intake-radio{display:flex;align-items:center;gap:8px;font-size:13px}
+        .intake-radio input{width:16px;height:16px;min-height:auto}
+
         /* ───────── Buttons ───────── */
         .ab-actions{display:flex;gap:10px;justify-content:flex-start}
         .ab-btn{
@@ -242,12 +276,21 @@
                 <input type="hidden" name="items-MIN_NUM_FORMS" id="id_items-MIN_NUM_FORMS" value="0">
                 <input type="hidden" name="items-MAX_NUM_FORMS" id="id_items-MAX_NUM_FORMS" value="1000">
 
-                <div class="ab-items" id="items-container"></div>
+            <div class="ab-items" id="items-container"></div>
 
-                <div class="ab-total">
-                    <strong id="grand-total">$0.00</strong>
-                </div>
+            <div class="ab-total">
+                <strong id="grand-total">$0.00</strong>
             </div>
+        </div>
+
+        <div id="intake-section" class="ab-hidden" style="margin-top:20px">
+            <h2>Forms</h2>
+            <p class="ab-sub">Required questionnaires and consent forms for this booking.</p>
+            <div id="intake-form-errors" class="ab-errornote ab-hidden"></div>
+            <div id="intake-forms-container"></div>
+        </div>
+
+        <input type="hidden" name="intake_payload" id="id_intake_payload" value="{}">
 
             <div class="ab-foot">
                 <a href="{% url 'admin:core_appointment_changelist' %}" class="btn btn-ghost">
@@ -272,11 +315,15 @@
     {{ masters|json_script:"ab-masters" }}
     {{ services_by_master|json_script:"ab-services-by-master" }}
     {{ initial_first_item|json_script:"ab-initial-first" }}
+    {{ service_forms_map|json_script:"ab-service-forms" }}
+    {{ intake_forms_catalog|json_script:"ab-intake-forms" }}
 
     {{ posted_items|default:'[]'|json_script:"ab-posted-items" }}
     {{ item_errors|default:'{}'|json_script:"ab-item-errors" }}
     {{ field_errors|default:'{}'|json_script:"ab-field-errors" }}
     {{ posted_client|default:'""'|json_script:"ab-posted-client" }}
+    {{ posted_intake_payload|default:'{"forms":[]}'|json_script:"ab-posted-intake" }}
+    {{ intake_error_map|default:'{}'|json_script:"ab-intake-errors" }}
 
     <script>
         window.APPOINTMENT_CTX = {
@@ -291,11 +338,15 @@
             const MASTERS = JSON.parse(document.getElementById('ab-masters').textContent || '[]');
             const SERVICES_BY_MASTER = JSON.parse(document.getElementById('ab-services-by-master').textContent || '{}');
             const INITIAL_FIRST = JSON.parse(document.getElementById('ab-initial-first').textContent || '{}');
+            const SERVICE_FORMS = JSON.parse(document.getElementById('ab-service-forms').textContent || '{}');
+            const INTAKE_FORMS = JSON.parse(document.getElementById('ab-intake-forms').textContent || '{}');
 
             const POSTED_ITEMS = JSON.parse(document.getElementById('ab-posted-items').textContent || '[]');
             const ITEM_ERRORS  = JSON.parse(document.getElementById('ab-item-errors').textContent || '{}');
             const FIELD_ERRORS = JSON.parse(document.getElementById('ab-field-errors').textContent || '{}');
             const POSTED_CLIENT= JSON.parse(document.getElementById('ab-posted-client').textContent || '""');
+            const POSTED_INTAKE = JSON.parse(document.getElementById('ab-posted-intake').textContent || '{"forms":[]}');
+            const INTAKE_ERRORS = JSON.parse(document.getElementById('ab-intake-errors').textContent || '{}');
 
             const CTX = (window.APPOINTMENT_CTX || {is_master:false,current_master_id:null});
             const IS_MASTER = !!CTX.is_master;
@@ -307,6 +358,9 @@
             const container   = document.getElementById('items-container');
             const totalForms  = document.getElementById('id_items-TOTAL_FORMS');
             const grandTotal  = document.getElementById('grand-total');
+            const intakeSection = document.getElementById('intake-section');
+            const intakeContainer = document.getElementById('intake-forms-container');
+            const intakePayloadInput = document.getElementById('id_intake_payload');
 
             // delegate remove
             container.addEventListener('click', (e) => {
@@ -317,6 +371,7 @@
                 row.remove();
                 renumberRows();
                 recalcGrandTotal();
+                renderIntakeForms();
             });
 
             /* ────────────── Client combobox ────────────── */
@@ -453,6 +508,373 @@
                 const hid = document.createElement('input');
                 hid.type='hidden'; hid.name=el.name; hid.value=el.value||'';
                 el.insertAdjacentElement('afterend', hid);
+            }
+
+            const intakeState = { forms: {} };
+            if (POSTED_INTAKE && Array.isArray(POSTED_INTAKE.forms)){
+                POSTED_INTAKE.forms.forEach(entry => {
+                    if (!entry || !entry.id) return;
+                    const key = String(entry.id);
+                    const data = entry.data && typeof entry.data === 'object' ? {...entry.data} : {};
+                    intakeState.forms[key] = { data };
+                });
+            }
+
+            function ensureIntakeEntry(formId){
+                const key = String(formId);
+                if (!intakeState.forms[key]){
+                    intakeState.forms[key] = { data: {} };
+                }
+                return intakeState.forms[key];
+            }
+
+            function gatherActiveFormIds(){
+                const required = new Set();
+                container.querySelectorAll('select.js-service').forEach(sel => {
+                    const sid = sel.value;
+                    if (!sid) return;
+                    const forms = SERVICE_FORMS[String(sid)] || [];
+                    forms.forEach(fid => { if (fid) required.add(String(fid)); });
+                });
+                return Array.from(required);
+            }
+
+            function updateSerializedPayload(){
+                if (!intakePayloadInput) return;
+                const required = gatherActiveFormIds();
+                if (!required.length){
+                    intakePayloadInput.value = JSON.stringify({forms: []});
+                    return;
+                }
+                const payload = {
+                    forms: required.map(fid => {
+                        const entry = ensureIntakeEntry(fid);
+                        return { id: fid, data: entry.data || {} };
+                    })
+                };
+                intakePayloadInput.value = JSON.stringify(payload);
+            }
+
+            function buildField(formId, fieldCfg, formData, formErrors){
+                if (!fieldCfg || typeof fieldCfg !== 'object') return null;
+                const key = fieldCfg.key;
+                if (!key) return null;
+
+                const type = (fieldCfg.type || 'text').toLowerCase();
+                const fieldId = `intake-${formId}-${key}`;
+                const labelText = fieldCfg.label || key;
+                const rawErrors = formErrors && Object.prototype.hasOwnProperty.call(formErrors, key) ? formErrors[key] : [];
+                const errors = Array.isArray(rawErrors) ? rawErrors.map(String) : rawErrors ? [String(rawErrors)] : [];
+                let value = Object.prototype.hasOwnProperty.call(formData, key) ? formData[key] : undefined;
+
+                if (value === undefined && Object.prototype.hasOwnProperty.call(fieldCfg, 'default')){
+                    value = fieldCfg.default;
+                    formData[key] = value;
+                }
+
+                const wrap = document.createElement('div');
+                wrap.className = 'intake-field';
+                if (fieldCfg.display && fieldCfg.display.width){
+                    wrap.dataset.width = fieldCfg.display.width;
+                }
+
+                const label = document.createElement('label');
+                label.htmlFor = fieldId;
+                label.textContent = labelText + (fieldCfg.required ? ' *' : '');
+
+                const settings = fieldCfg.settings || {};
+                let control = null;
+
+                const setCommon = (el) => {
+                    if (!el) return;
+                    el.id = fieldId;
+                    if (fieldCfg.required) el.required = true;
+                    if (fieldCfg.placeholder) el.placeholder = fieldCfg.placeholder;
+                };
+
+                switch (type){
+                    case 'textarea':
+                    case 'long_text': {
+                        const textarea = document.createElement('textarea');
+                        textarea.value = value != null ? value : '';
+                        textarea.addEventListener('input', () => {
+                            formData[key] = textarea.value;
+                            updateSerializedPayload();
+                        });
+                        control = textarea;
+                        break;
+                    }
+                    case 'number':
+                    case 'integer': {
+                        const input = document.createElement('input');
+                        input.type = 'number';
+                        if (settings.min_value != null) input.min = settings.min_value;
+                        if (settings.max_value != null) input.max = settings.max_value;
+                        input.value = value != null ? value : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                        break;
+                    }
+                    case 'decimal':
+                    case 'float': {
+                        const input = document.createElement('input');
+                        input.type = 'number';
+                        input.step = settings.step || '0.01';
+                        if (settings.min_value != null) input.min = settings.min_value;
+                        if (settings.max_value != null) input.max = settings.max_value;
+                        input.value = value != null ? value : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                        break;
+                    }
+                    case 'boolean':
+                    case 'checkbox': {
+                        const wrapToggle = document.createElement('div');
+                        wrapToggle.className = 'intake-checkbox';
+                        const input = document.createElement('input');
+                        input.type = 'checkbox';
+                        input.checked = Boolean(value);
+                        input.addEventListener('change', () => {
+                            formData[key] = input.checked;
+                            updateSerializedPayload();
+                        });
+                        setCommon(input);
+                        wrapToggle.appendChild(input);
+                        const span = document.createElement('span');
+                        span.textContent = labelText;
+                        wrapToggle.appendChild(span);
+                        wrap.appendChild(wrapToggle);
+                        label.remove();
+                        break;
+                    }
+                    case 'select':
+                    case 'radio':
+                    case 'radiolist':
+                    case 'multiselect':
+                    case 'multichoice': {
+                        const choices = Array.isArray(fieldCfg.choices) ? fieldCfg.choices : [];
+                        if (type === 'radio' || type === 'radiolist'){
+                            const group = document.createElement('div');
+                            group.className = 'intake-radio-group';
+                            choices.forEach((opt, idx) => {
+                                if (!opt) return;
+                                const optionVal = Object.prototype.hasOwnProperty.call(opt,'value') ? String(opt.value) : '';
+                                const optionLabel = opt.label || optionVal;
+                                const radioId = `${fieldId}-opt-${idx}`;
+                                const row = document.createElement('label');
+                                row.className = 'intake-radio';
+                                const radio = document.createElement('input');
+                                radio.type = 'radio';
+                                radio.name = fieldId;
+                                radio.id = radioId;
+                                radio.value = optionVal;
+                                radio.checked = String(value) === optionVal;
+                                radio.addEventListener('change', () => {
+                                    if (radio.checked){
+                                        formData[key] = optionVal;
+                                        updateSerializedPayload();
+                                    }
+                                });
+                                row.appendChild(radio);
+                                const span = document.createElement('span');
+                                span.textContent = optionLabel;
+                                row.appendChild(span);
+                                group.appendChild(row);
+                            });
+                            control = group;
+                        } else {
+                            const select = document.createElement('select');
+                            if (type === 'multiselect' || type === 'multichoice'){
+                                select.multiple = true;
+                            }
+                            if (!select.multiple){
+                                select.appendChild(new Option('---------',''));
+                            }
+                            choices.forEach(opt => {
+                                if (!opt) return;
+                                const optionVal = Object.prototype.hasOwnProperty.call(opt,'value') ? String(opt.value) : '';
+                                const optionLabel = opt.label || optionVal;
+                                select.appendChild(new Option(optionLabel, optionVal));
+                            });
+                            if (select.multiple){
+                                const selectedVals = Array.isArray(value) ? value.map(String) : [];
+                                Array.from(select.options).forEach(opt => {
+                                    opt.selected = selectedVals.includes(opt.value);
+                                });
+                            } else {
+                                select.value = value != null ? String(value) : '';
+                            }
+                            select.addEventListener('change', () => {
+                                if (select.multiple){
+                                    formData[key] = Array.from(select.selectedOptions).map(o => o.value);
+                                } else {
+                                    formData[key] = select.value;
+                                }
+                                updateSerializedPayload();
+                            });
+                            control = select;
+                        }
+                        break;
+                    }
+                    case 'date':
+                    case 'time':
+                    case 'datetime':
+                    case 'datetime_local': {
+                        const input = document.createElement('input');
+                        input.type = type === 'date' ? 'date' : (type === 'time' ? 'time' : 'datetime-local');
+                        input.value = value != null ? String(value) : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                        break;
+                    }
+                    case 'email': {
+                        const input = document.createElement('input');
+                        input.type = 'email';
+                        input.value = value != null ? value : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                        break;
+                    }
+                    case 'phone':
+                    case 'tel': {
+                        const input = document.createElement('input');
+                        input.type = 'tel';
+                        input.value = value != null ? value : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                        break;
+                    }
+                    default: {
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.value = value != null ? value : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                    }
+                }
+
+                if (control){
+                    setCommon(control);
+                    wrap.appendChild(label);
+                    wrap.appendChild(control);
+                } else if (type !== 'checkbox' && type !== 'boolean'){
+                    wrap.appendChild(label);
+                }
+
+                if (fieldCfg.help_text){
+                    const help = document.createElement('div');
+                    help.className = 'intake-field-help';
+                    help.textContent = fieldCfg.help_text;
+                    wrap.appendChild(help);
+                }
+
+                if (errors.length){
+                    wrap.classList.add('has-error');
+                    const err = document.createElement('div');
+                    err.className = 'intake-field-error';
+                    err.innerHTML = errors.join('<br>');
+                    wrap.appendChild(err);
+                }
+
+                return wrap;
+            }
+
+            function renderSingleForm(formId){
+                const meta = INTAKE_FORMS[formId];
+                if (!meta) return;
+                const entry = ensureIntakeEntry(formId);
+                const formData = entry.data;
+                const formErrors = INTAKE_ERRORS[formId] || {};
+
+                const card = document.createElement('section');
+                card.className = 'intake-card';
+                card.dataset.formId = formId;
+
+                const header = document.createElement('div');
+                header.className = 'intake-card__header';
+                const title = document.createElement('h3');
+                title.className = 'intake-card__title';
+                title.textContent = meta.name || `Form ${formId}`;
+                header.appendChild(title);
+                if (meta.description){
+                    const desc = document.createElement('p');
+                    desc.className = 'intake-card__description';
+                    desc.textContent = meta.description;
+                    header.appendChild(desc);
+                }
+                card.appendChild(header);
+
+                const generalErrors = Array.isArray(formErrors['__all__']) ? formErrors['__all__'] : [];
+                if (generalErrors.length){
+                    const alert = document.createElement('div');
+                    alert.className = 'intake-card__alert';
+                    alert.innerHTML = generalErrors.map(String).join('<br>');
+                    card.appendChild(alert);
+                }
+
+                const schema = meta.schema && typeof meta.schema === 'object' ? meta.schema : {sections: []};
+                const sections = Array.isArray(schema.sections) ? schema.sections : [];
+                sections.forEach(section => {
+                    const sectionWrap = document.createElement('div');
+                    sectionWrap.className = 'intake-card__section';
+                    if (section.title){
+                        const h = document.createElement('h4');
+                        h.className = 'intake-card__section-title';
+                        h.textContent = section.title;
+                        sectionWrap.appendChild(h);
+                    }
+                    if (section.description){
+                        const p = document.createElement('p');
+                        p.className = 'intake-card__section-desc';
+                        p.textContent = section.description;
+                        sectionWrap.appendChild(p);
+                    }
+                    const grid = document.createElement('div');
+                    grid.className = 'intake-grid';
+                    const fields = Array.isArray(section.fields) ? section.fields : [];
+                    fields.forEach(fieldCfg => {
+                        const fieldEl = buildField(formId, fieldCfg, formData, formErrors);
+                        if (fieldEl) grid.appendChild(fieldEl);
+                    });
+                    sectionWrap.appendChild(grid);
+                    card.appendChild(sectionWrap);
+                });
+
+                intakeContainer.appendChild(card);
+            }
+
+            function renderIntakeForms(){
+                if (!intakeSection) return;
+                const required = gatherActiveFormIds();
+                if (!required.length){
+                    intakeSection.classList.add('ab-hidden');
+                    intakeContainer.innerHTML = '';
+                    if (intakePayloadInput) intakePayloadInput.value = JSON.stringify({forms: []});
+                    return;
+                }
+
+                intakeSection.classList.remove('ab-hidden');
+                intakeContainer.innerHTML = '';
+                required.forEach(renderSingleForm);
+                updateSerializedPayload();
             }
 
             // generic "combo" поверх <select>
@@ -656,6 +1078,7 @@
                     populateServices(serviceSel, masterSel.value);
                     if (serviceCombo) { serviceCombo.rebuildFromSelect(); serviceCombo.clear(); }
                     hint.textContent = ''; priceInp.value = ''; recalcGrandTotal();
+                    renderIntakeForms();
                 });
 
                 serviceSel.addEventListener('change', () => {
@@ -665,6 +1088,7 @@
                     priceInp.value = price || '';
                     hint.textContent = dur ? (`Duration: ${dur} min`) : '';
                     recalcGrandTotal();
+                    renderIntakeForms();
                 });
 
                 priceInp.addEventListener('input', recalcGrandTotal);
@@ -722,6 +1146,7 @@
                 container.appendChild(row);
                 totalForms.value = idx + 1;
                 recalcGrandTotal();
+                renderIntakeForms();
             }
 
             function renumberRows(){
@@ -804,6 +1229,7 @@
 
                 recalcGrandTotal();
                 paintItemErrors();
+                renderIntakeForms();
             })();
 
             clientEl.addEventListener('change', () => {
@@ -814,6 +1240,7 @@
                 .addEventListener('click', () => addRow({ master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : '' }));
 
             document.getElementById('appt-form').addEventListener('submit', (e) => {
+                updateSerializedPayload();
                 if (!clientEl.value){ e.preventDefault(); alert('Выберите клиента.'); return; }
                 if (container.querySelectorAll('.ab-item').length === 0){ e.preventDefault(); alert('Добавьте хотя бы одну услугу.'); return; }
                 if (IS_MASTER){

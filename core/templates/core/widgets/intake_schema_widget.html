@@ -1,0 +1,35 @@
+{% load static %}
+<div class="ibuilder" data-intake-builder data-initial="{{ widget.value|escapejs }}">
+  <input type="hidden"
+         name="{{ widget.name }}"
+         value="{{ widget.value|escape }}"
+         {% include "django/forms/widgets/attrs.html" with widget=widget %}>
+
+    <div class="ibuilder__toolbar">
+      <div class="ibuilder__toolbar-left">
+        <button type="button" class="ibuilder__btn" data-action="add-section">Add section</button>
+        <button type="button" class="ibuilder__btn" data-action="load-sample">Load sample</button>
+        <button type="button" class="ibuilder__btn" data-action="expand-all">Expand all</button>
+        <button type="button" class="ibuilder__btn" data-action="collapse-all">Collapse all</button>
+      </div>
+    <div class="ibuilder__toolbar-right">
+      <button type="button" class="ibuilder__btn ibuilder__btn--ghost" data-action="toggle-json">JSON editor</button>
+    </div>
+  </div>
+
+  <div class="ibuilder__body" data-builder-sections></div>
+
+  <div class="ibuilder__meta" data-builder-meta></div>
+
+  <div class="ibuilder__json-panel" data-json-panel hidden>
+    <textarea class="ibuilder__json-textarea" data-json-textarea spellcheck="false"></textarea>
+    <div class="ibuilder__json-actions">
+      <button type="button" class="ibuilder__btn" data-action="apply-json">Apply</button>
+      <button type="button" class="ibuilder__btn ibuilder__btn--danger" data-action="reset-json">Reset</button>
+    </div>
+  </div>
+
+  <p class="help">
+    Use the builder to organise sections and fields. Field keys become JSON keys in stored submissions.
+  </p>
+</div>

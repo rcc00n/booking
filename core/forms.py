@@ -1,3 +1,5 @@
+import json
+import re
 from pathlib import Path
 
 from dal import autocomplete
@@ -1115,3 +1117,83 @@ class MasterAvailabilityForm(forms.ModelForm):
             "admin/js/quarter_timepicker.js",                 # твой селектор 15 минут
             "admin/js/ma_flatpickr_init.js",                  # инициализация календаря (ниже)
         ]
+
+
+INTAKE_FIELD_KEY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*$")
+
+
+class IntakeSchemaWidget(forms.Widget):
+    template_name = "core/widgets/intake_schema_widget.html"
+
+    def format_value(self, value):
+        if not value:
+            return json.dumps({"sections": [], "meta": {}}, ensure_ascii=False)
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return value
+            return json.dumps(parsed, ensure_ascii=False)
+        return json.dumps(value, ensure_ascii=False)
+
+    def get_context(self, name, value, attrs):
+        formatted = self.format_value(value)
+        try:
+            raw = json.loads(formatted)
+        except json.JSONDecodeError:
+            raw = {"sections": [], "meta": {}}
+        context = super().get_context(name, formatted, attrs)
+        context["widget"]["builder_value"] = raw
+        return context
+
+    class Media:
+        css = {"all": ["core/css/intake_builder.css"]}
+        js = ["core/js/intake_builder.js"]
+
+
+class ClientIntakeFormAdminForm(forms.ModelForm):
+    schema = forms.CharField(required=False, widget=IntakeSchemaWidget())
+
+    class Meta:
+        model = ClientIntakeForm
+        fields = "__all__"
+
+    def clean_schema(self):
+        raw = self.cleaned_data.get("schema")
+        if not raw:
+            return {"sections": [], "meta": {}}
+        if isinstance(raw, str):
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise forms.ValidationError(
+                    f"Form builder configuration must be valid JSON: {exc}"
+                ) from exc
+        else:
+            data = raw
+        if not isinstance(data, dict):
+            raise forms.ValidationError("Form builder configuration must be a JSON object.")
+        data.setdefault("sections", [])
+        data.setdefault("meta", {})
+
+        seen_keys = set()
+        for section in data["sections"]:
+            if not isinstance(section, dict):
+                raise forms.ValidationError("Each section must be an object.")
+            fields = section.get("fields") or []
+            if not isinstance(fields, list):
+                raise forms.ValidationError("Section fields must be a list.")
+            for field in fields:
+                if not isinstance(field, dict):
+                    raise forms.ValidationError("Field definitions must be JSON objects.")
+                key = field.get("key")
+                if not key:
+                    raise forms.ValidationError("Every field must have a key.")
+                if not INTAKE_FIELD_KEY_RE.match(str(key)):
+                    raise forms.ValidationError(
+                        f"Field key '{key}' is invalid. Use letters, digits or underscores and start with a letter."
+                    )
+                if key in seen_keys:
+                    raise forms.ValidationError(f"Field key '{key}' is duplicated.")
+                seen_keys.add(key)
+        return data

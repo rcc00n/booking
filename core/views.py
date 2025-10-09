@@ -18,7 +18,7 @@ import stripe
 from core.models import (
     Appointment, ServiceCategory, Service, PromoCode,
     AppointmentStatusHistory, MasterProfile, UserProfile, CancellationReason,
-    AppointmentItem, BookingCart, BookingCartItem, Payment,
+    AppointmentItem, BookingCart, BookingCartItem, Payment, ClientIntakeForm,
 )
 from core.services.booking import (
     get_available_slots, get_service_masters,
@@ -32,7 +32,17 @@ def _build_catalog_context(request):
     q = (request.GET.get("q") or "").strip()
     cat = request.GET.get("cat") or ""
 
-    services_qs = Service.objects.select_related("category").order_by("name")
+    services_qs = (
+        Service.objects
+        .select_related("category")
+        .prefetch_related(
+            Prefetch(
+                "pre_appointment_forms",
+                queryset=ClientIntakeForm.objects.filter(is_active=True),
+            )
+        )
+        .order_by("name")
+    )
     if q:
         services_qs = services_qs.filter(Q(name__icontains=q) | Q(description__icontains=q))
     if cat:
@@ -622,7 +632,16 @@ def api_appointment_reschedule(request, appt_id):
 def service_search(request):
     q = (request.GET.get('q') or '').strip()
     cat = request.GET.get('cat') or ''
-    qs = Service.objects.select_related('category')
+    qs = (
+        Service.objects
+        .select_related('category')
+        .prefetch_related(
+            Prefetch(
+                "pre_appointment_forms",
+                queryset=ClientIntakeForm.objects.filter(is_active=True),
+            )
+        )
+    )
 
     if q:
         qs = qs.filter(Q(name__icontains=q) | Q(description__icontains=q))
@@ -644,6 +663,15 @@ def service_search(request):
             "price": price,
             "discount_percent": disc.discount_percent if disc else None,
             "duration_min": s.duration_min,
+            "forms": [
+                {
+                    "id": str(form.id),
+                    "name": form.name,
+                    "slug": form.slug,
+                    "description": form.description,
+                }
+                for form in s.active_forms()
+            ],
         })
     return JsonResponse({"results": results})
 
