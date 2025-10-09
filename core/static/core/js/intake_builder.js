@@ -756,11 +756,20 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
+  function mountIntakeBuilders(){
     document.querySelectorAll('[data-intake-builder]').forEach(root => {
       if (!root.__intakeBuilderInstance){
         root.__intakeBuilderInstance = new IntakeBuilder(root);
       }
     });
-  });
+  }
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', mountIntakeBuilders);
+  } else {
+    mountIntakeBuilders();
+  }
+
+  document.addEventListener('formset:added', mountIntakeBuilders);
+  document.addEventListener('formset:removed', mountIntakeBuilders);
 })();

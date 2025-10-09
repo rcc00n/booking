@@ -1152,7 +1152,7 @@ class IntakeSchemaWidget(forms.Widget):
 
 
 class ClientIntakeFormAdminForm(forms.ModelForm):
-    schema = forms.CharField(required=False, widget=IntakeSchemaWidget())
+    schema = forms.JSONField(required=False, widget=IntakeSchemaWidget())
 
     class Meta:
         model = ClientIntakeForm
