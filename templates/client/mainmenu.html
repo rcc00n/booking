@@ -385,9 +385,13 @@
         {% endfor %}
       </select>
       <button class="btn btn--primary" type="submit" data-i18n="services.filters.submit">Search</button>
-      {% if q or active_category %}
-        <a class="btn btn--ghost" href="{% url 'client-dashboard' %}#services" data-i18n="services.filters.reset">Reset</a>
-      {% endif %}
+      <a
+        class="btn btn--ghost"
+        data-reset-link
+        href="{% url 'client-dashboard' %}#services"
+        {% if not q and not active_category %}style="display:none;" aria-hidden="true"{% endif %}
+        data-i18n="services.filters.reset"
+      >Reset</a>
     </form>
 
     <!-- Live results (JS) -->
@@ -866,6 +870,7 @@
       const paymentConfirm=document.getElementById('paymentConfirm');
       const paymentSummary=document.getElementById('paymentSummary');
       const paymentTitle=document.getElementById('paymentTitle');
+      const paymentCardLabel=document.querySelector('label[for="cardElement"]');
       const cardElementWrapper=document.getElementById('cardElementWrapper');
       const cardElementTarget=document.getElementById('cardElement');
       const paymentForm=document.getElementById('paymentForm');
@@ -2086,18 +2091,22 @@
         }
       }
 
-      /* ===== Live search (как было) ===== */
+      /* ===== Live search ===== */
+      const searchForm = document.querySelector('form.filters');
       const qInput = document.querySelector('input[name="q"]');
       const catSel = document.querySelector('select[name="cat"]');
+      const resetLink = document.querySelector('[data-reset-link]');
       const liveTitle = document.getElementById('liveTitle');
       const liveGrid  = document.getElementById('liveGrid');
       const serverContent = document.getElementById('serverContent');
-      const resetLink = document.querySelector('a.btn.btn--ghost[href*="client-dashboard"]');
 
-      function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+      const SEARCH_DELAY = 250;
+      let searchTimer = null;
+      let aborter = null;
+
       function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
-      function showLive(){ liveTitle.style.display='block'; liveGrid.style.display='grid'; serverContent.style.display='none'; }
-      function hideLive(){ liveTitle.style.display='none'; liveGrid.style.display='none'; serverContent.style.display='block'; }
+      function showLive(){ if(liveTitle) liveTitle.style.display='block'; if(liveGrid) liveGrid.style.display='grid'; if(serverContent) serverContent.style.display='none'; }
+      function hideLive(){ if(liveTitle) liveTitle.style.display='none'; if(liveGrid) liveGrid.style.display='none'; if(serverContent) serverContent.style.display='block'; }
       function skeleton(n=8){
         return Array.from({length:n}).map(()=>`
           <article class="service-card">
@@ -2106,6 +2115,30 @@
             <div class="skeleton" style="height:14px;margin-top:6px;border-radius:6px;"></div>
             <div class="skeleton" style="height:36px;margin-top:12px;border-radius:10px;"></div>
           </article>`).join('');
+      }
+      function toggleReset(q, cat){
+        if (!resetLink) return;
+        const shouldShow = Boolean(q) || Boolean(cat);
+        if (shouldShow){
+          resetLink.style.display = '';
+          resetLink.removeAttribute('aria-hidden');
+        } else {
+          resetLink.style.display = 'none';
+          resetLink.setAttribute('aria-hidden', 'true');
+        }
+      }
+      function updateLocation(q, cat){
+        if (!window.history || typeof window.history.replaceState !== 'function') return;
+        const nextUrl = new URL(window.location.href);
+        if (q) nextUrl.searchParams.set('q', q); else nextUrl.searchParams.delete('q');
+        if (cat) nextUrl.searchParams.set('cat', cat); else nextUrl.searchParams.delete('cat');
+        window.history.replaceState(null, document.title, nextUrl.toString());
+      }
+      function abortActiveRequest(){
+        if (aborter){
+          aborter.abort();
+          aborter = null;
+        }
       }
       function cardHTML(s){
         const hasDisc = Number.isFinite(+s.discount_percent) && +s.discount_percent > 0;
@@ -2137,51 +2170,91 @@
               data-i18n="services.cards.addToCart">${translate('services.cards.addToCart')}</button>
           </article>`;
       }
-
-      let aborter=null;
       async function fetchServices(q, cat){
-        if (aborter) aborter.abort();
-        aborter = new AbortController();
+        abortActiveRequest();
+        const controller = new AbortController();
+        aborter = controller;
         const params = new URLSearchParams();
         if (q)   params.set('q', q);
         if (cat) params.set('cat', cat);
-        const url = `/accounts/api/services/search/?${params.toString()}`;
-        const r = await fetch(url, { signal: aborter.signal, credentials: 'same-origin' });
-        if (!r.ok) throw new Error(translate('services.search.loadFailed'));
-        return r.json();
+        const queryString = params.toString();
+        const url = queryString ? `/accounts/api/services/search/?${queryString}` : '/accounts/api/services/search/';
+        try{
+          const r = await fetch(url, { signal: controller.signal, credentials: 'same-origin' });
+          if (!r.ok) throw new Error(translate('services.search.loadFailed'));
+          return await r.json();
+        }finally{
+          if (aborter === controller) {
+            aborter = null;
+          }
+        }
       }
-
-      const runSearch = debounce(async ()=>{
-        const q   = qInput?.value?.trim() || '';
-        const cat = catSel?.value || '';
-        if (!q && !cat) { hideLive(); return; }
+      async function executeSearch({ q, cat } = {}){
+        searchTimer = null;
+        if (!q && !cat){
+          abortActiveRequest();
+          hideLive();
+          return;
+        }
         showLive();
-        liveGrid.innerHTML = skeleton();
+        if (liveGrid) liveGrid.innerHTML = skeleton();
         try{
           const data = await fetchServices(q, cat);
           const items = (data && data.results) || [];
           if (items.length === 0){
-            liveGrid.innerHTML = `<div class="stub" data-i18n="services.search.noResults">${translate('services.search.noResults')}</div>`;
+            if (liveGrid) liveGrid.innerHTML = `<div class="stub" data-i18n="services.search.noResults">${translate('services.search.noResults')}</div>`;
             queueRefresh();
             return;
           }
-          liveGrid.innerHTML = items.map(cardHTML).join('');
+          if (liveGrid) liveGrid.innerHTML = items.map(cardHTML).join('');
           applyServiceNameTranslations(liveGrid);
           queueRefresh();
         }catch(e){
-          liveGrid.innerHTML = `<div class="stub" data-i18n="services.search.error">${translate('services.search.error')}</div>`;
+          if (e && e.name === 'AbortError') return;
+          if (liveGrid) liveGrid.innerHTML = `<div class="stub" data-i18n="services.search.error">${translate('services.search.error')}</div>`;
           queueRefresh();
         }
-      }, 300);
+      }
+      function scheduleSearch(options = {}){
+        const { immediate = false, updateUrl = true } = options;
+        const state = {
+          q: qInput?.value?.trim() || '',
+          cat: catSel?.value || '',
+        };
+        toggleReset(state.q, state.cat);
+        if (updateUrl) updateLocation(state.q, state.cat);
+        if (searchTimer){
+          clearTimeout(searchTimer);
+          searchTimer = null;
+        }
+        const payload = { q: state.q, cat: state.cat };
+        if (!payload.q && !payload.cat){
+          executeSearch(payload);
+          return;
+        }
+        if (immediate){
+          executeSearch(payload);
+        }else{
+          searchTimer = window.setTimeout(()=>executeSearch(payload), SEARCH_DELAY);
+        }
+      }
 
-      if (qInput) qInput.addEventListener('input', runSearch);
-      if (catSel) catSel.addEventListener('change', runSearch);
+      toggleReset(qInput?.value?.trim() || '', catSel?.value || '');
+
+      if (qInput) qInput.addEventListener('input', ()=>scheduleSearch());
+      if (catSel) catSel.addEventListener('change', ()=>scheduleSearch({ immediate:true }));
+      if (searchForm){
+        searchForm.addEventListener('submit', (e)=>{
+          e.preventDefault();
+          scheduleSearch({ immediate:true });
+        });
+      }
       if (resetLink){
         resetLink.addEventListener('click', (e)=>{
           e.preventDefault();
           if (qInput) qInput.value = '';
           if (catSel) catSel.value = '';
-          hideLive();
+          scheduleSearch({ immediate:true });
           document.getElementById('services')?.scrollIntoView({behavior:'smooth', block:'start'});
         });
       }
