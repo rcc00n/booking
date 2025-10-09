@@ -788,9 +788,6 @@
       });
       menuClose?.addEventListener('click', closeMenuDrawer);
       menuBackdrop?.addEventListener('click', closeMenuDrawer);
-      if (menuDrawer){
-        menuDrawer.addEventListener('click', (event) => event.stopPropagation(), true);
-      }
       menuDrawer?.addEventListener('click', (event) => {
         if (window.innerWidth <= 900 && event.target.closest('a')) {
           closeMenuDrawer();
