@@ -710,6 +710,7 @@
         summary: (amount) => `Complete your payment of ${amount}.`,
         missingKey: 'Payments are temporarily unavailable.',
         noCharge: (amount) => `No payment needed (${amount}).`,
+        offline: (amount) => `Payments are currently handled offline. Click "Confirm booking" to finish.`,
         enterCard: 'Enter your card details to finish.',
         processing: 'Processing payment…',
         verifyFailed: 'Unable to verify payment.',
@@ -1357,6 +1358,8 @@
         }
 
         const needCard = Boolean(context.payment.client_secret);
+        const amountNumeric = Number(context.payment.amount || 0);
+        const zeroDue = !Number.isNaN(amountNumeric) && amountNumeric <= 0;
         if (needCard) {
           stripeCardComplete = false;
           cardElementWrapper?.classList.add('is-visible');
@@ -1368,32 +1371,25 @@
           }
           if (paymentConfirm) {
             paymentConfirm.disabled = !stripe;
+            paymentConfirm.textContent = 'Pay now';
           }
           setTimeout(() => { stripeCardElement?.focus(); }, 120);
         } else {
           stripeCardComplete = true;
-          if (paymentConfirm) paymentConfirm.disabled = false;
+          if (paymentConfirm) {
+            paymentConfirm.disabled = false;
+            paymentConfirm.textContent = 'Confirm booking';
+          }
           cardElementWrapper?.classList.remove('is-visible');
+          if (zeroDue) {
+            setPaymentMessage('success', PAYMENT_COPY.noCharge(amountText));
+          } else {
+            setPaymentMessage('status', PAYMENT_COPY.offline(amountText));
+          }
         }
 
         if (paymentModal) {
           openModalElement(paymentModal);
-        }
-
-        if (!context.payment.client_secret) {
-          // No payment required → show success and redirect
-          setPaymentMessage('success', PAYMENT_COPY.noCharge(amountText));
-          if (paymentConfirm) {
-            paymentConfirm.textContent = 'Close';
-            paymentConfirm.disabled = false;
-            paymentConfirm.addEventListener('click', () => window.location.href='/accounts/dashboard/', { once: true });
-          }
-          window.setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 900);
-        } else {
-          if (paymentConfirm) {
-            paymentConfirm.textContent = 'Pay now';
-          }
-          setPaymentMessage('status', PAYMENT_COPY.enterCard);
         }
 
         checkPaymentForm();

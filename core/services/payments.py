@@ -97,17 +97,23 @@ def create_or_update_payment_intent(
     currency = (currency or settings.STRIPE_CURRENCY or "cad").lower()
     pm_types = list(payment_method_types or settings.STRIPE_PAYMENT_METHOD_TYPES)
 
-    if total <= Decimal("0.00"):
+    payments_enabled = getattr(settings, "STRIPE_PAYMENTS_ENABLED", True)
+    if total <= Decimal("0.00") or not payments_enabled:
         method = ensure_payment_method("Manual")
+        amount_received = total if total > Decimal("0.00") else Decimal("0.00")
+        note = (
+            "Payments handled offline" if (total > Decimal("0.00") and not payments_enabled)
+            else "No payment required"
+        )
         with transaction.atomic():
             payment = Payment.objects.create(
                 appointment=appointment,
-                amount=Decimal("0.00"),
+                amount=total,
                 currency=currency,
                 method=method,
                 status="succeeded",
-                amount_received=Decimal("0.00"),
-                metadata={"note": "No payment required"},
+                amount_received=amount_received,
+                metadata={"note": note},
             )
             paid_status = ensure_payment_status("Paid")
             appointment.payment_status = paid_status
