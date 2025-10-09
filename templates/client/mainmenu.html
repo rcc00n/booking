@@ -960,6 +960,10 @@
         if (!paymentConfirm) return;
         const details = gatherBillingDetails();
         const requiresCard = Boolean(currentPaymentContext?.payment?.client_secret);
+        if (!requiresCard){
+          paymentConfirm.disabled = false;
+          return;
+        }
         const requiredFilled = [
           details.name,
           details.email && emailRegex.test(details.email),
