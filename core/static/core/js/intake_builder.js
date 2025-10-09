@@ -285,7 +285,19 @@
       this.metaMount = root.querySelector('[data-builder-meta]');
       this.jsonPanel = root.querySelector('[data-json-panel]');
       this.jsonTextarea = this.jsonPanel ? this.jsonPanel.querySelector('[data-json-textarea]') : null;
-      const initial = parseJSON(root.dataset.initial);
+      const initialPayload = (() => {
+        const fromDataset = root.dataset.initial;
+        if (fromDataset && fromDataset.trim().length){
+          const parsed = parseJSON(fromDataset);
+          if (parsed) return parsed;
+        }
+        if (this.input && this.input.value){
+          const parsed = parseJSON(this.input.value);
+          if (parsed) return parsed;
+        }
+        return null;
+      })();
+      const initial = initialPayload || {};
       this.state = ensureSchema(initial);
       this.bindToolbar();
       this.render();
