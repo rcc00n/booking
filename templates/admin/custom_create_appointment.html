@@ -527,6 +527,135 @@
             function money(n){ n = Number(n||0); return '$' + n.toFixed(2); }
             function buildOption(v, t){ const o = document.createElement('option'); o.value=v; o.textContent=t; return o; }
 
+            const PROMO_ENDPOINT_ROOT = '/accounts/api/services/';
+            const PROMO_STRINGS = {
+                none: '— No promocode —',
+                loading: 'Loading…',
+                error: 'Failed to load promocodes',
+            };
+            const PROMO_CACHE = new Map();
+            const PROMO_PENDING = new Map();
+
+            function promoEndpointFor(serviceId){
+                return `${PROMO_ENDPOINT_ROOT}${encodeURIComponent(String(serviceId))}/promocodes/`;
+            }
+            function normalizePromo(raw){
+                if (!raw) return null;
+                const id = raw.id != null ? String(raw.id) : (raw.code ? String(raw.code) : '');
+                if (!id) return null;
+                const code = raw.code || raw.text || id;
+                const discount = raw.discount_percent != null ? Number(raw.discount_percent) :
+                    (raw.discount != null ? Number(raw.discount) : null);
+                return { id, code: String(code), discount: Number.isNaN(discount) ? null : discount };
+            }
+            function formatPromoLabel(promo){
+                if (!promo) return '';
+                const base = promo.code || promo.id;
+                if (promo.discount != null && !Number.isNaN(promo.discount)){
+                    return `${base} — ${promo.discount}% off`;
+                }
+                return base;
+            }
+            function resetPromoSelect(select, { disabled=false, message=null, selected=null } = {}){
+                if (!select) return;
+                const target = selected != null ? String(selected) : '';
+                select.innerHTML = '';
+                select.appendChild(buildOption('', PROMO_STRINGS.none));
+                if (message){
+                    const opt = buildOption('', message);
+                    opt.disabled = true;
+                    opt.dataset.stateOption = '1';
+                    select.appendChild(opt);
+                }
+                if (target){
+                    const opt = buildOption(target, target);
+                    opt.dataset.synthetic = '1';
+                    select.appendChild(opt);
+                    select.value = target;
+                } else {
+                    select.value = '';
+                }
+                select.disabled = !!disabled;
+            }
+            function applyPromoOptions(select, promos, selected){
+                if (!select) return;
+                const target = selected != null ? String(selected) : '';
+                select.innerHTML = '';
+                select.appendChild(buildOption('', PROMO_STRINGS.none));
+                const seen = new Set();
+                (promos || []).forEach(entry => {
+                    const promo = normalizePromo(entry);
+                    if (!promo || seen.has(promo.id)) return;
+                    seen.add(promo.id);
+                    select.appendChild(buildOption(promo.id, formatPromoLabel(promo)));
+                });
+                if (target && !seen.has(target)){
+                    const opt = buildOption(target, target);
+                    opt.dataset.synthetic = '1';
+                    select.appendChild(opt);
+                }
+                if (target && Array.from(select.options).some(o => o.value === target)){
+                    select.value = target;
+                } else {
+                    select.value = '';
+                }
+                select.disabled = false;
+            }
+            function getAvailablePromos(serviceId){
+                const sid = String(serviceId || '');
+                if (!sid){
+                    return Promise.resolve([]);
+                }
+                if (PROMO_CACHE.has(sid)){
+                    const cached = PROMO_CACHE.get(sid);
+                    return Promise.resolve(Array.isArray(cached) ? cached.slice() : []);
+                }
+                if (PROMO_PENDING.has(sid)){
+                    return PROMO_PENDING.get(sid);
+                }
+                const url = promoEndpointFor(sid);
+                const request = fetch(url, {
+                    credentials: 'same-origin',
+                    headers: { 'Accept': 'application/json' },
+                }).then(resp => {
+                    if (!resp.ok){
+                        throw new Error(`Promocode request failed with status ${resp.status}`);
+                    }
+                    return resp.json();
+                }).then(data => {
+                    const list = Array.isArray(data) ? data.map(normalizePromo).filter(Boolean) : [];
+                    PROMO_CACHE.set(sid, list);
+                    return list.slice();
+                }).catch(err => {
+                    console.error('Failed to load promocodes', err);
+                    throw err;
+                }).finally(() => {
+                    PROMO_PENDING.delete(sid);
+                });
+                PROMO_PENDING.set(sid, request);
+                return request;
+            }
+            function updatePromoSelect({ select, serviceId, selected }){
+                if (!select) return;
+                const target = selected != null ? String(selected) : select.value;
+                const sid = String(serviceId || '');
+                if (!sid){
+                    resetPromoSelect(select, { disabled: true, selected: target || null });
+                    return;
+                }
+                resetPromoSelect(select, { disabled: true, message: PROMO_STRINGS.loading, selected: target || null });
+                getAvailablePromos(sid)
+                    .then(list => {
+                        applyPromoOptions(select, list, target || '');
+                        if (!list.length){
+                            select.disabled = true;
+                        }
+                    })
+                    .catch(() => {
+                        resetPromoSelect(select, { disabled: true, message: PROMO_STRINGS.error, selected: target || null });
+                    });
+            }
+
             function getAvailableMasters(){
                 if (!IS_MASTER || !CURRENT_MASTER_ID) return MASTERS;
                 return MASTERS.filter(m => String(m.id) === CURRENT_MASTER_ID);
@@ -1334,8 +1463,6 @@
                 return wrap;
             }
 
-            function getAvailablePromos(){ return []; /* заготовка, если решите подгружать промокоды */ }
-
             function hookRow(row, idx){
                 const name = (suffix)=> `items-${idx}-${suffix}`;
                 const masterSel = row.querySelector('.js-master');
@@ -1345,6 +1472,23 @@
                 const priceInp  = row.querySelector('.js-price');
                 const promoSel  = row.querySelector('.js-promo');
                 const hint      = row.querySelector('.js-service-hint');
+
+                resetPromoSelect(promoSel, { disabled: true });
+                const refreshPromos = (opts = {}) => {
+                    let selectedValue;
+                    if (Object.prototype.hasOwnProperty.call(opts, 'selected')){
+                        selectedValue = opts.selected;
+                    } else if (opts.preserve){
+                        selectedValue = promoSel.value;
+                    } else {
+                        selectedValue = '';
+                    }
+                    updatePromoSelect({
+                        select: promoSel,
+                        serviceId: serviceSel.value,
+                        selected: selectedValue,
+                    });
+                };
 
                 // имена для POST
                 masterSel.name = name('master');       masterSel.id = `id_items-${idx}-master`;
@@ -1380,6 +1524,7 @@
                     hint.textContent = ''; priceInp.value = ''; recalcGrandTotal();
                     renderIntakeForms();
                     if (availability) availability.refresh();
+                    refreshPromos({ selected: '' });
                 });
 
                 serviceSel.addEventListener('change', () => {
@@ -1391,6 +1536,7 @@
                     recalcGrandTotal();
                     renderIntakeForms();
                     if (availability) availability.refresh();
+                    refreshPromos({ selected: '' });
                 });
 
                 dateInp.addEventListener('change', () => {
@@ -1399,8 +1545,10 @@
 
                 priceInp.addEventListener('input', recalcGrandTotal);
 
+                refreshPromos({ preserve: true });
+
                 // вернём наружу, чтобы синхронизировать при префилле
-                return { serviceCombo, availability };
+                return { serviceCombo, availability, refreshPromos };
             }
 
             function addRow(prefill){
@@ -1413,7 +1561,6 @@
                 const dateInp   = row.querySelector('.js-date');
                 const timeInp   = row.querySelector('.js-time');
                 const priceInp  = row.querySelector('.js-price');
-                const promoSel  = row.querySelector('.js-promo');
 
                 const comboRef = ref && ref.serviceCombo ? ref.serviceCombo : null;
                 let resolvedMaster = masterSel.value;
@@ -1443,7 +1590,15 @@
                     timeInp.value = prefill.start_time_1.length===5 ? prefill.start_time_1 : prefill.start_time_1.slice(0,5);
                 }
                 if (prefill && prefill.unit_price) priceInp.value = prefill.unit_price;
-                if (prefill && prefill.promocode)  promoSel.value = prefill.promocode;
+                if (ref && typeof ref.refreshPromos === 'function'){
+                    const promoOpts = {};
+                    if (prefill && prefill.promocode){
+                        promoOpts.selected = prefill.promocode;
+                    } else {
+                        promoOpts.preserve = true;
+                    }
+                    ref.refreshPromos(promoOpts);
+                }
 
                 container.appendChild(row);
                 totalForms.value = idx + 1;
