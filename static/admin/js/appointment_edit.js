@@ -22,6 +22,10 @@
     const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
     const itemsContainer = $("#items-container");
+    const salesContainer = document.getElementById("product-sales-container");
+    const SALES_PREFIX = "product_sales";
+    const SALE_DEFAULTS = parseJSON("product-sale-defaults", {});
+    const appointmentClientSelect = document.getElementById("id_client");
     if (!itemsContainer) return;
 
     function buildOption(value, text) {
@@ -49,7 +53,12 @@
             const opt = document.createElement("option");
             opt.value = val;
             opt.textContent = String(labelIfAdd ?? val);
+            opt.selected = true;
             select.appendChild(opt);
+        } else {
+            Array.from(select.options).forEach(o => {
+                o.selected = (o.value === val);
+            });
         }
         select.value = val;
     }
@@ -341,6 +350,65 @@
         }
     }
 
+    function applySaleDefaults(row) {
+        if (!row || row.dataset.defaultsApplied === "1") return;
+        const objIdInput = row.querySelector('input[name$="-id"]');
+        if (objIdInput && objIdInput.value) {
+            row.dataset.defaultsApplied = "1";
+            return;
+        }
+        const defaults = SALE_DEFAULTS || {};
+
+        const quantityInput = row.querySelector('input[name$="-quantity"]');
+        if (quantityInput && !quantityInput.value && defaults.quantity) {
+            quantityInput.value = defaults.quantity;
+        }
+
+        const soldBySelect = row.querySelector('select[name$="-sold_by"]');
+        const soldByDefault = defaults.sold_by;
+        if (soldBySelect && soldByDefault && !soldBySelect.value) {
+            const soldId = String(soldByDefault.id || soldByDefault);
+            const soldLabel = soldByDefault.label || soldByDefault.name || soldId;
+            setSelectValueEnsuringOption(soldBySelect, soldId, soldLabel);
+            const changeEvent = new Event("change", { bubbles: true });
+            soldBySelect.dispatchEvent(changeEvent);
+            if (window.django && window.django.jQuery) {
+                window.django.jQuery(soldBySelect).trigger("change");
+            } else if (window.jQuery) {
+                window.jQuery(soldBySelect).trigger("change");
+            }
+        }
+
+        const clientSelect = row.querySelector('select[name$="-client"]');
+        const clientDefault = defaults.client;
+        if (clientSelect && clientDefault && !clientSelect.value) {
+            const clientId = String(clientDefault.id || clientDefault);
+            const clientLabel = clientDefault.label || clientDefault.name || clientId;
+            setSelectValueEnsuringOption(clientSelect, clientId, clientLabel);
+            const changeEvent = new Event("change", { bubbles: true });
+            clientSelect.dispatchEvent(changeEvent);
+            if (window.django && window.django.jQuery) {
+                window.django.jQuery(clientSelect).trigger("change");
+            } else if (window.jQuery) {
+                window.jQuery(clientSelect).trigger("change");
+            }
+        }
+        row.dataset.defaultsApplied = "1";
+    }
+
+    function refreshSaleClientDefaultFromAppointment() {
+        if (!appointmentClientSelect || !SALE_DEFAULTS) return;
+        const val = appointmentClientSelect.value;
+        if (val) {
+            const options = Array.from(appointmentClientSelect.options || []);
+            const match = options.find(opt => opt.value === val);
+            const label = match ? match.textContent.trim() : val;
+            SALE_DEFAULTS.client = { id: val, label };
+        } else {
+            delete SALE_DEFAULTS.client;
+        }
+    }
+
     function addItem() {
         const tpl = $("#empty-form-tpl");
         if (!tpl) return;
@@ -361,6 +429,64 @@
         // Инициализация строки (селекты, таймпикер и т.д.)
         initRow(node);
     }
+
+    // Product sales helpers
+    function salesTotalFormsEl() {
+        return document.querySelector(`input[name="${SALES_PREFIX}-TOTAL_FORMS"]`);
+    }
+    function bumpSalesForms() {
+        const totalEl = salesTotalFormsEl();
+        if (totalEl) {
+            totalEl.value = String(parseInt(totalEl.value || "0", 10) + 1);
+        }
+    }
+    function nextSaleIndex() {
+        const totalEl = salesTotalFormsEl();
+        return totalEl ? parseInt(totalEl.value || "0", 10) : 0;
+    }
+    function initSaleRow(row) {
+        if (!row) return;
+        if (window.ProductSaleForm && typeof window.ProductSaleForm.enhanceScope === "function") {
+            window.ProductSaleForm.enhanceScope(row);
+        }
+        const deleteCheckbox = row.querySelector(`input[type="checkbox"][name$='-DELETE']`);
+        const removeBtn = $(".js-sale-remove", row);
+        if (deleteCheckbox && removeBtn) {
+            removeBtn.addEventListener("click", () => {
+                deleteCheckbox.checked = true;
+                row.classList.add("ab-hidden");
+            });
+        }
+    }
+    function initExistingSales() {
+        if (!salesContainer) return;
+        $$(".ps-item", salesContainer).forEach(row => {
+            applySaleDefaults(row);
+            initSaleRow(row);
+        });
+    }
+    function addProductSale() {
+        if (!salesContainer) return;
+        const tpl = document.getElementById("product-sale-empty-form");
+        if (!tpl) return;
+        const placeholder = salesContainer.querySelector(".ps-placeholder");
+        if (placeholder) placeholder.remove();
+        const idx = nextSaleIndex();
+        const fragment = tpl.content.cloneNode(true);
+        const node = fragment.firstElementChild;
+        replacePrefixAttributes(node, idx);
+        applySaleDefaults(node);
+        salesContainer.appendChild(node);
+        bumpSalesForms();
+        if (window.django && window.django.jQuery) {
+            window.django.jQuery(document).trigger("formset:added", [node, SALES_PREFIX]);
+        } else if (window.jQuery) {
+            window.jQuery(document).trigger("formset:added", [node, SALES_PREFIX]);
+        }
+        document.dispatchEvent(new CustomEvent("formset:added", { detail: { form: node, name: SALES_PREFIX } }));
+        initSaleRow(node);
+    }
+
     // вкладки
     function initTabs() {
         const tabs = $$(".tab");
@@ -374,32 +500,70 @@
             if (panel) panel.classList.add("active");
         }));
     }
-
+    function stripDateTimeLabels(root=document){
+        root.querySelectorAll('p.datetime').forEach(p => {
+            // убрать <br>
+            [...p.querySelectorAll('br')].forEach(br => br.remove());
+            // убрать текстовые узлы "Date:" / "Time:"
+            [...p.childNodes].forEach(n => {
+                if (n.nodeType === Node.TEXT_NODE) {
+                    const t = n.textContent.replace(/\bDate:\s*/i, '').replace(/\bTime:\s*/i, '');
+                    if (t.trim().length === 0) {
+                        n.remove();
+                    } else {
+                        n.textContent = t;
+                    }
+                }
+            });
+        });
+    }
     document.addEventListener("DOMContentLoaded", () => {
+        refreshSaleClientDefaultFromAppointment();
+        if (appointmentClientSelect) {
+            appointmentClientSelect.addEventListener("change", refreshSaleClientDefaultFromAppointment);
+        }
         initExistingRows();
+        initExistingSales();
+        if (salesContainer && !salesContainer.querySelector(".ps-item")) {
+            addProductSale();
+        }
         initTabs();
-
+        stripDateTimeLabels(document);
         const btnAdd = $("#btn-add-item");
         if (btnAdd) btnAdd.addEventListener("click", addItem);
+        const btnAddSale = document.getElementById("btn-add-product-sale");
+        if (btnAddSale) btnAddSale.addEventListener("click", addProductSale);
         // при с   абмите — убедимся, что все disabled реальные поля имеют hidden-клоны
-        const form = itemsContainer.closest("form");
+        const containerForm = itemsContainer ? itemsContainer.closest("form") : (salesContainer ? salesContainer.closest("form") : null);
+        const form = containerForm;
         if (form) {
             form.addEventListener("submit", () => {
-                $$(".ab-item", itemsContainer).forEach(row => {
+                if (itemsContainer) {
+                    $$(".ab-item", itemsContainer).forEach(row => {
 
-                    syncRowToNative(row);
-                    if (row.classList.contains("readonly")) {
-                        const nativeStartDate = $("[name$='-start_time_0']", row);
-                        const nativeStartTime = $("[name$='-start_time_1']", row);
-                        const nativePrice = $("[name$='-unit_price']", row);
-                        if (nativeStartDate) ensureHiddenClone(nativeStartDate);
-                        if (nativeStartTime) ensureHiddenClone(nativeStartTime);
-                        if (nativePrice)     ensureHiddenClone(nativePrice);
-                    }
+                        syncRowToNative(row);
+                        if (row.classList.contains("readonly")) {
+                            const nativeStartDate = $("[name$='-start_time_0']", row);
+                            const nativeStartTime = $("[name$='-start_time_1']", row);
+                            const nativePrice = $("[name$='-unit_price']", row);
+                            if (nativeStartDate) ensureHiddenClone(nativeStartDate);
+                            if (nativeStartTime) ensureHiddenClone(nativeStartTime);
+                            if (nativePrice)     ensureHiddenClone(nativePrice);
+                        }
 
-                    // master всегда не редактируем: UI disabled, но нативное поле активно — ничего делать не нужно
-                });
+                        // master всегда не редактируем: UI disabled, но нативное поле активно — ничего делать не нужно
+                    });
+                }
             });
+        }
+        const container = document.getElementById('items-container');
+        if (container) {
+            const mo = new MutationObserver(muts => {
+                muts.forEach(m => m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) stripDateTimeLabels(node);
+                }));
+            });
+            mo.observe(container, { childList: true, subtree: true });
         }
     });
 

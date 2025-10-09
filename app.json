@@ -1,0 +1,23 @@
+{
+  "scripts": {
+    "dokku": {
+      "predeploy": "python manage.py migrate --noinput",
+      "postdeploy": "python manage.py collectstatic --noinput"
+    }
+  },
+  "checks": {
+    "web": [
+      {
+        "type": "http",
+        "port": 5000,
+        "path": "/",
+        "attempts": 3,
+        "timeout": 5,
+        "grace": 10,
+        "headers": {
+          "Host": "malvabeauty.duckdns.org"
+        }
+      }
+    ]
+  }
+}

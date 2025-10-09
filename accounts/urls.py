@@ -6,6 +6,7 @@ from .views import (
     ClientAppointmentsListView,
     ClientRegisterView,
     MainMenuView,  # можно оставить, если где-то используется
+    ProductSalesView,
 )
 from django.contrib.auth.views import LogoutView
 from core.views import (
@@ -28,6 +29,7 @@ urlpatterns = [
     # Личные кабинеты (как у тебя уже реализовано)
     path("dashboard/", ClientDashboardView.as_view(), name="dashboard"),
     path("master/",    MasterDashboardView.as_view(), name="master_dashboard"),
+    path("master/sales/", ProductSalesView.as_view(), name="product-sales"),
     path("client/appointments/", ClientAppointmentsListView.as_view(), name="client_appointments"),
 
     # API бронирования (требует логина)

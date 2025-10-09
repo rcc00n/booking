@@ -13,12 +13,6 @@
     <link rel="stylesheet" href="{% static 'admin/css/appointments.css' %}">
 {% endblock %}
 {% block content %}
-    <style>
-        .content {
-            margin-left: 3.3vh !important;
-        }
-    </style>
-
     <div style="text-align: center; height: 100%; width: 100%; background: rgba(239,239,239,0.52);">
         <div class="calendar-nav">
             <div class="calendar-left">
@@ -46,8 +40,8 @@
 
             <div class="calendar-right">
 
-                {% if export_url %}
-                    <button onclick='window.location.href="{{ export_url }}"' class="add-appointment-btn" style="text-decoration:none; width:13vh; margin-right: 1vh;">
+                {% if export_url_xlsx %}
+                    <button onclick='window.location.href="{{ export_url_xlsx }}"' class="add-appointment-btn" style="text-decoration:none; width:13vh; margin-right: 1vh;">
                         Export CSV
                     </button>
                 {% endif %}

@@ -1,0 +1,74 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <style>
+        .ab-wrap{max-width:780px;margin:0 auto;padding:24px 0;display:flex;flex-direction:column;gap:20px}
+        .ab-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,.06);padding:22px;display:flex;flex-direction:column;gap:18px}
+        .ab-header h1{margin:0;font-size:26px;font-weight:700}
+        .ab-muted{color:#6b7280;font-size:13px}
+        .ab-field{display:flex;flex-direction:column;gap:6px}
+        .ab-field label{font-size:13px;font-weight:600;color:#374151}
+        .ab-field input,
+        .ab-field select,
+        .ab-field textarea{border:1px solid #d1d5db;border-radius:10px;padding:10px 12px;width:100%}
+        .ab-field textarea{min-height:90px;resize:vertical}
+        .ab-help{font-size:12px;color:#6b7280}
+        .ab-error{color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 10px;font-size:13px}
+        .ab-actions{display:flex;justify-content:flex-end;gap:12px}
+        .ab-btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:10px 16px;border:1px solid #e5e7eb;background:#111827;color:#fff;font-weight:600;cursor:pointer;text-decoration:none}
+        .ab-btn.secondary{background:#fff;color:#111827;border-color:#d1d5db}
+        .ab-meta{display:flex;flex-direction:column;gap:4px}
+        .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:12px;background:#f3f4f6;color:#374151}
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="ab-wrap">
+        <div class="ab-header">
+            <h1>{{ intake_form.name }}</h1>
+            <div class="ab-meta">
+                <div class="ab-muted">Appointment:
+                    <a href="{{ back_url }}">{{ appointment }}</a>
+                </div>
+                {% if related_services %}
+                    <div class="ab-muted">Services: {{ related_services|join:", " }}</div>
+                {% endif %}
+                {% if submission %}
+                    <div class="ab-muted">
+                        Last submitted:
+                        {{ submission.submitted_at|date:"Y-m-d H:i" }}
+                        {% if submission.submitted_by %}
+                            by {{ submission.submitted_by.get_full_name|default:submission.submitted_by.username }}
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <form method="post" novalidate>
+            {% csrf_token %}
+            <div class="ab-card">
+                {% if form.non_field_errors %}
+                    <div class="ab-error">{{ form.non_field_errors }}</div>
+                {% endif %}
+                {% for field in form %}
+                    <div class="ab-field">
+                        {{ field.label_tag }}
+                        {{ field }}
+                        {% if field.help_text %}<div class="ab-help">{{ field.help_text }}</div>{% endif %}
+                        {% if field.errors %}
+                            <div class="ab-error">{{ field.errors }}</div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+
+            <div class="ab-actions">
+                <a href="{{ back_url }}" class="ab-btn secondary">Cancel</a>
+                <button type="submit" class="ab-btn">Save form</button>
+            </div>
+        </form>
+    </div>
+{% endblock %}

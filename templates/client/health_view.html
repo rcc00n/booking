@@ -4,7 +4,7 @@
     <style>
         :root{--bg:#f4f5f7;--card:#ffffff;--ink:#1e293b;--muted:#64748b;--ring:#cbd5e1;--brand:#1F5C3A;--brand-200:#e6f1eb}
         .page{max-width:960px;margin:24px auto;padding:0 16px}
-        .hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+        .hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:12px;flex-wrap:wrap}
         .title{font-weight:800;color:var(--ink)}
         .meta{color:var(--muted);font-size:.92rem}
         .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ring);background:#fff;border-radius:10px;padding:10px 14px;font-weight:700;text-decoration:none}
@@ -18,6 +18,11 @@
         .chips{display:flex;gap:8px;flex-wrap:wrap}
         .chip{background:var(--brand-200);color:#0f3d27;padding:6px 10px;border-radius:999px;font-weight:700;font-size:.85rem}
         .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+        @media (max-width:600px){
+            .hdr{flex-direction:column;align-items:flex-start;gap:10px;}
+            .actions{width:100%;justify-content:flex-start;flex-wrap:wrap;}
+            .btn{width:100%;justify-content:center;}
+        }
     </style>
 
     <div class="page">

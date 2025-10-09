@@ -76,6 +76,8 @@
         <div class="title-row">
             <h1 class="muted" style="margin:0">Statistics</h1>
             <span class="title-date">({{ start }} — {{ end }})</span>
+
+
         </div>
 
         <!-- Фильтр по датам (горизонтальная линия) -->
@@ -94,6 +96,11 @@
             <button type="button" class="btn" data-preset="this">This month</button>
             <button type="button" class="btn" data-preset="prev">Prev month</button>
             <button type="button" class="btn" id="todayBtn">Today</button>
+            {% if export_xlsx_url %}
+                <button type="button" onclick='window.location.href="{{ export_xlsx_url }}"' class="btn" >
+                    Export CSV
+                </button>
+            {% endif %}
         </form>
 
         <div class="stat-grid">

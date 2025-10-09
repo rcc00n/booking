@@ -1,20 +1,22 @@
 # accounts/views.py
 from __future__ import annotations
 
+from decimal import Decimal
+
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import LoginView
-from django.core.exceptions import PermissionDenied
-from django.http import JsonResponse, HttpResponse
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.http import JsonResponse, HttpResponseRedirect
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.views.generic import TemplateView, ListView
 from django.views.generic.edit import CreateView
 
 from django.utils import timezone
-from django.db.models import OuterRef, Subquery, Count, Prefetch
+from django.db.models import OuterRef, Subquery, Count, Prefetch, Sum, F
 from django.db.models.functions import TruncMonth
 
 from core.models import (
@@ -23,11 +25,13 @@ from core.models import (
     AppointmentStatusHistory,
     UserProfile,
     AppointmentItem,
+    Product,
+    ProductSale,
 )
 
 from .forms import (
     ClientRegistrationForm,
-    ClientProfileForm, HealthConditionsForm,
+    ClientProfileForm, HealthConditionsForm, ProductSaleForm,
 )
 
 
@@ -184,6 +188,98 @@ class MasterDashboardView(RoleRequiredMixin, TemplateView):
     template_name = "master/dashboard.html"
 
 
+class ProductSalesView(RoleRequiredMixin, TemplateView):
+    """
+    Dashboard for employees to register retail product sales and review inventory.
+    """
+    required_role = "Master"
+    template_name = "master/product_sales.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_staff or request.user.is_superuser:
+            return TemplateView.dispatch(self, request, *args, **kwargs)
+        return super().dispatch(request, *args, **kwargs)
+
+    def _employee_profile(self) -> UserProfile:
+        profile = getattr(self.request.user, "userprofile", None)
+        if profile is None:
+            raise PermissionDenied("User profile is required to record product sales.")
+        return profile
+
+    def _build_form(self, data=None) -> ProductSaleForm:
+        profile = getattr(self.request.user, "userprofile", None)
+        return ProductSaleForm(data=data, employee_profile=profile)
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+
+        form = kwargs.get("form") or self._build_form()
+        ctx["form"] = form
+
+        inventory_qs = Product.objects.select_related("category").order_by("name")
+        ctx["inventory"] = inventory_qs
+        ctx["low_stock_products"] = inventory_qs.filter(
+            low_stock_threshold__gt=0,
+            quantity_in_stock__lte=F("low_stock_threshold"),
+        )
+        ctx["product_price_map"] = {
+            str(product.pk): f"{product.price:.2f}"
+            for product in inventory_qs
+        }
+
+        sales_qs = ProductSale.objects.select_related(
+            "product__category",
+            "sold_by__user",
+            "client__user",
+        ).order_by("-sold_at", "-id")
+        ctx["recent_sales"] = sales_qs[:25]
+
+        today = timezone.localdate(timezone.now())
+        month_start = today.replace(day=1)
+
+        totals_qs = ProductSale.objects.all()
+        ctx["today_total"] = totals_qs.filter(sold_at__date=today).aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")
+        ctx["month_total"] = totals_qs.filter(sold_at__date__gte=month_start).aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")
+
+        inventory_value = Decimal("0.00")
+        for product in inventory_qs:
+            inventory_value += (product.price or Decimal("0.00")) * Decimal(product.quantity_in_stock or 0)
+        ctx["inventory_value"] = inventory_value
+
+        return ctx
+
+    def post(self, request, *args, **kwargs):
+        try:
+            profile = self._employee_profile()
+        except PermissionDenied as exc:
+            messages.error(request, str(exc))
+            return redirect("product-sales")
+
+        form = self._build_form(data=request.POST)
+        if form.is_valid():
+            try:
+                sale = form.save(employee_profile=profile)
+            except ValidationError as exc:
+                if hasattr(exc, "message_dict"):
+                    for field, messages_list in exc.message_dict.items():
+                        for msg in messages_list:
+                            if field in form.fields:
+                                form.add_error(field, msg)
+                            else:
+                                form.add_error(None, msg)
+                else:
+                    for msg in getattr(exc, "messages", [str(exc)]):
+                        form.add_error(None, msg)
+            else:
+                messages.success(
+                    request,
+                    f"Recorded sale: {sale.product.name} × {sale.quantity} for ${sale.total_amount}.",
+                )
+                return redirect("product-sales")
+
+        return self.render_to_response(self.get_context_data(form=form), status=400)
+
+
 # =========================
 # Список записей клиента
 # =========================
@@ -216,14 +312,25 @@ class ClientRegisterView(CreateView):
     success_url = None  # вычисляем в get_success_url()
 
     def form_valid(self, form):
-        form.save()
         user = form.save()
+
+        profile = getattr(user, "userprofile", None)
+        if profile and profile.source != "online":
+            profile.source = "online"
+            profile.save(update_fields=["source"])
+
         if self.request.headers.get("x-requested-with") == "XMLHttpRequest":
-            return HttpResponse("OK")
-        if hasattr(user, "userprofile"):
-            user.userprofile.source = "online"
-            user.userprofile.save(update_fields=["source"])
-        return super().form_valid(form)
+            return JsonResponse(
+                {
+                    "status": "ok",
+                    "username": user.username,
+                    "redirect": self.get_success_url(),
+                },
+                status=201,
+            )
+
+        self.object = user
+        return HttpResponseRedirect(self.get_success_url())
 
     def form_invalid(self, form):
         if self.request.headers.get("x-requested-with") == "XMLHttpRequest":

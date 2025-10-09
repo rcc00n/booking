@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+{% load static tz %}
+{% block title %}Retail Product Sales{% endblock %}
+{% block content %}
+<style>
+  :root {
+    color-scheme: light;
+  }
+  body {
+    background: #f3f4f6;
+    font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #111827;
+  }
+  .page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px 48px;
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .subtitle {
+    color: #6b7280;
+    margin-bottom: 24px;
+  }
+  .grid {
+    display: grid;
+    gap: 20px;
+  }
+  .summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    margin-bottom: 28px;
+  }
+  .card {
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+    padding: 24px;
+  }
+  .card h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 18px;
+    color: #111827;
+  }
+  .stat-value {
+    font-size: 30px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+  .stat-label {
+    font-size: 14px;
+    color: #6b7280;
+    margin-top: 4px;
+  }
+  .main-grid {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    margin-bottom: 28px;
+  }
+  @media (max-width: 960px) {
+    .main-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 18px 16px;
+  }
+  .form-field label {
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+    display: block;
+    margin-bottom: 6px;
+  }
+  .form-field input,
+  .form-field select,
+  .form-field textarea {
+    width: 100%;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 15px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    background: #f9fafb;
+  }
+  .form-field textarea {
+    resize: vertical;
+    min-height: 112px;
+  }
+  .form-field input:focus,
+  .form-field select:focus,
+  .form-field textarea:focus {
+    outline: none;
+    background: #ffffff;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  }
+  .form-field.has-error input,
+  .form-field.has-error select,
+  .form-field.has-error textarea {
+    border-color: #dc2626;
+  }
+  .form-field--wide {
+    grid-column: 1 / -1;
+  }
+  .help-text {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 4px;
+  }
+  .error-text {
+    font-size: 12px;
+    color: #dc2626;
+    margin-top: 6px;
+  }
+  .submit-row {
+    margin-top: 24px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  .submit-row button {
+    background: linear-gradient(135deg, #2563eb, #7c3aed);
+    color: #ffffff;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 24px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 10px 22px rgba(124, 58, 237, 0.25);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .submit-row button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 15px 26px rgba(124, 58, 237, 0.35);
+  }
+  .messages {
+    margin-bottom: 24px;
+    list-style: none;
+    padding: 0;
+  }
+  .messages li {
+    padding: 12px 16px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    font-weight: 500;
+  }
+  .messages li.success {
+    background: #dcfce7;
+    color: #166534;
+  }
+  .messages li.error {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-align: left;
+    padding: 12px 8px;
+    color: #6b7280;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  td {
+    padding: 12px 8px;
+    border-bottom: 1px solid #f3f4f6;
+    vertical-align: top;
+    font-size: 14px;
+  }
+  tr:last-child td {
+    border-bottom: none;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #eef2ff;
+    color: #4338ca;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .empty-state {
+    color: #6b7280;
+    font-size: 14px;
+  }
+</style>
+
+<div class="page">
+  <h1>Retail product sales</h1>
+  <p class="subtitle">Record product checkouts, monitor inventory and keep the team aligned.</p>
+
+  {% if messages %}
+    <ul class="messages">
+      {% for message in messages %}
+        <li class="{{ message.tags }}">{{ message }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <div class="grid summary-grid">
+    <div class="card">
+      <div class="stat-value">${{ today_total|default:0|floatformat:2 }}</div>
+      <div class="stat-label">Revenue today</div>
+    </div>
+    <div class="card">
+      <div class="stat-value">${{ month_total|default:0|floatformat:2 }}</div>
+      <div class="stat-label">Revenue this month</div>
+    </div>
+    <div class="card">
+      <div class="stat-value">${{ inventory_value|default:0|floatformat:2 }}</div>
+      <div class="stat-label">Inventory on hand (at retail price)</div>
+    </div>
+    <div class="card">
+      <div class="stat-value">{{ low_stock_products|length }}</div>
+      <div class="stat-label">Low stock alerts</div>
+    </div>
+  </div>
+
+  <div class="grid main-grid">
+    <div class="card">
+      <h2>Register a sale</h2>
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="error-text" style="margin-bottom: 12px;">
+            {{ form.non_field_errors|join:", " }}
+          </div>
+        {% endif %}
+        <div class="form-grid">
+          {% for field in form %}
+            <div class="form-field{% if field.errors %} has-error{% endif %}{% if field.field.widget.input_type == 'textarea' %} form-field--wide{% endif %}">
+              <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% if field.help_text %}
+                <p class="help-text">{{ field.help_text }}</p>
+              {% endif %}
+              {% for error in field.errors %}
+                <p class="error-text">{{ error }}</p>
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+        <div class="submit-row">
+          <button type="submit">Save sale</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Low stock</h2>
+      {% if low_stock_products %}
+        <ul style="list-style: none; padding: 0; margin: 0;">
+          {% for product in low_stock_products %}
+            <li style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f3f4f6;">
+              <div>
+                <div style="font-weight: 600;">{{ product.name }}</div>
+                <div style="font-size: 13px; color: #6b7280;">
+                  {% if product.category %}{{ product.category.name }}{% else %}—{% endif %} · In stock: {{ product.quantity_in_stock }}
+                </div>
+              </div>
+              <span class="badge">Restock soon</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="empty-state">Everything looks good — no products are below threshold.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom: 28px;">
+    <h2>Inventory overview</h2>
+    {% if inventory %}
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Category</th>
+              <th>SKU</th>
+              <th>Retail price</th>
+              <th>In stock</th>
+              <th>Low stock threshold</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for product in inventory %}
+              <tr>
+                <td>{{ product.name }}</td>
+                <td>
+                  {% if product.category %}
+                    {{ product.category.name }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ product.sku|default:"—" }}</td>
+                <td>${{ product.price|floatformat:2 }}</td>
+                <td>{{ product.quantity_in_stock }}</td>
+                <td>
+                  {% if product.low_stock_threshold %}
+                    {{ product.low_stock_threshold }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty-state">No products have been created yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Recent sales</h2>
+    {% if recent_sales %}
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Product</th>
+              <th>Quantity</th>
+              <th>Unit price</th>
+              <th>Total</th>
+              <th>Client</th>
+              <th>Sold by</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for sale in recent_sales %}
+              <tr>
+                <td>{{ sale.sold_at|localtime|date:"Y-m-d H:i" }}</td>
+                <td>{{ sale.product.name }}</td>
+                <td>{{ sale.quantity }}</td>
+                <td>${{ sale.unit_price|floatformat:2 }}</td>
+                <td>${{ sale.total_amount|floatformat:2 }}</td>
+                <td>
+                  {% if sale.client %}
+                    {{ sale.client.user.get_full_name|default:sale.client.user.username }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ sale.sold_by.user.get_full_name|default:sale.sold_by.user.username }}</td>
+                <td>{{ sale.notes|default:"—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty-state">No sales have been recorded yet.</p>
+    {% endif %}
+  </div>
+</div>
+
+{{ product_price_map|json_script:"product-price-map" }}
+<script>
+  const priceData = JSON.parse(document.getElementById("product-price-map").textContent || "{}");
+  const productSelect = document.getElementById("id_product");
+  const unitPriceInput = document.getElementById("id_unit_price");
+  if (productSelect && unitPriceInput && !unitPriceInput.value) {
+    const updateUnitPrice = () => {
+      const value = productSelect.value;
+      if (value && priceData[value]) {
+        unitPriceInput.value = priceData[value];
+      }
+    };
+    productSelect.addEventListener("change", updateUnitPrice);
+    updateUnitPrice();
+  }
+</script>
+{% endblock %}

@@ -8,8 +8,9 @@ import uuid
 from django.core.exceptions import ValidationError
 from datetime import timedelta, time
 import os
+from importlib import import_module
 
-from django.db.models import OuterRef, Subquery, Sum, Prefetch
+from django.db.models import OuterRef, Subquery, Sum, Prefetch, F, Q
 from django.utils import timezone
 from django.utils.timezone import localtime
 from core.validators import clean_phone, clean_ab_postal_code
@@ -62,6 +63,7 @@ class UserProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     phone = models.CharField(max_length=32, unique=True, null=True, blank=True, default=None)
     birth_date = models.DateField(null=True, blank=True)
+    address = models.TextField(blank=True)
 
     # === NEW ===
     email_marketing_consent = models.BooleanField(default=False)   # согласие на рассылки
@@ -195,6 +197,72 @@ class PrepaymentOption(models.Model):
     def __str__(self):
         return f"{self.percent}%"
 
+
+class ClientIntakeForm(models.Model):
+    """
+    Reusable questionnaire/consent form that can be assigned to services.
+    The actual Django form class used to render/validate the payload is referenced via `form_class`.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=150)
+    slug = models.SlugField(max_length=150, unique=True)
+    description = models.TextField(blank=True)
+    form_class = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Dotted path to a Django form class that handles rendering/validation.",
+    )
+    is_active = models.BooleanField(default=True)
+    schema = models.JSONField(default=dict, blank=True)
+    schema_version = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def get_form_class(self):
+        """
+        Resolve the dotted path from `form_class` into an actual form class.
+        Returns None if not configured.
+        """
+        if not self.form_class:
+            return None
+        module_path, class_name = self.form_class.rsplit(".", 1)
+        module = import_module(module_path)
+        return getattr(module, class_name)
+
+    def normalized_schema(self) -> dict:
+        """
+        Ensure schema always has expected structure.
+        """
+        schema = self.schema or {}
+        if not isinstance(schema, dict):
+            schema = {}
+        schema.setdefault("sections", [])
+        schema.setdefault("meta", {})
+        return schema
+
+    def build_bound_form(self, *, data=None, files=None, initial=None, client=None, prefix=None):
+        """
+        Build a Django form instance based on the stored schema.
+        """
+        from core.utils.intake_forms import build_intake_form
+
+        return build_intake_form(
+            intake_form=self,
+            data=data,
+            files=files,
+            initial=initial,
+            client=client,
+            prefix=prefix,
+        )
+
+
 class Service(models.Model):
     """
     Represents a service offered in the system (e.g., haircut, massage).
@@ -207,6 +275,12 @@ class Service(models.Model):
     base_price = models.DecimalField(max_digits=10, decimal_places=2)
     duration_min = models.IntegerField()
     extra_time_min = models.IntegerField(null=True, blank=True)
+    pre_appointment_forms = models.ManyToManyField(
+        "core.ClientIntakeForm",
+        blank=True,
+        related_name="services",
+        help_text="Forms the client must complete before attending this service.",
+    )
 
     def __str__(self):
         return self.name
@@ -226,6 +300,62 @@ class Service(models.Model):
             discount_multiplier = Decimal(1) - (Decimal(discount.discount_percent) / Decimal(100))
             return (self.base_price * discount_multiplier).quantize(Decimal('0.01'))
         return self.base_price
+
+    def active_forms(self):
+        """
+        Return only active pre-appointment forms assigned to this service.
+        """
+        prefetched = getattr(self, "_prefetched_objects_cache", {})
+        if prefetched and "pre_appointment_forms" in prefetched:
+            return [form for form in prefetched["pre_appointment_forms"] if form.is_active]
+        return self.pre_appointment_forms.filter(is_active=True)
+
+
+class ClientIntakeFormSubmission(models.Model):
+    """
+    Stores answers for a specific intake form, optionally linked to an appointment.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    form = models.ForeignKey(
+        ClientIntakeForm,
+        on_delete=models.CASCADE,
+        related_name="submissions",
+    )
+    client = models.ForeignKey(
+        UserProfile,
+        on_delete=models.CASCADE,
+        related_name="intake_submissions",
+    )
+    appointment = models.ForeignKey(
+        "core.Appointment",
+        on_delete=models.CASCADE,
+        related_name="intake_submissions",
+        null=True,
+        blank=True,
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="intake_submissions",
+        null=True,
+        blank=True,
+    )
+    data = models.JSONField(default=dict, blank=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
+    form_schema_snapshot = models.JSONField(default=dict, blank=True)
+    schema_version = models.PositiveIntegerField(default=1)
+    is_complete = models.BooleanField(default=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-submitted_at"]
+
+    def __str__(self):
+        base = f"{self.form.name} → {self.client}"
+        if self.appointment_id:
+            return f"{base} ({self.appointment_id})"
+        return base
 
 class MasterRoom(models.Model):
     """
@@ -995,7 +1125,204 @@ class AppointmentStatusHistory(models.Model):
         help_text="Reason for cancelling if status is 'Cancelled'"
     )
 
-# --- 4. PAYMENTS ---
+# --- 4. RETAIL PRODUCTS ---
+
+
+class ProductCategory(models.Model):
+    """
+    Top-level grouping for retail products (e.g. Hair Care, Skin Care).
+    """
+    name = models.CharField(max_length=150, unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Product category"
+        verbose_name_plural = "Product categories"
+
+    def __str__(self):
+        return self.name
+
+
+class Product(models.Model):
+    """
+    Retail product that can be sold to clients.
+    """
+    category = models.ForeignKey(
+        ProductCategory,
+        on_delete=models.SET_NULL,
+        related_name="products",
+        blank=True,
+        null=True,
+    )
+    name = models.CharField(max_length=200, unique=True)
+    sku = models.CharField(max_length=64, blank=True, null=True, unique=True)
+    description = models.TextField(blank=True)
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Default retail price (CAD).",
+    )
+    quantity_in_stock = models.PositiveIntegerField(default=0)
+    low_stock_threshold = models.PositiveIntegerField(
+        default=0,
+        help_text="Set >0 to flag products that need restock.",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        indexes = [
+            models.Index(fields=["is_active", "name"], name="product_active_name_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.low_stock_threshold and self.low_stock_threshold < 0:
+            raise ValidationError({"low_stock_threshold": "Low stock threshold cannot be negative."})
+
+    @property
+    def is_low_on_stock(self) -> bool:
+        if not self.low_stock_threshold:
+            return False
+        return self.quantity_in_stock <= self.low_stock_threshold
+
+    def __str__(self):
+        return self.name
+
+
+class ProductSale(models.Model):
+    """
+    Immutable record describing the sale of a product to a client.
+    """
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        related_name="sales",
+    )
+    sold_by = models.ForeignKey(
+        UserProfile,
+        on_delete=models.PROTECT,
+        related_name="product_sales",
+        help_text="Employee who processed the sale.",
+    )
+    client = models.ForeignKey(
+        UserProfile,
+        on_delete=models.SET_NULL,
+        related_name="retail_purchases",
+        blank=True,
+        null=True,
+        help_text="Client receiving the product (optional).",
+    )
+    appointment = models.ForeignKey(
+        "core.Appointment",
+        on_delete=models.SET_NULL,
+        related_name="product_sales",
+        blank=True,
+        null=True,
+        help_text="Appointment associated with this sale (optional).",
+    )
+    sold_at = models.DateTimeField(default=timezone.now, db_index=True)
+    quantity = models.PositiveIntegerField()
+    unit_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Price per unit at the time of sale.",
+    )
+    total_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        editable=False,
+        help_text="Computed total for reporting.",
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-sold_at", "-id"]
+        indexes = [
+            models.Index(fields=["sold_at"], name="product_sale_sold_at_idx"),
+            models.Index(fields=["product", "sold_at"], name="product_sale_product_idx"),
+            models.Index(fields=["sold_by", "sold_at"], name="product_sale_employee_idx"),
+            models.Index(fields=["appointment"], name="product_sale_appt_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(check=Q(quantity__gt=0), name="product_sale_quantity_positive"),
+            models.CheckConstraint(check=Q(unit_price__gte=Decimal("0.00")), name="product_sale_unit_price_positive"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if not self.product_id:
+            raise ValidationError({"product": "Product is required."})
+        if not self.sold_by_id:
+            raise ValidationError({"sold_by": "Sold by user is required."})
+        if self.product_id and not self.product.is_active:
+            raise ValidationError({"product": "Cannot sell an inactive product."})
+
+    def _compute_total_amount(self) -> Decimal:
+        try:
+            return (self.unit_price * Decimal(self.quantity)).quantize(Decimal("0.01"))
+        except (InvalidOperation, TypeError) as exc:
+            raise ValidationError({"unit_price": "Invalid price precision."}) from exc
+
+    def save(self, *args, **kwargs):
+        if self.sold_at and timezone.is_naive(self.sold_at):
+            self.sold_at = timezone.make_aware(self.sold_at, timezone.get_current_timezone())
+
+        if self.product_id and self.unit_price is None:
+            self.unit_price = self.product.price
+
+        self.total_amount = self._compute_total_amount()
+
+        update_fields = kwargs.get("update_fields")
+        restrict_update = update_fields is not None
+
+        with transaction.atomic():
+            product = Product.objects.select_for_update().get(pk=self.product_id)
+
+            if self._state.adding:
+                if self.quantity > product.quantity_in_stock:
+                    raise ValidationError({"quantity": "Insufficient stock for this product."})
+                product.quantity_in_stock -= self.quantity
+                product.save(update_fields=["quantity_in_stock", "updated_at"])
+            else:
+                prev = type(self).objects.select_for_update().get(pk=self.pk)
+                if prev.product_id != self.product_id:
+                    raise ValidationError({"product": "Changing product on an existing sale is not supported."})
+                delta = self.quantity - prev.quantity
+                if delta:
+                    if delta > 0 and delta > product.quantity_in_stock:
+                        raise ValidationError({"quantity": "Insufficient stock for this product."})
+                    product.quantity_in_stock -= delta
+                    product.save(update_fields=["quantity_in_stock", "updated_at"])
+
+                if restrict_update:
+                    # ensure total_amount stays in sync even with update_fields
+                    kwargs["update_fields"] = list(set(update_fields) | {"total_amount", "updated_at"})
+
+            super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        with transaction.atomic():
+            product = Product.objects.select_for_update().get(pk=self.product_id)
+            product.quantity_in_stock += self.quantity
+            product.save(update_fields=["quantity_in_stock", "updated_at"])
+            super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.product} × {self.quantity} on {timezone.localtime(self.sold_at).strftime('%Y-%m-%d')}"
+
+
+# --- 5. PAYMENTS ---
 
 class PaymentMethod(models.Model):
     """
@@ -1064,7 +1391,7 @@ class Payment(models.Model):
     def __str__(self):
         return f"Payment {self.amount} {self.currency} for {self.appointment_id}"
 
-# --- 5. PREPAYMENTS ---
+# --- 6. PREPAYMENTS ---
 
 
 class AppointmentPrepayment(models.Model):
@@ -1074,7 +1401,7 @@ class AppointmentPrepayment(models.Model):
     appointment = models.OneToOneField(Appointment, on_delete=models.CASCADE)
     option = models.ForeignKey(PrepaymentOption, on_delete=models.CASCADE)
 
-# --- 6. FILES ---
+# --- 7. FILES ---
 
 class ClientFile(models.Model):
     """

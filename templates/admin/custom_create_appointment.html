@@ -5,31 +5,213 @@
     {{ block.super }}
     <link rel="stylesheet" href="{% static '/admin/css/custom_sidebar.css' %}">
     <style>
-        .ab-wrap{max-width:1100px;margin:0 auto}
-        .ab-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,.04);padding:20px}  .ab-sub{color:#6b7280;margin:0 0 18px}
-        .ab-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-        @media (max-width:900px){.ab-grid{grid-template-columns:1fr}}
-        .ab-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:12px;align-items:end}
-        @media (max-width:1100px){.ab-row{grid-template-columns:1fr 1fr}}
-        .ab-field label{display:block;font-size:13px;color:#374151;margin-bottom:6px}
-        .ab-field input,.ab-field select{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px}
-        .ab-actions{display:flex;gap:10px}
-        .ab-btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:10px 14px;border:1px solid #e5e7eb;background:#111827;color:#fff;cursor:pointer}
-        .ab-btn.secondary{background:#fff;color:#111827;border-color:#d1d5db}
-        .ab-btn.danger{background:#b91c1c}
-        .ab-items{display:flex;flex-direction:column;gap:12px}
-        .ab-item{padding:14px;border:1px dashed #e5e7eb;border-radius:12px;background:#fafafa}
-        .ab-total{margin-top:16px;text-align:right;color:#111827}
-        .ab-hidden{display:none}
-        .hint{color:#6b7280;font-size:12px;margin-top:4px}
+        /* ───────────────── Vars ───────────────── */
+        :root{
+            --ab-border:#e5e7eb;
+            --ab-muted:#6b7280;
+            --ab-bg:#ffffff;
+            --ab-bg-soft:#f8fafc;
 
-        /* Ошибки */
-        .ab-errornote{background:#FEF2F2;border:1px solid #FCA5A5;color:#991B1B;padding:10px 12px;border-radius:10px;margin:10px 0}
+            --ab-gray-50:#f9fafb;
+            --ab-gray-100:#f3f4f6;
+            --ab-gray-900:#111827;
+
+            --ab-green-600:#16a34a;
+            --ab-green-700:#15803d;
+
+            --ab-red-100:#fee2e2;
+            --ab-red-500:#ef4444;
+            --ab-red-600:#dc2626;
+            --ab-red-700:#b91c1c;
+        }
+
+        *{box-sizing:border-box}
+        .ab-wrap{max-width:1100px;margin:0 auto}
+        .ab-card{
+            background:var(--ab-bg);
+            border:1px solid var(--ab-border);
+            border-radius:14px;
+            box-shadow:0 6px 24px rgba(0,0,0,.06);
+            padding:22px;
+        }
+        h2{margin:0 0 4px}
+        .ab-sub{color:var(--ab-muted);margin:0 0 18px}
+
+        /* ───────── Fields & layout ───────── */
+        .ab-grid{display:grid;gap:16px}
+        #step-client.ab-grid{grid-template-columns:1fr} /* клиент — на всю ширину */
+
+        .ab-items{display:flex;flex-direction:column;gap:16px}
+        .ab-item{
+            position:relative; /* для плавающей кнопки Remove */
+            padding:16px;
+            border:1px solid var(--ab-border);
+            border-radius:14px;
+            background:#fff;
+        }
+
+        /* строки внутри карточки: 3 поля в ряд */
+        .ab-row{
+            display:grid;
+            grid-template-columns:repeat(3, 1fr);
+            gap:12px 16px;            /* row-gap / col-gap */
+            align-items:end;          /* выравниваем низ контролов */
+        }
+        @media (max-width:1100px){ .ab-row{grid-template-columns:1fr} }
+
+        .ab-field{position:relative}
+        /* резерв на 1 строку подсказки, чтобы высоты были одинаковыми */
+        .ab-item .ab-field{padding-bottom:18px}
+
+        .ab-field label{display:block;font-size:13px;color:#374151;margin-bottom:6px}
+        .ab-field input,
+        .ab-field select,
+        .combo-input{
+            width:100%;height:44px;
+            background:var(--ab-gray-50);
+            border:1px solid var(--ab-border);
+            border-radius:10px;
+            padding:10px 12px;
+            transition:border-color .15s ease, box-shadow .15s ease;
+        }
+        .ab-field input:focus,
+        .ab-field select:focus,
+        .combo:focus-within .combo-input{
+            outline:0;border-color:var(--ab-green-600);
+            box-shadow:0 0 0 3px rgba(34,197,94,.18);
+        }
+        .ab-field input:disabled,
+        .ab-field select:disabled,
+        .combo.is-disabled .combo-input{background:var(--ab-gray-100);color:#9ca3af}
+
+        /* “Duration” — абсолютная подсказка под полем Service, не влияет на раскладку */
+        .hint{color:var(--ab-muted);font-size:12px}
+        .hint--duration{
+            position:absolute;left:12px;right:12px;bottom:0; /* <-- фиксируем снизу */
+            margin:0;
+        }
+
+        /* ───────── Combobox (общий) ───────── */
+        .combo{position:relative;display:block;width:100%}
+        .combo-input{appearance:none;padding-right:34px !important}
+        .combo::after{
+            content:"";
+            position:absolute;right:12px;top:50%;margin-top:-3px;
+            border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid #9ca3af;
+            pointer-events:none;
+        }
+        .combo-list{
+            position:absolute;z-index:60;left:0;right:0;top:calc(100% + 6px);
+            max-height:260px;overflow:auto;background:#fff;border:1px solid var(--ab-border);
+            border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.08);display:none
+        }
+        .combo-open .combo-list{display:block}
+        .combo-item{padding:10px 12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .combo-item:hover,.combo-item[aria-selected="true"]{background:#f3f4f6}
+        .combo-empty{padding:10px 12px;color:var(--ab-muted)}
+        .ab-hidden{display:none !important}
+
+        /* ───────── Errors ───────── */
+        .ab-errornote{background:#fff5f5;border:1px solid #fecaca;color:#b91c1c;padding:10px 12px;border-radius:10px;margin:10px 0}
         .ab-errorlist{margin:0;padding-left:18px}
-        .ab-field.errors input,.ab-field.errors select{border-color:#ef4444}
+        .ab-field.errors input,.ab-field.errors select,.ab-field.errors .combo-input{border-color:var(--ab-red-500)}
         .ab-field .ab-field-error{color:#b91c1c;font-size:12px;margin-top:6px}
-        .ab-section-title{font-weight:700;margin-top:18px}
+
+        /* ───────── Intake builder ───────── */
+        #intake-section{border:1px solid var(--ab-border);border-radius:14px;background:#fff;padding:22px;}
+        #intake-section h2{margin:0 0 6px}
+        .intake-card{border:1px solid var(--ab-border);border-radius:12px;padding:18px;margin-bottom:18px;background:#fff;box-shadow:0 2px 12px rgba(15,23,42,.06)}
+        .intake-card__header{margin-bottom:12px}
+        .intake-card__title{margin:0;font-size:16px;font-weight:600;color:var(--ab-gray-900)}
+        .intake-card__description{margin:4px 0 0;font-size:13px;color:var(--ab-muted)}
+        .intake-card__section{margin-top:16px}
+        .intake-card__section-title{margin:0 0 6px;font-size:14px;font-weight:600;color:var(--ab-gray-900)}
+        .intake-card__section-desc{margin:0 0 12px;font-size:13px;color:var(--ab-muted)}
+        .intake-card__alert{border:1px solid var(--ab-red-500);background:var(--ab-red-100);color:var(--ab-red-700);padding:10px 12px;border-radius:10px;margin-bottom:12px;font-size:13px}
+        .intake-grid{display:grid;gap:14px 16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+        .intake-field{display:flex;flex-direction:column}
+        .intake-field[data-width="full"]{grid-column:1 / -1}
+        .intake-field[data-width="half"]{grid-column:span 1}
+        .intake-field label{font-size:13px;margin-bottom:6px;font-weight:500;color:#374151}
+        .intake-field input,
+        .intake-field select,
+        .intake-field textarea{border:1px solid var(--ab-border);border-radius:10px;background:var(--ab-gray-50);padding:10px 12px;min-height:44px;font-size:14px;transition:border-color .15s ease, box-shadow .15s ease}
+        .intake-field textarea{min-height:96px;resize:vertical}
+        .intake-field input:focus,
+        .intake-field select:focus,
+        .intake-field textarea:focus{outline:0;border-color:var(--ab-green-600);box-shadow:0 0 0 3px rgba(34,197,94,.18)}
+        .intake-field.has-error input,
+        .intake-field.has-error select,
+        .intake-field.has-error textarea{border-color:var(--ab-red-500)}
+        .intake-field-error{color:var(--ab-red-600);font-size:12px;margin-top:6px}
+        .intake-field-help{color:var(--ab-muted);font-size:12px;margin-top:4px}
+        .intake-checkbox{display:flex;align-items:center;gap:8px}
+        .intake-checkbox input{width:18px;height:18px;min-height:auto}
+        .intake-radio-group{display:flex;flex-direction:column;gap:6px}
+        .intake-radio{display:flex;align-items:center;gap:8px;font-size:13px}
+        .intake-radio input{width:16px;height:16px;min-height:auto}
+
+        /* ───────── Buttons ───────── */
+        .ab-actions{display:flex;gap:10px;justify-content:flex-start}
+        .ab-btn{
+            --ring:0 0 0 0 rgba(0,0,0,0);
+            display:inline-flex;align-items:center;gap:8px;
+            border-radius:12px;padding:10px 14px;cursor:pointer;
+            border:1px solid var(--ab-border);background:var(--ab-gray-900);color:#fff;
+            transition:transform .06s ease, box-shadow .15s ease, background .15s ease;
+            box-shadow:0 1px 0 rgba(0,0,0,.04), var(--ring);
+        }
+        .ab-btn svg{width:18px;height:18px}
+        .ab-btn:hover{transform:translateY(-1px)}
+        .ab-btn:active{transform:translateY(0)}
+        .ab-btn:focus-visible{outline:0;--ring:0 0 0 3px rgba(17,24,39,.12)}
+
+        /* Add service — более округлая, пунктир */
+        .ab-btn.success{
+            border-radius:9999px;
+            background:#fff;color:var(--ab-green-600);
+            border:2px dashed var(--ab-green-600);
+        }
+        .ab-btn.success:hover{background:#ecfdf5}
+
+        /* Кнопка Remove — красная пилюля, плавающая справа снизу карточки */
+        .ab-remove{
+            {#position:absolute;right:16px;bottom:16px;#}
+            {#display:inline-flex;align-items:center;gap:8px;#}
+            background:var(--ab-red-600);color:#fff;border:1px solid var(--ab-red-600);
+            border-radius:999px;padding:10px 16px;cursor:pointer;
+            transition:transform .06s ease, box-shadow .15s ease, background .15s ease;
+        }
+        .ab-remove:hover{background:var(--ab-red-700)}
+        .ab-remove svg{width:18px;height:18px}
+
+        /* Footer + total */
+        .ab-foot{display:flex;gap:12px;justify-content:flex-end;margin-top:20px}
+        .btn{
+            display:inline-flex;align-items:center;gap:10px;
+            font-weight:600;line-height:1;padding:12px 18px;border-radius:999px;
+            border:1px solid transparent;cursor:pointer;transition:transform .06s ease, box-shadow .15s ease, background .15s ease;
+            text-decoration:none;user-select:none;
+        }
+        .btn svg{width:18px;height:18px}
+        .btn-ghost{background:#fff;color:#111827;border-color:var(--ab-border)}
+        .btn-ghost:hover{background:#f9fafb}
+        .btn-success{background:var(--ab-green-700);border-color:var(--ab-green-700);color:#fff}
+        .btn-success:hover{background:var(--ab-green-600)}
+
+        .ab-total{
+
+            border-radius:14px;padding:12px 18px;display:flex;align-items:center;justify-content:space-between;
+
+        }
+        .ab-total::before{content:"Total";font-size:16px;font-weight:400;color:#1f2937}
+        #grand-total{font-size:28px;font-weight:500;color:#0f172a}
+
+        @media (prefers-reduced-motion: reduce){
+            .ab-btn,.btn{transition:none}
+        }
     </style>
+
 {% endblock %}
 
 {% block content %}
@@ -37,10 +219,10 @@
         <form method="post" action="" id="appt-form" class="ab-card">
             {% csrf_token %}
 
-            <h2>{% if add %}Создание записи{% else %}Создание записи{% endif %}</h2>
+            <h2>Создание записи</h2>
             <p class="ab-sub">Сначала выберите клиента, затем добавьте одну или несколько услуг.</p>
 
-            {# Глобальные ошибки (из form_errors) #}
+            {# Глобальные ошибки (если пришли с бэка) #}
             {% if form_errors %}
                 <div class="ab-errornote">
                     <ul class="ab-errorlist">
@@ -52,17 +234,25 @@
             <!-- STEP 1: CLIENT -->
             <div class="ab-grid" id="step-client">
                 <div class="ab-field {% if field_errors.client %}errors{% endif %}">
-                    <label for="id_client">Client <span style="color:#ef4444">*</span></label>
-                    <select id="id_client" name="client" required>
-                        <option value="">---------</option>
-                        {% for c in clients %}
-                            <option value="{{ c.id }}">{{ c.label }}</option>
-                        {% endfor %}
-                    </select>
+                    <label for="client_combo_input">Client <span style="color:#ef4444">*</span></label>
+
+                    <div class="combo" id="client_combo">
+                        <input id="client_combo_input" type="text" class="combo-input"
+                               placeholder="Type to search…" autocomplete="off"
+                               aria-haspopup="listbox" aria-expanded="false">
+                        <div class="combo-list" id="client_combo_list" role="listbox"></div>
+
+                        <!-- реальный контрол для POST (скрытый) -->
+                        <select id="id_client" name="client" required class="ab-hidden">
+                            <option value="">---------</option>
+                            {% for c in clients %}
+                                <option value="{{ c.id }}">{{ c.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>  {# ←ВАЖНО: закрываем .combo #}
+
                     {% if field_errors.client %}
-                        {% for e in field_errors.client %}
-                            <div class="ab-field-error">{{ e }}</div>
-                        {% endfor %}
+                        {% for e in field_errors.client %}<div class="ab-field-error">{{ e }}</div>{% endfor %}
                     {% endif %}
                     <div class="hint">После выбора клиента ниже станет доступно добавление услуг.</div>
                 </div>
@@ -71,124 +261,184 @@
             <!-- STEP 2: ITEMS -->
             <div id="items-section" class="ab-hidden" style="margin-top:20px">
                 <div class="ab-actions" style="margin-bottom:10px">
-                    <button type="button" class="ab-btn secondary" id="btn-add-item">＋ Add service</button>
+                    <button type="button" class="ab-btn success" id="btn-add-item">
+                        <!-- плюс -->
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        Add service
+                    </button>
                 </div>
 
-                <!-- management form (согласовано с вашим view) -->
+                <!-- formset‑management -->
                 <input type="hidden" name="items-TOTAL_FORMS" id="id_items-TOTAL_FORMS" value="0">
                 <input type="hidden" name="items-INITIAL_FORMS" id="id_items-INITIAL_FORMS" value="0">
                 <input type="hidden" name="items-MIN_NUM_FORMS" id="id_items-MIN_NUM_FORMS" value="0">
                 <input type="hidden" name="items-MAX_NUM_FORMS" id="id_items-MAX_NUM_FORMS" value="1000">
 
-                <div class="ab-items" id="items-container"></div>
+            <div class="ab-items" id="items-container"></div>
 
-                <div class="ab-total"><strong id="grand-total">$0.00</strong></div>
+            <div class="ab-total">
+                <strong id="grand-total">$0.00</strong>
             </div>
+        </div>
 
-            <div style="margin-top:20px;display:flex;gap:10px">
-                <button type="submit" class="ab-btn">Save</button>
-                <a href="{% url 'admin:core_appointment_changelist' %}" class="ab-btn secondary">Cancel</a>
+        <div id="intake-section" class="ab-hidden" style="margin-top:20px">
+            <h2>Forms</h2>
+            <p class="ab-sub">Required questionnaires and consent forms for this booking.</p>
+            <div id="intake-form-errors" class="ab-errornote ab-hidden"></div>
+            <div id="intake-forms-container"></div>
+        </div>
+
+        <input type="hidden" name="intake_payload" id="id_intake_payload" value="{}">
+
+            <div class="ab-foot">
+                <a href="{% url 'admin:core_appointment_changelist' %}" class="btn btn-ghost">
+                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                        <path d="M6 6l12 12M6 18L18 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    Cancel
+                </a>
+                <button type="submit" class="btn btn-success">
+                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a 2 2 0 0 1-2 2Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                        <path d="M17 21v-8H7v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                        <path d="M7 3v5h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                    </svg>
+                    Save Booking
+                </button>
             </div>
         </form>
     </div>
 
-    {# ---- Данные для JS из контекста ---- #}
+    {# ---- Данные из контекста (как и раньше) ---- #}
     {{ masters|json_script:"ab-masters" }}
     {{ services_by_master|json_script:"ab-services-by-master" }}
     {{ initial_first_item|json_script:"ab-initial-first" }}
+    {{ service_forms_map|json_script:"ab-service-forms" }}
+    {{ intake_forms_catalog|json_script:"ab-intake-forms" }}
 
-    {# могут отсутствовать — даём безопасные дефолты #}
     {{ posted_items|default:'[]'|json_script:"ab-posted-items" }}
     {{ item_errors|default:'{}'|json_script:"ab-item-errors" }}
     {{ field_errors|default:'{}'|json_script:"ab-field-errors" }}
     {{ posted_client|default:'""'|json_script:"ab-posted-client" }}
+    {{ posted_intake_payload|default:'{"forms":[]}'|json_script:"ab-posted-intake" }}
+    {{ intake_error_map|default:'{}'|json_script:"ab-intake-errors" }}
 
     <script>
-
-    window.APPOINTMENT_CTX = {
-        is_master : {{ is_master|yesno:"true,false" }},
-        current_master_id : {{ current_master_id|default:"null" }}
-    }
+        window.APPOINTMENT_CTX = {
+            is_master: {{ is_master|yesno:"true,false" }},
+            current_master_id: {{ current_master_id|default:"null" }}
+        }
     </script>
+
     <script>
         (function(){
             // ---- Data from backend
             const MASTERS = JSON.parse(document.getElementById('ab-masters').textContent || '[]');
             const SERVICES_BY_MASTER = JSON.parse(document.getElementById('ab-services-by-master').textContent || '{}');
             const INITIAL_FIRST = JSON.parse(document.getElementById('ab-initial-first').textContent || '{}');
+            const SERVICE_FORMS = JSON.parse(document.getElementById('ab-service-forms').textContent || '{}');
+            const INTAKE_FORMS = JSON.parse(document.getElementById('ab-intake-forms').textContent || '{}');
 
             const POSTED_ITEMS = JSON.parse(document.getElementById('ab-posted-items').textContent || '[]');
-            const ITEM_ERRORS = JSON.parse(document.getElementById('ab-item-errors').textContent || '{}');
+            const ITEM_ERRORS  = JSON.parse(document.getElementById('ab-item-errors').textContent || '{}');
             const FIELD_ERRORS = JSON.parse(document.getElementById('ab-field-errors').textContent || '{}');
-            const POSTED_CLIENT = JSON.parse(document.getElementById('ab-posted-client').textContent || '""');
+            const POSTED_CLIENT= JSON.parse(document.getElementById('ab-posted-client').textContent || '""');
+            const POSTED_INTAKE = JSON.parse(document.getElementById('ab-posted-intake').textContent || '{"forms":[]}');
+            const INTAKE_ERRORS = JSON.parse(document.getElementById('ab-intake-errors').textContent || '{}');
 
-            // MASTER-MODE flags
             const CTX = (window.APPOINTMENT_CTX || {is_master:false,current_master_id:null});
             const IS_MASTER = !!CTX.is_master;
             const CURRENT_MASTER_ID = CTX.current_master_id != null ? String(CTX.current_master_id) : null;
 
             // ---- Elements
-            const clientEl = document.getElementById('id_client');
-            const itemsSection = document.getElementById('items-section');
-            const container = document.getElementById('items-container');
-            const totalForms = document.getElementById('id_items-TOTAL_FORMS');
-            const grandTotal = document.getElementById('grand-total');
+            const clientEl    = document.getElementById('id_client');
+            const itemsSection= document.getElementById('items-section');
+            const container   = document.getElementById('items-container');
+            const totalForms  = document.getElementById('id_items-TOTAL_FORMS');
+            const grandTotal  = document.getElementById('grand-total');
+            const intakeSection = document.getElementById('intake-section');
+            const intakeContainer = document.getElementById('intake-forms-container');
+            const intakePayloadInput = document.getElementById('id_intake_payload');
 
-            // ---- Template row (создаём через JS — так проще печатать ошибки построчно)
-            function createRow() {
-                const wrap = document.createElement('div');
-                wrap.className = 'ab-item';
-                wrap.innerHTML = `
-      <div class="ab-row">
-        <div class="ab-field" data-field="master">
-          <label>Master <span style="color:#ef4444">*</span></label>
-          <select class="js-master" required></select>
-          <div class="ab-field-error js-err-master"></div>
-        </div>
+            // delegate remove
+            container.addEventListener('click', (e) => {
+                const btn = e.target.closest('.js-remove');
+                if (!btn) return;
+                const row = btn.closest('.ab-item');
+                if (!row) return;
+                row.remove();
+                renumberRows();
+                recalcGrandTotal();
+                renderIntakeForms();
+            });
 
-        <div class="ab-field" data-field="service">
-          <label>Service <span style="color:#ef4444">*</span></label>
-          <select class="js-service" required disabled>
-            <option value="">---------</option>
-          </select>
-          <div class="hint js-service-hint"></div>
-          <div class="ab-field-error js-err-service"></div>
-        </div>
+            /* ────────────── Client combobox ────────────── */
+            (function clientComboBox(){
+                const input     = document.getElementById('client_combo_input');
+                const listEl    = document.getElementById('client_combo_list');
+                const comboWrap = document.getElementById('client_combo');
 
-        <div class="ab-field" data-field="start_time_0">
-          <label>Date <span style="color:#ef4444">*</span></label>
-          <input type="date" class="js-date" required>
-          <div class="ab-field-error js-err-date"></div>
-        </div>
+                const ALL = Array.from(clientEl.options).filter(o => o.value)
+                    .map(o => ({ id: o.value, label: o.textContent }));
 
-        <div class="ab-field" data-field="start_time_1">
-          <label>Time <span style="color:#ef4444">*</span></label>
-          <input type="time" class="js-time ab-hidden" data-timepicker="15" required step="900">
-          <div class="ab-field-error js-err-time"></div>
-        </div>
+                let filtered = ALL.slice();
+                let activeIdx = -1;
 
-        <div class="ab-field" data-field="unit_price">
-          <label>Unit price</label>
-          <input type="number" class="js-price" step="0.01" min="0" placeholder="Auto">
-        </div>
+                function render(items){
+                    listEl.innerHTML = '';
+                    if (!items.length){
+                        const em = document.createElement('div');
+                        em.className = 'combo-empty'; em.textContent = 'No matches';
+                        listEl.appendChild(em);
+                        return;
+                    }
+                    items.forEach((it, idx) => {
+                        const div = document.createElement('div');
+                        div.className = 'combo-item'; div.setAttribute('role','option');
+                        div.dataset.id = it.id; div.textContent = it.label;
+                        if (idx === activeIdx) div.setAttribute('aria-selected','true');
+                        div.addEventListener('mousedown', (e) => { e.preventDefault(); choose(it); });
+                        listEl.appendChild(div);
+                    });
+                }
+                function open(){ comboWrap.classList.add('combo-open'); input.setAttribute('aria-expanded','true'); }
+                function close(){ comboWrap.classList.remove('combo-open'); input.setAttribute('aria-expanded','false'); activeIdx = -1; }
+                function filter(term){
+                    const t = (term||'').trim().toLowerCase();
+                    filtered = t ? ALL.filter(x => x.label.toLowerCase().includes(t)) : ALL.slice();
+                    activeIdx = filtered.length ? 0 : -1; render(filtered);
+                }
+                function choose(item){
+                    input.value = item.label;
+                    clientEl.value = item.id;
+                    clientEl.dispatchEvent(new Event('change', { bubbles:true }));
+                    itemsSection.classList.toggle('ab-hidden', !clientEl.value);
+                    close();
+                }
 
-        <div class="ab-field" data-field="promocode">
-          <label>Promocode</label>
-          <select class="js-promo">
-            <option value="">— No promocode —</option>
-          </select>
-          <div class="ab-field-error js-err-promocode"></div>
-        </div>
+                if (POSTED_CLIENT){
+                    const found = ALL.find(x => String(x.id) === String(POSTED_CLIENT));
+                    if (found){ clientEl.value = found.id; input.value = found.label; }
+                }
+                itemsSection.classList.toggle('ab-hidden', !clientEl.value);
 
-        <div class="ab-actions" style="grid-column:1/-1">
-          <button type="button" class="ab-btn danger js-remove">Remove</button>
-        </div>
-      </div>
-    `;
-                return wrap;
-            }
+                input.addEventListener('focus', () => { filter(input.value); open(); });
+                input.addEventListener('click',  () => { filter(input.value); open(); });
+                input.addEventListener('input', () => { filter(input.value); open(); clientEl.value = ''; });
 
-            // ---- Helpers
+                input.addEventListener('keydown', (e) => {
+                    if (!comboWrap.classList.contains('combo-open') && (e.key==='ArrowDown'||e.key==='ArrowUp')){ open(); render(filtered); return; }
+                    if (e.key==='ArrowDown'){ e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx+1)%filtered.length; render(filtered);} }
+                    if (e.key==='ArrowUp'){   e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx-1+filtered.length)%filtered.length; render(filtered);} }
+                    if (e.key==='Enter'){ if (comboWrap.classList.contains('combo-open') && filtered[activeIdx]){ e.preventDefault(); choose(filtered[activeIdx]); } }
+                    if (e.key==='Escape'){ close(); }
+                });
+                document.addEventListener('click', (e) => { if (!comboWrap.contains(e.target)) close(); });
+            })();
+
+            /* ────────────── Items helpers ────────────── */
             function money(n){ n = Number(n||0); return '$' + n.toFixed(2); }
             function buildOption(v, t){ const o = document.createElement('option'); o.value=v; o.textContent=t; return o; }
 
@@ -196,14 +446,12 @@
                 if (!IS_MASTER || !CURRENT_MASTER_ID) return MASTERS;
                 return MASTERS.filter(m => String(m.id) === CURRENT_MASTER_ID);
             }
-
             function populateMasters(select){
                 const masters = getAvailableMasters();
                 select.innerHTML = '';
                 select.appendChild(buildOption('', '---------'));
                 masters.forEach(m => select.appendChild(buildOption(String(m.id), m.label)));
             }
-
             function populateServices(select, masterId){
                 select.innerHTML = '';
                 select.appendChild(buildOption('', '---------'));
@@ -211,13 +459,12 @@
                 const list = SERVICES_BY_MASTER[String(mid)] || [];
                 list.forEach(s => {
                     const o = buildOption(String(s.id), s.name);
-                    o.dataset.price = s.base_price;
+                    o.dataset.price    = s.base_price;
                     o.dataset.duration = s.duration_min;
                     select.appendChild(o);
                 });
                 select.disabled = list.length === 0;
             }
-
             function recalcGrandTotal(){
                 let sum = 0;
                 container.querySelectorAll('.js-price').forEach(inp => {
@@ -227,17 +474,14 @@
                 grandTotal.textContent = money(sum);
             }
 
-            // ---- Timepicker 15m (селект поверх input[type=time])
+            // timepicker 15m (селект рядом с input[type=time])
             function buildTimeSelect() {
                 const sel = document.createElement('select');
                 sel.className = 'ab-select js-timepicker';
-                for (let h = 0; h < 24; h++) {
-                    for (let m = 0; m < 60; m += 15) {
+                for (let h=0; h<24; h++){
+                    for (let m=0; m<60; m+=15){
                         const v = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
-                        const opt = document.createElement('option');
-                        opt.value = v;
-                        opt.textContent = v;
-                        sel.appendChild(opt);
+                        const opt = document.createElement('option'); opt.value=v; opt.textContent=v; sel.appendChild(opt);
                     }
                 }
                 return sel;
@@ -246,14 +490,11 @@
                 if (!input || input.dataset.enhanced) return;
                 const sel = buildTimeSelect();
                 const raw = (input.value || '').slice(0,5);
-                if (raw) {
-                    const found = [...sel.options].some(o => o.value === raw);
-                    if (found) sel.value = raw;
-                }
+                if (raw && [...sel.options].some(o => o.value === raw)) sel.value = raw;
                 sel.addEventListener('change', () => {
                     input.value = sel.value;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    input.dispatchEvent(new Event('input', { bubbles:true }));
+                    input.dispatchEvent(new Event('change', { bubbles:true }));
                 });
                 input.insertAdjacentElement('afterend', sel);
                 input.classList.add('ab-hidden');
@@ -262,122 +503,637 @@
 
             function ensureHiddenClone(el){
                 if (!el || !el.disabled) return;
-                // не дублируем
-                if (el.nextElementSibling && el.nextElementSibling.tagName === 'INPUT' && el.nextElementSibling.type === 'hidden' && el.nextElementSibling.name === el.name) return;
+                if (el.nextElementSibling && el.nextElementSibling.tagName==='INPUT' &&
+                    el.nextElementSibling.type==='hidden' && el.nextElementSibling.name===el.name) return;
                 const hid = document.createElement('input');
-                hid.type = 'hidden';
-                hid.name = el.name;
-                hid.value = el.value || '';
+                hid.type='hidden'; hid.name=el.name; hid.value=el.value||'';
                 el.insertAdjacentElement('afterend', hid);
             }
 
-            // ---- Row wiring
+            const intakeState = { forms: {} };
+            if (POSTED_INTAKE && Array.isArray(POSTED_INTAKE.forms)){
+                POSTED_INTAKE.forms.forEach(entry => {
+                    if (!entry || !entry.id) return;
+                    const key = String(entry.id);
+                    const data = entry.data && typeof entry.data === 'object' ? {...entry.data} : {};
+                    intakeState.forms[key] = { data };
+                });
+            }
+
+            function ensureIntakeEntry(formId){
+                const key = String(formId);
+                if (!intakeState.forms[key]){
+                    intakeState.forms[key] = { data: {} };
+                }
+                return intakeState.forms[key];
+            }
+
+            function gatherActiveFormIds(){
+                const required = new Set();
+                container.querySelectorAll('select.js-service').forEach(sel => {
+                    const sid = sel.value;
+                    if (!sid) return;
+                    const forms = SERVICE_FORMS[String(sid)] || [];
+                    forms.forEach(fid => { if (fid) required.add(String(fid)); });
+                });
+                return Array.from(required);
+            }
+
+            function updateSerializedPayload(){
+                if (!intakePayloadInput) return;
+                const required = gatherActiveFormIds();
+                if (!required.length){
+                    intakePayloadInput.value = JSON.stringify({forms: []});
+                    return;
+                }
+                const payload = {
+                    forms: required.map(fid => {
+                        const entry = ensureIntakeEntry(fid);
+                        return { id: fid, data: entry.data || {} };
+                    })
+                };
+                intakePayloadInput.value = JSON.stringify(payload);
+            }
+
+            function buildField(formId, fieldCfg, formData, formErrors){
+                if (!fieldCfg || typeof fieldCfg !== 'object') return null;
+                const key = fieldCfg.key;
+                if (!key) return null;
+
+                const type = (fieldCfg.type || 'text').toLowerCase();
+                const fieldId = `intake-${formId}-${key}`;
+                const labelText = fieldCfg.label || key;
+                const rawErrors = formErrors && Object.prototype.hasOwnProperty.call(formErrors, key) ? formErrors[key] : [];
+                const errors = Array.isArray(rawErrors) ? rawErrors.map(String) : rawErrors ? [String(rawErrors)] : [];
+                let value = Object.prototype.hasOwnProperty.call(formData, key) ? formData[key] : undefined;
+
+                if (value === undefined && Object.prototype.hasOwnProperty.call(fieldCfg, 'default')){
+                    value = fieldCfg.default;
+                    formData[key] = value;
+                }
+
+                const wrap = document.createElement('div');
+                wrap.className = 'intake-field';
+                if (fieldCfg.display && fieldCfg.display.width){
+                    wrap.dataset.width = fieldCfg.display.width;
+                }
+
+                const label = document.createElement('label');
+                label.htmlFor = fieldId;
+                label.textContent = labelText + (fieldCfg.required ? ' *' : '');
+
+                const settings = fieldCfg.settings || {};
+                let control = null;
+
+                const setCommon = (el) => {
+                    if (!el) return;
+                    el.id = fieldId;
+                    if (fieldCfg.required) el.required = true;
+                    if (fieldCfg.placeholder) el.placeholder = fieldCfg.placeholder;
+                };
+
+                switch (type){
+                    case 'textarea':
+                    case 'long_text': {
+                        const textarea = document.createElement('textarea');
+                        textarea.value = value != null ? value : '';
+                        textarea.addEventListener('input', () => {
+                            formData[key] = textarea.value;
+                            updateSerializedPayload();
+                        });
+                        control = textarea;
+                        break;
+                    }
+                    case 'number':
+                    case 'integer': {
+                        const input = document.createElement('input');
+                        input.type = 'number';
+                        if (settings.min_value != null) input.min = settings.min_value;
+                        if (settings.max_value != null) input.max = settings.max_value;
+                        input.value = value != null ? value : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                        break;
+                    }
+                    case 'decimal':
+                    case 'float': {
+                        const input = document.createElement('input');
+                        input.type = 'number';
+                        input.step = settings.step || '0.01';
+                        if (settings.min_value != null) input.min = settings.min_value;
+                        if (settings.max_value != null) input.max = settings.max_value;
+                        input.value = value != null ? value : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                        break;
+                    }
+                    case 'boolean':
+                    case 'checkbox': {
+                        const wrapToggle = document.createElement('div');
+                        wrapToggle.className = 'intake-checkbox';
+                        const input = document.createElement('input');
+                        input.type = 'checkbox';
+                        input.checked = Boolean(value);
+                        input.addEventListener('change', () => {
+                            formData[key] = input.checked;
+                            updateSerializedPayload();
+                        });
+                        setCommon(input);
+                        wrapToggle.appendChild(input);
+                        const span = document.createElement('span');
+                        span.textContent = labelText;
+                        wrapToggle.appendChild(span);
+                        wrap.appendChild(wrapToggle);
+                        label.remove();
+                        break;
+                    }
+                    case 'select':
+                    case 'radio':
+                    case 'radiolist':
+                    case 'multiselect':
+                    case 'multichoice': {
+                        const choices = Array.isArray(fieldCfg.choices) ? fieldCfg.choices : [];
+                        if (type === 'radio' || type === 'radiolist'){
+                            const group = document.createElement('div');
+                            group.className = 'intake-radio-group';
+                            choices.forEach((opt, idx) => {
+                                if (!opt) return;
+                                const optionVal = Object.prototype.hasOwnProperty.call(opt,'value') ? String(opt.value) : '';
+                                const optionLabel = opt.label || optionVal;
+                                const radioId = `${fieldId}-opt-${idx}`;
+                                const row = document.createElement('label');
+                                row.className = 'intake-radio';
+                                const radio = document.createElement('input');
+                                radio.type = 'radio';
+                                radio.name = fieldId;
+                                radio.id = radioId;
+                                radio.value = optionVal;
+                                radio.checked = String(value) === optionVal;
+                                radio.addEventListener('change', () => {
+                                    if (radio.checked){
+                                        formData[key] = optionVal;
+                                        updateSerializedPayload();
+                                    }
+                                });
+                                row.appendChild(radio);
+                                const span = document.createElement('span');
+                                span.textContent = optionLabel;
+                                row.appendChild(span);
+                                group.appendChild(row);
+                            });
+                            control = group;
+                        } else {
+                            const select = document.createElement('select');
+                            if (type === 'multiselect' || type === 'multichoice'){
+                                select.multiple = true;
+                            }
+                            if (!select.multiple){
+                                select.appendChild(new Option('---------',''));
+                            }
+                            choices.forEach(opt => {
+                                if (!opt) return;
+                                const optionVal = Object.prototype.hasOwnProperty.call(opt,'value') ? String(opt.value) : '';
+                                const optionLabel = opt.label || optionVal;
+                                select.appendChild(new Option(optionLabel, optionVal));
+                            });
+                            if (select.multiple){
+                                const selectedVals = Array.isArray(value) ? value.map(String) : [];
+                                Array.from(select.options).forEach(opt => {
+                                    opt.selected = selectedVals.includes(opt.value);
+                                });
+                            } else {
+                                select.value = value != null ? String(value) : '';
+                            }
+                            select.addEventListener('change', () => {
+                                if (select.multiple){
+                                    formData[key] = Array.from(select.selectedOptions).map(o => o.value);
+                                } else {
+                                    formData[key] = select.value;
+                                }
+                                updateSerializedPayload();
+                            });
+                            control = select;
+                        }
+                        break;
+                    }
+                    case 'date':
+                    case 'time':
+                    case 'datetime':
+                    case 'datetime_local': {
+                        const input = document.createElement('input');
+                        input.type = type === 'date' ? 'date' : (type === 'time' ? 'time' : 'datetime-local');
+                        input.value = value != null ? String(value) : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                        break;
+                    }
+                    case 'email': {
+                        const input = document.createElement('input');
+                        input.type = 'email';
+                        input.value = value != null ? value : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                        break;
+                    }
+                    case 'phone':
+                    case 'tel': {
+                        const input = document.createElement('input');
+                        input.type = 'tel';
+                        input.value = value != null ? value : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                        break;
+                    }
+                    default: {
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.value = value != null ? value : '';
+                        input.addEventListener('input', () => {
+                            formData[key] = input.value;
+                            updateSerializedPayload();
+                        });
+                        control = input;
+                    }
+                }
+
+                if (control){
+                    setCommon(control);
+                    wrap.appendChild(label);
+                    wrap.appendChild(control);
+                } else if (type !== 'checkbox' && type !== 'boolean'){
+                    wrap.appendChild(label);
+                }
+
+                if (fieldCfg.help_text){
+                    const help = document.createElement('div');
+                    help.className = 'intake-field-help';
+                    help.textContent = fieldCfg.help_text;
+                    wrap.appendChild(help);
+                }
+
+                if (errors.length){
+                    wrap.classList.add('has-error');
+                    const err = document.createElement('div');
+                    err.className = 'intake-field-error';
+                    err.innerHTML = errors.join('<br>');
+                    wrap.appendChild(err);
+                }
+
+                return wrap;
+            }
+
+            function renderSingleForm(formId){
+                const meta = INTAKE_FORMS[formId];
+                if (!meta) return;
+                const entry = ensureIntakeEntry(formId);
+                const formData = entry.data;
+                const formErrors = INTAKE_ERRORS[formId] || {};
+
+                const card = document.createElement('section');
+                card.className = 'intake-card';
+                card.dataset.formId = formId;
+
+                const header = document.createElement('div');
+                header.className = 'intake-card__header';
+                const title = document.createElement('h3');
+                title.className = 'intake-card__title';
+                title.textContent = meta.name || `Form ${formId}`;
+                header.appendChild(title);
+                if (meta.description){
+                    const desc = document.createElement('p');
+                    desc.className = 'intake-card__description';
+                    desc.textContent = meta.description;
+                    header.appendChild(desc);
+                }
+                card.appendChild(header);
+
+                const generalErrors = Array.isArray(formErrors['__all__']) ? formErrors['__all__'] : [];
+                if (generalErrors.length){
+                    const alert = document.createElement('div');
+                    alert.className = 'intake-card__alert';
+                    alert.innerHTML = generalErrors.map(String).join('<br>');
+                    card.appendChild(alert);
+                }
+
+                const schema = meta.schema && typeof meta.schema === 'object' ? meta.schema : {sections: []};
+                const sections = Array.isArray(schema.sections) ? schema.sections : [];
+                sections.forEach(section => {
+                    const sectionWrap = document.createElement('div');
+                    sectionWrap.className = 'intake-card__section';
+                    if (section.title){
+                        const h = document.createElement('h4');
+                        h.className = 'intake-card__section-title';
+                        h.textContent = section.title;
+                        sectionWrap.appendChild(h);
+                    }
+                    if (section.description){
+                        const p = document.createElement('p');
+                        p.className = 'intake-card__section-desc';
+                        p.textContent = section.description;
+                        sectionWrap.appendChild(p);
+                    }
+                    const grid = document.createElement('div');
+                    grid.className = 'intake-grid';
+                    const fields = Array.isArray(section.fields) ? section.fields : [];
+                    fields.forEach(fieldCfg => {
+                        const fieldEl = buildField(formId, fieldCfg, formData, formErrors);
+                        if (fieldEl) grid.appendChild(fieldEl);
+                    });
+                    sectionWrap.appendChild(grid);
+                    card.appendChild(sectionWrap);
+                });
+
+                intakeContainer.appendChild(card);
+            }
+
+            function renderIntakeForms(){
+                if (!intakeSection) return;
+                const required = gatherActiveFormIds();
+                if (!required.length){
+                    intakeSection.classList.add('ab-hidden');
+                    intakeContainer.innerHTML = '';
+                    if (intakePayloadInput) intakePayloadInput.value = JSON.stringify({forms: []});
+                    return;
+                }
+
+                intakeSection.classList.remove('ab-hidden');
+                intakeContainer.innerHTML = '';
+                required.forEach(renderSingleForm);
+                updateSerializedPayload();
+            }
+
+            // generic "combo" поверх <select>
+            function makeComboFromSelect(selectEl, placeholder) {
+                if (!selectEl) return null;
+                const existingWrap = selectEl.closest('.combo');
+                if (existingWrap){
+                    const input = existingWrap.querySelector('.combo-input');
+                    const list  = existingWrap.querySelector('.combo-list');
+                    function optionsToItems() {
+                        return Array.from(selectEl.options).filter(o=>o.value!=='')
+                            .map(o => ({ id:o.value, label:o.textContent, opt:o }));
+                    }
+                    let ALL = optionsToItems();
+                    let filtered = ALL.slice();
+                    let activeIdx = -1;
+
+                    function render() {
+                        if (!list) return;
+                        list.innerHTML = '';
+                        if (!filtered.length){ const em = document.createElement('div'); em.className='combo-empty'; em.textContent='No matches'; list.appendChild(em); return; }
+                        filtered.forEach((it, idx) => {
+                            const div = document.createElement('div'); div.className='combo-item'; div.setAttribute('role','option');
+                            if (idx===activeIdx) div.setAttribute('aria-selected','true');
+                            div.textContent = it.label;
+                            div.addEventListener('mousedown', (e) => {
+                                e.preventDefault(); selectEl.value = it.id; selectEl.dispatchEvent(new Event('change', { bubbles:true }));
+                                if (input) input.value = it.label; existingWrap.classList.remove('combo-open');
+                            });
+                            list.appendChild(div);
+                        });
+                    }
+                    function filter(term){
+                        const t = (term||'').trim().toLowerCase();
+                        filtered = t ? ALL.filter(x => x.label.toLowerCase().includes(t)) : ALL.slice();
+                        activeIdx = filtered.length ? 0 : -1; render();
+                    }
+                    return {
+                        rebuildFromSelect(){ ALL = optionsToItems(); filter(input ? input.value : ''); },
+                        clear(){ selectEl.value=''; if (input) input.value=''; filter(''); },
+                        syncFromSelect(){
+                            const cur = Array.from(selectEl.options).find(o => o.value === selectEl.value);
+                            if (input) input.value = cur ? cur.textContent : ''; filter(input ? input.value : '');
+                        }
+                    };
+                }
+
+                // строим с нуля
+                const wrap = document.createElement('div'); wrap.className='combo';
+                selectEl.parentNode.insertBefore(wrap, selectEl); wrap.appendChild(selectEl);
+                const input = document.createElement('input');
+                input.type='text'; input.className='combo-input'; input.placeholder = placeholder || 'Type to search…'; input.autocomplete='off';
+                wrap.insertBefore(input, selectEl);
+                const list = document.createElement('div'); list.className='combo-list'; wrap.appendChild(list);
+                selectEl.classList.add('ab-hidden');
+
+                function optionsToItems() {
+                    return Array.from(selectEl.options).filter(o=>o.value!=='')
+                        .map(o => ({ id:o.value, label:o.textContent, opt:o }));
+                }
+                let ALL = optionsToItems(); let filtered = ALL.slice(); let activeIdx = -1;
+
+                function render(){
+                    list.innerHTML = '';
+                    if (!filtered.length){ const em = document.createElement('div'); em.className='combo-empty'; em.textContent='No matches'; list.appendChild(em); return; }
+                    filtered.forEach((it, idx) => {
+                        const div = document.createElement('div'); div.className='combo-item'; div.setAttribute('role','option');
+                        if (idx===activeIdx) div.setAttribute('aria-selected','true');
+                        div.textContent = it.label;
+                        div.addEventListener('mousedown', (e) => {
+                            e.preventDefault(); selectEl.value = it.id; selectEl.dispatchEvent(new Event('change', { bubbles:true }));
+                            input.value = it.label; wrap.classList.remove('combo-open');
+                        });
+                        list.appendChild(div);
+                    });
+                }
+                function open(){ wrap.classList.add('combo-open'); input.setAttribute('aria-expanded','true'); }
+                function close(){ wrap.classList.remove('combo-open'); input.setAttribute('aria-expanded','false'); activeIdx=-1; }
+                function filter(term){ const t=(term||'').trim().toLowerCase(); filtered=t?ALL.filter(x=>x.label.toLowerCase().includes(t)):ALL.slice(); activeIdx=filtered.length?0:-1; render(); }
+
+                input.addEventListener('focus', ()=>{ filter(input.value); open(); });
+                input.addEventListener('click', ()=>{ filter(input.value); open(); });
+                input.addEventListener('input', ()=>{ filter(input.value); open(); selectEl.value=''; });
+                input.addEventListener('keydown', (e)=>{
+                    if (!wrap.classList.contains('combo-open') && (e.key==='ArrowDown'||e.key==='ArrowUp')){ open(); render(); return; }
+                    if (e.key==='ArrowDown'){ e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx+1)%filtered.length; render(); } }
+                    if (e.key==='ArrowUp'){   e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx-1+filtered.length)%filtered.length; render(); } }
+                    if (e.key==='Enter'){ if (wrap.classList.contains('combo-open') && filtered[activeIdx]){ e.preventDefault(); selectEl.value=filtered[activeIdx].id; selectEl.dispatchEvent(new Event('change',{bubbles:true})); input.value=filtered[activeIdx].label; close(); } }
+                    if (e.key==='Escape'){ close(); }
+                });
+                document.addEventListener('click', (e)=>{ if (!wrap.contains(e.target)) close(); });
+
+                return {
+                    rebuildFromSelect(){ ALL = optionsToItems(); filter(input.value); },
+                    clear(){ selectEl.value=''; input.value=''; filter(''); },
+                    syncFromSelect(){ const cur = Array.from(selectEl.options).find(o=>o.value===selectEl.value); input.value = cur ? cur.textContent : ''; filter(''); }
+                };
+            }
+
+            /* ────────────── Row factory ────────────── */
+            function createRow() {
+                const wrap = document.createElement('div');
+                wrap.className = 'ab-item';
+                wrap.innerHTML = `
+    <!-- Ряд 1: Master · Service · Date -->
+    <div class="ab-row">
+      <div class="ab-field" data-field="master">
+        <label>Master <span style="color:#ef4444">*</span></label>
+        <select class="js-master" required></select>
+        <div class="ab-field-error js-err-master"></div>
+      </div>
+
+      <div class="ab-field" data-field="service">
+        <label>Service <span style="color:#ef4444">*</span></label>
+        <select class="js-service" required disabled>
+          <option value="">---------</option>
+        </select>
+        <!-- фиксированная подсказка; не двигает селект -->
+        <div class="hint hint--duration js-service-hint" aria-live="polite"></div>
+        <div class="ab-field-error js-err-service"></div>
+      </div>
+
+      <div class="ab-field" data-field="start_time_0">
+        <label>Date <span style="color:#ef4444">*</span></label>
+        <input type="date" class="js-date" required>
+        <div class="ab-field-error js-err-date"></div>
+      </div>
+    </div>
+
+    <!-- Ряд 2: Time · Unit price · Promocode -->
+    <div class="ab-row">
+      <div class="ab-field" data-field="start_time_1">
+        <label>Time <span style="color:#ef4444">*</span></label>
+        <input type="time" class="js-time ab-hidden" data-timepicker="15" required step="900">
+        <div class="ab-field-error js-err-time"></div>
+      </div>
+
+      <div class="ab-field" data-field="unit_price">
+        <label>Unit price</label>
+        <input type="number" class="js-price" step="0.01" min="0" placeholder="Auto">
+      </div>
+
+      <div class="ab-field" data-field="promocode">
+        <label>Promocode</label>
+        <select class="js-promo">
+          <option value="">— No promocode —</option>
+        </select>
+        <div class="ab-field-error js-err-promocode"></div>
+      </div>
+    </div>
+
+    <!-- Кнопка Remove: красная пилюля в углу -->
+    <button type="button" class="ab-remove js-remove" title="Remove">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      Remove
+    </button>
+  `;
+                return wrap;
+            }
+
+            function getAvailablePromos(){ return []; /* заготовка, если решите подгружать промокоды */ }
+
             function hookRow(row, idx){
                 const name = (suffix)=> `items-${idx}-${suffix}`;
                 const masterSel = row.querySelector('.js-master');
-                const serviceSel = row.querySelector('.js-service');
-                const dateInp = row.querySelector('.js-date');
-                const timeInp = row.querySelector('.js-time');
-                const priceInp = row.querySelector('.js-price');
-                const promoSel = row.querySelector('.js-promo');
-                const hint = row.querySelector('.js-service-hint');
+                const serviceSel= row.querySelector('.js-service');
+                const dateInp   = row.querySelector('.js-date');
+                const timeInp   = row.querySelector('.js-time');
+                const priceInp  = row.querySelector('.js-price');
+                const promoSel  = row.querySelector('.js-promo');
+                const hint      = row.querySelector('.js-service-hint');
 
-                // names + ids (для вью)
-                masterSel.name = name('master');   masterSel.id = `id_items-${idx}-master`;
-                serviceSel.name = name('service'); serviceSel.id = `id_items-${idx}-service`;
-                dateInp.name = name('start_time_0'); dateInp.id = `id_items-${idx}-start_time_0`;
-                timeInp.name = name('start_time_1'); timeInp.id = `id_items-${idx}-start_time_1`;
-                priceInp.name = name('unit_price');  priceInp.id = `id_items-${idx}-unit_price`;
-                promoSel.name = name('promocode');   promoSel.id = `id_items-${idx}-promocode`;
+                // имена для POST
+                masterSel.name = name('master');       masterSel.id = `id_items-${idx}-master`;
+                serviceSel.name= name('service');      serviceSel.id= `id_items-${idx}-service`;
+                dateInp.name   = name('start_time_0'); dateInp.id   = `id_items-${idx}-start_time_0`;
+                timeInp.name   = name('start_time_1'); timeInp.id   = `id_items-${idx}-start_time_1`;
+                priceInp.name  = name('unit_price');   priceInp.id  = `id_items-${idx}-unit_price`;
+                promoSel.name  = name('promocode');    promoSel.id  = `id_items-${idx}-promocode`;
 
                 populateMasters(masterSel);
                 enhanceTimeInput(timeInp);
 
-                // MASTER-MODE: фиксируем мастера, дизейблим селект и подкидываем hidden
+                let serviceCombo = makeComboFromSelect(serviceSel, 'Type to search service…');
+
+                // режим мастера: фиксируем мастера
                 if (IS_MASTER && CURRENT_MASTER_ID){
                     masterSel.value = CURRENT_MASTER_ID;
                     masterSel.setAttribute('disabled', 'disabled');
-                    // визуально вместо select покажем бейдж с именем мастера
-                    const box = masterSel.closest('[data-field="master"]');
-                    if (box && !box.querySelector('.ab-master-badge')) {
-                        const mObj = (MASTERS.find(m => String(m.id) === CURRENT_MASTER_ID) || {label:'(Me)'});
-                        const badge = document.createElement('div');
-                        badge.className = 'ab-master-badge';
-                        badge.textContent = mObj.label || 'Current master';
-                        // спрячем селект, оставим бейдж
-                        masterSel.classList.add('ab-hidden');
-                        box.insertBefore(badge, masterSel);
-                    }
                     ensureHiddenClone(masterSel);
+                    populateServices(serviceSel, CURRENT_MASTER_ID);
+                } else {
+                    populateServices(serviceSel, masterSel.value);
                 }
-
-                populateServices(serviceSel, masterSel.value);
 
                 masterSel.addEventListener('change', () => {
                     populateServices(serviceSel, masterSel.value);
-                    hint.textContent = '';
-                    priceInp.value = '';
-                    recalcGrandTotal();
+                    if (serviceCombo) { serviceCombo.rebuildFromSelect(); serviceCombo.clear(); }
+                    hint.textContent = ''; priceInp.value = ''; recalcGrandTotal();
+                    renderIntakeForms();
                 });
 
                 serviceSel.addEventListener('change', () => {
                     const opt = serviceSel.selectedOptions[0];
                     const price = opt && opt.dataset ? opt.dataset.price : '';
-                    const dur = opt && opt.dataset ? opt.dataset.duration : '';
+                    const dur   = opt && opt.dataset ? opt.dataset.duration : '';
                     priceInp.value = price || '';
                     hint.textContent = dur ? (`Duration: ${dur} min`) : '';
                     recalcGrandTotal();
+                    renderIntakeForms();
                 });
 
                 priceInp.addEventListener('input', recalcGrandTotal);
 
-                row.querySelector('.js-remove').addEventListener('click', () => {
-                    row.remove();
-                    renumberRows();
-                    recalcGrandTotal();
-                });
+                // вернём наружу, чтобы синхронизировать при префилле
+                return { serviceCombo };
             }
 
             function addRow(prefill){
                 const idx = Number(totalForms.value);
                 const row = createRow();
-                hookRow(row, idx);
+                const ref = hookRow(row, idx);
 
-                // Префилл значений
                 const masterSel = row.querySelector('.js-master');
-                const serviceSel = row.querySelector('.js-service');
-                const dateInp = row.querySelector('.js-date');
-                const timeInp = row.querySelector('.js-time');
-                const priceInp = row.querySelector('.js-price');
-                const promoSel = row.querySelector('.js-promo');
+                const serviceSel= row.querySelector('.js-service');
+                const dateInp   = row.querySelector('.js-date');
+                const timeInp   = row.querySelector('.js-time');
+                const priceInp  = row.querySelector('.js-price');
+                const promoSel  = row.querySelector('.js-promo');
 
                 if (IS_MASTER && CURRENT_MASTER_ID){
                     masterSel.value = CURRENT_MASTER_ID;
                     masterSel.setAttribute('disabled', 'disabled');
                     ensureHiddenClone(masterSel);
                     populateServices(serviceSel, CURRENT_MASTER_ID);
-                }
-                else if (prefill && prefill.master){
+                } else if (prefill && prefill.master){
                     masterSel.value = String(prefill.master);
                     populateServices(serviceSel, masterSel.value);
+                } else {
+                    populateServices(serviceSel, masterSel.value);
                 }
-                else {
-                    populateServices(serviceSel, masterSel.value)
-                }
+
                 if (prefill && prefill.service){
                     serviceSel.value = String(prefill.service);
-                    // дернуть цену/длительность
                     const opt = serviceSel.selectedOptions[0];
-                    if (opt) {
-                        priceInp.value = opt.dataset.price || '';
+                    if (opt){ priceInp.value = opt.dataset.price || '';
                         const hint = row.querySelector('.js-service-hint');
                         hint.textContent = opt.dataset.duration ? (`Duration: ${opt.dataset.duration} min`) : '';
                     }
                 }
+                if (ref && ref.serviceCombo && serviceSel.value){ ref.serviceCombo.syncFromSelect(); }
+
                 if (prefill && prefill.start_time_0) dateInp.value = prefill.start_time_0;
                 if (prefill && prefill.start_time_1){
                     timeInp.value = prefill.start_time_1.length===5 ? prefill.start_time_1 : prefill.start_time_1.slice(0,5);
-                    // синхронизируем селект-таймпикер
                     const sel = timeInp.nextElementSibling;
                     if (sel && sel.classList.contains('js-timepicker')){
                         const v = timeInp.value.slice(0,5);
@@ -389,120 +1145,77 @@
 
                 container.appendChild(row);
                 totalForms.value = idx + 1;
+                recalcGrandTotal();
+                renderIntakeForms();
             }
 
             function renumberRows(){
                 const rows = Array.from(container.querySelectorAll('.ab-item'));
                 totalForms.value = rows.length;
                 rows.forEach((row, i) => {
-                    const old = row.cloneNode(true);
-                    row.parentNode.replaceChild(old, row);
-                    hookRow(row, i);
+                    row.querySelectorAll('[name^="items-"]').forEach(el => {
+                        const suffix = el.name.replace(/^items-\d+-/, '');
+                        el.name = `items-${i}-${suffix}`;
+                        el.id   = `id_items-${i}-${suffix}`;
+                    });
+                    const mSel = row.querySelector('select.js-master');
+                    if (mSel && mSel.disabled){
+                        let hid = mSel.nextElementSibling;
+                        if (!(hid && hid.tagName==='INPUT' && hid.type==='hidden')){
+                            hid = document.createElement('input'); hid.type='hidden'; mSel.insertAdjacentElement('afterend', hid);
+                        }
+                        hid.name = mSel.name; hid.value = mSel.value || '';
+                    }
                 });
             }
+
             function rowIndexFromNames(row){
                 const any = row.querySelector('[name^="items-"]');
                 if (!any) return null;
                 const m = any.getAttribute('name').match(/^items-(\d+)-/);
-                return m ? m[1] : null; // строковый индекс как в item_errors
+                return m ? m[1] : null;
             }
 
-// Заменяем paintItemErrors на точное сопоставление по name
             function paintItemErrors(){
                 const items = ITEM_ERRORS || {};
-                console.log('ITEM_ERRORS', ITEM_ERRORS);
-                console.log('POSTED_ITEMS', POSTED_ITEMS);
                 container.querySelectorAll('.ab-item').forEach(row => {
                     const idx = rowIndexFromNames(row);
                     if (idx == null) return;
-                    const errs = items[idx];
-                    if (!errs) return;
+                    const errs = items[idx]; if (!errs) return;
 
-                    // master
-                    if (errs.master?.length){
-                        const fld = row.querySelector('[data-field="master"]');
-                        fld.classList.add('errors');
-                        row.querySelector('.js-err-master').textContent = errs.master.join(' ');
-                    }
-
-                    // service
-                    if (errs.service?.length){
-                        const fld = row.querySelector('[data-field="service"]');
-                        fld.classList.add('errors');
-                        row.querySelector('.js-err-service').textContent = errs.service.join(' ');
-                    }
-
-                    // date
-                    if (errs.start_time_0?.length){
-                        const fld = row.querySelector('[data-field="start_time_0"]');
-                        fld.classList.add('errors');
-                        row.querySelector('.js-err-date').textContent = errs.start_time_0.join(' ');
-                    }
-
-                    // time (учитываем и сводный start_time, и start_time_1)
+                    if (errs.master?.length){ const fld = row.querySelector('[data-field="master"]'); fld.classList.add('errors'); row.querySelector('.js-err-master').textContent = errs.master.join(' '); }
+                    if (errs.service?.length){ const fld = row.querySelector('[data-field="service"]'); fld.classList.add('errors'); row.querySelector('.js-err-service').textContent = errs.service.join(' '); }
+                    if (errs.start_time_0?.length){ const fld = row.querySelector('[data-field="start_time_0"]'); fld.classList.add('errors'); row.querySelector('.js-err-date').textContent = errs.start_time_0.join(' '); }
                     const timeMsgs = [...(errs.start_time || []), ...(errs.start_time_1 || [])];
-                    if (timeMsgs.length){
-                        const fld = row.querySelector('[data-field="start_time_1"]');
-                        fld.classList.add('errors');
-                        row.querySelector('.js-err-time').textContent = timeMsgs.join(' ');
-                    }
-
-                    // price
-                    if (errs.unit_price?.length){
-                        const fld = row.querySelector('[data-field="unit_price"]');
-                        fld.classList.add('errors');
-                        const box = fld.querySelector('.ab-field-error') || document.createElement('div');
-                        box.className = 'ab-field-error';
-                        box.textContent = errs.unit_price.join(' ');
-                        fld.appendChild(box);
-                    }
-
-                    // promocode
-                    if (errs.promocode?.length){
-                        const fld = row.querySelector('[data-field="promocode"]');
-                        fld.classList.add('errors');
-                        const box = row.querySelector('.js-err-promocode');
-                        if (box) box.textContent = errs.promocode.join(' ');
-                    }
-
-                    // общие ошибки строки
-                    if (errs.__all__?.length){
-                        const note = document.createElement('div');
-                        note.className = 'ab-errornote';
-                        note.innerHTML = errs.__all__.map(String).join('<br>');
-                        row.prepend(note);
-                    }
+                    if (timeMsgs.length){ const fld = row.querySelector('[data-field="start_time_1"]'); fld.classList.add('errors'); row.querySelector('.js-err-time').textContent = timeMsgs.join(' '); }
+                    if (errs.unit_price?.length){ const fld = row.querySelector('[data-field="unit_price"]'); fld.classList.add('errors'); const box = fld.querySelector('.ab-field-error') || document.createElement('div'); box.className='ab-field-error'; box.textContent = errs.unit_price.join(' '); fld.appendChild(box); }
+                    if (errs.promocode?.length){ const fld = row.querySelector('[data-field="promocode"]'); fld.classList.add('errors'); const box = row.querySelector('.js-err-promocode'); if (box) box.textContent = errs.promocode.join(' '); }
+                    if (errs.__all__?.length){ const note = document.createElement('div'); note.className='ab-errornote'; note.innerHTML = errs.__all__.map(String).join('<br>'); row.prepend(note); }
                 });
             }
 
-            // ---- Init form
+            // init
             (function init(){
-                // Восстановим выбранного клиента (если был)
                 if (POSTED_CLIENT){ clientEl.value = POSTED_CLIENT; }
-                // Покажем секцию услуг, если клиент выбран
                 itemsSection.classList.toggle('ab-hidden', !clientEl.value);
 
-                // Если мастер — убедимся, что в initial_first_item уже его master
                 if (IS_MASTER && CURRENT_MASTER_ID){
                     if (!INITIAL_FIRST || typeof INITIAL_FIRST !== 'object') window.INITIAL_FIRST = {};
                     if (!INITIAL_FIRST.master) INITIAL_FIRST.master = CURRENT_MASTER_ID;
                 }
 
-                // Нарисуем строки:
                 if (Array.isArray(POSTED_ITEMS) && POSTED_ITEMS.length){
                     POSTED_ITEMS.forEach(it => {
-                        const rowPrefill = {
+                        addRow({
                             master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : it.master,
                             service: it.service,
                             start_time_0: it.start_time_0,
                             start_time_1: it.start_time_1,
                             unit_price: it.unit_price,
                             promocode: it.promocode
-                        }
+                        });
                     });
-                    addRow(rowPrefill)
                 } else {
-                    // Если есть initial_first_item (GET с префилом) — используем
                     if (INITIAL_FIRST && (INITIAL_FIRST.master || INITIAL_FIRST.start_time_date || INITIAL_FIRST.start_time_time)){
                         addRow({
                             master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : (INITIAL_FIRST.master || ''),
@@ -510,44 +1223,32 @@
                             start_time_1: (INITIAL_FIRST.start_time_time || '').slice(0,5),
                         });
                     } else {
-                        addRow({master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : ''});
+                        addRow({ master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : '' });
                     }
                 }
 
                 recalcGrandTotal();
                 paintItemErrors();
+                renderIntakeForms();
             })();
 
-            // Системные события
             clientEl.addEventListener('change', () => {
                 itemsSection.classList.toggle('ab-hidden', !clientEl.value);
             });
 
-            document.getElementById('btn-add-item').addEventListener('click', () => addRow({ master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : ''}));
+            document.getElementById('btn-add-item')
+                .addEventListener('click', () => addRow({ master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : '' }));
 
-            // Базовая клиентская валидация, чтобы не гонять пустое
             document.getElementById('appt-form').addEventListener('submit', (e) => {
-                if (!clientEl.value){
-                    e.preventDefault();
-                    alert('Выберите клиента.');
-                    return;
-                }
-                if (container.querySelectorAll('.ab-item').length === 0){
-                    e.preventDefault();
-                    alert('Добавьте хотя бы одну услугу.');
-                    return;
-                }
-                // MASTER-MODE: перед отправкой гарантируем hidden-клоны для всех master (disabled)
+                updateSerializedPayload();
+                if (!clientEl.value){ e.preventDefault(); alert('Выберите клиента.'); return; }
+                if (container.querySelectorAll('.ab-item').length === 0){ e.preventDefault(); alert('Добавьте хотя бы одну услугу.'); return; }
                 if (IS_MASTER){
                     container.querySelectorAll('select.js-master').forEach(sel => {
-                        if (sel.disabled) {
-                            sel.value = CURRENT_MASTER_ID; // на всякий случай
-                            ensureHiddenClone(sel);
-                        }
+                        if (sel.disabled){ sel.value = CURRENT_MASTER_ID; ensureHiddenClone(sel); }
                     });
                 }
             });
-
         })();
     </script>
 {% endblock %}

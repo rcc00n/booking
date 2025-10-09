@@ -37,7 +37,7 @@
                     <div class="appt-list">
                         {% for app in recent_appointments %}
                             <div class="appt-item{% if app.start_time.date == today %} appt-today{% endif %}"
-                                 onclick="window.location.href='{% url 'admin:core_appointment_change' app.id %}'">
+                                 onclick="window.location.href='{% url 'admin:core_appointment_change' app.appointment.id %}'">
                                 <div class="appt-date">
                                     <span class="appt-day">{{ app.start_time|date:"d" }}</span>
                                     <span class="appt-month">{{ app.start_time|date:"b" }}</span>
@@ -45,23 +45,19 @@
                                 <div class="appt-details">
                                     <div class="appt-top">
                                         <span class="appt-time">{{ app.start_time|date:"D, d M Y H:i" }}</span>
-                                        {% with last=app.appointmentstatushistory_set.last %}
+                                        {% with last=app.appointment.appointmentstatushistory_set.last %}
                                             {% if last %}<span class="appt-status {{ last.status.name|lower }}">{{ last.status.name }}</span>{% endif %}
                                         {% endwith %}
+
                                     </div>
-                                    {# первый item встречи #}
-                                    {% for it in app.items.all|slice:":1" %}
-                                        <div class="appt-service">{{ it.service.name }}</div>
-                                        <div class="appt-master">{% if it.master %}with {{ it.master.user.get_full_name }}{% endif %}</div>
-                                    {% empty %}
-                                        <div class="appt-service">—</div>
-                                        <div class="appt-master">&nbsp;</div>
-                                    {% endfor %}
+                                    <div class="appt-service">{{ app.service.name }}</div>
+                                    <div class="appt-master">{% if app.master %}with {{ app.master.user.get_full_name }}{% endif %}</div>
+
                                 </div>
                                 <div class="appt-price">
                                     {% if app.final_price %}CA$ {{ app.final_price|floatformat:2 }}
                                     {% elif app.total_price %}CA$ {{ app.total_price|floatformat:2 }}
-                                    {% else %}&nbsp;{% endif %}
+                                    {% else %}&nbsp;Free{% endif %}
                                 </div>
                             </div>
                         {% empty %}

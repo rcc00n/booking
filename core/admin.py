@@ -1,27 +1,29 @@
 from bisect import bisect_left
 from collections import defaultdict
-from typing import Dict, Any, List
+from decimal import Decimal
+from io import BytesIO
+from typing import Dict, Any, List, Sequence, Iterable
 from urllib.parse import urlencode
 
 from django.contrib.admin import DateFieldListFilter
 
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from django.core.exceptions import FieldError
+from django.core.exceptions import FieldError, PermissionDenied
 from django.db import transaction, IntegrityError
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.contrib import admin, messages
-from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField
+from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField, Prefetch
 from itertools import cycle
 
 from django.utils.formats import number_format
-from django.utils.timezone import localtime, datetime, make_aware, localdate, get_current_timezone, make_naive
+from django.utils.timezone import localtime, datetime, make_aware, localdate, get_current_timezone, make_naive, is_aware
 from django.utils.html import escape
 from core.utils.admin_perms import is_master, master_obj
-from django.shortcuts import redirect
+from django.shortcuts import redirect, get_object_or_404
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
-from datetime import date, timedelta
+from datetime import date, timedelta, time as time_cls
 from django.contrib.admin.views.decorators import staff_member_required
 from django.http import HttpRequest, HttpResponse, Http404
 from django.contrib.auth.models import Permission
@@ -59,10 +61,32 @@ from django.db.models import Count, Sum, Q, F
 from django.template.response import TemplateResponse
 from django.utils import timezone
 from django.utils.timezone import localdate
+from datetime import timezone as py_tz
+
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, Alignment, numbers
+
+
+def _coerce_json(value):
+    if isinstance(value, dict):
+        return {k: _coerce_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_coerce_json(v) for v in value]
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, time_cls):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
 
 from core.models import (
     Appointment, AppointmentItem, Payment,
-    AppointmentStatus, Role, MasterProfile, Service
+    AppointmentStatus, Role, MasterProfile, Service,
+    ClientIntakeForm, ClientIntakeFormSubmission,
 )
 
 
@@ -94,18 +118,44 @@ def custom_index(request):
         chart_data.append({"day": day.strftime("%a %d"), "sales": float(sales), "appointments": appts})
 
     # Статусы и счётчики на ближайшие 7 дней
+
     confirmed = AppointmentStatus.objects.filter(name="Confirmed").first()
     cancelled = AppointmentStatus.objects.filter(name="Cancelled").first()
 
-    upcoming = Appointment.objects.filter(
-        start_time__date__range=(today, today + timedelta(days=7))
+    # Подзапрос «последний статус для визита»
+    last_status_sq_items = (
+        AppointmentStatusHistory.objects
+        .filter(appointment_id=OuterRef("appointment_id"))
+        .order_by("-set_at")
+        .values("status_id")[:1]
     )
-    confirmed_count = upcoming.filter(appointmentstatushistory__status=confirmed) \
-        .distinct().count() if confirmed else 0
-    cancelled_count = upcoming.filter(appointmentstatushistory__status=cancelled) \
-        .distinct().count() if cancelled else 0
 
-    # Top services (текущий месяц) — считаем позиции у Service через обратную связь "appointmentitem"
+    # берём позиции ближайшей недели (как и было), но аннотируем последний статус визита
+    upcoming_items = (
+        AppointmentItem.objects
+        .filter(start_time__date__range=(today, today + timedelta(days=7)))
+        .annotate(last_status_id=Subquery(last_status_sq_items))
+    )
+
+    # считаем КОЛ-ВО ВИЗИТОВ (distinct по appointment_id), где последний статус == нужному
+    confirmed_count = (
+        upcoming_items
+        .filter(last_status_id=getattr(confirmed, "id", None))
+        .values("appointment_id")
+        .distinct()
+        .count()
+    ) if confirmed else 0
+
+    cancelled_count = (
+        upcoming_items
+        .filter(last_status_id=getattr(cancelled, "id", None))
+        .values("appointment_id")
+        .distinct()
+        .count()
+    ) if cancelled else 0
+
+
+# Top services (текущий месяц) — считаем позиции у Service через обратную связь "appointmentitem"
     top_services = (
         Service.objects.annotate(
             count=Count(
@@ -115,73 +165,63 @@ def custom_index(request):
         )
         .order_by("-count")[:10]
     )
-    first_day = today.replace(day=1)
+    first_day = localdate().replace(day=1)
+    if first_day.month == 12:
+        first_day_next = date(first_day.year + 1, 1, 1)
+    else:
+        first_day_next = date(first_day.year, first_day.month + 1, 1)
 
-    # Берём уникальные пары (master, appointment), где есть хотя бы один Item этого мастера
-    pairs = (
-        AppointmentItem.objects
-        .filter(appointment__start_time__date__gte=first_day)
-        .values("master_id", "appointment_id")
-        .distinct()
-    )
-
-    # Сколько мастеров участвует в каждой встрече (для деления платежа)
-    masters_count_sq = (
-        Appointment.objects
-        .filter(pk=OuterRef("appointment_id"))
-        .annotate(mc=Count("items__master", distinct=True))
-        .values("mc")[:1]
-    )
-
-    # Сумма платежей по каждой встрече (на случай если платежей несколько)
-    paid_total_sq = (
+    # 2) Агрегация денег по мастеру из AppointmentItem.final_price
+    paid_by_appt = dict(
         Payment.objects
-        .filter(appointment_id=OuterRef("appointment_id"))
+        .filter(created_at__date__gte=first_day, created_at__date__lt=first_day_next)
         .values("appointment_id")
-        .annotate(total=Sum("amount"))
-        .values("total")[:1]
+        .annotate(total=Coalesce(Sum("amount"), Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))))
+        .values_list("appointment_id", "total")
     )
 
-    pairs = pairs.annotate(
-        masters_count=Subquery(masters_count_sq, output_field=IntegerField()),
-        paid_total=Subquery(paid_total_sq, output_field=DecimalField(max_digits=12, decimal_places=2)),
-    ).annotate(
-        # вклад мастера в эту встречу: total_payment / masters_count
-        contrib=ExpressionWrapper(
-            Coalesce(F("paid_total"), Value(0))
-            / Greatest(Coalesce(F("masters_count"), Value(1)), Value(1)),
-            output_field=DecimalField(max_digits=12, decimal_places=2),
-            )
-    )
+    if not paid_by_appt:
+        top_masters = []
+    else:
+    # 3) Сумма final_price по мастеру в каждом визите из оплаченных
+        rows = (
+            AppointmentItem.objects
+            .filter(appointment_id__in=paid_by_appt.keys())
+            .values("appointment_id", "master_id")
+            .annotate(msum=Coalesce(Sum("final_price"), Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))))
+        )
 
-    # Суммируем вклады по всем встречам для каждого мастера
-    agg = (
-        pairs.values("master_id")
-        .annotate(total=Sum("contrib"))
-        .order_by("-total")[:10]
-    )
+        # 4) Сумма final_price по визиту (для нормализации долей мастеров)
+        appt_total = {}
+        for r in rows:
+            aid = r["appointment_id"]
+            appt_total[aid] = (appt_total.get(aid, 0) or 0) + (r["msum"] or 0)
 
-    # Берём сами профили мастеров и прикрепляем им поле .total
-    master_totals = {row["master_id"]: (row["total"] or 0) for row in agg}
-    top_masters_qs = MasterProfile.objects.filter(pk__in=master_totals.keys()).select_related("user")
-    top_masters = list(top_masters_qs)
-    for m in top_masters:
-        m.total = master_totals.get(m.pk, 0)
+        # 5) Распределяем деньги визита пропорционально долям мастеров
+        master_totals = {}
+        for r in rows:
+            aid = r["appointment_id"]
+            mid = r["master_id"]
+            msum = r["msum"] or 0
+            paid = paid_by_appt.get(aid, 0) or 0
+            total = appt_total.get(aid, 0) or 0
+            if paid and total > 0 and msum > 0:
+                part = paid * (msum / total)
+                master_totals[mid] = (master_totals.get(mid, 0) or 0) + part
 
-    # Отсортировать финально по total (на случай несохранённого порядка)
-    top_masters = sorted(top_masters, key=lambda m: m.total or 0, reverse=True)[:10]
+        # 6) Топ-10 мастеров по начисленной сумме
+        top_ids = sorted(master_totals.keys(), key=lambda k: master_totals[k], reverse=True)[:10]
+        top_masters_qs = MasterProfile.objects.filter(pk__in=top_ids).select_related("user")
+        top_masters = list(top_masters_qs)
+        for m in top_masters:
+            m.total = master_totals.get(m.pk, 0)
+
+        # Сохранить порядок по total
+        top_masters = sorted(top_masters, key=lambda m: m.total or 0, reverse=True)[:10]
 
     # Недавние встречи (20) с префетчем позиций
     recent_appointments = (
-        Appointment.objects.select_related("client__user")
-        .prefetch_related(
-            Prefetch(
-                "items",
-                queryset=AppointmentItem.objects.select_related("service", "master__user")
-                .order_by("start_time"),
-                )
-        )
-        .order_by("-start_time")[:20]
+        AppointmentItem.objects.select_related("appointment__client__user").order_by("-start_time")[:20]
     )
 
     # Сегодняшние предстоящие встречи (Appointment + items); мастеру — только его
@@ -210,7 +250,7 @@ def custom_index(request):
         "daily_appointments": daily_counts,
         "chart_data": chart_data,
         "total_sales": total_sales,
-        "upcoming_total": upcoming.count(),
+        "upcoming_total": upcoming_items.count(),
         "confirmed_count": confirmed_count,
         "cancelled_count": cancelled_count,
         "top_services": top_services,      # Service с .name и .count
@@ -267,6 +307,422 @@ class ExportCsvMixin:
             extra_context['export_url'] = None
 
         return super().changelist_view(request, extra_context=extra_context)
+
+
+
+class ExportXlsxMixin:
+    """
+    Универсальный XLSX-экспорт для Django Admin.
+    Дает:
+      - URL 'export-xlsx/' для полной выгрузки текущего changelist с учетом фильтров
+      - Экшены: export_appointments_xlsx / export_appointment_items_xlsx
+    Подключение: наследуй нужный ModelAdmin от этого миксина.
+    """
+
+    # ============ ПУБЛИЧНЫЕ ТОЧКИ ============
+
+    def get_urls(self):
+        opts = self.model._meta
+        return [
+            path(
+                "export-xlsx/",
+                self.admin_site.admin_view(self._export_all_xlsx_view),
+                name=f"{opts.app_label}_{opts.model_name}_export_xlsx",
+            ),
+        ] + super().get_urls()
+
+    # Экшен: 1 строка = 1 Appointment
+    def export_appointments_xlsx(self, request, queryset):
+        qs = self._qs_for_export(request, queryset)
+        headers = [
+            "Appointment ID",
+            "Start",
+            "Client",
+            "Status",
+            "Payment Status",
+            "Personal Discount",
+            "Items Count",
+            "Total (sum of items)",
+            "Items (preview)",
+        ]
+        rows = []
+        for appt in qs:
+            items = getattr(appt, "appointmentitem_set").all()
+            total = sum([(getattr(it, "final_price", None) or 0) for it in items])
+            preview = " | ".join(
+                f"{getattr(getattr(it, 'service', None), 'name', getattr(it, 'service', ''))} ×{getattr(it, 'quantity', 1)}"
+                for it in items[:6]
+            )
+            if items.count() > 6:
+                preview += " …"
+            rows.append([
+                str(getattr(appt, "pk", "")),
+                self._to_naive_dt(getattr(appt, "start_time", None)),
+                self._client_name(getattr(appt, "client", None)),
+                self._safe_str(getattr(appt, "status", "")),
+                self._safe_str(getattr(appt, "payment_status", "")),
+                getattr(appt, "personal_discount", None),
+                items.count(),
+                self._as_decimal(total),
+                preview,
+            ])
+
+        # Start = колонка 2 (datetime), Total = колонка 8 (денежный)
+        return self._xlsx_response(
+            "appointments.xlsx", "Appointments", headers, rows,
+            money_cols={8}, datetime_cols={2}
+        )
+
+    export_appointments_xlsx.short_description = "Export Appointments (XLSX, 1 row per appointment)"
+
+    # Экшен: 1 строка = 1 Appointment Item
+    def export_appointment_items_xlsx(self, request, queryset):
+        qs = self._qs_for_export(request, queryset)
+        headers = [
+            "Appointment ID",
+            "Item ID",
+            "Item Start",
+            "Service",
+            "Master",
+            "Quantity",
+            "Unit Price",
+            "Service Discount",
+            "Promocode",
+            "Final Price",
+            "Client",
+            "Appointment Status",
+            "Payment Status",
+            "Personal Discount (Appointment)",
+        ]
+        rows = []
+        for appt in qs:
+            items = getattr(appt, "appointmentitem_set").all()
+            for it in items:
+                rows.append([
+                    str(getattr(appt, "pk", "")),
+                    str(getattr(it, "pk", "")),
+                    self._to_naive_dt(getattr(it, "start_time", None)),
+                    self._safe_str(getattr(getattr(it, "service", None), "name", getattr(it, "service", ""))),
+                    self._safe_str(getattr(getattr(it, "master", None), "short_name",
+                                           getattr(getattr(getattr(it, "master", None), "user", None), "username", ""))),
+                    getattr(it, "quantity", 1),
+                    self._as_decimal(getattr(it, "unit_price", None)),
+                    self._safe_str(getattr(getattr(it, "service_discount", None), "name", getattr(it, "service_discount", ""))),
+                    self._safe_str(getattr(getattr(it, "promocode", None), "code", getattr(it, "promocode", ""))),
+                    self._as_decimal(getattr(it, "final_price", None)),
+                    self._client_name(getattr(appt, "client", None)),
+                    self._safe_str(getattr(appt, "status", "")),
+                    self._safe_str(getattr(appt, "payment_status", "")),
+                    getattr(appt, "personal_discount", None),
+                ])
+
+        # Item Start = 3 (datetime), Unit Price = 7, Final Price = 10 (денежные)
+        return self._xlsx_response(
+            "appointment_items.xlsx", "Items", headers, rows,
+            money_cols={7, 10}, datetime_cols={3}
+        )
+
+    export_appointment_items_xlsx.short_description = "Export Appointment Items (XLSX, 1 row per item)"
+
+    # Зарегистрируй экшены в админ-классе:
+    # actions = ["export_appointments_xlsx", "export_appointment_items_xlsx"]
+
+    # ============ ВСПОМОГАТЕЛЬНОЕ ============
+
+    def _export_all_xlsx_view(self, request):
+        """
+        Полная выгрузка текущего списка (как в changelist, с учетом фильтров).
+        По умолчанию — 1 строка = 1 объект self.model с его ._meta.fields.
+        """
+        queryset = self.get_queryset(request)
+        fields = [f.name for f in self.model._meta.fields]
+        headers = fields
+        rows = ([self._xlsx_safe(getattr(obj, f)) for f in fields] for obj in queryset)
+        return self._xlsx_response(f"{self.model._meta.model_name}.xlsx", "Export", headers, rows)
+
+    def _qs_for_export(self, request, queryset=None):
+        """
+        Оптимизация выборки для экшенов по встречам и их позициям.
+        Переопредели под свою модель при необходимости.
+        """
+        qs = (queryset or self.get_queryset(request)).select_related(
+            "client",
+        ).prefetch_related(
+            "appointmentitem_set__service",
+            "appointmentitem_set__master",
+            "appointmentitem_set__promocode",
+            "appointmentitem_set__service_discount",
+        )
+        return qs
+
+    # ============ НИЗКИЙ УРОВЕНЬ (XLSX) ============
+
+    def _xlsx_response(
+            self,
+            filename: str,
+            sheet_title: str,
+            headers: Sequence[str],
+            rows: Iterable[Sequence],
+            *,
+            money_cols: set[int] | None = None,
+            datetime_cols: set[int] | None = None,
+    ) -> HttpResponse:
+        """
+        Возвращает HttpResponse с XLSX.
+        money_cols / datetime_cols — 1-based индексы колонок для number_format.
+        """
+        money_cols = money_cols or set()
+        datetime_cols = datetime_cols or set()
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = sheet_title[:31] if sheet_title else "Export"
+
+        # Заголовок
+        ws.append(list(headers))
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(vertical="center")
+
+        # Данные
+        row_idx = 1
+        for row in rows:
+            row_idx += 1
+            safe_row = [self._xlsx_safe(v) for v in row]
+            ws.append(safe_row)
+
+            # Форматы
+            for col_idx, _ in enumerate(headers, start=1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                if col_idx in money_cols and isinstance(cell.value, (int, float, Decimal)):
+                    cell.number_format = numbers.FORMAT_CURRENCY_USD_SIMPLE
+                if col_idx in datetime_cols and isinstance(cell.value, datetime):
+                    cell.number_format = "yyyy-mm-dd hh:mm"
+
+        # Авто-ширина
+        for col_idx in range(1, ws.max_column + 1):
+            letter = get_column_letter(col_idx)
+            max_len = 0
+            for cell in ws[letter]:
+                v = "" if cell.value is None else str(cell.value)
+                if len(v) > max_len:
+                    max_len = len(v)
+            ws.column_dimensions[letter].width = min(max_len + 2, 60)
+
+        buff = BytesIO()
+        wb.save(buff)
+        buff.seek(0)
+
+        resp = HttpResponse(
+            buff.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        if not filename.endswith(".xlsx"):
+            filename += ".xlsx"
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return resp
+
+    # ============ ПРИВЕДЕНИЕ ТИПОВ ============
+
+    def _xlsx_safe(self, v):
+        """Конвертирует произвольные значения в Excel-дружелюбные."""
+        if v is None:
+            return ""
+        # datetime → naive (локальная TZ), time → без tzinfo
+        if isinstance(v, datetime):
+            return self._to_naive_dt(v)
+        if isinstance(v, time_cls):
+            # Excel не поддерживает tz-aware time; сбрасываем tzinfo
+            return time_cls(v.hour, v.minute, v.second, v.microsecond)
+        if isinstance(v, (date, )):
+            return v
+        if isinstance(v, (str, int, float, bool, Decimal)):
+            return v
+        # Модели/Enums/Objects → строка (использует __str__)
+        return str(v)
+
+    def _to_naive_dt(self, dt: datetime) -> datetime | None:
+        """Excel не любит tz-aware; переводим в naive (settings.TIME_ZONE)."""
+        if not isinstance(dt, datetime):
+            return dt
+        return make_naive(dt) if is_aware(dt) else dt
+
+    def _as_decimal(self, v):
+        if v is None:
+            return None
+        if isinstance(v, Decimal):
+            return v
+        if isinstance(v, (int, float)):
+            return Decimal(str(v))
+        try:
+            return Decimal(str(v))
+        except Exception:
+            return str(v)
+
+    def _safe_str(self, v, default=""):
+        return default if v in (None, "") else str(v)
+
+    def _client_name(self, client):
+        if client is None:
+            return ""
+        full = getattr(client, "full_name", "")
+        if full:
+            return full
+        user = getattr(client, "user", None)
+        return getattr(user, "username", "") if user else ""
+
+    def _wb_new(self) -> Workbook:
+        wb = Workbook()
+        wb.remove(wb.active)  # удаляем дефолтный пустой лист
+        return wb
+
+    def _append_sheet(self, wb: Workbook, title: str, headers, rows, *, money_cols=None, datetime_cols=None):
+        money_cols = set(money_cols or [])
+        datetime_cols = set(datetime_cols or [])
+
+        ws = wb.create_sheet(title=title[:31] or "Export")
+        ws.append(list(headers))
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(vertical="center")
+
+        row_idx = 1
+        for row in rows:
+            row_idx += 1
+            safe_row = [self._xlsx_safe(v) for v in row]
+            ws.append(safe_row)
+
+            for col_idx, _ in enumerate(headers, start=1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                if col_idx in money_cols and isinstance(cell.value, (int, float, Decimal)):
+                    cell.number_format = numbers.FORMAT_CURRENCY_USD_SIMPLE
+                if col_idx in datetime_cols and isinstance(cell.value, datetime):
+                    cell.number_format = "yyyy-mm-dd hh:mm"
+                if col_idx in datetime_cols and isinstance(cell.value, date) and not isinstance(cell.value, datetime):
+                    cell.number_format = "yyyy-mm-dd"
+
+        # авто-ширина
+        for col_idx in range(1, ws.max_column + 1):
+            letter = get_column_letter(col_idx)
+            max_len = 0
+            for c in ws[letter]:
+                s = "" if c.value is None else str(c.value)
+                if len(s) > max_len:
+                    max_len = len(s)
+            ws.column_dimensions[letter].width = min(max_len + 2, 60)
+
+        return ws
+
+    def _wb_response(self, wb: Workbook, filename: str) -> HttpResponse:
+        buff = BytesIO()
+        wb.save(buff)
+        buff.seek(0)
+        resp = HttpResponse(
+            buff.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        if not filename.endswith(".xlsx"):
+            filename += ".xlsx"
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return resp
+
+    def build_statistics_workbook(
+            self,
+            *,
+            start, end,
+            kpi_total_revenue, kpi_total_appointments, kpi_with_discount,
+            top_bookers, top_spenders, ds_totals,
+            discount_breakdown, promo_breakdown, client_source_table,
+    ):
+        """
+        Собирает многолистовую книгу XLSX из данных статистики.
+        На вход подаются готовые QuerySet/списки, которые уже посчитаны в stats_view.
+        """
+        wb = self._wb_new()
+
+        # KPI
+        self._append_sheet(
+            wb, "KPI",
+            headers=["Start", "End", "Total Revenue", "Appointments", "With Discount"],
+            rows=[[start, end, kpi_total_revenue, kpi_total_appointments, kpi_with_discount]],
+            money_cols={3}, datetime_cols={1, 2},
+        )
+
+        # Top Bookers
+        self._append_sheet(
+            wb, "Top Bookers",
+            headers=["Client ID", "First Name", "Last Name", "Email", "Appointments", "Spent"],
+            rows=[
+                [
+                    r["client_id"],
+                    r["client__user__first_name"],
+                    r["client__user__last_name"],
+                    r["client__user__email"],
+                    r["appt_count"],
+                    r["spent"],
+                ] for r in top_bookers
+            ],
+            money_cols={6},
+        )
+
+        # Top Spenders
+        self._append_sheet(
+            wb, "Top Spenders",
+            headers=["Client ID", "First Name", "Last Name", "Email", "Spent", "Appointments"],
+            rows=[
+                [
+                    r["client_id"],
+                    r["client__user__first_name"],
+                    r["client__user__last_name"],
+                    r["client__user__email"],
+                    r["spent"],
+                    r["appt_count"],
+                ] for r in top_spenders
+            ],
+            money_cols={5},
+        )
+
+        # Discount Sources totals
+        self._append_sheet(
+            wb, "Discount Sources",
+            headers=["Discount Source", "Appointments (distinct)", "Revenue"],
+            rows=[[r["discount_source"], r["cnt"], r["revenue"]] for r in ds_totals],
+            money_cols={3},
+        )
+
+        # ServiceDiscount breakdown
+        self._append_sheet(
+            wb, "ServiceDiscount",
+            headers=["ServiceDiscount", "Service", "Uses", "Revenue(by items)", "Saved"],
+            rows=[
+                [str(d), getattr(d.service, "name", ""), d.uses, d.revenue, d.saved]
+                for d in discount_breakdown
+            ],
+            money_cols={4, 5},
+        )
+
+        # Promo breakdown
+        self._append_sheet(
+            wb, "Promo",
+            headers=["Code", "Uses", "Revenue (share)"],
+            rows=[[r["code"], r["uses"], r["revenue"]] for r in promo_breakdown],
+            money_cols={3},
+        )
+
+        # Client Source
+        self._append_sheet(
+            wb, "Client Source",
+            headers=["Key", "Label", "Revenue", "Appointments", "Clients"],
+            rows=[
+                [r["key"], r["label"], r["revenue"], r["appts"], r["clients"]]
+                for r in client_source_table
+            ],
+            money_cols={3},
+        )
+
+        return wb
+
+
 # -----------------------------
 # Customized User Admin
 # -----------------------------
@@ -276,7 +732,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     """
     add_form = CustomUserCreationForm
     form = CustomUserChangeForm
-    export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
+    export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
 
     add_fieldsets = (
         (None, {
@@ -284,7 +740,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             'fields': (
                 'username', 'usable_password', 'password1', 'password2',
                 'email', 'first_name', 'last_name',
-                'phone', 'birth_date', 'postal_code',
+                'phone', 'birth_date', 'address', 'postal_code',
                 'personal_discount_percent', 'how_heard', 'email_marketing_consent',
                 'notes',
                 'is_active', 'is_staff', 'is_superuser', 'groups',
@@ -304,6 +760,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     def get_export_row(self, obj):
         phone = obj.userprofile.phone if hasattr(obj, 'userprofile') else ''
         birth_date = obj.userprofile.birth_date if hasattr(obj, 'userprofile') else ''
+        address = obj.userprofile.address if hasattr(obj, 'userprofile') else ''
         postal_code = obj.userprofile.postal_code if hasattr(obj, 'userprofile') else ''
         source = obj.userprofile.source if hasattr(obj, 'userprofile') else ''
         consent = obj.userprofile.email_marketing_consent if hasattr(obj, 'userprofile') else ''
@@ -315,6 +772,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             obj.last_name,
             phone,
             birth_date,
+            address,
             postal_code,
             obj.is_staff,
             obj.is_superuser,
@@ -333,7 +791,10 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     # Field layout when editing a user
     fieldsets = (
         (None, {'fields': ('username', 'email', 'password', 'personal_discount_percent')}),
-        ('Personal Info', {'fields': ('first_name', 'last_name', 'phone', 'birth_date', 'postal_code', 'how_heard', 'email_marketing_consent')}),
+        ('Personal Info', {'fields': (
+            'first_name', 'last_name', 'phone', 'birth_date', 'address',
+            'postal_code', 'how_heard', 'email_marketing_consent'
+        )}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Files', {'fields': ('files',)}),
         ('Notes', {'fields': ('notes',)}),
@@ -672,6 +1133,48 @@ class AppointmentItemInline(admin.TabularInline):
         return True
 
 
+class AppointmentProductSaleInline(admin.StackedInline):
+    model = ProductSale
+    form = AppointmentProductSaleForm
+    fk_name = "appointment"
+    extra = 0
+    autocomplete_fields = ("product", "sold_by", "client")
+    verbose_name = "Product sale"
+    verbose_name_plural = "Product sales"
+    prefix = "product_sales"
+
+    def formfield_for_foreignkey(self, db_field, request=None, **kwargs):
+        if db_field.name == "client":
+            kwargs["queryset"] = (
+                UserProfile.objects.filter(userrole__role__name="Client")
+                .select_related("user")
+                .order_by("user__first_name", "user__last_name", "user__username")
+                .distinct()
+            )
+        if db_field.name == "sold_by" and request is not None:
+            profile = getattr(request.user, "userprofile", None)
+            filters = Q(user__is_superuser=True)
+            if profile:
+                filters |= Q(pk=profile.pk)
+            kwargs["queryset"] = (
+                UserProfile.objects.select_related("user")
+                .filter(filters)
+                .order_by("user__first_name", "user__last_name", "user__username")
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def get_formset(self, request, obj=None, **kwargs):
+        formset = super().get_formset(request, obj, **kwargs)
+        base_kwargs = getattr(formset, "form_kwargs", {}) or {}
+        formset.form_kwargs = {**base_kwargs, "request": request, "appointment": obj}
+
+        price_url = reverse("admin:core_productsale_product_price")
+        product_field = formset.form.base_fields.get("product")
+        if product_field:
+            product_field.widget.attrs["data-price-endpoint"] = price_url
+        return formset
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # CSV helpers
 # ──────────────────────────────────────────────────────────────────────────────
@@ -686,7 +1189,7 @@ def _money(x):
 
 
 @admin.register(Appointment)
-class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
+class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     """
     Полнофункциональная админка:
       • обычный список + календарный вид (?view=calendar)
@@ -696,7 +1199,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
       • режим мастера: видит только свои записи, read-only, без действий
     """
     form = AppointmentAdminForm
-    inlines = [AppointmentItemInline]
+    inlines = [AppointmentItemInline, AppointmentProductSaleInline]
     add_form = AppointmentAddForm
     # NOTE: если хочешь отдельный шаблон для календаря — задай его здесь
     change_list_template = "admin/appointments_calendar.html"  # твой базовый шаблон списка
@@ -704,7 +1207,12 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
     date_hierarchy = "start_time"  # поправь, если поле называется иначе
 
     list_select_related = ("client",)
-
+    search_fields = (
+        "id",
+        "client__user__first_name",
+        "client__user__last_name",
+        "client__user__username",
+    )
 
     ordering = ("-start_time",)
     autocomplete=["promocode",]
@@ -781,20 +1289,61 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             ctx["form"] = adminform.form
 
         # отдаём инлайн-формсет позиций в шаблон
-        # ── НАЙТИ inline formset ДЛЯ AppointmentItem НАДЁЖНО ─────────────────
-        # === 1) Собираем formset для items принудительно ===
-        items_fs = None
+        # ── НАЙТИ inline formsets НАДЁЖНО ─────────────────
+        items_inline = None
+        sales_inline = None
         for inline in ctx.get("inline_admin_formsets", []):
+            model = getattr(inline.opts, "model", None)
+            if model is AppointmentItem:
+                items_inline = inline
+            elif model is ProductSale:
+                sales_inline = inline
 
-            if getattr(inline.opts, "model", None) is AppointmentItem:
+        if items_inline is not None:
+            ctx["items_formset"] = items_inline.formset
+            ctx["items_inline"] = items_inline
+        if sales_inline is not None:
+            ctx["product_sales_formset"] = sales_inline.formset
+            ctx["product_sales_inline"] = sales_inline
+            ctx["product_sales_prefix"] = sales_inline.formset.prefix
+            ctx["product_sales_can_delete"] = sales_inline.formset.can_delete
 
-                items_fs = inline.formset
+        sale_forms_to_render = []
+        if sales_inline is not None:
+            for form in sales_inline.formset.forms:
+                instance_exists = getattr(form.instance, "pk", None)
+                if form.is_bound:
+                    if form.errors or not form.empty_permitted or form.has_changed():
+                        sale_forms_to_render.append(form)
+                elif instance_exists:
+                    sale_forms_to_render.append(form)
+        ctx["product_sales_forms"] = sale_forms_to_render
 
-                break
-
-
-        if items_fs is not None:
-            ctx["items_formset"] = items_fs
+        sale_defaults = {"quantity": 1}
+        if obj and getattr(obj, "client", None):
+            client_obj = obj.client
+            client_user = getattr(client_obj, "user", None)
+            raw_client_label = (
+                getattr(client_user, "get_full_name", lambda: "")() or getattr(client_user, "username", "") or str(client_obj)
+            )
+            client_label = (str(raw_client_label) or "").strip() or str(client_obj)
+            sale_defaults["client"] = {
+                "id": str(obj.client_id),
+                "label": client_label,
+            }
+        profile = getattr(request.user, "userprofile", None)
+        if profile:
+            user = getattr(profile, "user", None)
+            raw_sold_by_label = (
+                getattr(user, "get_full_name", lambda: "")() or getattr(user, "username", "") or str(profile)
+            )
+            sold_by_label = (str(raw_sold_by_label) or "").strip() or str(profile)
+            sale_defaults["sold_by"] = {
+                "id": str(profile.pk),
+                "label": sold_by_label,
+            }
+        ctx["product_sale_defaults"] = sale_defaults
+        ctx["product_sale_price_endpoint"] = reverse("admin:core_productsale_product_price")
         # ===== данные для кастомных селектов =====
         # ограничим пул мастеров, если текущий пользователь — мастер
         mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
@@ -837,6 +1386,39 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             else:
                 promos_global.append(payload)
 
+        intake_forms_overview: List[Dict[str, Any]] = []
+        intake_required_ids: List[str] = []
+        if obj:
+            submissions_map = {
+                str(sub.form_id): sub
+                for sub in ClientIntakeFormSubmission.objects.filter(appointment=obj).select_related("form")
+            }
+            required_forms_qs = (
+                ClientIntakeForm.objects
+                .filter(services__appointmentitem__appointment=obj)
+                .distinct()
+            )
+            for intake_form in required_forms_qs:
+                fid = str(intake_form.pk)
+                intake_required_ids.append(fid)
+                submission = submissions_map.get(fid)
+                service_names = list(
+                    intake_form.services
+                    .filter(appointmentitem__appointment=obj)
+                    .order_by("name")
+                    .values_list("name", flat=True)
+                    .distinct()
+                )
+                intake_forms_overview.append({
+                    "id": fid,
+                    "name": intake_form.name,
+                    "description": intake_form.description,
+                    "services": service_names,
+                    "submitted": bool(submission),
+                    "submitted_at": submission.submitted_at if submission else None,
+                    "manage_url": reverse("admin:core_appointment_manage_form", args=[obj.pk, intake_form.pk]),
+                })
+
         ctx.update({
             "masters_data": masters,
             "ms_map_data": dict(ms_map),
@@ -844,6 +1426,8 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             "promos_by_service_data": dict(promos_by_service),
             "promos_global_data": promos_global,
             "APPT_FIELDS_1": ("client", "start_time", "payment_status", "current_status"),
+            "intake_forms_overview": intake_forms_overview,
+            "intake_required_ids": intake_required_ids,
 
             # === важные флаги для шаблонов/JS ===
             "is_master": is_master(request.user),
@@ -851,9 +1435,76 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         })
         return super().render_change_form(request, ctx, add=add, change=change, form_url=form_url, obj=obj)
 
+    def manage_intake_form_view(self, request, appointment_id, form_id):
+        appointment = get_object_or_404(Appointment, pk=appointment_id)
+        if not self.has_change_permission(request, appointment):
+            raise PermissionDenied
+
+        intake_form = get_object_or_404(ClientIntakeForm, pk=form_id)
+        submission = (
+            ClientIntakeFormSubmission.objects
+            .filter(appointment=appointment, form=intake_form)
+            .first()
+        )
+
+        client_profile = getattr(appointment, "client", None)
+        if submission:
+            initial_data = submission.data or submission.raw_payload or {}
+        else:
+            initial_data = {}
+
+        if request.method == "POST":
+            bound_form = intake_form.build_bound_form(
+                data=request.POST,
+                files=request.FILES,
+                client=client_profile,
+            )
+            if bound_form.is_valid():
+                cleaned = _coerce_json(bound_form.cleaned_data)
+                ClientIntakeFormSubmission.objects.update_or_create(
+                    appointment=appointment,
+                    client=client_profile,
+                    form=intake_form,
+                    defaults={
+                        "submitted_by": request.user if getattr(request.user, "is_authenticated", False) else None,
+                        "data": cleaned,
+                        "raw_payload": cleaned,
+                        "form_schema_snapshot": intake_form.normalized_schema(),
+                        "schema_version": intake_form.schema_version,
+                        "is_complete": True,
+                    },
+                )
+                messages.success(request, f"{intake_form.name} saved.")
+                return redirect("admin:core_appointment_change", appointment.pk)
+        else:
+            bound_form = intake_form.build_bound_form(
+                data=None,
+                files=None,
+                initial=initial_data,
+                client=client_profile,
+            )
+
+        related_services = (
+            intake_form.services.filter(appointmentitem__appointment=appointment)
+            .order_by("name")
+            .values_list("name", flat=True)
+            .distinct()
+        )
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"{intake_form.name} — {appointment}",
+            "appointment": appointment,
+            "intake_form": intake_form,
+            "submission": submission,
+            "form": bound_form,
+            "related_services": list(related_services),
+            "back_url": reverse("admin:core_appointment_change", args=[appointment.pk]),
+        }
+        return TemplateResponse(request, "admin/appointment_manage_form.html", context)
+
     def save_model(self, request, obj, form, change):
         # Админка валидирует формы, но мы дополнительно страхуемся:
-        print(f"obj:{obj}")
         obj.full_clean()  # вызывает Appointment.clean()
         super().save_model(request, obj, form, change)
         new_status = form.cleaned_data.get("current_status")
@@ -884,14 +1535,22 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
     def save_formset(self, request, form, formset, change):
         # Забираем инстансы без сохранения
         instances = formset.save(commit=False)
-        print(f"formset: {formset}")
         # Удаления — отдельно
         for deleted in formset.deleted_objects:
             deleted.delete()
 
         # Прогоняем full_clean() на каждом дочернем объекте
         for inst in instances:
-            print(f"inst: {inst}")
+            if isinstance(inst, ProductSale):
+                if form.instance and not inst.client_id and getattr(form.instance, "client_id", None):
+                    inst.client_id = form.instance.client_id
+                if not inst.sold_by_id:
+                    profile = getattr(request.user, "userprofile", None)
+                    if profile:
+                        inst.sold_by = profile
+                if not inst.sold_at:
+                    base_dt = getattr(form.instance, "start_time", None)
+                    inst.sold_at = base_dt or timezone.now()
             inst.full_clean()  # вызывает AppointmentItem.clean()
             inst.save()
 
@@ -922,6 +1581,11 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         urls = super().get_urls()
         custom = [
             path(
+                "<uuid:appointment_id>/forms/<uuid:form_id>/",
+                self.admin_site.admin_view(self.manage_intake_form_view),
+                name="core_appointment_manage_form",
+            ),
+            path(
                 "create/custom/",
                 self.admin_site.admin_view(self.custom_create_view),
                 name="core_appointment_custom_create",
@@ -936,23 +1600,89 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         return obj.id
 
     def _context_lists(self):
-        clients = (UserProfile.objects.select_related("user")
-                   .annotate(label=Concat("user__first_name", Value(" "), "user__last_name"))
-                   .values("id", "label").order_by("label"))
-        masters = (MasterProfile.objects.select_related("user")
-                   .annotate(label=Concat("user__user__first_name", Value(" "), "user__user__last_name"))
-                   .values("id", "label").order_by("label"))
-        services_by_master = {}
-        qs = (ServiceMaster.objects.select_related("service", "master")
-              .values("master_id", "service__id", "service__name", "service__base_price", "service__duration_min"))
+        clients = (
+            UserProfile.objects.select_related("user")
+            .annotate(label=Concat("user__first_name", Value(" "), "user__last_name"))
+            .values("id", "label")
+            .order_by("label")
+        )
+        masters = (
+            MasterProfile.objects.select_related("user")
+            .annotate(label=Concat("user__user__first_name", Value(" "), "user__user__last_name"))
+            .values("id", "label")
+            .order_by("label")
+        )
+
+        service_forms_map: Dict[str, List[str]] = {}
+        intake_forms_map: Dict[str, ClientIntakeForm] = {}
+        services_info: Dict[str, Dict[str, Any]] = {}
+
+        services_qs = (
+            Service.objects
+            .select_related("category")
+            .prefetch_related(
+                Prefetch(
+                    "pre_appointment_forms",
+                    queryset=ClientIntakeForm.objects.filter(is_active=True),
+                )
+            )
+        )
+        for svc in services_qs:
+            sid = str(svc.pk)
+            active_forms = list(svc.active_forms())
+            form_ids = [str(form.pk) for form in active_forms]
+            service_forms_map[sid] = form_ids
+            services_info[sid] = {
+                "id": sid,
+                "name": svc.name,
+                "base_price": str(svc.base_price),
+                "duration_min": svc.duration_min,
+                "forms": form_ids,
+            }
+            for form in active_forms:
+                intake_forms_map[str(form.pk)] = form
+
+        services_by_master: Dict[str, List[Dict[str, Any]]] = {}
+        qs = (
+            ServiceMaster.objects
+            .select_related("service", "master")
+            .values(
+                "master_id",
+                "service__id",
+                "service__name",
+                "service__base_price",
+                "service__duration_min",
+            )
+        )
         for r in qs:
-            services_by_master.setdefault(str(r["master_id"]), []).append({
-                "id": str(r["service__id"]),
-                "name": r["service__name"],
-                "base_price": str(r["service__base_price"]),
-                "duration_min": r["service__duration_min"],
-            })
-        return list(clients), list(masters), services_by_master
+            sid = str(r["service__id"])
+            base = services_info.get(sid)
+            if not base:
+                forms = service_forms_map.get(sid, [])
+                base = {
+                    "id": sid,
+                    "name": r["service__name"],
+                    "base_price": str(r["service__base_price"]),
+                    "duration_min": r["service__duration_min"],
+                    "forms": forms,
+                }
+                services_info[sid] = base
+            payload = {
+                "id": base["id"],
+                "name": base["name"],
+                "base_price": base["base_price"],
+                "duration_min": base["duration_min"],
+                "forms": list(base.get("forms", [])),
+            }
+            services_by_master.setdefault(str(r["master_id"]), []).append(payload)
+
+        return (
+            list(clients),
+            list(masters),
+            services_by_master,
+            service_forms_map,
+            intake_forms_map,
+        )
 
     def _parse_start_dt(date_str: str | None, time_str: str | None):
         if not date_str or not time_str:
@@ -1002,6 +1732,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "__all__": [],                 # глобальные ошибки
                 "fields": defaultdict(list),   # ошибки по полям формы (вне айтемов)
                 "items": defaultdict(lambda: defaultdict(list)),  # ошибки по строкам айтемов
+                "intake": defaultdict(lambda: defaultdict(list)),  # ошибки по формам-анкетам
             }
 
         def _serialize_validation_error(exc, bag):
@@ -1028,6 +1759,14 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                             bag["__all__"].extend(msgs)
                     elif key in ("__all__", "non_field_errors"):
                         bag["__all__"].extend(msgs)
+                    elif key.startswith("intake:"):
+                        parts = key.split(":")
+                        if len(parts) >= 2:
+                            fintake = parts[1]
+                            field_name = parts[2] if len(parts) >= 3 else "__all__"
+                            bag["intake"][fintake][field_name].extend(msgs)
+                        else:
+                            bag["__all__"].extend(msgs)
                     else:
                         bag["fields"][key].extend(msgs)
             else:
@@ -1037,15 +1776,33 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         def _finalize_bag(bag):
             bag["fields"] = dict(bag["fields"])
             bag["items"] = {i: dict(fields) for i, fields in bag["items"].items()}
+            bag["intake"] = {form_id: dict(fields) for form_id, fields in bag["intake"].items()}
             return bag
 
         def _context_lists():
             """Ваш существующий метод, оставляю как есть; если у вас уже есть — используйте его."""
             return self._context_lists()
+
+        def _build_forms_catalog(forms_map):
+            catalog = {}
+            for fid, form in forms_map.items():
+                catalog[fid] = {
+                    "id": fid,
+                    "name": form.name,
+                    "slug": form.slug,
+                    "description": form.description or "",
+                    "version": form.schema_version,
+                    "schema": form.normalized_schema(),
+                    "updated_at": form.updated_at.isoformat() if form.updated_at else None,
+                }
+            return catalog
+
         # ---------------- GET: первичная отрисовка ----------------
         mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
         if request.method == "GET" and request.GET.get("master") != 'undefined':
-            clients, masters, services_by_master = _context_lists()
+            clients, masters, services_by_master, service_forms_map, intake_forms_map = _context_lists()
+            intake_forms_catalog = _build_forms_catalog(intake_forms_map)
+            posted_intake_payload = {"forms": []}
 
             q_date   = request.GET.get("date")
             q_time   = request.GET.get("time")
@@ -1072,6 +1829,10 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "services_by_master": services_by_master,
                 "initial_first_item": initial_first_item,
                 "prefill_query": {"date": q_date, "time": q_time, "master": str(q_master) if q_master else None},
+                "service_forms_map": service_forms_map,
+                "intake_forms_catalog": intake_forms_catalog,
+                "posted_intake_payload": posted_intake_payload,
+                "intake_error_map": {},
 
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
@@ -1080,7 +1841,8 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
 
 
         # ---------------- POST: создаём запись ----------------
-        clients, masters, services_by_master = _context_lists()
+        clients, masters, services_by_master, service_forms_map, intake_forms_map = _context_lists()
+        intake_forms_catalog = _build_forms_catalog(intake_forms_map)
 
         if is_master(request.user):
             masters = [m for m in masters if str(m["id"]) == str(mp.pk)]
@@ -1126,8 +1888,30 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 uniq.append(it)
             promos_by_service[sid] = sorted(uniq, key=lambda x: (x["text"] or "").lower())
 
+        intake_payload_raw = (request.POST.get("intake_payload") or "").strip()
+
         # state + первичная валидация
         bag = _empty_error_bag()
+        intake_payload = {"forms": []}
+        submitted_intake_map: dict[str, dict] = {}
+        if intake_payload_raw:
+            try:
+                intake_payload = json.loads(intake_payload_raw) or {"forms": []}
+            except json.JSONDecodeError:
+                bag["__all__"].append("Unable to parse submitted intake forms.")
+                intake_payload = {"forms": []}
+        if isinstance(intake_payload, dict):
+            entries = intake_payload.get("forms", [])
+            if isinstance(entries, list):
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    fid = entry.get("id")
+                    if fid:
+                        submitted_intake_map[str(fid)] = entry
+        else:
+            bag["__all__"].append("Invalid intake forms payload structure.")
+            intake_payload = {"forms": []}
         client_id = (request.POST.get("client") or "").strip()
         try:
             total_forms = int(request.POST.get("items-TOTAL_FORMS", 0))
@@ -1192,8 +1976,44 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "promocode_id": (row["promocode"] or None),
             })
 
+        required_form_ids: set[str] = set()
+        for row in valid_rows:
+            service_id = row.get("service_id")
+            if not service_id:
+                continue
+            required_form_ids.update(service_forms_map.get(str(service_id), []))
+
+        client_profile = None
+        if client_id:
+            client_profile = UserProfile.objects.filter(pk=client_id).select_related("user").first()
+
+        validated_intake: dict[str, dict] = {}
+        for form_id in required_form_ids:
+            form_obj = intake_forms_map.get(form_id)
+            if not form_obj:
+                continue
+            submission_entry = submitted_intake_map.get(form_id)
+            if not submission_entry:
+                bag["intake"][form_id]["__all__"].append("This form must be completed before booking.")
+                continue
+            payload = submission_entry.get("data") or {}
+            if not isinstance(payload, dict):
+                bag["intake"][form_id]["__all__"].append("Invalid payload for this form.")
+                continue
+            bound_form = form_obj.build_bound_form(data=payload, client=client_profile)
+            if not bound_form.is_valid():
+                for field_name, errors in bound_form.errors.items():
+                    target = field_name if field_name != "__all__" else "__all__"
+                    bag["intake"][form_id][target].extend([str(err) for err in errors])
+                continue
+            validated_intake[form_id] = {
+                "cleaned_data": bound_form.cleaned_data,
+                "raw_data": payload,
+                "form": form_obj,
+            }
+
         # если уже есть ошибки — просто показать страницу с ними
-        has_errors = bool(bag["__all__"] or bag["fields"] or bag["items"])
+        has_errors = bool(bag["__all__"] or bag["fields"] or bag["items"] or bag["intake"])
         if has_errors:
             ctx = {
                 **self.admin_site.each_context(request),
@@ -1204,8 +2024,12 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "form_errors": bag["__all__"],
                 "field_errors": dict(bag["fields"]),
                 "item_errors": {i: dict(v) for i, v in bag["items"].items()},
+                "intake_error_map": {fid: dict(fields) for fid, fields in bag["intake"].items()},
                 "posted_items": posted_items,
                 "posted_client": client_id,
+                "service_forms_map": service_forms_map,
+                "intake_forms_catalog": intake_forms_catalog,
+                "posted_intake_payload": intake_payload,
 
 
                 "is_master": is_master(request.user),
@@ -1304,6 +2128,26 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                         set_by=request.user.userprofile if set_by else None,
                     )
 
+                if validated_intake:
+                    profile_for_submission = getattr(appt, "client", None) or client_profile
+                    if profile_for_submission is None and client_id:
+                        profile_for_submission = UserProfile.objects.filter(pk=client_id).first()
+                    for payload in validated_intake.values():
+                        form_obj = payload["form"]
+                        if profile_for_submission is None:
+                            continue
+                        ClientIntakeFormSubmission.objects.create(
+                            form=form_obj,
+                            client=profile_for_submission,
+                            appointment=appt,
+                            submitted_by=request.user if getattr(request.user, "is_authenticated", False) else None,
+                            data=_coerce_json(payload["cleaned_data"]),
+                            raw_payload=_coerce_json(payload["raw_data"]),
+                            form_schema_snapshot=form_obj.normalized_schema(),
+                            schema_version=form_obj.schema_version,
+                            is_complete=True,
+                        )
+
             messages.success(request, "Appointment created.")
             return redirect("admin:core_appointment_change", appt.pk)
 
@@ -1320,8 +2164,12 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "form_errors": bag["__all__"],
                 "field_errors": bag["fields"],
                 "item_errors": bag["items"],
+                "intake_error_map": bag["intake"],
                 "posted_items": posted_items,
                 "posted_client": client_id,
+                "service_forms_map": service_forms_map,
+                "intake_forms_catalog": intake_forms_catalog,
+                "posted_intake_payload": intake_payload,
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
             }
@@ -1339,8 +2187,12 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "form_errors": bag["__all__"],
                 "field_errors": dict(bag["fields"]),
                 "item_errors": {i: dict(v) for i, v in bag["items"].items()},
+                "intake_error_map": {fid: dict(fields) for fid, fields in bag["intake"].items()},
                 "posted_items": posted_items,
                 "posted_client": client_id,
+                "service_forms_map": service_forms_map,
+                "intake_forms_catalog": intake_forms_catalog,
+                "posted_intake_payload": intake_payload,
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
             }
@@ -1358,8 +2210,12 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "form_errors": bag["__all__"],
                 "field_errors": dict(bag["fields"]),
                 "item_errors": {i: dict(v) for i, v in bag["items"].items()},
+                "intake_error_map": {fid: dict(fields) for fid, fields in bag["intake"].items()},
                 "posted_items": posted_items,
                 "posted_client": client_id,
+                "service_forms_map": service_forms_map,
+                "intake_forms_catalog": intake_forms_catalog,
+                "posted_intake_payload": intake_payload,
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
             }
@@ -1433,128 +2289,17 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
 
     # ── CSV действия (через твой миксин) ─────────────────────────────────────
 
-    actions = ["export_appointments_csv", "export_appointment_items_csv"]
+    actions = ["export_appointments_xlsx", "export_appointment_items_xlsx"]
 
-    def _csv_export(self, request, filename, headers, rows):
-        """
-        Универсальный адаптер под разные реализации твоего миксина.
-        1) export_as_csv(request, filename, headers, rows)
-        2) stream_csv(filename, headers, rows)
-        3) fallback — HttpResponse (если миксин ничего не определяет)
-        """
-        if hasattr(self, "export_as_csv") and callable(getattr(self, "export_as_csv")):
-            return self.export_as_csv(request, filename, headers, rows)
-        if hasattr(self, "stream_csv") and callable(getattr(self, "stream_csv")):
-            return self.stream_csv(filename, headers, rows)
 
-        import csv
-        resp = HttpResponse(content_type="text/csv; charset=utf-8")
-        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
-        writer = csv.writer(resp)
-        writer.writerow(headers)
-        for r in rows:
-            writer.writerow(r)
-        return resp
-
-    def _qs_for_export(self, request, queryset=None):
-        qs = (queryset or self.get_queryset(request)).select_related(
-            "client",
-        ).prefetch_related(
-            "appointmentitem_set__service",
-            "appointmentitem_set__master",
-            "appointmentitem_set__promocode",
-            "appointmentitem_set__service_discount",
-        )
-        return qs
-
-    def export_appointments_csv(self, request, queryset):
-        qs = self._qs_for_export(request, queryset)
-        headers = [
-            "Appointment ID",
-            "Start",
-            "Client",
-            "Status",
-            "Payment Status",
-            "Personal Discount",
-            "Items Count",
-            "Total (sum of items)",
-            "Items (preview)",
-        ]
-        rows = []
-        for appt in qs:
-            items = getattr(appt, "appointmentitem_set").all()
-            total = sum([(it.final_price or 0) for it in items])
-            preview = " | ".join(
-                f"{getattr(it.service, 'name', it.service)} ×{getattr(it, 'quantity', 1)}"
-                for it in items[:6]
-            )
-            if items.count() > 6:
-                preview += " …"
-            rows.append([
-                str(appt.pk),
-                getattr(appt, "start_time", None),
-                getattr(appt.client, "full_name", getattr(getattr(appt.client, "user", None), "username", "")),
-                getattr(appt, "status", ""),
-                getattr(appt, "payment_status", ""),
-                getattr(appt, "personal_discount", ""),
-                items.count(),
-                _money(total),
-                preview,
-            ])
-        return self._csv_export(request, "appointments.csv", headers, rows)
-    export_appointments_csv.short_description = "Export Appointments (1 row per appointment)"
-
-    def export_appointment_items_csv(self, request, queryset):
-        qs = self._qs_for_export(request, queryset)
-        headers = [
-            "Appointment ID",
-            "Item ID",
-            "Item Start",
-            "Service",
-            "Master",
-            "Quantity",
-            "Unit Price",
-            "Service Discount",
-            "Promocode",
-            "Final Price",
-            "Client",
-            "Appointment Status",
-            "Payment Status",
-            "Personal Discount (Appointment)",
-        ]
-        rows = []
-        for appt in qs:
-            items = getattr(appt, "appointmentitem_set").all()
-            for it in items:
-                rows.append([
-                    str(appt.pk),
-                    str(getattr(it, "pk", "")),
-                    getattr(it, "start_time", None),
-                    getattr(it.service, "name", str(it.service)),
-                    getattr(it.master, "short_name", getattr(getattr(it.master, "user", None), "username", "")),
-                    getattr(it, "quantity", 1),
-                    _money(getattr(it, "unit_price", None)),
-                    getattr(getattr(it, "service_discount", None), "name", getattr(it, "service_discount", "")),
-                    getattr(getattr(it, "promocode", None), "code", getattr(it, "promocode", "")),
-                    _money(getattr(it, "final_price", None)),
-                    getattr(appt.client, "full_name", getattr(getattr(appt.client, "user", None), "username", "")),
-                    getattr(appt, "status", ""),
-                    getattr(appt, "payment_status", ""),
-                    getattr(appt, "personal_discount", ""),
-                ])
-        return self._csv_export(request, "appointment_items.csv", headers, rows)
-    export_appointment_items_csv.short_description = "Export Appointment Items (1 row per item)"
 
     # ── AJAX КАЛЕНДАРЬ (список → календарь + JSON) ──────────────────────────
 
 
     def changelist_view(self, request, extra_context=None):
-
         selected_date = request.GET.get('date')
-
         if selected_date:
             selected_date = datetime.strptime(selected_date, '%Y-%m-%d').date()
-
         else:
             selected_date = timezone.localdate()
 
@@ -1562,12 +2307,14 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         appointment_statuses = AppointmentStatus.objects.all()
         payment_statuses = PaymentStatus.objects.all()
 
-        appointments = AppointmentItem.objects.select_related('appointment__client', 'service', 'master').prefetch_related('appointment__items__service')
-
+        appointments = AppointmentItem.objects.select_related(
+            'appointment__client', 'service', 'master'
+        ).prefetch_related('appointment__items__service')
 
         masters = MasterProfile.objects.filter(
             id__in=appointments.values_list('master_id', flat=True)
         ).distinct()
+
         start_of_day = make_aware(datetime.combine(selected_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(selected_date, datetime.max.time()))
 
@@ -1575,12 +2322,17 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
             start_time__lte=end_of_day,
             end_time__gte=start_of_day
         )
+
         if request.GET.get("service"):
             appointments = appointments.filter(service_id=request.GET["service"])
         if request.GET.get("status"):
-            appointments = appointments.filter(appointment__appointmentstatushistory__status_id=request.GET["status"])
+            appointments = appointments.filter(
+                appointment__appointmentstatushistory__status_id=request.GET["status"]
+            )
         if request.GET.get("payment_status"):
-            appointments = appointments.filter(appointment__payment_status_id__in=request.GET.getlist("payment_status"))
+            appointments = appointments.filter(
+                appointment__payment_status_id__in=request.GET.getlist("payment_status")
+            )
 
         # Слоты по 15 минут
         start_hour = 8
@@ -1589,37 +2341,46 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
         time_pointer = datetime(2000, 1, 1, start_hour, 0)
         end_time = datetime(2000, 1, 1, end_hour, 0)
 
-
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             action = request.GET.get("action")
+            calendar_table = createTable(
+                selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities
+            )
 
-            calendar_table = createTable(selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities)
-
-            if action == "filter":  # Фильтрация по форме
-
+            if action == "filter":
                 html = render_to_string('admin/appointments_calendar_partial.html', {
                     "calendar_table": calendar_table,
                     'masters': masters,
                 })
                 return JsonResponse({"html": html})
 
-            elif action == "calendar":  # Подгрузка календаря (твоя текущая логика)
-
+            elif action == "calendar":
                 html = render_to_string('admin/appointments_calendar_partial.html', {
                     'calendar_table': calendar_table,
                     'masters': masters,
                 }, request=request)
-
                 return JsonResponse({'html': html})
 
-        calendar_table = createTable(selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities)
+        calendar_table = createTable(
+            selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities
+        )
 
         response = super().changelist_view(request, extra_context=extra_context)
 
         if hasattr(response, "context_data"):
             context = response.context_data
-            context.update({
 
+            # Собираем URL для XLSX-экспорта (с сохранением текущих фильтров)
+            try:
+                opts = self.model._meta
+                q = f"?{request.GET.urlencode()}" if request.GET else ""
+                export_url_xlsx = reverse(
+                    f'admin:{opts.app_label}_{opts.model_name}_export_xlsx'
+                ) + q
+            except NoReverseMatch:
+                export_url_xlsx = None
+
+            context.update({
                 "calendar_table": calendar_table,
                 "masters": masters,
                 "selected_date": selected_date,
@@ -1629,6 +2390,7 @@ class AppointmentAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "services": services,
                 "appointment_statuses": appointment_statuses,
                 "payment_statuses": payment_statuses,
+                "export_url_xlsx": export_url_xlsx,  # <-- вот это добавили
             })
 
         return response
@@ -1767,7 +2529,57 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     list_display = ('name', 'base_price', 'category', 'duration_min')
     search_fields = ('name',)
     list_filter = ('category',)
-    export_fields = ['name', 'description','base_price', 'category','prepayment_option', 'duration_min', 'extra_time_min']
+    filter_horizontal = ("pre_appointment_forms",)
+    fields = (
+        "name",
+        "description",
+        "category",
+        "base_price",
+        "duration_min",
+        "extra_time_min",
+        "pre_appointment_forms",
+    )
+    export_fields = ['name', 'description','base_price', 'category', 'duration_min', 'extra_time_min']
+
+
+@admin.register(ClientIntakeForm)
+class ClientIntakeFormAdmin(admin.ModelAdmin):
+    form = ClientIntakeFormAdminForm
+    list_display = ("name", "slug", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("name", "slug", "description")
+    prepopulated_fields = {"slug": ("name",)}
+    fieldsets = (
+        (None, {"fields": ("name", "slug", "description", "is_active")}),
+        (_("Builder"), {"fields": ("schema", "schema_version")} ),
+        (_("Form class"), {"fields": ("form_class",), "classes": ("collapse",)}),
+        (_("Timestamps"), {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(ClientIntakeFormSubmission)
+class ClientIntakeFormSubmissionAdmin(admin.ModelAdmin):
+    list_display = ("form", "client", "appointment", "submitted_by", "submitted_at")
+    list_filter = ("form", "submitted_at", "submitted_by")
+    search_fields = (
+        "form__name",
+        "client__user__first_name",
+        "client__user__last_name",
+        "appointment__id",
+    )
+    readonly_fields = (
+        "form",
+        "client",
+        "appointment",
+        "submitted_by",
+        "submitted_at",
+        "data",
+        "raw_payload",
+        "form_schema_snapshot",
+        "schema_version",
+        "is_complete",
+    )
 # -----------------------------
 # Notification Admin
 # -----------------------------
@@ -1866,8 +2678,223 @@ class PromoCodeAdmin(ExportCsvMixin ,admin.ModelAdmin):
 
 
 # -----------------------------
+# Retail products & sales
+# -----------------------------
+
+
+class LowStockFilter(admin.SimpleListFilter):
+    title = "Low stock status"
+    parameter_name = "low_stock"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("1", "Needs restock"),
+            ("0", "Sufficient stock"),
+        )
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if value == "1":
+            return queryset.filter(
+                low_stock_threshold__gt=0,
+                quantity_in_stock__lte=F("low_stock_threshold"),
+            )
+        if value == "0":
+            return queryset.exclude(
+                low_stock_threshold__gt=0,
+                quantity_in_stock__lte=F("low_stock_threshold"),
+            )
+        return queryset
+
+
+class ProductCategoryAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active", "created_at", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("name",)
+    ordering = ("name",)
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("name", "description", "is_active")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+
+class ProductAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "category",
+        "price",
+        "quantity_in_stock",
+        "low_stock_indicator",
+        "is_active",
+        "updated_at",
+    )
+    list_filter = ("is_active", "category", LowStockFilter)
+    search_fields = ("name", "sku")
+    ordering = ("name",)
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("name", "sku", "category", "description", "is_active")}),
+        ("Pricing & Inventory", {"fields": ("price", "quantity_in_stock", "low_stock_threshold")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    @admin.display(description="Low stock", boolean=True)
+    def low_stock_indicator(self, obj):
+        return obj.is_low_on_stock
+
+
+class ProductSaleAdmin(admin.ModelAdmin):
+    form = ProductSaleAdminForm
+    date_hierarchy = "sold_at"
+    list_display = (
+        "sold_at",
+        "product",
+        "quantity",
+        "unit_price",
+        "total_amount",
+        "sold_by",
+        "client",
+        "appointment",
+    )
+    list_filter = (
+        "product__category",
+        "product",
+        "sold_by",
+        ("sold_at", DateFieldListFilter),
+    )
+    search_fields = (
+        "product__name",
+        "product__sku",
+        "appointment__id",
+        "client__user__first_name",
+        "client__user__last_name",
+        "client__user__username",
+        "notes",
+    )
+    ordering = ("-sold_at", "-id")
+    readonly_fields = ("total_amount", "created_at", "updated_at")
+    autocomplete_fields = ("product", "sold_by", "client", "appointment")
+    list_select_related = (
+        "product",
+        "sold_by__user",
+        "client__user",
+        "appointment__client__user",
+    )
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "product",
+                    "sold_by",
+                    "client",
+                    "appointment",
+                    "sold_at",
+                    "quantity",
+                    "unit_price",
+                    "total_amount",
+                    "notes",
+                )
+            },
+        ),
+        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj))
+        if obj:
+            readonly.extend(
+                [
+                    "product",
+                    "sold_by",
+                    "client",
+                    # allow updating appointment if needed post creation
+                    "sold_at",
+                    "quantity",
+                    "unit_price",
+                    "total_amount",
+                ]
+            )
+        return readonly
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "client":
+            kwargs["queryset"] = (
+                UserProfile.objects.filter(userrole__role__name="Client")
+                .select_related("user")
+                .order_by("user__first_name", "user__last_name", "user__username")
+                .distinct()
+            )
+        if db_field.name == "sold_by":
+            current_profile = getattr(request.user, "userprofile", None)
+            sold_by_filters = Q(user__is_superuser=True)
+            if current_profile:
+                sold_by_filters |= Q(pk=current_profile.pk)
+            kwargs["queryset"] = (
+                UserProfile.objects.select_related("user")
+                .filter(sold_by_filters)
+                .order_by(
+                    "user__first_name",
+                    "user__last_name",
+                    "user__username",
+                )
+            )
+        if db_field.name == "appointment":
+            kwargs["queryset"] = (
+                Appointment.objects.select_related("client__user")
+                .order_by("-start_time")
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        profile = getattr(request.user, "userprofile", None)
+        if not obj and profile and "sold_by" in form.base_fields:
+            form.base_fields["sold_by"].initial = profile.pk
+
+        product_field = form.base_fields.get("product")
+        if product_field:
+            product_field.widget.attrs["data-price-endpoint"] = reverse(
+                "admin:core_productsale_product_price"
+            )
+        return form
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "product-price/",
+                self.admin_site.admin_view(self.product_price_lookup),
+                name="core_productsale_product_price",
+            ),
+        ]
+        return custom + urls
+
+    def product_price_lookup(self, request: HttpRequest):
+        product_id = request.GET.get("product")
+        if not product_id:
+            return JsonResponse({"error": "Missing product id"}, status=400)
+        try:
+            product = Product.objects.only("price").get(pk=product_id)
+        except Product.DoesNotExist:
+            return JsonResponse({"error": "Product not found"}, status=404)
+        return JsonResponse({"unit_price": str(product.price)})
+
+    def save_model(self, request, obj, form, change):
+        if not obj.sold_by_id:
+            profile = getattr(request.user, "userprofile", None)
+            if profile:
+                obj.sold_by = profile
+        super().save_model(request, obj, form, change)
+
+
+# -----------------------------
 # Register remaining models directly
 # -----------------------------
+admin.site.register(ProductCategory, ProductCategoryAdmin)
+admin.site.register(Product, ProductAdmin)
+admin.site.register(ProductSale, ProductSaleAdmin)
 admin.site.register(Role)
 admin.site.register(UserRole)
 admin.site.register(AppointmentStatus)
@@ -1888,6 +2915,13 @@ class AppointmentItemPromoCodeAdmin(admin.ModelAdmin):
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
     form = UserProfileChangeForm
+    search_fields = (
+        "user__first_name",
+        "user__last_name",
+        "user__username",
+        "user__email",
+        "phone",
+    )
     # Явно перечислим поля на форме
     @admin.display(description="First name")
     def user_first_name(self, obj):
@@ -2165,7 +3199,7 @@ def _client_source_aggregation(qs):
 # view
 # ──────────────────────────────────────────────────────────────────────────────
 
-@staff_member_required
+
 @staff_member_required
 def stats_view(request: HttpRequest) -> HttpResponse:
     # ── Период
@@ -2476,6 +3510,28 @@ def stats_view(request: HttpRequest) -> HttpResponse:
     src_labels = [r["label"] for r in client_source_stats]
     src_revenue = [float(r["revenue"]) for r in client_source_stats]
 
+
+    if request.GET.get("export") == "xlsx":
+        exporter = ExportXlsxMixin()  # просто используем миксин как helper
+        wb = exporter.build_statistics_workbook(
+            start=start, end=end,
+            kpi_total_revenue=kpi_total_revenue,
+            kpi_total_appointments=kpi_total_appointments,
+            kpi_with_discount=kpi_with_discount,
+            top_bookers=list(top_bookers),
+            top_spenders=list(top_spenders),
+            ds_totals=list(ds_totals),
+            discount_breakdown=list(discount_breakdown),
+            promo_breakdown=list(promo_breakdown),
+            client_source_table=list(client_source_table),
+        )
+        return exporter._wb_response(wb, "statistics.xlsx")
+
+    # === иначе — рендерим страницу и даём ссылку на экспорт с текущими фильтрами ===
+    params = request.GET.copy()
+    params["export"] = "xlsx"
+
+    export_xlsx_url = f"{request.path}?{params.urlencode()}"  # сохраняет все фильтры + export=xlsx
     # ── Контекст для шаблона
     context = {
         "title": "Statistics",
@@ -2498,6 +3554,7 @@ def stats_view(request: HttpRequest) -> HttpResponse:
 
         "client_source_stacked": client_source_stacked,
         "client_source_table": client_source_table,
+        "export_xlsx_url": export_xlsx_url
     }
     return render(request, "admin/statistics.html", context)
 

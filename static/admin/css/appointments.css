@@ -16,8 +16,8 @@ html, body {
 .content {
     flex: 1;
     display: flex;
-    width: 96vw !important;
-    max-width: 96vw !important;
+    width: 100% !important;
+    max-width: 100% !important;
     padding: 0 !important;
     flex-direction: column;
     min-height: 0; /* 👈 предотвратить выталкивание */
@@ -372,7 +372,7 @@ html, body {
     border-collapse: collapse;
     width: 100%;
     table-layout: fixed;
-    margin: 0 auto;
+    margin: 0;
 
 }
 

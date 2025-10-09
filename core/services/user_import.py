@@ -53,9 +53,13 @@ NORMALIZED_REQUIRED_HEADERS: Dict[str, str] = {
     "lastname": "last_name",
     "last_name": "last_name",
     "last name": "last_name",
+    "phone": "phone",
+    "phonenumber": "phone",
+    "mobile": "phone",
+    "telephone": "phone",
 }
 
-REQUIRED_FIELDS = {"username", "email", "password", "first_name", "last_name"}
+REQUIRED_FIELDS = {"username", "email", "password", "first_name", "last_name", "phone"}
 SUPPORTED_EXTENSIONS = (".csv", ".xlsx", ".xlsm")
 
 
@@ -205,6 +209,8 @@ def import_users_from_file(uploaded_file) -> UserImportResult:
                     is_active=True,
                 )
                 profile = _ensure_profile(user)
+                profile.phone = cleaned["phone"]
+                profile.save(update_fields=["phone"])
                 _ensure_default_role(profile)
         except (ValidationError, IntegrityError) as exc:
             result.add_error(row_number, cleaned.get("username"), str(exc))

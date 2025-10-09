@@ -1,3 +1,5 @@
+import json
+import re
 from pathlib import Path
 
 from dal import autocomplete
@@ -10,12 +12,16 @@ from django.contrib.auth.forms import (
     AdminUserCreationForm,
 )
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
-from django.template import TemplateDoesNotExist, engines
-from django.utils.text import slugify
-from django.utils.safestring import mark_safe
-from django.db.models import Prefetch, Q
-from django.forms import inlineformset_factory, BaseInlineFormSet
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+from django.db.models import Prefetch, Q
+from django.forms import BaseInlineFormSet, inlineformset_factory
+from django.template import TemplateDoesNotExist, engines
+from django.utils.safestring import mark_safe
+from django.utils.text import slugify
+
+import phonenumbers
+
 from .models import *
 from .validators import *
 
@@ -37,6 +43,150 @@ HEALTH_CONTRA_CHOICES = [
 EDITABLE_FIELDS_FOR_MASTER = (
     "service", "start_time", "end_time", "unit_price", "promocode",
 )
+
+
+class ProductSaleAdminForm(forms.ModelForm):
+    """
+    Shared base form for product sale editing in admin UIs.
+    Supports enhanced widgets via data attributes consumed by custom JS.
+    """
+    class Meta:
+        model = ProductSale
+        fields = "__all__"
+
+    class Media:
+        js = ("core/js/product_sale_admin.js",)
+
+    def __init__(self, *args, **kwargs):
+        self.request = kwargs.pop("request", None)
+        self.appointment = kwargs.pop("appointment", None)
+        super().__init__(*args, **kwargs)
+
+        sold_by = self.fields.get("sold_by")
+        if sold_by:
+            sold_by.widget.attrs.setdefault(
+                "data-placeholder", "Start typing to choose an employee"
+            )
+
+        client = self.fields.get("client")
+        if client:
+            client.widget.attrs.setdefault(
+                "data-placeholder", "Start typing to search clients"
+            )
+
+        appointment = self.fields.get("appointment")
+        if appointment:
+            appointment.widget.attrs.setdefault(
+                "data-placeholder", "Link to an appointment (optional)"
+            )
+
+        product = self.fields.get("product")
+        if product:
+            product.widget.attrs.setdefault("data-price-endpoint", "")
+            product.widget.attrs.setdefault("data-product-sale-role", "product")
+
+        unit_price = self.fields.get("unit_price")
+        if unit_price:
+            unit_price.widget.attrs.update(
+                {
+                    "data-unit-price-input": "1",
+                    "autocomplete": "off",
+                    "data-product-sale-role": "unit-price",
+                }
+            )
+
+        quantity = self.fields.get("quantity")
+        if quantity:
+            quantity.widget.attrs.update(
+                {
+                    "data-quantity-input": "1",
+                    "data-product-sale-role": "quantity",
+                }
+            )
+
+
+class AppointmentProductSaleForm(ProductSaleAdminForm):
+    """
+    Specialized form for embedding product sales into the appointment change form.
+    Hides fields that should not be edited in that context and applies sensible defaults.
+    """
+
+    def __init__(self, *args, **kwargs):
+        request = kwargs.get("request")
+        appointment = kwargs.get("appointment")
+        super().__init__(*args, **kwargs)
+
+        if "sold_at" in self.fields:
+            self.fields.pop("sold_at")
+
+        client_field = self.fields.get("client")
+        if client_field:
+            qs = UserProfile.objects.select_related("user").all()
+            client_field.queryset = qs.order_by(
+                "user__first_name",
+                "user__last_name",
+                "user__username",
+            )
+
+        sold_by_field = self.fields.get("sold_by")
+        if sold_by_field:
+            filters = Q(user__is_superuser=True) | Q(user__is_staff=True)
+            profile = getattr(request.user, "userprofile", None) if request else None
+            if profile:
+                filters |= Q(pk=profile.pk)
+            if self.instance and getattr(self.instance, "sold_by_id", None):
+                filters |= Q(pk=self.instance.sold_by_id)
+            sold_by_field.queryset = (
+                UserProfile.objects.select_related("user")
+                .filter(filters)
+                .order_by(
+                    "user__first_name",
+                    "user__last_name",
+                    "user__username",
+                )
+            )
+
+        defaults = {}
+        if appointment and appointment.client_id and "client" in self.fields:
+            defaults["client"] = appointment.client_id
+        profile = getattr(request.user, "userprofile", None) if request else None
+        if profile and "sold_by" in self.fields:
+            defaults["sold_by"] = profile.pk
+        if "quantity" in self.fields:
+            defaults.setdefault("quantity", 1)
+
+        for key, value in defaults.items():
+            if key in self.fields and key not in self.initial:
+                self.initial[key] = value
+            field = self.fields.get(key)
+            if field and not field.initial:
+                field.initial = value
+
+        # Keep notes compact in inline UI.
+        notes = self.fields.get("notes")
+        if notes:
+            notes.widget.attrs.setdefault("rows", 2)
+
+
+def _normalize_phone(value: str) -> str:
+    """Bring phone number to E.164, default country +1."""
+    raw = (value or "").strip()
+    if not raw:
+        raise ValidationError("Phone number is required.")
+
+    filtered = "".join(ch for ch in raw if ch.isdigit() or ch == "+")
+    if filtered and not filtered.startswith("+"):
+        filtered = "+1" + filtered
+
+    try:
+        parsed = phonenumbers.parse(filtered, None)
+    except phonenumbers.NumberParseException as exc:
+        raise ValidationError("Invalid phone number format.") from exc
+
+    if not phonenumbers.is_possible_number(parsed):
+        raise ValidationError("Invalid phone number format.")
+
+    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
 # -----------------------------
 # Appointment Form
@@ -313,6 +463,11 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
     last_name = forms.CharField(required=True)
     phone = forms.CharField(required=True)
     birth_date = forms.DateField(required=False, widget=forms.SelectDateWidget(years=range(1950, 2030)))
+    address = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Street, Apt, City, ZIP"}),
+        label="Address",
+    )
     personal_discount_percent = forms.IntegerField(
         required=False, min_value=0, max_value=100, initial=0, label="Personal discount, %"
     )
@@ -341,6 +496,7 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
         fields = [
             'username', 'email', 'first_name', 'last_name',
             'phone', 'birth_date',
+            'address',
             'usable_password', 'password1', 'password2',
             'is_staff', 'is_active', 'is_superuser',
             'groups', "postal_code", "email_marketing_consent",
@@ -384,6 +540,7 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
             how_heard = self.cleaned_data.get('how_heard')
             email_marketing_consent = self.cleaned_data.get('email_marketing_consent')
             notes = self.cleaned_data.get('notes')
+            address = (self.cleaned_data.get('address') or "").strip()
 
             profile, created = UserProfile.objects.get_or_create(user=user)
             profile.phone = phone
@@ -394,8 +551,9 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
             profile.notes = notes
             profile.health_conditions = self._collect_health_payload()
             profile.postal_code = self.cleaned_data.get('postal_code', "")
+            profile.address = address
 
-            if created and not hasattr(self, "is_client_register"):
+            if not hasattr(self, "is_client_register"):
                 profile.source = "offline"
             profile.save()
 
@@ -406,7 +564,12 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
 
 
     def clean_phone(self):
-        phone = self.cleaned_data.get('phone')
+        raw_phone = self.cleaned_data.get('phone', "")
+        try:
+            phone = _normalize_phone(raw_phone)
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.message)
+
         if UserProfile.objects.filter(phone=phone).exists():
             raise forms.ValidationError("User with such phone number already exists.")
         return phone
@@ -432,6 +595,7 @@ class UserImportRowForm(forms.Form):
     password = forms.CharField()
     first_name = forms.CharField(max_length=150)
     last_name = forms.CharField(max_length=150)
+    phone = forms.CharField(max_length=32)
 
     def clean_username(self):
         username = self.cleaned_data["username"].strip()
@@ -453,6 +617,17 @@ class UserImportRowForm(forms.Form):
         password = self.cleaned_data["password"]
         validate_password(password)
         return password
+
+    def clean_phone(self):
+        raw_phone = self.cleaned_data.get("phone", "")
+        try:
+            phone = _normalize_phone(raw_phone)
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.message)
+
+        if UserProfile.objects.filter(phone=phone).exists():
+            raise forms.ValidationError("Phone already exists.")
+        return phone
 # -----------------------------
 # Custom User Change Form
 # -----------------------------
@@ -477,7 +652,7 @@ class UserProfileChangeForm(forms.ModelForm):
         model = UserProfile
         fields = (
             "user",
-            "phone", "birth_date", "postal_code",
+            "phone", "birth_date", "address", "postal_code",
             "how_heard",
             "notes",
             # ВАЖНО: тут только реальные поля UserProfile!
@@ -531,6 +706,11 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
     last_name = forms.CharField(required=False)
     phone = forms.CharField(required=True)
     birth_date = forms.DateField(required=False, widget=forms.SelectDateWidget(years=range(1950, 2030)))
+    address = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Street, Apt, City, ZIP"}),
+        label="Address",
+    )
     personal_discount_percent = forms.IntegerField(
         required=False, min_value=0, max_value=100, label="Personal discount, %"
     )
@@ -569,6 +749,7 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
             'user_permissions',
             'password',
             'postal_code',
+            'address',
             'how_heard',
             'email_marketing_consent',
             'notes',
@@ -596,6 +777,7 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
             self.fields['email_marketing_consent'].initial = self.instance.userprofile.email_marketing_consent
             self.fields['notes'].initial = self.instance.userprofile.notes
             self.fields['postal_code'].initial = getattr(up, 'postal_code', "")
+            self.fields['address'].initial = getattr(up, 'address', "")
 
     def clean_postal_code(self):
         val = self.cleaned_data.get("postal_code", "").strip()
@@ -615,6 +797,7 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         birth_date = self.cleaned_data.get('birth_date', None)
         how_heard = self.cleaned_data.get('how_heard', None)
         notes = self.cleaned_data.get('notes', None)
+        address = (self.cleaned_data.get('address') or "").strip()
 
         email_marketing_consent = self.cleaned_data.get('email_marketing_consent', False)
         profile, created = UserProfile.objects.get_or_create(user=user)
@@ -626,6 +809,7 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         profile.set_marketing_consent(email_marketing_consent)
         profile.health_conditions = self._collect_health_payload()
         profile.postal_code = self.cleaned_data.get('postal_code', "")
+        profile.address = address
         profile.save()
 
 
@@ -640,7 +824,12 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
 
 
     def clean_phone(self):
-        phone = self.cleaned_data.get('phone')
+        raw_phone = self.cleaned_data.get('phone', "")
+        try:
+            phone = _normalize_phone(raw_phone)
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.message)
+
         qs = UserProfile.objects.filter(phone=phone)
         if self.instance.pk:
             qs = qs.exclude(user=self.instance)
@@ -928,3 +1117,83 @@ class MasterAvailabilityForm(forms.ModelForm):
             "admin/js/quarter_timepicker.js",                 # твой селектор 15 минут
             "admin/js/ma_flatpickr_init.js",                  # инициализация календаря (ниже)
         ]
+
+
+INTAKE_FIELD_KEY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*$")
+
+
+class IntakeSchemaWidget(forms.Widget):
+    template_name = "core/widgets/intake_schema_widget.html"
+
+    def format_value(self, value):
+        if not value:
+            return json.dumps({"sections": [], "meta": {}}, ensure_ascii=False)
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return value
+            return json.dumps(parsed, ensure_ascii=False)
+        return json.dumps(value, ensure_ascii=False)
+
+    def get_context(self, name, value, attrs):
+        formatted = self.format_value(value)
+        try:
+            raw = json.loads(formatted)
+        except json.JSONDecodeError:
+            raw = {"sections": [], "meta": {}}
+        context = super().get_context(name, formatted, attrs)
+        context["widget"]["builder_value"] = raw
+        return context
+
+    class Media:
+        css = {"all": ["core/css/intake_builder.css"]}
+        js = ["core/js/intake_builder.js"]
+
+
+class ClientIntakeFormAdminForm(forms.ModelForm):
+    schema = forms.JSONField(required=False, widget=IntakeSchemaWidget())
+
+    class Meta:
+        model = ClientIntakeForm
+        fields = "__all__"
+
+    def clean_schema(self):
+        raw = self.cleaned_data.get("schema")
+        if not raw:
+            return {"sections": [], "meta": {}}
+        if isinstance(raw, str):
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise forms.ValidationError(
+                    f"Form builder configuration must be valid JSON: {exc}"
+                ) from exc
+        else:
+            data = raw
+        if not isinstance(data, dict):
+            raise forms.ValidationError("Form builder configuration must be a JSON object.")
+        data.setdefault("sections", [])
+        data.setdefault("meta", {})
+
+        seen_keys = set()
+        for section in data["sections"]:
+            if not isinstance(section, dict):
+                raise forms.ValidationError("Each section must be an object.")
+            fields = section.get("fields") or []
+            if not isinstance(fields, list):
+                raise forms.ValidationError("Section fields must be a list.")
+            for field in fields:
+                if not isinstance(field, dict):
+                    raise forms.ValidationError("Field definitions must be JSON objects.")
+                key = field.get("key")
+                if not key:
+                    raise forms.ValidationError("Every field must have a key.")
+                if not INTAKE_FIELD_KEY_RE.match(str(key)):
+                    raise forms.ValidationError(
+                        f"Field key '{key}' is invalid. Use letters, digits or underscores and start with a letter."
+                    )
+                if key in seen_keys:
+                    raise forms.ValidationError(f"Field key '{key}' is duplicated.")
+                seen_keys.add(key)
+        return data

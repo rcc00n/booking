@@ -13,7 +13,7 @@
 {% block content %}
     <div class="module">
         <h1>{{ title }}</h1>
-        <p>Upload a CSV or XLSX file that contains the following columns: <code>Username</code>, <code>Email</code>, <code>Password</code>, <code>First name</code>, <code>Last name</code>.</p>
+        <p>Upload a CSV or XLSX file that contains the following columns: <code>Username</code>, <code>Email</code>, <code>Password</code>, <code>First name</code>, <code>Last name</code>, <code>Phone</code>.</p>
         <p>You can start from the <a href="{% static 'samples/users_import_template.csv' %}">downloadable template</a>.</p>
         <form method="post" enctype="multipart/form-data" novalidate>
             {% csrf_token %}

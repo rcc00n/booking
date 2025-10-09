@@ -72,7 +72,7 @@
     .site-header{background:var(--green-dark);box-shadow:var(--shadow);position:sticky;top:0;z-index:100;padding-block:.75rem}
     .site-header__inner{display:flex;align-items:center;justify-content:space-between}
     .logo{font:900 1.25rem/1 var(--font-heading);color:var(--gold);letter-spacing:.3px}
-    .header-actions{display:flex;align-items:center;gap:.75rem}
+    .header-actions{display:flex;align-items:center;gap:.75rem;margin-left:auto}
     .lang-picker{display:inline-flex;align-items:center;gap:.4rem;margin-right:.5rem;color:var(--taupe);font-size:.82rem}
     .lang-picker__label{opacity:.75;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
     .lang-picker__select{appearance:none;background:rgba(255,255,255,.12);color:#111;border:1px solid rgba(255,255,255,.25);padding:.35rem .75rem;border-radius:.55rem;font-weight:600;cursor:pointer;min-width:5.5rem}
@@ -89,6 +89,12 @@
     }
     .hero h1{font:900 clamp(2rem,4vw,3.2rem)/1.1 var(--font-heading); color:var(--green-dark)}
     .hero p{font-size:1.08rem; max-width:52ch; color:var(--muted)}
+
+    .mobile-nav-btn{display:none;align-items:center;justify-content:center;width:2.75rem;height:2.75rem;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:var(--taupe);font-size:1.35rem;transition:.2s ease;}
+    .mobile-nav-btn:active{transform:scale(.94);}
+    .mobile-nav-backdrop{display:none;}
+    .mobile-close{display:none;}
+    .floating-cart{display:none;}
 
     h2{font:900 1.5rem/1.2 var(--font-heading)}
     h3{font:800 1.1rem/1.2 var(--font-heading)}
@@ -229,6 +235,7 @@
     .outlook__cell{border-bottom:1px solid var(--grid-border); border-right:1px solid var(--grid-border); padding:.25rem .4rem; background:#fff; white-space:nowrap; text-overflow:ellipsis}
     .outlook__cell.time{position:sticky;left:0;background:#fff;z-index:2;font-size:.85rem;color:#666}
     .outlook__head{position:sticky;top:0;background:#fff;z-index:3;border-bottom:2px solid var(--grid-border);box-shadow:0 1px 0 rgba(0,0,0,.04); padding:.4rem .45rem}
+    .outlook__head.day--selected{box-shadow:0 0 0 2px color-mix(in srgb, var(--gold) 45%, transparent);border-bottom-color:color-mix(in srgb, var(--gold) 55%, transparent);}
     .day-head{display:flex;flex-direction:column}
     .day-title{font:800 .92rem/1.1 var(--font-heading); color:var(--green-dark); text-transform:capitalize}
     .day-sub{font-size:.75rem;color:#666;margin-top:.15rem}
@@ -251,6 +258,19 @@
     .legend .lg-free i{background:var(--chip-bg);border:2px solid color-mix(in srgb, var(--free) 60%, #fff)}
     .legend .lg-busy i{background:var(--busy)}
 
+    .book-mobile{display:none;margin-top:.75rem;border:1px solid #DAD3C1;border-radius:1rem;padding:1rem;background:#fff;box-shadow:0 16px 30px rgba(32,64,41,.12)}
+    .book-mobile__date{display:flex;flex-direction:column;gap:.45rem}
+    .book-mobile__date label{font-size:.82rem;font-weight:700;color:#204029;text-transform:uppercase;letter-spacing:.06em}
+    .book-mobile__date input{height:2.65rem;border:1px solid #DAD3C1;border-radius:.65rem;padding:0 .75rem;font:600 .95rem/1 var(--font-ui);color:#204029;background:#fff}
+    .book-mobile__date input:focus{outline:2px solid color-mix(in srgb, var(--green) 45%, transparent);outline-offset:2px}
+    .book-mobile__times{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin-top:1rem;max-height:min(44vh,320px);overflow-y:auto;padding-right:.35rem;margin-right:-.35rem;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+    .book-mobile__times::-webkit-scrollbar{width:6px}
+    .book-mobile__times::-webkit-scrollbar-thumb{background:rgba(32,64,41,.25);border-radius:999px}
+    .book-mobile__time{padding:.7rem .8rem;border-radius:.75rem;border:1.5px solid #DAD3C1;background:#fff;font-weight:700;color:#204029;box-shadow:0 12px 26px rgba(32,64,41,.14);transition:.18s ease;text-align:center}
+    .book-mobile__time:focus-visible{outline:2px solid color-mix(in srgb, var(--gold) 55%, transparent);outline-offset:2px}
+    .book-mobile__time.is-selected{background:#204029;color:#fff;border-color:#204029;box-shadow:0 16px 32px rgba(32,64,41,.26)}
+    .book-mobile__empty{margin-top:1rem;font-size:.85rem;color:#6b7a6f;text-align:center;display:none}
+
     /* Zoom-proof modal sizes */
     .modal__dialog{ width:min(940px, calc(100dvw - 2rem)); max-height:calc(100dvh - 2rem); }
     @supports not (height: 100dvh){
@@ -265,6 +285,52 @@
       .modal__dialog--payment .payment-body{padding:0 1.25rem 1.25rem}
       .modal__dialog--payment .modal__footer{padding:1rem 1.25rem}
       .payment-fieldset{grid-template-columns:1fr}
+      .book-desktop{display:none}
+      .book-mobile{display:block}
+    }
+
+    @media (max-width: 560px){
+      .book-mobile__times{grid-template-columns:1fr}
+    }
+
+    @media (max-width: 900px){
+      body.nav-open{overflow:hidden;}
+      .container{padding-inline:1.15rem;}
+      .site-header{padding-block:.65rem;}
+      .site-header__inner{gap:.9rem;}
+      .mobile-nav-btn{display:inline-flex;margin-left:auto;}
+      .header-actions{position:fixed;top:0;right:0;bottom:0;width:min(320px,92vw);background:linear-gradient(180deg,#204029 0%,#1b3626 100%);padding:1.75rem 1.5rem 2rem;border-radius:0;transform:translateX(100%);transition:transform .3s ease,opacity .3s ease;opacity:0;display:flex;flex-direction:column;align-items:stretch;gap:1.2rem;box-shadow:-18px 0 35px rgba(0,0,0,.32);z-index:120;margin-left:0;}
+      body.nav-open .header-actions{transform:translateX(0);opacity:1;}
+      .header-actions::before{content:'';width:72px;height:4px;border-radius:999px;background:rgba(255,255,255,.25);align-self:center;margin-bottom:.75rem;}
+      .header-actions .btn{width:100%;justify-content:center;}
+      .header-actions .lang-picker{flex-direction:column;align-items:stretch;gap:.5rem;margin-right:0;color:#fff;}
+      .header-actions .lang-picker__label{opacity:.85;}
+      .header-actions .lang-picker__select{width:100%;background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.35);}
+      .mobile-close{display:inline-flex;align-items:center;gap:.45rem;color:#fff;background:transparent;border:none;font-size:1rem;font-weight:700;justify-content:flex-start;padding:0;}
+      .mobile-nav-backdrop{position:fixed;top:0;bottom:0;left:0;right:0;background:rgba(15,23,17,.45);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:110;display:none;}
+      body.nav-open .mobile-nav-backdrop{opacity:1;pointer-events:auto;display:block;right:min(320px,92vw);}
+      .hero{padding:4rem 1.25rem 3.4rem;align-items:flex-start;text-align:left;gap:1.2rem;}
+      .hero h1{font-size:clamp(2rem,8vw,2.6rem);} 
+      .hero p{font-size:1rem;max-width:32ch;}
+      .filters{flex-direction:column;align-items:stretch;gap:.85rem;}
+      .filters input,.filters select{width:100%;}
+      .filters .btn{width:100%;justify-content:center;}
+      .services-grid{grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1.1rem;}
+      .service-card{border-radius:1.25rem;padding:1rem .95rem;}
+      .service-card__img{height:160px;}
+      .service-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;}
+      .floating-cart{display:none;position:fixed;right:1.15rem;bottom:1.25rem;background:linear-gradient(135deg,var(--green) 0%,var(--gold) 100%);color:#fff;border:none;border-radius:999px;padding:.75rem 1.15rem;align-items:center;gap:.6rem;box-shadow:0 18px 28px rgba(32,64,41,.25);z-index:105;transition:transform .2s ease,opacity .2s ease;}
+      .floating-cart.floating-cart--visible{display:flex;}
+      .floating-cart__icon{font-size:1.35rem;line-height:1;}
+      .floating-cart__count{min-width:1.9rem;height:1.9rem;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:rgba(255,255,255,.18);font-weight:800;}
+      body.modal-open .floating-cart,
+      body.nav-open .floating-cart{display:none;}
+    }
+
+    @media (max-width: 540px){
+      .hero{padding-top:3.2rem;}
+      .btn{width:100%;justify-content:center;}
+      .services-grid{grid-template-columns:1fr;}
     }
   </style>
 </head>
@@ -274,7 +340,11 @@
   <header class="site-header">
     <div class="container site-header__inner">
       <span class="logo" data-i18n="common.brand">Malva Booking</span>
-      <nav class="header-actions">
+      <button type="button" class="mobile-nav-btn" data-menu-toggle aria-label="Open menu" aria-expanded="false">☰</button>
+      <nav class="header-actions" data-menu-drawer>
+        <button type="button" class="mobile-close" data-menu-close aria-label="Close menu">
+          ✕ <span data-i18n="common.close">Close</span>
+        </button>
         <div class="lang-picker" data-i18n-attr="aria-label:common.language">
           <label for="langSelect" class="lang-picker__label" data-i18n="common.language">Language</label>
           <select id="langSelect" class="lang-picker__select" data-lang-switch></select>
@@ -291,6 +361,7 @@
       </nav>
     </div>
   </header>
+  <div class="mobile-nav-backdrop" data-menu-backdrop></div>
 
   <!-- hero -->
   <section class="hero">
@@ -416,6 +487,11 @@
     </div>
   </main>
 
+  <button type="button" class="floating-cart" id="floatingCart" aria-label="Open cart">
+    <span class="floating-cart__icon" aria-hidden="true">🛒</span>
+    <span class="floating-cart__count" id="floatingCartCount">0</span>
+  </button>
+
   <footer class="site-footer" data-i18n="services.footer.copy">© 2025 Malva Booking</footer>
 
   <!-- ===== Modal: booking ===== -->
@@ -441,7 +517,16 @@
           <div class="field" style="margin-top:.5rem">
             <label data-i18n="services.modal.chooseTime">Choose time</label>
 
-            <div class="outlook" id="ol">
+            <div class="book-mobile" id="bookMobile" aria-live="polite">
+              <div class="book-mobile__date">
+                <label for="bookMobileDate" data-i18n="services.modal.mobileDate">Date</label>
+                <input type="date" id="bookMobileDate" name="bookMobileDate">
+              </div>
+              <div class="book-mobile__times" id="bookMobileTimes"></div>
+              <div class="book-mobile__empty" id="bookMobileEmpty">No availability yet.</div>
+            </div>
+
+            <div class="outlook book-desktop" id="ol">
               <div class="outlook__toolbar">
                 <div class="controls">
                   <button id="olPrev" type="button" data-i18n="services.modal.prev">← Prev</button>
@@ -455,11 +540,11 @@
               </div>
             </div>
 
-            <div class="legend">
+            <div class="legend book-desktop">
               <span class="lg-free"><i></i> <span data-i18n="common.free">free</span></span>
               <span class="lg-busy"><i></i> <span data-i18n="common.busy">busy</span></span>
             </div>
-            <div class="hint" data-i18n="services.modal.legendHint">Прокручивайте горизонтально. Красные слоты показаны как занятые и не кликаются.</div>
+            <div class="hint book-desktop" data-i18n="services.modal.legendHint">Прокручивайте горизонтально. Красные слоты показаны как занятые и не кликаются.</div>
           </div>
         </div>
 
@@ -680,6 +765,46 @@
         });
       };
 
+      const menuToggle = document.querySelector('[data-menu-toggle]');
+      const menuClose = document.querySelector('[data-menu-close]');
+      const menuDrawer = document.querySelector('[data-menu-drawer]');
+      const menuBackdrop = document.querySelector('[data-menu-backdrop]');
+
+      const openMenuDrawer = () => {
+        document.body.classList.add('nav-open');
+        menuToggle?.setAttribute('aria-expanded', 'true');
+      };
+      const closeMenuDrawer = () => {
+        document.body.classList.remove('nav-open');
+        menuToggle?.setAttribute('aria-expanded', 'false');
+      };
+
+      menuToggle?.addEventListener('click', () => {
+        if (document.body.classList.contains('nav-open')) {
+          closeMenuDrawer();
+        } else {
+          openMenuDrawer();
+        }
+      });
+      menuClose?.addEventListener('click', closeMenuDrawer);
+      menuBackdrop?.addEventListener('click', closeMenuDrawer);
+      if (menuDrawer){
+        menuDrawer.addEventListener('click', (event) => event.stopPropagation(), true);
+      }
+      menuDrawer?.addEventListener('click', (event) => {
+        if (window.innerWidth <= 900 && event.target.closest('a')) {
+          closeMenuDrawer();
+          return;
+        }
+        event.stopPropagation();
+      });
+      window.addEventListener('resize', () => {
+        if (window.innerWidth > 900) closeMenuDrawer();
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeMenuDrawer();
+      });
+
       const isAuth  = {{ user.is_authenticated|yesno:"true,false" }};
       const loginUrl= "{% url 'login' %}?next={{ request.path }}";
       const apiAvail= "/accounts/api/availability/";
@@ -716,6 +841,8 @@
       const cartSummary=document.getElementById('cartSummary');
       const cartCheckout=document.getElementById('cartCheckout');
       const cartCount=document.getElementById('cartCount');
+      const floatingCartBtn=document.getElementById('floatingCart');
+      const floatingCartCount=document.getElementById('floatingCartCount');
       const paymentModal=document.getElementById('paymentModal');
       const paymentClose=document.getElementById('paymentClose');
       const paymentConfirm=document.getElementById('paymentConfirm');
@@ -736,6 +863,27 @@
       const inputState=document.getElementById('paymentState');
       const inputPostal=document.getElementById('paymentPostal');
       const inputCountry=document.getElementById('paymentCountry');
+
+      const BODY_MODAL_CLASS = 'modal-open';
+
+      function openModalElement(el){
+        if(!el) return;
+        el.classList.add('modal--open');
+        document.body.classList.add(BODY_MODAL_CLASS);
+      }
+
+      function closeModalElement(el){
+        if(!el) return;
+        el.classList.remove('modal--open');
+        if(!document.querySelector('.modal.modal--open')){
+          document.body.classList.remove(BODY_MODAL_CLASS);
+        }
+      }
+
+      if(floatingCartBtn){
+        floatingCartBtn.setAttribute('aria-hidden','true');
+        floatingCartBtn.tabIndex = -1;
+      }
 
       let summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
       let cartState = { items: [], count: 0, total_price: '0', total_duration_min: 0 };
@@ -964,7 +1112,15 @@
       function updateCartUI(data){
         if(!data) return;
         cartState = data;
-        if(cartCount){ cartCount.textContent = data.count || 0; }
+        const count = Number(data.count || 0);
+        if(cartCount){ cartCount.textContent = count; }
+        if(floatingCartCount){ floatingCartCount.textContent = count; }
+        if(floatingCartBtn){
+          const hasItems = count > 0;
+          floatingCartBtn.classList.toggle('floating-cart--visible', hasItems);
+          floatingCartBtn.setAttribute('aria-hidden', hasItems ? 'false' : 'true');
+          floatingCartBtn.tabIndex = hasItems ? 0 : -1;
+        }
 
         const items = Array.isArray(data.items) ? data.items : [];
         if(cartItems){
@@ -1057,6 +1213,12 @@
           const resp=await fetch(apiCart, {credentials:'same-origin'});
           if(resp.status===401){
             if(cartCount) cartCount.textContent='0';
+            if(floatingCartCount) floatingCartCount.textContent='0';
+            if(floatingCartBtn){
+              floatingCartBtn.classList.remove('floating-cart--visible');
+              floatingCartBtn.setAttribute('aria-hidden','true');
+              floatingCartBtn.tabIndex = -1;
+            }
             return;
           }
           if(!resp.ok) throw new Error(translate('services.cart.loadFailed'));
@@ -1139,16 +1301,17 @@
       }
 
       async function openCartModal(){
+        closeMenuDrawer();
         if(!isAuth){ window.location=loginUrl; return; }
         setCartMessage(null);
         if(cartModal){
-          cartModal.classList.add('modal--open');
+          openModalElement(cartModal);
         }
         await refreshCart(true);
       }
 
       function closeCartModal(){
-        if(cartModal){ cartModal.classList.remove('modal--open'); }
+        if(cartModal){ closeModalElement(cartModal); }
         setCartMessage(null);
       }
 
@@ -1217,7 +1380,7 @@
         }
 
         if (paymentModal) {
-          paymentModal.classList.add('modal--open');
+          openModalElement(paymentModal);
         }
 
         if (!context.payment.client_secret) {
@@ -1240,7 +1403,7 @@
       }
 
       function closePaymentModal(){
-        if(paymentModal){ paymentModal.classList.remove('modal--open'); }
+        if(paymentModal){ closeModalElement(paymentModal); }
         setPaymentMessage(null);
         resetPaymentForm();
         currentPaymentContext = null;
@@ -1345,6 +1508,10 @@
       const olPrev=document.getElementById('olPrev');
       const olNext=document.getElementById('olNext');
       const olToday=document.getElementById('olToday');
+      const mobileScheduleContainer = document.getElementById('bookMobile');
+      const mobileDateInput = document.getElementById('bookMobileDate');
+      const mobileTimeList = document.getElementById('bookMobileTimes');
+      const mobileEmpty = document.getElementById('bookMobileEmpty');
 
       // ===== state =====
       const WINDOW_DAYS = 14;
@@ -1355,6 +1522,13 @@
       let current={ serviceId:null, serviceName:'', masterId:null, slot:null, mastersData:[] };
       let baseStart = new Date(); baseStart.setHours(0,0,0,0);
       let availabilityCache = new Map(); // dateStr -> { set:Set(HH:MM), iso:Map(HH:MM->ISO) }
+      let scheduleState = {
+        days: [],
+        dayData: [],
+        timeRows: [],
+        locale: getLocale(),
+        selectedDate: null,
+      };
 
       // ===== open/close =====
       function openModal(serviceId, serviceName){
@@ -1369,14 +1543,28 @@
         btnSubmit.disabled=true;
         summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
         setTextKey(elSummary, 'services.modal.summaryPlaceholder');
+        resetSelection();
 
         availabilityCache.clear();
         baseStart = new Date(); baseStart.setHours(0,0,0,0);
+        scheduleState = {
+          days: [],
+          dayData: [],
+          timeRows: [],
+          locale: getLocale(),
+          selectedDate: null,
+        };
+        if (mobileTimeList) mobileTimeList.innerHTML = '';
+        if (mobileEmpty) mobileEmpty.style.display = 'none';
+        if (mobileDateInput){
+          mobileDateInput.value = '';
+          mobileDateInput.disabled = true;
+        }
 
-        modal.classList.add('modal--open');
+        openModalElement(modal);
         loadMastersAndRender();
       }
-      function closeModal(){ modal.classList.remove('modal--open'); }
+      function closeModal(){ closeModalElement(modal); }
 
       // ===== availability by day/master =====
       async function fetchAvailability(dayISO, masterId){
@@ -1430,8 +1618,37 @@
         return out.sort();
       }
 
+      function applySelection(day, iso, locale){
+        if (!iso || !day) return;
+        current.masterId = Number(elMaster?.value || current.masterId || 0);
+        current.slot = iso;
+        const masterText = elMaster?.selectedOptions[0]?.text || '';
+        const timeText = fmtHM(new Date(iso));
+        const dateText = day.toLocaleDateString(locale);
+        const summaryVars = { master: masterText, time: timeText, date: dateText };
+        summaryState = { key: 'services.modal.summarySelected', vars: summaryVars };
+        setTextKey(elSummary, 'services.modal.summarySelected', summaryVars, `Master: ${masterText}. Time: ${timeText}, ${dateText}.`);
+        btnSubmit.disabled = false;
+      }
+
+      function resetSelection(){
+        current.slot = null;
+        summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
+        setTextKey(elSummary, 'services.modal.summaryPlaceholder');
+        btnSubmit.disabled = true;
+      }
+
+      function selectSlot(day, iso, locale){
+        if (!iso || !day) return;
+        scheduleState.selectedDate = ymd(day);
+        applySelection(day, iso, locale);
+        renderDesktopSchedule(locale);
+        renderMobileSchedule(locale);
+      }
+
       async function loadMastersAndRender(){
-        elError.style.display='none'; btnSubmit.disabled=true; current.slot=null;
+        elError.style.display='none';
+        resetSelection();
         try{
           const first = await fetchAvailability(ymd(baseStart), null);
           const masters = (first.raw && first.raw.masters) || [];
@@ -1444,6 +1661,16 @@
             opt.textContent = translate('services.modal.noMasters', null, 'No masters available');
             elMaster.appendChild(opt);
             olGrid.innerHTML=`<div class="p-4 text-sm text-center">${translate('services.modal.noAvailability', null, 'No availability')}</div>`;
+            if (mobileTimeList) mobileTimeList.innerHTML='';
+            if (mobileEmpty){
+              mobileEmpty.style.display='block';
+              setTextKey(mobileEmpty, 'services.modal.noAvailability', null, 'No availability yet.');
+            }
+            if (mobileDateInput){
+              mobileDateInput.value='';
+              mobileDateInput.disabled=true;
+            }
+            btnSubmit.disabled = true;
             return;
           }
           masters.forEach(m=>{
@@ -1478,74 +1705,234 @@
         const dayData = dayStrs.map(ds => availabilityCache.get(ds));
         const timeRows = buildTimeRows(dayData.map(x=>x?.set));
 
+        scheduleState.days = days;
+        scheduleState.dayData = dayData;
+        scheduleState.timeRows = timeRows;
+        scheduleState.locale = locale;
+
+        const firstDate = days[0] ? ymd(days[0]) : null;
+        const lastDate = days[days.length-1] ? ymd(days[days.length-1]) : null;
+
+        if (mobileDateInput){
+          mobileDateInput.disabled = !days.length;
+          mobileDateInput.min = firstDate || '';
+          mobileDateInput.max = lastDate || '';
+        }
+
+        let slotStillValid = false;
+        if (current.slot){
+          for (const data of dayData){
+            if (data && data.iso){
+              for (const value of data.iso.values()){
+                if (value === current.slot){
+                  slotStillValid = true;
+                  break;
+                }
+              }
+            }
+            if (slotStillValid) break;
+          }
+        }
+        if (!slotStillValid){
+          resetSelection();
+        }
+
+        if (!scheduleState.selectedDate || (firstDate && scheduleState.selectedDate < firstDate) || (lastDate && scheduleState.selectedDate > lastDate)){
+          scheduleState.selectedDate = null;
+        }
+
+        if (!scheduleState.selectedDate){
+          const firstAvailable = dayData.findIndex(data => data && data.set && data.set.size);
+          if (firstAvailable !== -1){
+            scheduleState.selectedDate = ymd(days[firstAvailable]);
+          } else if (firstDate){
+            scheduleState.selectedDate = firstDate;
+          }
+        }
+
+        if (mobileDateInput && scheduleState.selectedDate){
+          mobileDateInput.value = scheduleState.selectedDate;
+        }
+
+        renderDesktopSchedule(locale);
+        renderMobileSchedule(locale);
+      }
+
+      function renderDesktopSchedule(locale = scheduleState.locale || getLocale()){
+        if (!olGrid) return;
+        const days = scheduleState.days;
+        const dayData = scheduleState.dayData;
+        const timeRows = scheduleState.timeRows;
+
+        if (!days.length){
+          olGrid.innerHTML = '';
+          if (olRange) olRange.textContent = '—';
+          btnSubmit.disabled = true;
+          return;
+        }
+
         const from = days[0].toLocaleDateString(locale, {month:'short', day:'numeric'});
         const to   = days[days.length-1].toLocaleDateString(locale, {month:'short', day:'numeric'});
-        olRange.textContent = `${from} – ${to}`;
+        if (olRange) olRange.textContent = `${from} – ${to}`;
         olGrid.style.setProperty('--days', String(WINDOW_DAYS));
-
         olGrid.innerHTML='';
+
         const headTime = document.createElement('div');
         headTime.className='outlook__cell outlook__head time';
         olGrid.appendChild(headTime);
 
+        const todayStr = (new Date()).toDateString();
+        const selectedDateStr = scheduleState.selectedDate;
+
         days.forEach(d=>{
-          const h=document.createElement('div');
-          h.className='outlook__cell outlook__head';
-          if (new Date().toDateString()===d.toDateString()) h.classList.add('day--today');
-          h.innerHTML = `<div class="day-head">
+          const header=document.createElement('div');
+          header.className='outlook__cell outlook__head';
+          if (todayStr === d.toDateString()) header.classList.add('day--today');
+          if (selectedDateStr && selectedDateStr === ymd(d)) header.classList.add('day--selected');
+          header.innerHTML = `<div class="day-head">
             <div class="day-title">${d.toLocaleDateString(locale, {weekday:'long'})}</div>
             <div class="day-sub">${d.toLocaleDateString(locale, {month:'short', day:'numeric'})}</div>
           </div>`;
-          olGrid.appendChild(h);
+          olGrid.appendChild(header);
         });
 
         timeRows.forEach(t=>{
-          const [hh,mm]=t.split(':').map(n=>parseInt(n,10)); const fake=new Date(); fake.setHours(hh,mm,0,0);
+          const [hh,mm]=t.split(':').map(n=>parseInt(n,10));
+          const fake=new Date(); fake.setHours(hh,mm,0,0);
           const tcell=document.createElement('div'); tcell.className='outlook__cell time'; tcell.textContent=fmtHM(fake);
           olGrid.appendChild(tcell);
 
           days.forEach((d,idx)=>{
-            const c=document.createElement('div'); c.className='outlook__cell';
-            const data = dayData[idx]; const isFree = data?.set?.has(t);
+            const cell=document.createElement('div');
+            cell.className='outlook__cell';
+            const data = dayData[idx];
+            const isFree = data?.set?.has(t);
             const chip=document.createElement('button');
-            chip.type='button'; chip.className='slot-chip ' + (isFree?'slot-free':'slot-busy');
+            chip.type='button';
+            chip.className='slot-chip ' + (isFree?'slot-free':'slot-busy');
             chip.textContent=fmtHM(fake);
+            chip.disabled = !isFree;
 
-            if (isFree){
-              chip.addEventListener('click', ()=>{
-                olGrid.querySelectorAll('.slot-selected').forEach(el=>el.classList.remove('slot-selected'));
+            if(isFree){
+              const iso = data.iso.get(t);
+              if (iso === current.slot){
                 chip.classList.add('slot-selected');
-
-                current.masterId = Number(elMaster.value);
-                current.slot     = data.iso.get(t);
-                const masterText = elMaster.selectedOptions[0]?.text || '';
-                const summaryVars = {
-                  master: masterText,
-                  time: chip.textContent,
-                  date: d.toLocaleDateString(locale)
-                };
-                summaryState = { key: 'services.modal.summarySelected', vars: summaryVars };
-                setTextKey(elSummary, 'services.modal.summarySelected', summaryVars, `Master: ${summaryVars.master}. Time: ${summaryVars.time}, ${summaryVars.date}.`);
-                btnSubmit.disabled=false;
+              }
+              chip.addEventListener('click', ()=>{
+                selectSlot(d, iso, locale);
               });
-            }else{
-              chip.disabled=true;
             }
-
-            c.appendChild(chip);
-            olGrid.appendChild(c);
+            cell.appendChild(chip);
+            olGrid.appendChild(cell);
           });
         });
 
-        const todayIdx = days.findIndex(x=>x.toDateString()===new Date().toDateString());
-        if (todayIdx>0){
-          const colWidth = 160;
-          olWrap.scrollLeft = todayIdx * colWidth - colWidth;
+        if (olWrap){
+          const selected = olGrid.querySelector('.slot-selected');
+          if (selected){
+            selected.scrollIntoView({ block:'nearest', inline:'center' });
+          }else{
+            const todayIdx = days.findIndex(x=>x.toDateString()===todayStr);
+            if (todayIdx>0){
+              const colWidth = 160;
+              olWrap.scrollLeft = Math.max(todayIdx * colWidth - colWidth, 0);
+            } else {
+              olWrap.scrollLeft = 0;
+            }
+          }
         }
+      }
+
+      function renderMobileSchedule(locale = scheduleState.locale || getLocale()){
+        if (!mobileScheduleContainer || !mobileTimeList) return;
+        const days = scheduleState.days;
+        const dayData = scheduleState.dayData;
+
+        mobileTimeList.innerHTML = '';
+
+        if (!days.length){
+          if (mobileEmpty){
+            mobileEmpty.style.display = 'block';
+            setTextKey(mobileEmpty, 'services.modal.noAvailability', null, 'No availability yet.');
+          }
+          return;
+        }
+
+        if (mobileEmpty){
+          mobileEmpty.style.display = 'none';
+        }
+
+        const selectedDateStr = scheduleState.selectedDate;
+        const selectedDayIndex = days.findIndex(d => ymd(d) === selectedDateStr);
+        const fallbackIndex = days.findIndex((_, idx) => dayData[idx] && dayData[idx].set && dayData[idx].set.size);
+        const useIndex = selectedDayIndex !== -1 ? selectedDayIndex : (fallbackIndex !== -1 ? fallbackIndex : 0);
+        const day = days[useIndex];
+        const dayKey = day ? ymd(day) : null;
+        if (dayKey && scheduleState.selectedDate !== dayKey){
+          scheduleState.selectedDate = dayKey;
+          if (mobileDateInput) mobileDateInput.value = dayKey;
+        }
+
+        if (mobileDateInput && scheduleState.selectedDate){
+          mobileDateInput.value = scheduleState.selectedDate;
+        }
+
+        const data = day ? dayData[useIndex] : null;
+        if (!data || !data.set || !data.set.size){
+          if (mobileEmpty){
+            mobileEmpty.style.display = 'block';
+            setTextKey(mobileEmpty, 'services.modal.noAvailabilityDay', null, 'No available times on this date.');
+          }
+          btnSubmit.disabled = true;
+          return;
+        }
+
+        if (mobileEmpty){
+          mobileEmpty.style.display = 'none';
+        }
+
+        const times = Array.from(data.set).sort();
+        times.forEach(timeKey => {
+          const iso = data.iso.get(timeKey);
+          if (!iso) return;
+          const btn=document.createElement('button');
+          btn.type='button';
+          btn.className='book-mobile__time';
+          btn.textContent = fmtHM(new Date(iso));
+          if (iso === current.slot){
+            btn.classList.add('is-selected');
+          }
+          btn.addEventListener('click', ()=>{
+            selectSlot(day, iso, locale);
+          });
+          mobileTimeList.appendChild(btn);
+        });
+
+        if (!times.length){
+          if (mobileEmpty){
+            mobileEmpty.style.display = 'block';
+            setTextKey(mobileEmpty, 'services.modal.noAvailabilityDay', null, 'No available times on this date.');
+          }
+          btnSubmit.disabled = true;
+        } else if (!current.slot){
+          btnSubmit.disabled = true;
+        }
+      }
+
+      if (mobileDateInput){
+        mobileDateInput.addEventListener('change', ()=>{
+          const value = mobileDateInput.value;
+          scheduleState.selectedDate = value || null;
+          resetSelection();
+          renderDesktopSchedule(scheduleState.locale || getLocale());
+          renderMobileSchedule(scheduleState.locale || getLocale());
+        });
       }
 
       async function shiftWindow(deltaDays){
         baseStart = new Date(baseStart); baseStart.setDate(baseStart.getDate() + deltaDays);
+        scheduleState.selectedDate = null;
+        resetSelection();
         await renderWindow();
       }
       olPrev.addEventListener('click', ()=>shiftWindow(-WINDOW_DAYS));
@@ -1558,6 +1945,10 @@
         summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
         setTextKey(elSummary, 'services.modal.summaryPlaceholder');
         availabilityCache.clear();
+        scheduleState.selectedDate = null;
+        scheduleState.days = [];
+        scheduleState.dayData = [];
+        scheduleState.timeRows = [];
         await renderWindow();
       });
 
@@ -1608,7 +1999,10 @@
       modal.addEventListener('click',(e)=>{ if(e.target===modal) closeModal(); });
       btnSubmit.addEventListener('click',addToCart);
 
-      if(cartBtn){ cartBtn.addEventListener('click', openCartModal); }
+      if(cartBtn){
+        cartBtn.addEventListener('click', openCartModal);
+      }
+      if(floatingCartBtn){ floatingCartBtn.addEventListener('click', openCartModal); }
       if(cartClose){ cartClose.addEventListener('click', closeCartModal); }
       if(cartModal){ cartModal.addEventListener('click',(e)=>{ if(e.target===cartModal) closeCartModal(); }); }
       if(cartItems){
@@ -1661,16 +2055,24 @@
       if (paymentSummary) paymentSummary.textContent = PAYMENT_COPY.summary('$0');
 
       // UX: Shift+wheel горизонтально
-      olWrap.addEventListener('wheel', (e)=>{
-        if (e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-          e.preventDefault(); olWrap.scrollLeft += e.deltaY;
-        }
-      }, { passive:false });
+      if (olWrap){
+        olWrap.addEventListener('wheel', (e)=>{
+          if (e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+            e.preventDefault(); olWrap.scrollLeft += e.deltaY;
+          }
+        }, { passive:false });
+      }
 
       if(isAuth){
         refreshCart(true);
-      }else if(cartCount){
-        cartCount.textContent='0';
+      } else {
+        if(cartCount) cartCount.textContent='0';
+        if(floatingCartCount) floatingCartCount.textContent='0';
+        if(floatingCartBtn){
+          floatingCartBtn.classList.remove('floating-cart--visible');
+          floatingCartBtn.setAttribute('aria-hidden','true');
+          floatingCartBtn.tabIndex = -1;
+        }
       }
 
       /* ===== Live search (как было) ===== */

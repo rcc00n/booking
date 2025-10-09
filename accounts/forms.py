@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from django import forms
+from decimal import Decimal
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from django.utils.text import slugify
 
 import phonenumbers
@@ -13,6 +15,8 @@ from core.models import (
     UserProfile,
     Role,
     HowHeard,  # TextChoices со значениями источников
+    Product,
+    ProductSale,
 )
 
 
@@ -25,22 +29,44 @@ class ClientRegistrationForm(UserCreationForm):
         • назначает роль «Client».
     """
 
+    first_name = forms.CharField(
+        required=True,
+        max_length=150,
+        label="First name",
+        error_messages={"required": "First name is required."},
+    )
+
+    last_name = forms.CharField(
+        required=True,
+        max_length=150,
+        label="Last name",
+        error_messages={"required": "Last name is required."},
+    )
+
     email = forms.EmailField(required=True, label="E-mail")
 
     # Визуально предзаполняем +1 и показываем формат;
     # валидацию/нормализацию делаем в clean_phone()
     phone = forms.CharField(
         max_length=20,
-        label="Телефон",
+        label="Phone",
         initial="+1 ",
         widget=forms.TextInput(attrs={"placeholder": "(555) 123-4567"})
     )
 
-    username = forms.CharField(required=False, label="Логин (можно оставить пустым)")
+    birth_date = forms.DateField(
+        required=True,
+        label="Date of birth",
+        input_formats=["%Y-%m-%d"],
+        widget=forms.DateInput(attrs={"type": "date"}),
+        error_messages={"required": "Date of birth is required."},
+    )
+
+    username = forms.CharField(required=False, label="Username (optional)")
 
     # --- NEW: дополнительные поля регистрации ---
     address = forms.CharField(
-        required=False, label="Адрес",
+        required=False, label="Address",
         widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Street, Apt, City, ZIP"})
     )
 
@@ -50,13 +76,14 @@ class ClientRegistrationForm(UserCreationForm):
     )
 
     email_marketing_consent = forms.BooleanField(
-        required=False, label="I agree to receive e-mail updates and offers"
+        required=False,
+        label="I agree to receive e-mail updates and offers and consent to the processing of my personal data",
     )
 
     class Meta(UserCreationForm.Meta):
         model = CustomUserDisplay
         fields = (
-            "username", "email", "phone",
+            "username", "first_name", "last_name", "email", "phone", "birth_date",
             "address", "how_heard", "email_marketing_consent",
             "password1", "password2"
         )
@@ -66,7 +93,7 @@ class ClientRegistrationForm(UserCreationForm):
     def clean_email(self):
         email = (self.cleaned_data.get("email") or "").lower().strip()
         if CustomUserDisplay.objects.filter(email__iexact=email).exists():
-            raise forms.ValidationError("Этот e-mail уже используется.")
+            raise forms.ValidationError("This e-mail is already in use.")
         return email
 
     def clean_phone(self):
@@ -80,18 +107,40 @@ class ClientRegistrationForm(UserCreationForm):
         try:
             parsed = phonenumbers.parse(raw, None)
         except phonenumbers.NumberParseException:
-            raise forms.ValidationError("Неверный формат телефона.")
+            raise forms.ValidationError("Invalid phone number format.")
         phone_e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
         # Проверка уникальности среди профилей
         if UserProfile.objects.filter(phone=phone_e164).exists():
-            raise forms.ValidationError("Этот телефон уже используется.")
+            raise forms.ValidationError("This phone number is already in use.")
         return phone_e164
 
     def clean_username(self):
         username = (self.cleaned_data.get("username") or "").strip()
-        if username and CustomUserDisplay.objects.filter(username=username).exists():
-            raise forms.ValidationError("Такой логин уже занят.")
+        if username:
+            qs = CustomUserDisplay.objects.filter(username=username)
+            instance_pk = getattr(self.instance, "pk", None)
+            if instance_pk:
+                qs = qs.exclude(pk=instance_pk)
+            if qs.exists():
+                raise forms.ValidationError("This username is already taken.")
         return username or None
+
+    def clean_birth_date(self):
+        birth_date = self.cleaned_data.get("birth_date")
+        if not birth_date:
+            return birth_date
+
+        today = timezone.now().date()
+        if birth_date > today:
+            raise forms.ValidationError("Birth date cannot be in the future.")
+
+        age = today.year - birth_date.year - (
+            (today.month, today.day) < (birth_date.month, birth_date.day)
+        )
+        if age < 18:
+            raise forms.ValidationError("You must be at least 18 years old to create an account.")
+
+        return birth_date
 
     # --- Save ---
 
@@ -100,36 +149,50 @@ class ClientRegistrationForm(UserCreationForm):
 
         # email / username
         user.email = self.cleaned_data["email"]
-        if not self.cleaned_data.get("username"):
-            # генерируем из e-mail: "john@example.com" → "john"
-            user.username = slugify(user.email.split("@")[0])
-            # гарантируем уникальность
+        user.first_name = self.cleaned_data["first_name"]
+        user.last_name = self.cleaned_data["last_name"]
+        provided_username = self.cleaned_data.get("username")
+        if provided_username:
+            user.username = provided_username
+        else:
+            base = slugify(user.email.split("@")[0]) or "user"
+            candidate = base
             suffix = 1
-            base = user.username
-            while CustomUserDisplay.objects.filter(username=user.username).exists():
-                user.username = f"{base}{suffix}"
+            while CustomUserDisplay.objects.filter(username=candidate).exclude(pk=user.pk).exists():
+                candidate = f"{base}{suffix}"
                 suffix += 1
+            user.username = candidate
 
         if commit:
             user.save()
 
-            # профиль
             phone = self.cleaned_data["phone"]  # уже в E.164
-            profile = UserProfile.objects.create(
+            birth_date = self.cleaned_data.get("birth_date")
+            address = self.cleaned_data.get("address") or ""
+            how_heard = self.cleaned_data.get("how_heard") or ""
+
+            profile, created = UserProfile.objects.get_or_create(
                 user=user,
-                phone=phone,
-                address=self.cleaned_data.get("address") or "",
-                how_heard=self.cleaned_data.get("how_heard") or "",
+                defaults={
+                    "phone": phone,
+                    "birth_date": birth_date,
+                    "address": address,
+                    "how_heard": how_heard,
+                },
             )
-            # согласие на e-mail-рассылки (+ timestamp)
+            if not created:
+                profile.phone = phone
+                profile.birth_date = birth_date
+                profile.address = address
+                profile.how_heard = how_heard
+
             consent = bool(self.cleaned_data.get("email_marketing_consent"))
             profile.set_marketing_consent(consent)
             profile.save(update_fields=[
-                "address", "how_heard",
+                "phone", "birth_date", "address", "how_heard",
                 "email_marketing_consent", "email_marketing_consented_at",
             ])
 
-            # роль «Client»
             client_role, _ = Role.objects.get_or_create(name="Client")
             profile.userrole_set.get_or_create(role=client_role)
 
@@ -220,6 +283,24 @@ class ClientProfileForm(forms.Form):
             raise ValidationError("Этот телефон уже используется.")
         return phone_e164
 
+    def clean_birth_date(self):
+        birth_date = self.cleaned_data.get("birth_date")
+        if not birth_date:
+            return birth_date
+
+        today = timezone.now().date()
+        if birth_date > today:
+            raise ValidationError("Can not be born in the future")
+
+        # минимальный возраст — 18 лет
+        age = today.year - birth_date.year - (
+            (today.month, today.day) < (birth_date.month, birth_date.day)
+        )
+        if age < 18:
+            raise ValidationError("Can not be below 18 yo")
+
+        return birth_date
+
     def save(self):
         self.user.first_name = self.cleaned_data.get("first_name", "") or ""
         self.user.last_name  = self.cleaned_data.get("last_name", "") or ""
@@ -277,3 +358,109 @@ class HealthConditionsForm(forms.Form):
             "surgeries": join_csv(data.get("surgeries")),
             "notes": data.get("notes", ""),
         })
+
+
+# -----------------------------
+# Retail sales
+# -----------------------------
+
+class ProductSaleForm(forms.Form):
+    product = forms.ModelChoiceField(
+        label="Product",
+        queryset=Product.objects.none(),
+    )
+    client = forms.ModelChoiceField(
+        label="Client",
+        required=False,
+        queryset=UserProfile.objects.none(),
+        help_text="Optional: link sale to an existing client.",
+    )
+    quantity = forms.IntegerField(
+        label="Quantity",
+        min_value=1,
+        initial=1,
+    )
+    unit_price = forms.DecimalField(
+        label="Unit price (CAD)",
+        required=False,
+        min_value=Decimal("0.00"),
+        decimal_places=2,
+        max_digits=10,
+        help_text="Leave blank to use the product's default price.",
+        widget=forms.NumberInput(attrs={"step": "0.01"}),
+    )
+    sold_at = forms.DateTimeField(
+        label="Sale date & time",
+        required=False,
+        input_formats=["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"],
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
+    notes = forms.CharField(
+        label="Notes",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+
+    def __init__(self, *args, employee_profile: UserProfile | None = None, **kwargs):
+        self.employee_profile = employee_profile
+        super().__init__(*args, **kwargs)
+
+        self.fields["product"].queryset = Product.objects.filter(is_active=True).order_by("name")
+
+        client_qs = (
+            UserProfile.objects.filter(userrole__role__name="Client")
+            .select_related("user")
+            .order_by("user__first_name", "user__last_name", "user__username")
+            .distinct()
+        )
+        self.fields["client"].queryset = client_qs
+
+        if not self.is_bound:
+            local_now = timezone.localtime(timezone.now())
+            self.fields["sold_at"].initial = local_now.strftime("%Y-%m-%dT%H:%M")
+
+    def clean_unit_price(self):
+        price = self.cleaned_data.get("unit_price")
+        product = self.cleaned_data.get("product")
+        if price is None:
+            if product is None:
+                return price
+            return product.price
+        return price
+
+    def clean_sold_at(self):
+        value = self.cleaned_data.get("sold_at")
+        if not value:
+            return timezone.now()
+        if timezone.is_naive(value):
+            value = timezone.make_aware(value, timezone.get_current_timezone())
+        return value
+
+    def clean(self):
+        cleaned = super().clean()
+        product: Product | None = cleaned.get("product")
+        quantity = cleaned.get("quantity") or 0
+        if product and quantity and quantity > product.quantity_in_stock:
+            self.add_error(
+                "quantity",
+                f"Only {product.quantity_in_stock} unit(s) of {product.name} remaining in stock.",
+            )
+        return cleaned
+
+    def save(self, *, employee_profile: UserProfile | None = None) -> ProductSale:
+        profile = employee_profile or self.employee_profile
+        if profile is None:
+            raise ValidationError("Employee profile is required to register a sale.")
+
+        sale = ProductSale(
+            product=self.cleaned_data["product"],
+            sold_by=profile,
+            client=self.cleaned_data.get("client"),
+            quantity=self.cleaned_data["quantity"],
+            unit_price=self.cleaned_data["unit_price"],
+            sold_at=self.cleaned_data["sold_at"],
+            notes=self.cleaned_data.get("notes", ""),
+        )
+        sale.full_clean()
+        sale.save()
+        return sale
