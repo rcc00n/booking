@@ -18,6 +18,18 @@ from django.conf import settings
 
 
 from storages.backends.s3boto3 import S3Boto3Storage
+from django.utils.text import slugify
+
+
+def service_image_upload_to(instance, filename: str) -> str:
+    """
+    Deterministic upload path per service to avoid leftovers on S3/local storage.
+    """
+    base, ext = os.path.splitext(filename)
+    normalized = slugify(base) or "image"
+    ext = ext.lower() or ".jpg"
+    service_id = instance.pk or uuid.uuid4()
+    return f"services/{service_id}/{normalized}{ext}"
 # --- 1. ROLES ---
 
 class Role(models.Model):
@@ -270,6 +282,17 @@ class Service(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
+    image = models.ImageField(
+        upload_to=service_image_upload_to,
+        blank=True,
+        null=True,
+        help_text="Shown on the public catalog cards."
+    )
+    image_alt_text = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Accessible text for the service image; defaults to the service name."
+    )
     category = models.ForeignKey(ServiceCategory, on_delete=models.CASCADE, blank=True, null=True)
     # prepayment_option = models.ForeignKey(PrepaymentOption, on_delete=models.CASCADE, blank=True, null=True)
     base_price = models.DecimalField(max_digits=10, decimal_places=2)
@@ -284,6 +307,28 @@ class Service(models.Model):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        old_image = None
+        if self.pk:
+            try:
+                old_image = Service.objects.only("image").get(pk=self.pk).image
+            except Service.DoesNotExist:
+                old_image = None
+
+        super().save(*args, **kwargs)
+
+        # If a new image uploaded or cleared, remove the old file from storage to avoid leftovers.
+        if old_image and getattr(old_image, "name", "") and old_image.name != getattr(self.image, "name", ""):
+            old_image.delete(save=False)
+
+    @property
+    def card_image_url(self) -> str | None:
+        return self.image.url if self.image else None
+
+    @property
+    def card_image_alt(self) -> str:
+        return self.image_alt_text or self.name
 
 
     def get_active_discount(self):
