@@ -1,4 +1,8 @@
 .ibuilder{border:1px solid #d1d5db;border-radius:12px;background:#fff;padding:18px;margin-bottom:8px;box-shadow:0 3px 12px rgba(17,24,39,.04)}
+.ibuilder-guide-panel{margin-top:16px;display:flex;flex-direction:column;gap:14px;width:100%}
+.ibuilder-guide-panel .ibuilder__guide{margin:0}
+#jazzy-actions .ibuilder-guide-panel{margin-top:24px}
+#jazzy-actions .ibuilder-guide-panel .ibuilder__guide{margin:0;box-shadow:none;border-radius:12px}
 .ibuilder__guide{background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:18px;color:#1f2937}
 .ibuilder__guide h3{margin-top:0;margin-bottom:12px;font-size:18px;font-weight:700}
 .ibuilder__guide h4{margin-top:18px;margin-bottom:8px;font-size:15px;font-weight:600}

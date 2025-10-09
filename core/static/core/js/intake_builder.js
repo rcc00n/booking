@@ -167,6 +167,70 @@
     return schema;
   }
 
+  function locateActionsHost(){
+    const selectors = [
+      '#jazzy-actions .card-body',
+      '#jazzy-actions',
+      '.submit-row',
+      '.form-actions',
+    ];
+    for (const selector of selectors){
+      const el = document.querySelector(selector);
+      if (el) return { element: el, selector };
+    }
+    return null;
+  }
+
+  function ensureGuidePanel({ element, selector }){
+    if (!element) return null;
+    if (selector === '#jazzy-actions'){
+      const cardBody = element.querySelector('.card-body');
+      if (cardBody){
+        element = cardBody;
+      }
+    }
+    if (selector === '.submit-row'){
+      let next = element.nextElementSibling;
+      while (next && !next.classList.contains('ibuilder-guide-panel')){
+        next = next.nextElementSibling;
+      }
+      if (next && next.classList.contains('ibuilder-guide-panel')){
+        return next;
+      }
+      const panel = document.createElement('div');
+      panel.className = 'ibuilder-guide-panel';
+      element.insertAdjacentElement('afterend', panel);
+      return panel;
+    }
+
+    let panel = element.querySelector('.ibuilder-guide-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.className = 'ibuilder-guide-panel';
+      element.appendChild(panel);
+    }
+    return panel;
+  }
+
+  function relocateGuideToActionsPanel(root, attempt = 0){
+    if (!root || root.dataset.guideRelocated === '1') return;
+    const guide = root.querySelector('.ibuilder__guide');
+    if (!guide) return;
+
+    const hostInfo = locateActionsHost();
+    if (!hostInfo){
+      if (attempt < 10){
+        const delay = Math.min(600, 150 + attempt * 50);
+        setTimeout(() => relocateGuideToActionsPanel(root, attempt + 1), delay);
+      }
+      return;
+    }
+    const panel = ensureGuidePanel(hostInfo);
+    if (!panel) return;
+    panel.appendChild(guide);
+    root.dataset.guideRelocated = '1';
+  }
+
   function createDefaultField(){
     const key = slugify('field_' + Math.random().toString(36).slice(2,6));
     return {
@@ -301,6 +365,7 @@
       this.state = ensureSchema(initial);
       this.bindToolbar();
       this.render();
+      relocateGuideToActionsPanel(this.root);
     }
 
     bindToolbar(){
