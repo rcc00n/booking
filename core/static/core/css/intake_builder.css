@@ -1,4 +1,12 @@
 .ibuilder{border:1px solid #d1d5db;border-radius:12px;background:#fff;padding:18px;margin-bottom:8px;box-shadow:0 3px 12px rgba(17,24,39,.04)}
+.ibuilder__guide{background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:18px;color:#1f2937}
+.ibuilder__guide h3{margin-top:0;margin-bottom:12px;font-size:18px;font-weight:700}
+.ibuilder__guide h4{margin-top:18px;margin-bottom:8px;font-size:15px;font-weight:600}
+.ibuilder__guide ol{margin:0 0 10px 18px;padding:0;display:flex;flex-direction:column;gap:6px}
+.ibuilder__guide li{line-height:1.45}
+.ibuilder__guide pre{background:#111827;color:#f3f4f6;border-radius:8px;padding:12px;font-size:13px;overflow:auto;margin:8px 0 12px}
+.ibuilder__guide code{font-family:var(--ibuilder-mono,monospace)}
+.ibuilder__guide .help{margin:0;font-size:13px;color:#374151}
 .ibuilder__toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
 .ibuilder__toolbar-left,.ibuilder__toolbar-right{display:flex;gap:8px;flex-wrap:wrap}
 .ibuilder__btn{background:#2563eb;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;transition:background .2s ease}

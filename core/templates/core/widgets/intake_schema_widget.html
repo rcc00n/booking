@@ -5,6 +5,44 @@
          value="{{ widget.value|escape }}"
          {% include "django/forms/widgets/attrs.html" with widget=widget %}>
 
+  <div class="ibuilder__guide">
+    <h3>How to build a client intake form</h3>
+    <ol>
+      <li><strong>Create sections first.</strong> Click <em>Add section</em>, give it a title (for example “Medical history”), and optionally describe what belongs inside.</li>
+      <li><strong>Add questions to each section.</strong> Inside a section press <em>Add field</em>. Fill in the human-friendly <em>Label</em> (what staff/client sees) and pick the <em>Type</em> (text, checkbox, date, etc.).</li>
+      <li><strong>Set the field key.</strong> The builder auto-fills a key based on the label. Keys must be unique and contain letters/numbers/underscores only; they become JSON keys in saved submissions.</li>
+      <li><strong>Configure details.</strong> Use the options that appear (Required, Placeholder, Choices, Min/Max, etc.) to control validation and default values.</li>
+      <li><strong>Organise as needed.</strong> Use the up/down arrows to reorder sections or questions, and <em>Duplicate</em>/<em>Remove</em> to copy or delete fields.</li>
+      <li><strong>Save the form.</strong> Click <em>Save</em> or <em>Save and continue editing</em>. Re-opening the form will show the saved layout. Use the <em>Form class</em> tab only if you have a custom Django form class that should render/validate the data instead of the dynamic builder.</li>
+    </ol>
+
+    <h4>Working with the JSON editor</h4>
+    <ol>
+      <li>Press <em>JSON editor</em> to open the raw configuration. You can copy it for backup or paste a layout from another system.</li>
+      <li>Edit the JSON carefully, then click <em>Apply</em>. The visual builder refreshes to reflect your changes. <em>Reset</em> restores the JSON to the latest saved builder state.</li>
+      <li>Always keep the structure: a top-level <code>meta</code> object and a <code>sections</code> array. Each section contains a <code>fields</code> array, with each field defining at least <code>key</code>, <code>label</code>, and <code>type</code>.</li>
+    </ol>
+    <p><strong>Example JSON skeleton:</strong></p>
+    <pre><code>{
+  "meta": { "version": 1 },
+  "sections": [
+    {
+      "title": "Section title",
+      "description": "",
+      "fields": [
+        {
+          "key": "unique_key",
+          "label": "Question text",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ]
+}</code></pre>
+    <p class="help">Tip: Increase the <em>Schema version</em> whenever you make breaking changes so you can track which intake submissions were collected with which layout.</p>
+  </div>
+
     <div class="ibuilder__toolbar">
       <div class="ibuilder__toolbar-left">
         <button type="button" class="ibuilder__btn" data-action="add-section">Add section</button>
