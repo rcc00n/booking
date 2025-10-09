@@ -429,6 +429,35 @@ class MasterProfile(models.Model):
             return parts[0][0] + parts[1][0]
         return self.user.get_full_name()[:2]
 
+class MasterMonthlySalesTarget(models.Model):
+    """
+    Stores a monthly sales target for a master so progress can be surfaced in the admin dashboard.
+    """
+    master = models.ForeignKey(MasterProfile, on_delete=models.CASCADE, related_name="monthly_sales_targets")
+    month = models.DateField(help_text="Use the first day of the month for tracking")
+    target_amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))])
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("master", "month")
+        ordering = ["-month", "master__user__user__first_name", "master__user__user__last_name"]
+        verbose_name = "Master sales target"
+        verbose_name_plural = "Master sales targets"
+
+    def __str__(self):
+        return f"{self.master} - {self.month:%B %Y}: {self.target_amount}"
+
+    def clean(self):
+        super().clean()
+        if self.month:
+            self.month = self.month.replace(day=1)
+
+    def save(self, *args, **kwargs):
+        if self.month:
+            self.month = self.month.replace(day=1)
+        super().save(*args, **kwargs)
+
 class MasterWorkDay(models.Model):
     WEEKDAYS = [
         (0, "Monday"),

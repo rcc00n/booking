@@ -180,10 +180,9 @@ def custom_index(request):
         .values_list("appointment_id", "total")
     )
 
-    if not paid_by_appt:
-        top_masters = []
-    else:
-    # 3) Сумма final_price по мастеру в каждом визите из оплаченных
+    master_month_totals = {}
+    top_masters = []
+    if paid_by_appt:
         rows = (
             AppointmentItem.objects
             .filter(appointment_id__in=paid_by_appt.keys())
@@ -191,13 +190,11 @@ def custom_index(request):
             .annotate(msum=Coalesce(Sum("final_price"), Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))))
         )
 
-        # 4) Сумма final_price по визиту (для нормализации долей мастеров)
         appt_total = {}
         for r in rows:
             aid = r["appointment_id"]
             appt_total[aid] = (appt_total.get(aid, 0) or 0) + (r["msum"] or 0)
 
-        # 5) Распределяем деньги визита пропорционально долям мастеров
         master_totals = {}
         for r in rows:
             aid = r["appointment_id"]
@@ -209,15 +206,46 @@ def custom_index(request):
                 part = paid * (msum / total)
                 master_totals[mid] = (master_totals.get(mid, 0) or 0) + part
 
-        # 6) Топ-10 мастеров по начисленной сумме
-        top_ids = sorted(master_totals.keys(), key=lambda k: master_totals[k], reverse=True)[:10]
+        master_month_totals = master_totals
+        top_ids = sorted(master_month_totals.keys(), key=lambda k: master_month_totals[k], reverse=True)[:10]
         top_masters_qs = MasterProfile.objects.filter(pk__in=top_ids).select_related("user")
         top_masters = list(top_masters_qs)
         for m in top_masters:
-            m.total = master_totals.get(m.pk, 0)
+            m.total = master_month_totals.get(m.pk, Decimal("0"))
 
-        # Сохранить порядок по total
         top_masters = sorted(top_masters, key=lambda m: m.total or 0, reverse=True)[:10]
+
+    current_month_label = first_day.strftime("%B %Y")
+    month_targets = (
+        MasterMonthlySalesTarget.objects
+        .filter(month__year=first_day.year, month__month=first_day.month)
+        .select_related("master__user__user")
+    )
+    targets_by_master = {t.master_id: t for t in month_targets}
+    master_target_rows = []
+    master_target_for_current_user = None
+    masters_qs = MasterProfile.objects.select_related("user__user").order_by(
+        "user__user__first_name", "user__user__last_name"
+    )
+    for master in masters_qs:
+        target_obj = targets_by_master.get(master.id)
+        achieved_amount = master_month_totals.get(master.id) or Decimal("0")
+        target_amount = getattr(target_obj, "target_amount", None)
+        remaining_amount = None
+        if target_amount is not None:
+            remaining_amount = target_amount - achieved_amount
+            if remaining_amount < Decimal("0"):
+                remaining_amount = Decimal("0")
+        entry = {
+            "master": master,
+            "target": target_obj,
+            "target_amount": target_amount,
+            "achieved_amount": achieved_amount,
+            "remaining_amount": remaining_amount,
+        }
+        master_target_rows.append(entry)
+        if master_profile and master.id == master_profile.id:
+            master_target_for_current_user = entry
 
     # Недавние встречи (20) с префетчем позиций
     recent_appointments = (
@@ -258,6 +286,9 @@ def custom_index(request):
         "today": today,
         "recent_appointments": recent_appointments,
         "today_appointments": today_appointments,
+        "master_target_rows": master_target_rows,
+        "master_target_month_label": current_month_label,
+        "master_target_for_current_user": master_target_for_current_user,
     })
     return TemplateResponse(request, "admin/index.html", context)
 
@@ -3161,9 +3192,27 @@ class MasterWorkDayInline(admin.TabularInline):
     extra = 7  # сразу 7 строк для всех дней
 
 
+
+
+class MasterMonthlySalesTargetInline(admin.TabularInline):
+    model = MasterMonthlySalesTarget
+    extra = 0
+    fields = ("month", "target_amount")
+    ordering = ("-month",)
+
+
+@admin.register(MasterMonthlySalesTarget)
+class MasterMonthlySalesTargetAdmin(admin.ModelAdmin):
+    list_display = ("master", "month", "target_amount", "updated_at")
+    list_filter = ("month",)
+    search_fields = ("master__user__user__first_name", "master__user__user__last_name")
+    autocomplete_fields = ("master",)
+    ordering = ("-month", "master__user__user__first_name")
+
+
 @admin.register(MasterProfile)
 class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
-    inlines = [MasterWorkDayInline]
+    inlines = [MasterWorkDayInline, MasterMonthlySalesTargetInline]
     add_form = MasterCreateFullForm
     change_list_template = "admin/master/changelist_cards.html"
     list_per_page = 24
