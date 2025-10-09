@@ -1366,10 +1366,17 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         ms_map = defaultdict(list)
         for sm in ServiceMaster.objects.select_related("service", "master").order_by("service__name"):
             sid = str(sm.service_id)
+            service = sm.service
+            duration_min = service.duration_min or 0
+            extra_min = service.extra_time_min or 0
+            total_duration = duration_min + extra_min
             ms_map[str(sm.master_id)].append({
                 "id": str(sm.service_id),
-                "name": sm.service.name,
-                "base_price": str(sm.service.base_price),
+                "name": service.name,
+                "base_price": str(service.base_price),
+                "duration_min": duration_min,
+                "extra_time_min": extra_min,
+                "total_duration_min": total_duration,
                 "svc_disc": svc_discounts.get(sid, 0),  # %
             })
 
@@ -1600,12 +1607,22 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         return obj.id
 
     def _context_lists(self):
-        clients = (
+        clients_raw = (
             UserProfile.objects.select_related("user")
-            .annotate(label=Concat("user__first_name", Value(" "), "user__last_name"))
-            .values("id", "label")
-            .order_by("label")
+            .annotate(
+                first_name=Coalesce("user__first_name", Value("")),
+                last_name=Coalesce("user__last_name", Value("")),
+                username=Coalesce("user__username", Value("")),
+            )
+            .values("id", "first_name", "last_name", "username")
+            .order_by("user__first_name", "user__last_name", "user__username")
         )
+        clients = []
+        for row in clients_raw:
+            label = f"{row['first_name']} {row['last_name']}".strip()
+            if not label:
+                label = row["username"] or str(row["id"])
+            clients.append({"id": row["id"], "label": label})
         masters = (
             MasterProfile.objects.select_related("user")
             .annotate(label=Concat("user__user__first_name", Value(" "), "user__user__last_name"))
@@ -1637,6 +1654,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "name": svc.name,
                 "base_price": str(svc.base_price),
                 "duration_min": svc.duration_min,
+                "extra_time_min": svc.extra_time_min,
+                "total_duration_min": (svc.duration_min or 0) + (svc.extra_time_min or 0),
                 "forms": form_ids,
             }
             for form in active_forms:
@@ -1652,6 +1671,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "service__name",
                 "service__base_price",
                 "service__duration_min",
+                "service__extra_time_min",
             )
         )
         for r in qs:
@@ -1664,6 +1684,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                     "name": r["service__name"],
                     "base_price": str(r["service__base_price"]),
                     "duration_min": r["service__duration_min"],
+                    "extra_time_min": r["service__extra_time_min"],
+                    "total_duration_min": (r["service__duration_min"] or 0) + (r["service__extra_time_min"] or 0),
                     "forms": forms,
                 }
                 services_info[sid] = base
@@ -1672,6 +1694,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "name": base["name"],
                 "base_price": base["base_price"],
                 "duration_min": base["duration_min"],
+                "extra_time_min": base.get("extra_time_min", 0),
+                "total_duration_min": base.get("total_duration_min", (base.get("duration_min") or 0)),
                 "forms": list(base.get("forms", [])),
             }
             services_by_master.setdefault(str(r["master_id"]), []).append(payload)
@@ -1804,49 +1828,95 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             availability_url = ""
 
         mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
-        if request.method == "GET" and request.GET.get("master") != 'undefined':
-            clients, masters, services_by_master, service_forms_map, intake_forms_map = _context_lists()
-            intake_forms_catalog = _build_forms_catalog(intake_forms_map)
-            posted_intake_payload = {"forms": []}
+        clients, masters, services_by_master, service_forms_map, intake_forms_map = _context_lists()
+        intake_forms_catalog = _build_forms_catalog(intake_forms_map)
 
-            q_date   = request.GET.get("date")
-            q_time   = request.GET.get("time")
-            q_master = request.GET.get("master")
+        if request.method == "GET":
+
+            q_date = (request.GET.get("date") or "").strip()
+
+            q_time = (request.GET.get("time") or "").strip()
+
+            q_master = (request.GET.get("master") or "").strip()
+
+            if q_master == "undefined":
+
+                q_master = ""
+
+
 
             if is_master(request.user):
-                q_master = str(mp.pk)
-                masters = [m for m in masters if str(m["id"]) == str(mp.pk)]
+
+                q_master = str(mp.pk) if mp else ""
+
+                masters = [m for m in masters if mp and str(m["id"]) == str(mp.pk)]
+
+
 
             initial_first_item = {}
 
             if q_master and MasterProfile.objects.filter(pk=q_master).exists():
+
                 initial_first_item["master"] = str(q_master)
 
-            dt = _parse_dt(q_date, q_time)
+
+
+            dt = _parse_dt(q_date or None, q_time or None)
+
             if dt:
+
                 initial_first_item["start_time_date"] = dt.strftime("%Y-%m-%d")
+
                 initial_first_item["start_time_time"] = dt.strftime("%H:%M:%S" if dt.second else "%H:%M")
 
+
+
             ctx = {
+
                 **self.admin_site.each_context(request),
-                "clients": clients,
+
+                "clients": list(clients),
+
                 "masters": masters,
+
                 "services_by_master": services_by_master,
+
                 "initial_first_item": initial_first_item,
-                "prefill_query": {"date": q_date, "time": q_time, "master": str(q_master) if q_master else None},
+
+                "prefill_query": {"date": q_date or None, "time": q_time or None, "master": str(q_master) if q_master else None},
+
                 "service_forms_map": service_forms_map,
+
                 "intake_forms_catalog": intake_forms_catalog,
-                "posted_intake_payload": posted_intake_payload,
+
+                "posted_intake_payload": {"forms": []},
+
                 "intake_error_map": {},
 
+                "form_errors": [],
+
+                "field_errors": {},
+
+                "item_errors": {},
+
+                "posted_items": [],
+
+                "posted_client": "",
+
                 "is_master": is_master(request.user),
+
                 "current_master_id": mp.id if mp else None,
+
                 "availability_url": availability_url,
+
             }
+
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
 
-        # ---------------- POST: создаём запись ----------------
+
+        # ---------------- POST: ??????? ?????? ----------------
+
         clients, masters, services_by_master, service_forms_map, intake_forms_map = _context_lists()
         intake_forms_catalog = _build_forms_catalog(intake_forms_map)
 
@@ -1934,6 +2004,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "start_time_1": (request.POST.get(pref + "start_time_1") or "").strip(),  # time
                 "unit_price":  (request.POST.get(pref + "unit_price") or "").strip(),
                 "promocode":   (request.POST.get(pref + "promocode") or "").strip(),
+                "duration_override_min": (request.POST.get(pref + "duration_override_min") or "").strip(),
+                "manual_discount_percent": (request.POST.get(pref + "manual_discount_percent") or "").strip(),
             })
 
         # обязательные поля верхнего уровня
@@ -1973,6 +2045,32 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             if date_str and time_str and not dt:
                 bag["items"][idx]["start_time_1"].append("Invalid date/time.")
 
+            duration_raw = row.get("duration_override_min", "").strip()
+            duration_override = None
+            if duration_raw:
+                try:
+                    duration_override = int(duration_raw)
+                    if duration_override < 1:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    bag["items"][idx]["duration_override_min"].append("Enter a positive duration (minutes).")
+                    duration_override = None
+
+            manual_raw = row.get("manual_discount_percent", "").strip()
+            manual_discount = None
+            if manual_raw:
+                try:
+                    manual_discount = int(manual_raw)
+                except (TypeError, ValueError):
+                    bag["items"][idx]["manual_discount_percent"].append("Enter discount between 0 and 100.")
+                    manual_discount = None
+                else:
+                    if manual_discount < 0 or manual_discount > 100:
+                        bag["items"][idx]["manual_discount_percent"].append("Enter discount between 0 and 100.")
+                        manual_discount = None
+            else:
+                manual_discount = 0
+
             valid_rows.append({
                 "idx": idx,
                 "master_id": master_id or None,
@@ -1980,6 +2078,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "dt": dt,
                 "unit_price": (row["unit_price"] or None),
                 "promocode_id": (row["promocode"] or None),
+                "duration_override": duration_override,
+                "manual_discount": manual_discount,
             })
 
         required_form_ids: set[str] = set()
@@ -2023,7 +2123,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         if has_errors:
             ctx = {
                 **self.admin_site.each_context(request),
-                "clients": clients,
+                "clients": list(clients),
                 "masters": masters,
                 "services_by_master": services_by_master,
                 "promos_by_service_json": json.dumps(promos_by_service),
@@ -2078,6 +2178,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                         service_id=row["service_id"],
                         start_time=row["dt"],
                         unit_price=row["unit_price"] or None,
+                        duration_override_min=row.get("duration_override"),
+                        manual_discount_percent=row.get("manual_discount", 0) or 0,
                     )
                     try:
                         item.full_clean()

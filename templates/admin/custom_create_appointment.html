@@ -395,6 +395,7 @@
     </div>
 
     {# ---- Данные из контекста (как и раньше) ---- #}
+    {{ clients|json_script:"ab-clients" }}
     {{ masters|json_script:"ab-masters" }}
     {{ services_by_master|json_script:"ab-services-by-master" }}
     {{ initial_first_item|json_script:"ab-initial-first" }}
@@ -419,6 +420,7 @@
     <script>
         (function(){
             // ---- Data from backend
+            const CLIENTS = JSON.parse(document.getElementById('ab-clients').textContent || '[]');
             const MASTERS = JSON.parse(document.getElementById('ab-masters').textContent || '[]');
             const SERVICES_BY_MASTER = JSON.parse(document.getElementById('ab-services-by-master').textContent || '{}');
             const INITIAL_FIRST = JSON.parse(document.getElementById('ab-initial-first').textContent || '{}');
@@ -460,6 +462,20 @@
             });
 
             /* ────────────── Client combobox ────────────── */
+            if (clientEl && CLIENTS.length) {
+                const hasRealOptions = Array.from(clientEl.options).some(o => o.value);
+                if (!hasRealOptions) {
+                    const frag = document.createDocumentFragment();
+                    CLIENTS.forEach(c => {
+                        const opt = document.createElement('option');
+                        opt.value = String(c.id);
+                        opt.textContent = c.label || String(c.id);
+                        frag.appendChild(opt);
+                    });
+                    clientEl.appendChild(frag);
+                }
+            }
+
             (function clientComboBox(){
                 const input     = document.getElementById('client_combo_input');
                 const listEl    = document.getElementById('client_combo_list');
@@ -676,6 +692,9 @@
                     const o = buildOption(String(s.id), s.name);
                     o.dataset.price    = s.base_price;
                     o.dataset.duration = s.duration_min;
+                    if (s.total_duration_min != null) {
+                        o.dataset.totalDuration = s.total_duration_min;
+                    }
                     select.appendChild(o);
                 });
                 select.disabled = list.length === 0;
@@ -1451,6 +1470,19 @@
     </div>
 
     <!-- Кнопка Remove: красная пилюля в углу -->
+    <div class="ab-row">
+      <div class="ab-field" data-field="duration_override_min">
+        <label>Duration (minutes)</label>
+        <input type="number" class="js-duration" min="1" placeholder="Auto">
+        <div class="ab-field-error js-err-duration"></div>
+      </div>
+      <div class="ab-field" data-field="manual_discount_percent">
+        <label>Manual discount (%)</label>
+        <input type="number" class="js-discount" min="0" max="100" step="1" placeholder="0">
+        <div class="ab-field-error js-err-discount"></div>
+      </div>
+    </div>
+
     <button type="button" class="ab-remove js-remove" title="Remove">
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -1471,6 +1503,8 @@
                 const timeInp   = row.querySelector('.js-time');
                 const priceInp  = row.querySelector('.js-price');
                 const promoSel  = row.querySelector('.js-promo');
+                const durationInp = row.querySelector('.js-duration');
+                const discountInp = row.querySelector('.js-discount');
                 const hint      = row.querySelector('.js-service-hint');
 
                 resetPromoSelect(promoSel, { disabled: true });
@@ -1497,6 +1531,26 @@
                 timeInp.name   = name('start_time_1'); timeInp.id   = `id_items-${idx}-start_time_1`;
                 priceInp.name  = name('unit_price');   priceInp.id  = `id_items-${idx}-unit_price`;
                 promoSel.name  = name('promocode');    promoSel.id  = `id_items-${idx}-promocode`;
+                if (durationInp) {
+                    durationInp.name = name('duration_override_min');
+                    durationInp.id = `id_items-${idx}-duration_override_min`;
+                    if (!durationInp.value) {
+                        durationInp.dataset.auto = '1';
+                    }
+                    durationInp.addEventListener('input', () => {
+                        durationInp.dataset.auto = '0';
+                    });
+                }
+                if (discountInp) {
+                    discountInp.name = name('manual_discount_percent');
+                    discountInp.id = `id_items-${idx}-manual_discount_percent`;
+                    discountInp.addEventListener('change', () => {
+                        const val = parseInt(discountInp.value, 10);
+                        if (Number.isNaN(val)) return;
+                        if (val < 0) discountInp.value = '0';
+                        if (val > 100) discountInp.value = '100';
+                    });
+                }
 
                 populateMasters(masterSel);
                 const availability = initTimeslotPicker({
@@ -1521,7 +1575,15 @@
 
                 masterSel.addEventListener('change', () => {
                     populateServices(serviceSel, masterSel.value, { combo: serviceCombo, resetSelection: true });
-                    hint.textContent = ''; priceInp.value = ''; recalcGrandTotal();
+                    hint.textContent = ''; priceInp.value = '';
+                    if (durationInp) {
+                        durationInp.value = '';
+                        durationInp.dataset.auto = '1';
+                    }
+                    if (discountInp) {
+                        discountInp.value = '';
+                    }
+                    recalcGrandTotal();
                     renderIntakeForms();
                     if (availability) availability.refresh();
                     refreshPromos({ selected: '' });
@@ -1531,8 +1593,20 @@
                     const opt = serviceSel.selectedOptions[0];
                     const price = opt && opt.dataset ? opt.dataset.price : '';
                     const dur   = opt && opt.dataset ? opt.dataset.duration : '';
+                    const totalDur = opt && opt.dataset ? (opt.dataset.totalDuration || dur) : '';
                     priceInp.value = price || '';
-                    hint.textContent = dur ? (`Duration: ${dur} min`) : '';
+                    if (durationInp) {
+                        const autoMode = durationInp.dataset.auto !== '0';
+                        if (autoMode) {
+                            durationInp.value = totalDur || '';
+                            if (totalDur) {
+                                durationInp.dataset.auto = '1';
+                            } else {
+                                delete durationInp.dataset.auto;
+                            }
+                        }
+                    }
+                    hint.textContent = totalDur ? (`Duration: ${totalDur} min`) : '';
                     recalcGrandTotal();
                     renderIntakeForms();
                     if (availability) availability.refresh();
@@ -1561,7 +1635,9 @@
                 const dateInp   = row.querySelector('.js-date');
                 const timeInp   = row.querySelector('.js-time');
                 const priceInp  = row.querySelector('.js-price');
-
+                const durationInp = row.querySelector('.js-duration');
+                const discountInp = row.querySelector('.js-discount');
+                
                 const comboRef = ref && ref.serviceCombo ? ref.serviceCombo : null;
                 let resolvedMaster = masterSel.value;
                 if (IS_MASTER && CURRENT_MASTER_ID){
@@ -1580,7 +1656,19 @@
                     const opt = serviceSel.selectedOptions[0];
                     if (opt){ priceInp.value = opt.dataset.price || '';
                         const hint = row.querySelector('.js-service-hint');
-                        hint.textContent = opt.dataset.duration ? (`Duration: ${opt.dataset.duration} min`) : '';
+                        const totalDur = opt.dataset.totalDuration || opt.dataset.duration || '';
+                        hint.textContent = totalDur ? (`Duration: ${totalDur} min`) : '';
+                        if (durationInp){
+                            if (prefill.duration_override_min){
+                                durationInp.value = prefill.duration_override_min;
+                                durationInp.dataset.auto = '0';
+                            } else if (!durationInp.value){
+                                durationInp.value = totalDur || '';
+                                if (totalDur){
+                                    durationInp.dataset.auto = '1';
+                                }
+                            }
+                        }
                     }
                 }
                 if (ref && ref.serviceCombo && serviceSel.value){ ref.serviceCombo.syncFromSelect(); }
@@ -1590,6 +1678,17 @@
                     timeInp.value = prefill.start_time_1.length===5 ? prefill.start_time_1 : prefill.start_time_1.slice(0,5);
                 }
                 if (prefill && prefill.unit_price) priceInp.value = prefill.unit_price;
+                if (durationInp){
+                    if (prefill && prefill.duration_override_min){
+                        durationInp.value = prefill.duration_override_min;
+                        durationInp.dataset.auto = '0';
+                    } else if (!durationInp.value){
+                        durationInp.dataset.auto = durationInp.dataset.auto || '1';
+                    }
+                }
+                if (discountInp && prefill && prefill.manual_discount_percent !== undefined && prefill.manual_discount_percent !== null && prefill.manual_discount_percent !== ''){
+                    discountInp.value = prefill.manual_discount_percent;
+                }
                 if (ref && typeof ref.refreshPromos === 'function'){
                     const promoOpts = {};
                     if (prefill && prefill.promocode){
@@ -1651,6 +1750,8 @@
                     const timeMsgs = [...(errs.start_time || []), ...(errs.start_time_1 || [])];
                     if (timeMsgs.length){ const fld = row.querySelector('[data-field="start_time_1"]'); fld.classList.add('errors'); row.querySelector('.js-err-time').textContent = timeMsgs.join(' '); }
                     if (errs.unit_price?.length){ const fld = row.querySelector('[data-field="unit_price"]'); fld.classList.add('errors'); const box = fld.querySelector('.ab-field-error') || document.createElement('div'); box.className='ab-field-error'; box.textContent = errs.unit_price.join(' '); fld.appendChild(box); }
+                    if (errs.duration_override_min?.length){ const fld = row.querySelector('[data-field="duration_override_min"]'); if (fld){ fld.classList.add('errors'); const box = fld.querySelector('.js-err-duration'); if (box) box.textContent = errs.duration_override_min.join(' '); } }
+                    if (errs.manual_discount_percent?.length){ const fld = row.querySelector('[data-field="manual_discount_percent"]'); if (fld){ fld.classList.add('errors'); const box = fld.querySelector('.js-err-discount'); if (box) box.textContent = errs.manual_discount_percent.join(' '); } }
                     if (errs.promocode?.length){ const fld = row.querySelector('[data-field="promocode"]'); fld.classList.add('errors'); const box = row.querySelector('.js-err-promocode'); if (box) box.textContent = errs.promocode.join(' '); }
                     if (errs.__all__?.length){ const note = document.createElement('div'); note.className='ab-errornote'; note.innerHTML = errs.__all__.map(String).join('<br>'); row.prepend(note); }
                 });
@@ -1674,7 +1775,9 @@
                             start_time_0: it.start_time_0,
                             start_time_1: it.start_time_1,
                             unit_price: it.unit_price,
-                            promocode: it.promocode
+                            promocode: it.promocode,
+                            duration_override_min: it.duration_override_min,
+                            manual_discount_percent: it.manual_discount_percent
                         });
                     });
                 } else {

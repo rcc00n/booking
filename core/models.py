@@ -740,8 +740,7 @@ class Appointment(models.Model):
             if not it.master or not it.service or not start_dt:
                 return  # пропускаем неполные строки
 
-            extra_min = it.service.extra_time_min or 0
-            total_min = (it.service.duration_min or 0) + extra_min
+            total_min = it.duration_min if hasattr(it, "duration_min") else 0
             this_end = start_dt + timedelta(minutes=total_min)
 
             # Поиск пересечений с чужими AppointmentItem этого же мастера
@@ -764,8 +763,7 @@ class Appointment(models.Model):
                 other_start = other.appointment.start_time if other.appointment else None
                 if not other_start:
                     continue
-                other_extra = (other.service.extra_time_min or 0) if other.service else 0
-                other_total = (other.service.duration_min or 0) + other_extra
+                other_total = other.duration_min if hasattr(other, "duration_min") else 0
                 other_end = other_start + timedelta(minutes=other_total)
 
                 if start_dt < other_end and this_end > other_start:
@@ -859,7 +857,18 @@ class AppointmentItem(models.Model):
     # Базовая цена позиции на момент записи (может быть вручную переопределена в админке)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))], null=True, blank=True)
     unit_price_overridden = models.BooleanField(default=False, help_text="Manually set in admin")
-
+    duration_override_min = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1)],
+        help_text="Custom duration in minutes for this appointment only"
+    )
+    manual_discount_percent = models.PositiveSmallIntegerField(
+        default=0,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Additional per-appointment discount in percent"
+    )
     # Итог позиции после позиционных скидок (service/promocode). Персональная НЕ учитывается!
     final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)  # '', 'service', 'promocode'
@@ -870,11 +879,18 @@ class AppointmentItem(models.Model):
         return f"{self.appointment.client} for {self.service} at {self.start_time}"
     @property
     def duration_min(self) -> int:
-        extra = self.service.extra_time_min or 0
-        return (self.service.duration_min or 0) + extra
+        if self.duration_override_min:
+            return int(self.duration_override_min)
+        service = getattr(self, "service", None)
+        if not service:
+            return 0
+        extra = service.extra_time_min or 0
+        return int((service.duration_min or 0) + extra)
 
     @property
     def end_time(self):
+        if not self.start_time:
+            return None
         return self.start_time + timedelta(minutes=self.duration_min)
 
     @staticmethod
@@ -924,30 +940,37 @@ class AppointmentItem(models.Model):
         # сначала применяем скидку услуги/промокода
         price = base * (Decimal(100) - Decimal(promo_disc)) / Decimal(100)
         price = price * (Decimal(100) - Decimal(service_disc)) / Decimal(100)
-        # потом — персональную скидку клиента
+        manual_disc = int(getattr(self, "manual_discount_percent", 0) or 0)
+        if manual_disc:
+            price = price * (Decimal(100) - Decimal(manual_disc)) / Decimal(100)
+        # Apply personal discount snapshot at booking time
         personal_pct = 0
         if self.appointment and self.appointment.client:
             personal_pct = int(self.appointment.client.personal_discount_percent or 0)
 
         if personal_pct:
             price = price * (Decimal(100) - Decimal(personal_pct)) / Decimal(100)
-        # финальная цена
+        # Finalize computed price
         self.final_price = price.quantize(Decimal("0.01"))
-        # источник скидки
+        # Track discount source flags
         if service_disc == 0 and personal_pct == 0 and promo_disc == 0:
-            self.discount_source = ""
+            discount_source = ""
         elif promo_disc > 0 and personal_pct > 0 and service_disc:
-            self.discount_source = "promocode+personal+service"
+            discount_source = "promocode+personal+service"
         elif service_disc > 0 and personal_pct > 0:
-            self.discount_source = "service+personal"
+            discount_source = "service+personal"
         elif promo_disc > 0 and personal_pct > 0:
-            self.discount_source = "promocode+personal"
+            discount_source = "promocode+personal"
         elif service_disc > 0:
-            self.discount_source = "service"
+            discount_source = "service"
         elif promo_disc > 0:
-            self.discount_source = "promocode"
+            discount_source = "promocode"
         else:
-            self.discount_source = "personal"
+            discount_source = "personal"
+
+        if manual_disc > 0:
+            discount_source = f"{discount_source}+manual" if discount_source else "manual"
+        self.discount_source = discount_source
 
 
     # Удобный хелпер: берём реальный старт из self.start_time (или из appointment.start_time, если нет)
@@ -969,8 +992,7 @@ class AppointmentItem(models.Model):
         if not self.master or not self.service or not start_dt:
             return
 
-        extra_min = self.service.extra_time_min or 0
-        total_min = (self.service.duration_min or 0) + extra_min
+        total_min = self.duration_min
         this_end = start_dt + timedelta(minutes=total_min)
 
         # === 1) Пересечения для этого мастера по предметному времени (AppointmentItem.start_time) ===
@@ -993,8 +1015,7 @@ class AppointmentItem(models.Model):
         for other in overlapping_qs.select_related("service", "appointment"):
             if not other.start_time:
                 continue
-            other_extra = (other.service.extra_time_min or 0) if other.service else 0
-            other_total = (other.service.duration_min or 0) + other_extra
+            other_total = other.duration_min if hasattr(other, "duration_min") else 0
             other_end = other.start_time + timedelta(minutes=other_total)
 
             if start_dt < other_end and this_end > other.start_time:
@@ -1095,8 +1116,7 @@ class AppointmentItem(models.Model):
                 for other in room_overlap_qs.select_related("service", "appointment", "master"):
                     if not other.start_time:
                         continue
-                    other_extra = (other.service.extra_time_min or 0) if other.service else 0
-                    other_total = (other.service.duration_min or 0) + other_extra
+                    other_total = other.duration_min if hasattr(other, "duration_min") else 0
                     other_end = other.start_time + timedelta(minutes=other_total)
                     if start_dt < other_end and this_end > other.start_time:
                         raise ValidationError({
@@ -1824,3 +1844,4 @@ def detect_discount_source(service, client, promocode):
     if s > 0:
         return "service"
     return ""
+

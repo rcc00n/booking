@@ -334,6 +334,14 @@ class AppointmentItemInlineForm(forms.ModelForm):
             has_price_initial = self.initial.get("unit_price") or getattr(self.instance, "unit_price", None)
             if not has_price_initial and service and getattr(service, "base_price", None) is not None:
                 self.fields["unit_price"].initial = service.base_price
+        if not self.is_bound and "duration_override_min" in self.fields:
+            override = getattr(self.instance, "duration_override_min", None)
+            if override:
+                self.fields["duration_override_min"].initial = override
+            elif service:
+                total_duration = (service.duration_min or 0) + (getattr(service, "extra_time_min", 0) or 0)
+                if total_duration:
+                    self.fields["duration_override_min"].initial = total_duration
 
         # 3) Сохраняем ссылку на родителя для метода ниже (не обязательно, но удобно)
         self._parent_obj = parent_obj

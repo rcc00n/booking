@@ -114,7 +114,9 @@ def _appointment_intervals(master: MasterProfile, day: datetime) -> List[Slot]:
         base_start = item.start_time or getattr(item.appointment, "start_time", None)
         if not base_start:
             continue
-        duration_min = (item.service.duration_min or 0) + (item.service.extra_time_min or 0)
+        duration_min = int(getattr(item, "duration_min", 0) or 0)
+        if not duration_min:
+            duration_min = (item.service.duration_min or 0) + (item.service.extra_time_min or 0)
         dur = timedelta(minutes=duration_min)
         blocks.append((base_start, base_start + dur))
     return blocks

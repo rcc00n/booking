@@ -71,7 +71,13 @@
     function populateServices(uiSelect, masterId) {
         uiSelect.innerHTML = "";
         const list = MS_MAP[String(masterId)] || [];
-        list.forEach(s => uiSelect.appendChild(buildOption(s.id, s.name)));
+        list.forEach(s => {
+            const opt = buildOption(s.id, s.name);
+            if (s.base_price != null) opt.dataset.price = s.base_price;
+            if (s.duration_min != null) opt.dataset.duration = s.duration_min;
+            if (s.total_duration_min != null) opt.dataset.totalDuration = s.total_duration_min;
+            uiSelect.appendChild(opt);
+        });
         uiSelect.disabled = list.length === 0;
     }
 
@@ -159,11 +165,27 @@
         const promoForceUI = $(".js-promo-force", row);
         const nativeStart  = $("[name$='-start_time']", row);   // реальное поле
         const nativePrice  = $("[name$='-unit_price']", row);   // реальное поле
+        const durationInput = $("[name$='-duration_override_min']", row);
+        const discountInput = $("[name$='-manual_discount_percent']", row);
         const delWrap      = $(".js-del-wrap", row);
         const roBadge      = $(".js-ro-badge", row);
 
         // наполним мастеров и выставим значения
         populateMasters(uiMaster);
+        if (durationInput && !durationInput.value) {
+            durationInput.dataset.auto = '1';
+        }
+        if (durationInput) {
+            durationInput.addEventListener('input', () => { durationInput.dataset.auto = '0'; });
+        }
+        if (discountInput) {
+            discountInput.addEventListener('change', () => {
+                const val = parseInt(discountInput.value, 10);
+                if (Number.isNaN(val)) return;
+                if (val < 0) discountInput.value = '0';
+                if (val > 100) discountInput.value = '100';
+            });
+        }
 
         // не трогаем значение master у существующих строк; просто отражаем его в UI
         if (nativeMaster && uiMaster) uiMaster.value = String(nativeMaster.value || "");
@@ -174,6 +196,14 @@
         const effectiveMasterId = (nativeMaster ? nativeMaster.value : (uiMaster ? uiMaster.value : ""));
         populateServices(uiSvc, effectiveMasterId);
         if (nativeSvc && nativeSvc.value) uiSvc.value = String(nativeSvc.value);
+        const initialOpt = uiSvc.selectedOptions?.[0];
+        if (durationInput && (!durationInput.value || durationInput.dataset.auto === '1')) {
+            const initialTotal = initialOpt && initialOpt.dataset ? (initialOpt.dataset.totalDuration || initialOpt.dataset.duration || '') : '';
+            if (initialTotal) {
+                durationInput.value = initialTotal;
+                durationInput.dataset.auto = '1';
+            }
+        }
         mirrorOptions(nativeSvc, uiSvc);
 
 
@@ -188,6 +218,16 @@
             mirrorOptions(nativeSvc, uiSvc);
             const label = uiSvc.selectedOptions?.[0]?.textContent || "";
             setSelectValueEnsuringOption(nativeSvc, uiSvc.value, label);
+            const opt = uiSvc.selectedOptions?.[0];
+            const totalDur = opt && opt.dataset ? (opt.dataset.totalDuration || opt.dataset.duration || "") : "";
+            if (durationInput) {
+                if (!durationInput.value || durationInput.dataset.auto === '1') {
+                    durationInput.value = totalDur || '';
+                    if (totalDur) {
+                        durationInput.dataset.auto = '1';
+                    }
+                }
+            }
             // и пересобрать промокоды UI (как было у тебя)
             if (typeof populatePromos === "function") {
                 populatePromos(uiPromo, uiSvc.value);
@@ -248,6 +288,8 @@
                 if (nativeStartDate) disableAndClone(nativeStartDate);
                 if (nativeStartTime) disableAndClone(nativeStartTime);
                 if (nativePrice)     disableAndClone(nativePrice);
+                if (durationInput)   disableAndClone(durationInput);
+                if (discountInput)   disableAndClone(discountInput);
 
                 // если поверх time уже навешан четвертной селект — тоже задизейблим
 
@@ -284,6 +326,16 @@
             uiSvc.disabled = false;
             uiSvc.addEventListener("change", () => {
                 if (nativeSvc) nativeSvc.value = uiSvc.value;
+                const opt = uiSvc.selectedOptions?.[0];
+                const totalDur = opt && opt.dataset ? (opt.dataset.totalDuration || opt.dataset.duration || '') : '';
+                if (durationInput) {
+                    if (!durationInput.value || durationInput.dataset.auto === '1') {
+                        durationInput.value = totalDur || '';
+                        if (totalDur) {
+                            durationInput.dataset.auto = '1';
+                        }
+                    }
+                }
                 populatePromos(uiPromo, uiSvc.value);
             });
             if (nativePromo) {
