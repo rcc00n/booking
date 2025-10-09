@@ -5,6 +5,251 @@
          value="{{ widget.value|escape }}"
          {% include "django/forms/widgets/attrs.html" with widget=widget %}>
 
+  <div class="ibuilder__guide">
+    <h3>Client intake builder playbook</h3>
+    <p>Use this checklist whenever you create or revise an intake form. Every control in the builder and JSON is documented below.</p>
+
+    <h4>Before you start</h4>
+    <ul>
+      <li>Confirm the goal of the form (onboarding, follow-up, consent renewal, etc.) and who will fill it out (client, staff, both).</li>
+      <li>List the data points you must capture. Group them into logical sections (e.g. “General”, “Medical history”, “Preferences”).</li>
+      <li>Identify which answers are mandatory, which have suggested defaults, and which must follow strict formatting (dates, phone numbers, numeric ranges).</li>
+      <li>Decide whether this form replaces an existing schema. If so, plan the version bump and communicate downstream consumers of the data.</li>
+    </ul>
+
+    <h4>Toolbar reference</h4>
+    <ul>
+      <li><strong>Add section:</strong> Inserts a blank section at the end of the form.</li>
+      <li><strong>Load sample:</strong> Replaces the current layout with a comprehensive demo schema. Use it to explore features or as a starting point.</li>
+      <li><strong>Expand all / Collapse all:</strong> Quickly toggle visibility for every section—handy for proofreading long forms.</li>
+      <li><strong>JSON editor:</strong> Opens the raw configuration for backup, bulk editing, or advanced tweaks. Changes are applied only after you click <em>Apply</em>.</li>
+    </ul>
+
+    <h4>Section workflow</h4>
+    <ol>
+      <li><strong>Title &amp; description:</strong> Clearly state the topic. The optional description appears above fields and should orient the respondent.</li>
+      <li><strong>Reorder:</strong> Use <em>Up</em>/<em>Down</em> to relocate a section. The order here is the order presented to users.</li>
+      <li><strong>Collapse:</strong> Toggle between expanded and collapsed states for editing convenience. Collapsed sections remain saved; they just hide their fields in the builder.</li>
+      <li><strong>Delete:</strong> Removes the section and every field inside it. This action cannot be undone; export the JSON first if you might need to restore it.</li>
+      <li><strong>Add field:</strong> Appends a new question inside the section. Fields inherit the section order.</li>
+    </ol>
+
+    <h4>Field configuration checklist</h4>
+    <ul>
+      <li><strong>Label:</strong> The human-friendly prompt shown to staff/clients. Write instructions (“List medications separated by commas”) when needed.</li>
+      <li><strong>Key:</strong> A machine-friendly identifier (letters, numbers, underscores; must start with a letter). Keys must be unique across the entire form and become JSON keys. The builder auto-generates a key from the label—edit it if you need a stable API name.</li>
+      <li><strong>Type:</strong> Controls rendering and validation. Changing the type may reset incompatible settings (e.g. removing choices for non-choice fields).</li>
+      <li><strong>Required:</strong> Enforces that the user provides a value. For optional questions, leave unchecked and rely on validation rules instead.</li>
+      <li><strong>Placeholder:</strong> Grey helper text shown in inputs before entry. Use sparingly to avoid confusing it with actual answers.</li>
+      <li><strong>Default:</strong> Pre-fills a response (string, boolean, choice). Defaults are stored if the user leaves the field untouched.</li>
+      <li><strong>Help text:</strong> Longer guidance displayed beneath the input. Explain why you need the data, formatting expectations, or links to policies.</li>
+      <li><strong>Width:</strong> Choose <em>Full</em> for single-column layout or <em>Half</em> to place fields side-by-side on wider screens.</li>
+    </ul>
+
+    <h4>Field type reference</h4>
+    <ul>
+      <li><strong>Text:</strong> Single-line input. Optional min/max length and regex pattern enforce formatting (e.g. postal codes).</li>
+      <li><strong>Long text (textarea):</strong> Multi-line field for narratives or comments. Supports the same length/pattern settings as text.</li>
+      <li><strong>Number / Integer:</strong> Numeric input with optional <em>Min</em> / <em>Max</em> constraints. The JSON alias <code>integer</code> is also accepted.</li>
+      <li><strong>Decimal / Float:</strong> Number input that accepts fractional values. Use <em>Decimal places</em> to force currency-like precision.</li>
+      <li><strong>Boolean:</strong> Renders a checkbox; defaults to unchecked unless you set <em>Default</em> to <code>true</code>.</li>
+      <li><strong>Select:</strong> Single choice dropdown. Define at least one option (value/label) and optionally mark a default.</li>
+      <li><strong>Radio:</strong> Single choice rendered as radio buttons. Works like Select but always visible.</li>
+      <li><strong>Multiselect:</strong> Multi-choice checkbox list. You may pre-select multiple defaults.</li>
+      <li><strong>Date / Time / Date &amp; time:</strong> Calendar and/or time pickers. Respect locale and timezone requirements downstream.</li>
+      <li><strong>Email / Phone:</strong> Text inputs with additional validation applied on submission.</li>
+    </ul>
+
+    <h4>Choice management</h4>
+    <ol>
+      <li>Each option needs both a <strong>Value</strong> (stored in JSON) and a <strong>Label</strong> (shown to users).</li>
+      <li>For single-choice fields, selecting a default automatically clears previous defaults. For multiselect, toggle defaults independently.</li>
+      <li>Use the <strong>×</strong> button to remove an option. The change is immediate in the builder.</li>
+      <li><strong>Add option</strong> inserts a blank choice at the end. Reorder options by dragging in the JSON editor if you need a precise order.</li>
+    </ol>
+
+    <h4>Validation &amp; advanced settings</h4>
+    <ul>
+      <li><strong>Numeric fields:</strong> Configure <em>Min</em> / <em>Max</em> to reject out-of-range values. Decimal fields also support <em>Decimal places</em>.</li>
+      <li><strong>Text fields:</strong> Control <em>Min length</em>, <em>Max length</em>, and optional <em>Pattern (regex)</em> for custom validation (e.g. <code>^[0-9]{4}$</code> for a 4-digit PIN).</li>
+      <li><strong>Display settings:</strong> Width is stored under <code>display.width</code>. Extend display rules in JSON if you need breakpoints or CSS hooks.</li>
+      <li><strong>Duplication:</strong> Use <em>Duplicate</em> to clone a field; adjust the new key immediately to avoid duplicates.</li>
+      <li><strong>Ordering:</strong> Up/Down buttons update the order instantly. Verify the final order before saving to guarantee a logical flow.</li>
+    </ul>
+
+    <h4>Meta and versioning</h4>
+    <ul>
+      <li>The <strong>Schema version</strong> field increments <code>meta.version</code>. Increase this for any breaking change (key rename, field removal, meaning change).</li>
+      <li>Non-breaking updates (copy edits, help text tweaks) can stay on the same version, but bumping the number still improves traceability.</li>
+      <li>Store release notes elsewhere if teams need historical context—only the version lives in the schema.</li>
+    </ul>
+
+    <h4>Saving, testing, and publishing</h4>
+    <ol>
+      <li>Click <em>Save</em> or <em>Save and continue editing</em> in the right column to persist changes.</li>
+      <li>After saving, reopen the form to confirm the layout matches expectations. Review on both desktop and mobile breakpoints.</li>
+      <li>Submit a test appointment or intake entry to ensure downstream processing (webhooks, exports, analytics) understands the new keys.</li>
+      <li>If a custom Django <em>Form class</em> is configured, keep it in sync with the JSON schema or switch back to the builder-driven intake.</li>
+    </ol>
+
+    <h4>Troubleshooting</h4>
+    <ul>
+      <li><strong>Duplicate keys:</strong> Ensure every field key is unique. The admin form will block the save if duplicates remain.</li>
+      <li><strong>Invalid JSON error:</strong> The JSON editor validates syntax when you click <em>Apply</em>. Fix commas/braces and try again.</li>
+      <li><strong>Unexpected defaults:</strong> Confirm that default values match the field type (e.g. strings for text, booleans for checkboxes).</li>
+      <li><strong>Lost work:</strong> Use the JSON editor to copy the schema regularly, or version the exported JSON in source control.</li>
+    </ul>
+
+    <h3>Authoring JSON manually (exhaustive guide)</h3>
+    <ol>
+      <li><strong>Top-level structure:</strong> Always provide an object with two keys: <code>meta</code> (object) and <code>sections</code> (array).</li>
+      <li><strong>Meta object:</strong> At minimum include <code>version</code> (positive integer). You can add extra metadata (e.g. <code>title</code>, <code>description</code>) for downstream systems—unknown keys are preserved.</li>
+      <li><strong>Sections array:</strong> Each entry is an object. Recommended properties:
+        <ul>
+          <li><code>id</code>: Stable identifier (UUID or slug). Optional but helps with diffing.</li>
+          <li><code>title</code>: Required. Displayed heading.</li>
+          <li><code>description</code>: Optional explanatory text.</li>
+          <li><code>collapsed</code>: Optional boolean controlling default collapsed state in the builder.</li>
+          <li><code>fields</code>: Array of field objects (see below).</li>
+        </ul>
+      </li>
+      <li><strong>Field object essentials:</strong>
+        <ul>
+          <li><code>id</code>: Unique identifier (UUID). Auto-generated if omitted.</li>
+          <li><code>key</code>: Required slug (letters/numbers/underscores, starting with a letter). Drives storage.</li>
+          <li><code>label</code>: Required human prompt.</li>
+          <li><code>type</code>: One of <code>text</code>, <code>textarea</code>, <code>number</code>, <code>decimal</code>, <code>boolean</code>, <code>select</code>, <code>radio</code>, <code>multiselect</code>, <code>date</code>, <code>time</code>, <code>datetime</code>, <code>email</code>, <code>phone</code>.</li>
+          <li><code>required</code>: Boolean (defaults to <code>false</code>).</li>
+        </ul>
+      </li>
+      <li><strong>Optional field attributes:</strong>
+        <ul>
+          <li><code>placeholder</code>, <code>help_text</code>, <code>default</code></li>
+          <li><code>display</code>: Object with <code>width</code> (<code>full</code> or <code>half</code>). Extend as needed for custom front-ends.</li>
+          <li><code>settings</code>: Object for validation extras:
+            <ul>
+              <li><code>min_value</code> / <code>max_value</code> (numbers)</li>
+              <li><code>decimal_places</code> (decimals)</li>
+              <li><code>min_length</code> / <code>max_length</code> (text)</li>
+              <li><code>pattern</code> (regex string for text)</li>
+            </ul>
+          </li>
+          <li><code>choices</code>: Array for choice-based fields. Each choice has <code>value</code>, <code>label</code>, and optional <code>default</code> boolean.</li>
+        </ul>
+      </li>
+      <li><strong>Validation rules:</strong> Respect JSON data types—numbers without quotes, booleans as <code>true</code>/<code>false</code>, and strings wrapped in quotes. Keep arrays ordered as you want options displayed.</li>
+      <li><strong>Applying changes:</strong> Paste the JSON into the editor, click <em>Apply</em>, verify the preview, and then <em>Save</em> the Django form. Use <em>Reset</em> to roll back to the last applied state.</li>
+      <li><strong>Version control:</strong> Store exported JSON alongside your codebase for auditing. Commit schema version bumps with release notes to avoid accidental regressions.</li>
+    </ol>
+
+    <p><strong>Complete JSON example:</strong></p>
+    <pre><code>{
+  "meta": {
+    "version": 3,
+    "title": "Client intake v3",
+    "description": "Updated consent and skincare questions"
+  },
+  "sections": [
+    {
+      "id": "general-info",
+      "title": "General information",
+      "description": "Collected at every first visit.",
+      "fields": [
+        {
+          "id": "field-full-name",
+          "key": "full_name",
+          "label": "Full legal name",
+          "type": "text",
+          "required": true,
+          "placeholder": "Jane Doe",
+          "help_text": "Match the client profile to avoid duplicates.",
+          "display": { "width": "half" },
+          "settings": { "min_length": 2, "max_length": 80 }
+        },
+        {
+          "id": "field-dob",
+          "key": "date_of_birth",
+          "label": "Date of birth",
+          "type": "date",
+          "required": true,
+          "help_text": "Used for age-restricted treatments."
+        },
+        {
+          "id": "field-phone",
+          "key": "mobile_phone",
+          "label": "Mobile phone",
+          "type": "phone",
+          "required": false,
+          "placeholder": "+1 555 555 1234"
+        }
+      ]
+    },
+    {
+      "id": "skin-profile",
+      "title": "Skin profile",
+      "description": "Helps tailor skincare plans.",
+      "fields": [
+        {
+          "id": "field-skin-type",
+          "key": "skin_type",
+          "label": "Skin type",
+          "type": "radio",
+          "required": true,
+          "choices": [
+            { "value": "normal", "label": "Normal", "default": true },
+            { "value": "dry", "label": "Dry" },
+            { "value": "oily", "label": "Oily" },
+            { "value": "combination", "label": "Combination" }
+          ]
+        },
+        {
+          "id": "field-sensitivity",
+          "key": "sensitivity_level",
+          "label": "How sensitive is your skin?",
+          "type": "select",
+          "choices": [
+            { "value": "low", "label": "Low" },
+            { "value": "medium", "label": "Medium" },
+            { "value": "high", "label": "High" }
+          ]
+        },
+        {
+          "id": "field-allergies",
+          "key": "known_allergies",
+          "label": "Known allergies",
+          "type": "multiselect",
+          "help_text": "Tick all that apply.",
+          "choices": [
+            { "value": "pollen", "label": "Pollen" },
+            { "value": "nuts", "label": "Nuts" },
+            { "value": "fragrance", "label": "Fragrance oils" },
+            { "value": "lidocaine", "label": "Lidocaine" }
+          ]
+        },
+        {
+          "id": "field-medications",
+          "key": "current_medications",
+          "label": "Current medications",
+          "type": "textarea",
+          "required": false,
+          "help_text": "Include prescription and over-the-counter medication.",
+          "settings": { "max_length": 500 }
+        },
+        {
+          "id": "field-consent",
+          "key": "consent_granted",
+          "label": "Consent granted",
+          "type": "boolean",
+          "default": true,
+          "help_text": "Keep checked if a signed consent form is on file."
+        }
+      ]
+    }
+  ]
+}</code></pre>
+    <p class="help">Always increment <em>Schema version</em> when breaking changes are introduced. Retain JSON exports for rollback or audit purposes.</p>
+  </div>
+
     <div class="ibuilder__toolbar">
       <div class="ibuilder__toolbar-left">
         <button type="button" class="ibuilder__btn" data-action="add-section">Add section</button>
