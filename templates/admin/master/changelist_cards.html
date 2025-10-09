@@ -1,0 +1,114 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static admin_urls admin_list filters%}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'admin/css/master_profile.css' %}">
+{% endblock %}
+
+{% block content %}
+
+    <div class="tm-container">   {# <-- НОВЫЙ ЕДИНЫЙ ВРАППЕР #}
+
+        <div class="tm-header tm-header--left">
+            <div class="tm-header__spacer"></div>
+
+            <div class="tm-header__title">
+                <h1 class="tm-title">{% trans "Team Members" %}</h1>
+                <span class="tm-badge">{{ cl.paginator.count }}</span>
+            </div>
+
+            <div class="tm-header__actions">
+                <a class="tm-btn tm-btn--ghost" href="{{ export_url|default:'#' }}">
+                    <i class="fas fa-download"></i> {% trans "Export CSV" %}
+                </a>
+                <a class="tm-btn tm-btn--success" href="{% url cl.opts|admin_urlname:'add' %}">
+                    <i class="fas fa-plus"></i> {% trans "Add Member" %}
+                </a>
+                <button type="button" class="tm-btn tm-btn--icon" aria-label="More">
+                    <i class="fas fa-ellipsis-h"></i>
+                </button>
+            </div>
+        </div>
+
+        {# ── SEARCH BAR (серый контейнер + Chips Filters/Sort) ─────────────── #}
+        <div class="tm-searchbox">
+            <form method="get" class="tm-searchbox__form">
+                <i class="fas fa-search tm-searchbox__icon" aria-hidden="true"></i>
+                <input
+                        class="tm-searchbox__input"
+                        type="text"
+                        name="{{ cl.search_var }}"
+                        placeholder="{% trans 'Search team members…' %}"
+                        value="{{ request.GET.q|default:'' }}"
+                        autocomplete="off"
+                />
+                {# сохраняем GET-параметры #}
+                {% for key, val in request.GET.items %}
+                    {% if key != cl.search_var and key != 'p' and key != 'e' %}
+                        <input type="hidden" name="{{ key }}" value="{{ val }}">
+                    {% endif %}
+                {% endfor %}
+
+                <div class="tm-searchbox__actions">
+                    <button type="button" class="tm-chip">
+                        <i class="fas fa-filter"></i> {% trans "Filters" %}
+                    </button>
+                    <button type="button" class="tm-chip">
+                        <i class="fas fa-sort-amount-down"></i> {% trans "Sort" %}
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <ul class="tm-list">
+            {% for obj in cl.result_list %}
+                {% with djuser=obj.user.user up=obj.user %}
+                    <li class="tm-item">
+                        <a class="tm-item__overlay" href="{% url cl.opts|admin_urlname:'change' obj.pk %}"></a>
+
+                        <div class="tm-avatar tm-avatar--c{{ obj.pk|default:forloop.counter|color_index:8 }}">
+                            {{ djuser.first_name|default_if_none:""|slice:":1" }}{{ djuser.last_name|default_if_none:""|slice:":1" }}
+                        </div>
+
+                        <div class="tm-main">
+                            <div class="tm-name">{{ djuser.get_full_name|default:djuser.username }}</div>
+                            {% if obj.profession %}<div class="tm-role">{{ obj.profession }}</div>{% endif %}
+                            <div class="tm-contact">
+                                {% if djuser.email %}
+                                    <span class="tm-contact__item"><span class="tm-ico">@</span><a href="mailto:{{ djuser.email }}">{{ djuser.email }}</a></span>
+                                {% endif %}
+                                {% if up.phone %}
+                                    <span class="tm-contact__item"><span class="tm-ico">☎</span><a href="tel:{{ up.phone|cut:' ' }}">{{ up.phone }}</a></span>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="tm-right">
+                            {% if obj.room %}
+                            <div class="tm-room">
+                                <span class="tm-room__label">{% trans "Room" %}</span>
+                                <span class="tm-room__pill">{{ obj.room }}</span>
+                            </div>
+                            {% endif %}
+                    </li>
+                {% endwith %}
+            {% empty %}
+                <li class="tm-empty">{% trans "No team members found." %}</li>
+            {% endfor %}
+        </ul>
+
+        <div class="tm-pagination">
+            <div class="tm-results">
+                {% if cl.paginator.count == 1 %}
+                    Showing 1 team member
+                {% else %}
+                    Showing {{ cl.paginator.count }} team members
+                {% endif %}
+            </div>
+
+        </div>
+
+    </div>  {# /tm-container #}
+
+{% endblock %}

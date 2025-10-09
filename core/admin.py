@@ -3028,10 +3028,14 @@ class MasterWorkDayInline(admin.TabularInline):
     model = MasterWorkDay
     extra = 7  # сразу 7 строк для всех дней
 
+
 @admin.register(MasterProfile)
 class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
     inlines = [MasterWorkDayInline]
     add_form = MasterCreateFullForm
+    change_list_template = "admin/master/changelist_cards.html"
+    list_per_page = 24
+
     readonly_fields = ['password_display']
     export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","postal_code", "profession", 'bio', "room", "is_staff", "is_superuser", 'is_active']
     search_fields = ("user__user__username", "user__user__first_name", "user__user__last_name")
@@ -3060,6 +3064,9 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
         ]
     form = MasterCreateFullForm  # на редактирование тоже можно оставить ту же
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related("user__user", "room")
 
     list_display = ("get_name", "room", "profession")
 
