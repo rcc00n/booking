@@ -1,0 +1,120 @@
+.tm-header__actions .tm-btn--import {
+    background: #0ea5e9;
+    color: #fff !important;
+    border-color: transparent;
+}
+
+.tm-searchbox__actions {
+    position: relative;
+    display: flex;
+    gap: 10px;
+}
+
+.tm-dropdown {
+    position: relative;
+}
+
+.tm-dropdown__panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    min-width: 220px;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid var(--bs-border-color, #e5e7eb);
+    background: #fff;
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+    display: none;
+    z-index: 20;
+}
+
+.tm-dropdown.is-open .tm-dropdown__panel {
+    display: block;
+}
+
+.tm-dropdown__section + .tm-dropdown__section {
+    margin-top: 12px;
+    border-top: 1px solid var(--bs-border-color, #e5e7eb);
+    padding-top: 12px;
+}
+
+.tm-dropdown__title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #475569;
+    margin-bottom: 8px;
+}
+
+.tm-dropdown__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+}
+
+.tm-dropdown__option {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: #f8fafc;
+    color: #0f172a;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tm-dropdown__option:hover {
+    border-color: #cbd5f5;
+    background: #eef2ff;
+}
+
+.tm-dropdown__option.is-active {
+    border-color: #6366f1;
+    background: #eef2ff;
+    font-weight: 600;
+}
+
+.tm-dropdown__actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.tm-dropdown__actions button {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--bs-border-color, #e5e7eb);
+    background: #fff;
+    cursor: pointer;
+}
+
+.tm-dropdown__actions button.tm-action--clear {
+    background: #f8fafc;
+    color: #334155;
+}
+
+.tm-filter-summary {
+    font-size: 12px;
+    color: #475569;
+    margin-top: 4px;
+}
+
+.tm-chip.is-active {
+    border-color: #6366f1;
+    background: #eef2ff;
+    color: #312e81;
+    font-weight: 600;
+}
+
+@media (max-width: 720px) {
+    .tm-dropdown__panel {
+        right: auto;
+        left: 0;
+    }
+}

@@ -763,6 +763,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     """
     add_form = CustomUserCreationForm
     form = CustomUserChangeForm
+    change_list_template = "admin/users/changelist_cards.html"
     export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
 
     add_fieldsets = (
@@ -818,6 +819,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'source', 'client_status_col')
     list_filter = ('is_superuser', 'userprofile__how_heard', ClientStatusFilter)
     search_fields = ('username', 'email', 'first_name', 'last_name', 'userprofile__phone')
+    ordering = ('-date_joined',)
 
     # Field layout when editing a user
     fieldsets = (
@@ -842,8 +844,55 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     )
 
     def get_queryset(self, request):
-        # чтобы не ловить N+1
-        return super().get_queryset(request).select_related('userprofile')
+        # Prefetch the attached profile to avoid N+1 lookups.
+        qs = super().get_queryset(request).select_related('userprofile')
+
+        status_key = request.GET.get('client_status')
+        if status_key:
+            status_label = ClientStatusFilter.LOOKUP_TO_LABEL.get(status_key)
+            if status_label:
+                user_ids = list(qs.values_list('id', flat=True))
+                if user_ids:
+                    profiles = (
+                        UserProfile.objects.select_related('user')
+                        .filter(user_id__in=user_ids)
+                    )
+                    matching_ids = [
+                        profile.user_id
+                        for profile in profiles
+                        if profile.client_status == status_label
+                    ]
+                    qs = qs.filter(id__in=matching_ids) if matching_ids else qs.none()
+                else:
+                    qs = qs.none()
+
+        user_order = request.GET.get('user_order')
+        if user_order == 'oldest':
+            qs = qs.order_by('date_joined')
+        else:
+            qs = qs.order_by('-date_joined')
+
+        # Stash the choice and drop the param before default admin validation runs.
+        request._user_order_choice = user_order or 'newest'
+        if 'user_order' in request.GET:
+            mutable_get = request.GET.copy()
+            mutable_get.pop('user_order', None)
+            request.GET = mutable_get
+
+        return qs
+
+    def get_ordering(self, request):
+        user_order = getattr(request, "_user_order_choice", None) or request.GET.get("user_order")
+        if user_order == "oldest":
+            return ("date_joined",)
+        if user_order == "newest" or not user_order:
+            return ("-date_joined",)
+        return super().get_ordering(request)
+
+    def lookup_allowed(self, lookup, value):
+        if lookup == "user_order":
+            return True
+        return super().lookup_allowed(lookup, value)
 
     @admin.display(description="Status")
     def client_status_col(self, obj):
@@ -924,9 +973,22 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
                 'import_url',
                 reverse(f'admin:{opts.app_label}_{opts.model_name}_import'),
             )
-            extra_context.setdefault('import_label', 'Import users')
+            extra_context.setdefault('import_label', 'Import Users')
         except NoReverseMatch:
             pass
+        extra_context['client_status_options'] = [
+            {'value': key, 'label': label}
+            for key, label in ClientStatusFilter.LOOKUP_TO_LABEL.items()
+        ]
+        current_status = request.GET.get('client_status', '')
+        extra_context['client_status_current'] = current_status
+        extra_context['client_status_current_label'] = (
+            ClientStatusFilter.LOOKUP_TO_LABEL.get(current_status, '') if current_status else ''
+        )
+        user_order = request.GET.get('user_order') or 'newest'
+        if user_order not in ('newest', 'oldest'):
+            user_order = 'newest'
+        extra_context['user_order_current'] = user_order
         return super().changelist_view(request, extra_context=extra_context)
 
     def import_users_view(self, request):
@@ -3219,7 +3281,130 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
 
     readonly_fields = ['password_display']
     export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","postal_code", "profession", 'bio', "room", "is_staff", "is_superuser", 'is_active']
-    search_fields = ("user__user__username", "user__user__first_name", "user__user__last_name")
+    search_fields = (
+        "user__user__username",
+        "user__user__first_name",
+        "user__user__last_name",
+        "user__user__email",
+        "user__phone",
+    )
+
+    def get_queryset(self, request):
+        # Prefetch related auth user + room to minimize queries in cards template.
+        qs = super().get_queryset(request).select_related("user__user", "room")
+
+        name_order = getattr(request, "_master_order_choice", request.GET.get("name_order"))
+        if name_order not in {"az", "za"}:
+            cached_order = getattr(request, "_master_order_choice", None)
+            if cached_order in {"az", "za"}:
+                name_order = cached_order
+            else:
+                name_order = "az"
+        request._master_order_choice = name_order
+
+        if name_order == "za":
+            qs = qs.order_by("-user__user__first_name", "-user__user__last_name", "-pk")
+        else:
+            qs = qs.order_by("user__user__first_name", "user__user__last_name", "pk")
+
+        return qs
+
+    def get_ordering(self, request):
+        name_order = getattr(request, "_master_order_choice", None) or request.GET.get("name_order")
+        if name_order == "za":
+            return ("-user__user__first_name", "-user__user__last_name", "-pk")
+        return ("user__user__first_name", "user__user__last_name", "pk")
+
+    def lookup_allowed(self, lookup, value):
+        if lookup in {"name_order"}:
+            return True
+        return super().lookup_allowed(lookup, value)
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+
+        rooms_qs = MasterRoom.objects.order_by("room")
+        room_options = [
+            {"value": "", "label": _("All rooms")},
+        ]
+        if self.model.objects.filter(room__isnull=True).exists():
+            room_options.append({"value": "none", "label": _("Unassigned")})
+        room_options.extend(
+            {"value": str(room.pk), "label": room.room}
+            for room in rooms_qs
+        )
+        room_current = request.GET.get("room", "")
+        room_current_label = ""
+        if room_current:
+            if room_current == "none":
+                room_current_label = _("Unassigned")
+            else:
+                for option in room_options:
+                    if option["value"] == room_current:
+                        room_current_label = option["label"]
+                        break
+
+        professions = (
+            self.model.objects.exclude(profession__isnull=True)
+            .exclude(profession__exact="")
+            .values_list("profession", flat=True)
+            .distinct()
+            .order_by("profession")
+        )
+        profession_options = [{"value": "", "label": _("All professions")}]
+        profession_options.extend({"value": prof, "label": prof} for prof in professions)
+        profession_current = request.GET.get("profession", "")
+        profession_current_label = ""
+        if profession_current:
+            profession_current_label = profession_current
+
+        name_order = request.GET.get("name_order") or "az"
+        if name_order not in {"az", "za"}:
+            name_order = "az"
+
+        request._master_room_filter = room_current
+        request._master_profession_filter = profession_current
+        request._master_order_choice = name_order
+
+        extra_context.update(
+            {
+                "room_options": room_options,
+                "room_current": room_current,
+                "room_current_label": room_current_label,
+                "profession_options": profession_options,
+                "profession_current": profession_current,
+                "profession_current_label": profession_current_label,
+                "name_order_current": name_order,
+            }
+        )
+
+        try:
+            opts = self.model._meta
+            export_url = reverse(f'admin:{opts.app_label}_{opts.model_name}_export_csv')
+            export_url += f"?{request.GET.urlencode()}"
+        except NoReverseMatch:
+            export_url = None
+        extra_context["export_url"] = export_url
+
+        original_get = request.GET
+        cleaned_get = original_get.copy()
+        if room_current == "none":
+            cleaned_get.pop("room", None)
+            cleaned_get["room__isnull"] = "True"
+        elif room_current and not room_current.isdigit():
+            cleaned_get.pop("room", None)
+        if profession_current:
+            cleaned_get.pop("profession", None)
+            cleaned_get["profession__iexact"] = profession_current
+        else:
+            cleaned_get.pop("profession", None)
+        cleaned_get.pop("name_order", None)
+        request.GET = cleaned_get
+        try:
+            return super(ExportCsvMixin, self).changelist_view(request, extra_context=extra_context)
+        finally:
+            request.GET = original_get
+
     def get_export_row(self, obj):
         phone = obj.user.userprofile.phone if hasattr(obj, 'user') else ''
         birth_date = obj.user.userprofile.birth_date if hasattr(obj, 'user') else ''

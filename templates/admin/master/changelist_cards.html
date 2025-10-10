@@ -1,14 +1,123 @@
 {% extends "admin/base_site.html" %}
-{% load i18n static admin_urls admin_list filters%}
+{% load i18n static admin_urls admin_list filters %}
 
 {% block extrastyle %}
     {{ block.super }}
     <link rel="stylesheet" href="{% static 'admin/css/master_profile.css' %}">
+    <link rel="stylesheet" href="{% static 'admin/css/user_cards.css' %}">
+{% endblock %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const dropdowns = document.querySelectorAll('[data-dropdown]');
+            const form = document.querySelector('.tm-searchbox__form');
+            const roomInput = document.getElementById('filter-room-input');
+            const professionInput = document.getElementById('filter-profession-input');
+            const orderInput = document.getElementById('name-order-input');
+
+            function closeAll(except) {
+                dropdowns.forEach(function (dropdown) {
+                    if (dropdown === except) {
+                        return;
+                    }
+                    dropdown.classList.remove('is-open');
+                });
+            }
+
+            dropdowns.forEach(function (dropdown) {
+                const trigger = dropdown.querySelector('[data-dropdown-trigger]');
+                const panel = dropdown.querySelector('[data-dropdown-panel]');
+
+                if (!trigger || !panel) {
+                    return;
+                }
+
+                trigger.addEventListener('click', function (event) {
+                    event.preventDefault();
+                    const alreadyOpen = dropdown.classList.contains('is-open');
+                    closeAll();
+                    if (!alreadyOpen) {
+                        dropdown.classList.add('is-open');
+                    }
+                });
+
+                panel.querySelectorAll('[data-room-value]').forEach(function (button) {
+                    button.addEventListener('click', function (event) {
+                        event.preventDefault();
+                        if (roomInput) {
+                            roomInput.value = button.getAttribute('data-room-value') || '';
+                        }
+                        if (form) {
+                            form.submit();
+                        }
+                    });
+                });
+
+                panel.querySelectorAll('[data-action="clear-room"]').forEach(function (button) {
+                    button.addEventListener('click', function (event) {
+                        event.preventDefault();
+                        if (roomInput) {
+                            roomInput.value = '';
+                        }
+                        if (form) {
+                            form.submit();
+                        }
+                    });
+                });
+
+                panel.querySelectorAll('[data-profession-value]').forEach(function (button) {
+                    button.addEventListener('click', function (event) {
+                        event.preventDefault();
+                        if (professionInput) {
+                            professionInput.value = button.getAttribute('data-profession-value') || '';
+                        }
+                        if (form) {
+                            form.submit();
+                        }
+                    });
+                });
+
+                panel.querySelectorAll('[data-action="clear-profession"]').forEach(function (button) {
+                    button.addEventListener('click', function (event) {
+                        event.preventDefault();
+                        if (professionInput) {
+                            professionInput.value = '';
+                        }
+                        if (form) {
+                            form.submit();
+                        }
+                    });
+                });
+
+                panel.querySelectorAll('[data-order-value]').forEach(function (button) {
+                    button.addEventListener('click', function (event) {
+                        event.preventDefault();
+                        if (orderInput) {
+                            orderInput.value = button.getAttribute('data-order-value') || '';
+                        }
+                        if (form) {
+                            form.submit();
+                        }
+                    });
+                });
+            });
+
+            document.addEventListener('click', function (event) {
+                dropdowns.forEach(function (dropdown) {
+                    if (!dropdown.contains(event.target)) {
+                        dropdown.classList.remove('is-open');
+                    }
+                });
+            });
+        });
+    </script>
 {% endblock %}
 
 {% block content %}
 
-    <div class="tm-container">   {# <-- НОВЫЙ ЕДИНЫЙ ВРАППЕР #}
+    <div class="tm-container">
 
         <div class="tm-header tm-header--left">
             <div class="tm-header__spacer"></div>
@@ -25,13 +134,12 @@
                 <a class="tm-btn tm-btn--success" href="{% url cl.opts|admin_urlname:'add' %}">
                     <i class="fas fa-plus"></i> {% trans "Add Member" %}
                 </a>
-                <button type="button" class="tm-btn tm-btn--icon" aria-label="More">
+                <button type="button" class="tm-btn tm-btn--icon" aria-label="{% trans 'More actions' %}">
                     <i class="fas fa-ellipsis-h"></i>
                 </button>
             </div>
         </div>
 
-        {# ── SEARCH BAR (серый контейнер + Chips Filters/Sort) ─────────────── #}
         <div class="tm-searchbox">
             <form method="get" class="tm-searchbox__form">
                 <i class="fas fa-search tm-searchbox__icon" aria-hidden="true"></i>
@@ -39,24 +147,115 @@
                         class="tm-searchbox__input"
                         type="text"
                         name="{{ cl.search_var }}"
-                        placeholder="{% trans 'Search team members…' %}"
+                        placeholder="{% trans 'Search team members...' %}"
                         value="{{ request.GET.q|default:'' }}"
                         autocomplete="off"
                 />
-                {# сохраняем GET-параметры #}
                 {% for key, val in request.GET.items %}
-                    {% if key != cl.search_var and key != 'p' and key != 'e' %}
+                    {% if key != cl.search_var and key != 'p' and key != 'e' and key != 'room' and key != 'profession' and key != 'name_order' %}
                         <input type="hidden" name="{{ key }}" value="{{ val }}">
                     {% endif %}
                 {% endfor %}
+                <input type="hidden" id="filter-room-input" name="room" value="{{ room_current }}">
+                <input type="hidden" id="filter-profession-input" name="profession" value="{{ profession_current }}">
+                <input type="hidden" id="name-order-input" name="name_order" value="{{ name_order_current }}">
 
                 <div class="tm-searchbox__actions">
-                    <button type="button" class="tm-chip">
-                        <i class="fas fa-filter"></i> {% trans "Filters" %}
-                    </button>
-                    <button type="button" class="tm-chip">
-                        <i class="fas fa-sort-amount-down"></i> {% trans "Sort" %}
-                    </button>
+                    <div class="tm-dropdown{% if room_current or profession_current %} is-active{% endif %}" data-dropdown>
+                        <button type="button" class="tm-chip{% if room_current or profession_current %} is-active{% endif %}" data-dropdown-trigger>
+                            <i class="fas fa-filter" aria-hidden="true"></i> {% trans "Filters" %}
+                        </button>
+                        {% if room_current_label or profession_current_label %}
+                            <div class="tm-filter-summary">
+                                {% if room_current_label %}
+                                    {% trans "Room" %}: {{ room_current_label }}
+                                {% endif %}
+                                {% if room_current_label and profession_current_label %} · {% endif %}
+                                {% if profession_current_label %}
+                                    {% trans "Profession" %}: {{ profession_current_label }}
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                        <div class="tm-dropdown__panel" data-dropdown-panel>
+                            <div class="tm-dropdown__section">
+                                <div class="tm-dropdown__title">{% trans "Room" %}</div>
+                                <div class="tm-dropdown__actions">
+                                    <button type="button" class="tm-action--clear" data-action="clear-room">
+                                        {% trans "Clear" %}
+                                    </button>
+                                </div>
+                                <ul class="tm-dropdown__list">
+                                    {% for option in room_options %}
+                                        <li>
+                                            <button type="button"
+                                                    class="tm-dropdown__option{% if option.value == room_current %} is-active{% endif %}"
+                                                    data-room-value="{{ option.value }}">
+                                                {{ option.label }}
+                                                {% if option.value == room_current %}
+                                                    <span>&check;</span>
+                                                {% endif %}
+                                            </button>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                            <div class="tm-dropdown__section">
+                                <div class="tm-dropdown__title">{% trans "Profession" %}</div>
+                                <div class="tm-dropdown__actions">
+                                    <button type="button" class="tm-action--clear" data-action="clear-profession">
+                                        {% trans "Clear" %}
+                                    </button>
+                                </div>
+                                <ul class="tm-dropdown__list">
+                                    {% for option in profession_options %}
+                                        <li>
+                                            <button type="button"
+                                                    class="tm-dropdown__option{% if option.value == profession_current %} is-active{% endif %}"
+                                                    data-profession-value="{{ option.value }}">
+                                                {{ option.label }}
+                                                {% if option.value == profession_current %}
+                                                    <span>&check;</span>
+                                                {% endif %}
+                                            </button>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tm-dropdown" data-dropdown>
+                        <button type="button" class="tm-chip{% if name_order_current == 'za' %} is-active{% endif %}" data-dropdown-trigger>
+                            <i class="fas fa-sort-amount-down" aria-hidden="true"></i> {% trans "Sort" %}
+                        </button>
+                        <div class="tm-dropdown__panel" data-dropdown-panel>
+                            <div class="tm-dropdown__section">
+                                <div class="tm-dropdown__title">{% trans "Sort by" %}</div>
+                                <ul class="tm-dropdown__list">
+                                    <li>
+                                        <button type="button"
+                                                class="tm-dropdown__option{% if name_order_current == 'az' %} is-active{% endif %}"
+                                                data-order-value="az">
+                                            {% trans "Name (A-Z)" %}
+                                            {% if name_order_current == 'az' %}
+                                                <span>&check;</span>
+                                            {% endif %}
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button type="button"
+                                                class="tm-dropdown__option{% if name_order_current == 'za' %} is-active{% endif %}"
+                                                data-order-value="za">
+                                            {% trans "Name (Z-A)" %}
+                                            {% if name_order_current == 'za' %}
+                                                <span>&check;</span>
+                                            {% endif %}
+                                        </button>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </form>
         </div>
@@ -79,7 +278,7 @@
                                     <span class="tm-contact__item"><span class="tm-ico">@</span><a href="mailto:{{ djuser.email }}">{{ djuser.email }}</a></span>
                                 {% endif %}
                                 {% if up.phone %}
-                                    <span class="tm-contact__item"><span class="tm-ico">☎</span><a href="tel:{{ up.phone|cut:' ' }}">{{ up.phone }}</a></span>
+                                    <span class="tm-contact__item"><span class="tm-ico">&#9742;</span><a href="tel:{{ up.phone|cut:' ' }}">{{ up.phone }}</a></span>
                                 {% endif %}
                             </div>
                         </div>
@@ -91,6 +290,7 @@
                                 <span class="tm-room__pill">{{ obj.room }}</span>
                             </div>
                             {% endif %}
+                        </div>
                     </li>
                 {% endwith %}
             {% empty %}
@@ -109,6 +309,6 @@
 
         </div>
 
-    </div>  {# /tm-container #}
+    </div>
 
 {% endblock %}

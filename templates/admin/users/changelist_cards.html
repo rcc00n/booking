@@ -1,0 +1,286 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static admin_urls admin_list filters %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'admin/css/master_profile.css' %}">
+    <link rel="stylesheet" href="{% static 'admin/css/user_cards.css' %}">
+{% endblock %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const dropdowns = document.querySelectorAll('[data-dropdown]');
+            const form = document.querySelector('.tm-searchbox__form');
+            const statusInput = document.getElementById('client-status-input');
+            const orderInput = document.getElementById('user-order-input');
+
+            function closeAll(except) {
+                dropdowns.forEach(function (dropdown) {
+                    if (dropdown === except) {
+                        return;
+                    }
+                    dropdown.classList.remove('is-open');
+                });
+            }
+
+            dropdowns.forEach(function (dropdown) {
+                const trigger = dropdown.querySelector('[data-dropdown-trigger]');
+                const panel = dropdown.querySelector('[data-dropdown-panel]');
+
+                if (!trigger || !panel) {
+                    return;
+                }
+
+                trigger.addEventListener('click', function (event) {
+                    event.preventDefault();
+                    const alreadyOpen = dropdown.classList.contains('is-open');
+                    closeAll();
+                    if (!alreadyOpen) {
+                        dropdown.classList.add('is-open');
+                    }
+                });
+
+                panel.querySelectorAll('[data-status-value]').forEach(function (button) {
+                    button.addEventListener('click', function (event) {
+                        event.preventDefault();
+                        if (statusInput) {
+                            statusInput.value = button.getAttribute('data-status-value') || '';
+                        }
+                        if (form) {
+                            form.submit();
+                        }
+                    });
+                });
+
+                panel.querySelectorAll('[data-order-value]').forEach(function (button) {
+                    button.addEventListener('click', function (event) {
+                        event.preventDefault();
+                        if (orderInput) {
+                            orderInput.value = button.getAttribute('data-order-value') || '';
+                        }
+                        if (form) {
+                            form.submit();
+                        }
+                    });
+                });
+
+                panel.querySelectorAll('[data-action="clear-status"]').forEach(function (button) {
+                    button.addEventListener('click', function (event) {
+                        event.preventDefault();
+                        if (statusInput) {
+                            statusInput.value = '';
+                        }
+                        if (form) {
+                            form.submit();
+                        }
+                    });
+                });
+            });
+
+            document.addEventListener('click', function (event) {
+                dropdowns.forEach(function (dropdown) {
+                    if (!dropdown.contains(event.target)) {
+                        dropdown.classList.remove('is-open');
+                    }
+                });
+            });
+        });
+    </script>
+{% endblock %}
+
+{% block content %}
+    <div class="tm-container">
+        <div class="tm-header tm-header--left">
+            <div class="tm-header__spacer"></div>
+
+            <div class="tm-header__title">
+                <h1 class="tm-title">{% trans "Users" %}</h1>
+                <span class="tm-badge">{{ cl.paginator.count }}</span>
+            </div>
+
+            <div class="tm-header__actions">
+                {% if import_url %}
+                    <a class="tm-btn tm-btn--import" href="{{ import_url }}">
+                        <i class="fas fa-upload" aria-hidden="true"></i>
+                        {% if import_label %}
+                            {{ import_label }}
+                        {% else %}
+                            {% trans "Import Users" %}
+                        {% endif %}
+                    </a>
+                {% endif %}
+                {% if export_url %}
+                    <a class="tm-btn tm-btn--ghost" href="{{ export_url }}">
+                        <i class="fas fa-download" aria-hidden="true"></i> {% trans "Export CSV" %}
+                    </a>
+                {% endif %}
+                <a class="tm-btn tm-btn--success" href="{% url cl.opts|admin_urlname:'add' %}">
+                    <i class="fas fa-plus" aria-hidden="true"></i> {% trans "Add User" %}
+                </a>
+                <button type="button" class="tm-btn tm-btn--icon" aria-label="{% trans 'More actions' %}">
+                    <i class="fas fa-ellipsis-h" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="tm-searchbox">
+            <form method="get" class="tm-searchbox__form">
+                <i class="fas fa-search tm-searchbox__icon" aria-hidden="true"></i>
+                <input
+                        class="tm-searchbox__input"
+                        type="text"
+                        name="{{ cl.search_var }}"
+                        placeholder="{% trans 'Search users...' %}"
+                        value="{{ request.GET.q|default:'' }}"
+                        autocomplete="off"
+                />
+                {% for key, val in request.GET.items %}
+                    {% if key != cl.search_var and key != 'p' and key != 'o' and key != 'client_status' and key != 'user_order' and key != 'e' %}
+                        <input type="hidden" name="{{ key }}" value="{{ val }}">
+                    {% endif %}
+                {% endfor %}
+                <input type="hidden" id="client-status-input" name="client_status" value="{{ client_status_current }}">
+                <input type="hidden" id="user-order-input" name="user_order" value="{{ user_order_current }}">
+
+                <div class="tm-searchbox__actions">
+                    <div class="tm-dropdown{% if client_status_current %} is-active{% endif %}" data-dropdown>
+                        <button type="button" class="tm-chip{% if client_status_current %} is-active{% endif %}" data-dropdown-trigger>
+                            <i class="fas fa-filter" aria-hidden="true"></i> {% trans "Filters" %}
+                        </button>
+                        {% if client_status_current_label %}
+                            <div class="tm-filter-summary">{{ client_status_current_label }}</div>
+                        {% endif %}
+                        <div class="tm-dropdown__panel" data-dropdown-panel>
+                            <div class="tm-dropdown__section">
+                                <div class="tm-dropdown__title">{% trans "Client Status" %}</div>
+                                <div class="tm-dropdown__actions">
+                                    <button type="button" class="tm-action--clear" data-action="clear-status">
+                                        {% trans "Clear" %}
+                                    </button>
+                                </div>
+                                <ul class="tm-dropdown__list">
+                                    <li>
+                                        <button type="button"
+                                                class="tm-dropdown__option{% if not client_status_current %} is-active{% endif %}"
+                                                data-status-value="">
+                                            {% trans "All statuses" %}
+                                            {% if not client_status_current %}<span>&check;</span>{% endif %}
+                                        </button>
+                                    </li>
+                                    {% for option in client_status_options %}
+                                        <li>
+                                            <button type="button"
+                                                    class="tm-dropdown__option{% if option.value == client_status_current %} is-active{% endif %}"
+                                                    data-status-value="{{ option.value }}">
+                                                {{ option.label }}
+                                                {% if option.value == client_status_current %}
+                                                    <span>&check;</span>
+                                                {% endif %}
+                                            </button>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tm-dropdown" data-dropdown>
+                        <button type="button" class="tm-chip{% if user_order_current != 'newest' %} is-active{% endif %}" data-dropdown-trigger>
+                            <i class="fas fa-sort-amount-down" aria-hidden="true"></i> {% trans "Sort" %}
+                        </button>
+                        <div class="tm-dropdown__panel" data-dropdown-panel>
+                            <div class="tm-dropdown__section">
+                                <div class="tm-dropdown__title">{% trans "Sort by" %}</div>
+                                <ul class="tm-dropdown__list">
+                                    <li>
+                                        <button type="button"
+                                                class="tm-dropdown__option{% if user_order_current == 'newest' %} is-active{% endif %}"
+                                                data-order-value="newest">
+                                            {% trans "Date added (newest first)" %}
+                                            {% if user_order_current == 'newest' %}
+                                                <span>&check;</span>
+                                            {% endif %}
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button type="button"
+                                                class="tm-dropdown__option{% if user_order_current == 'oldest' %} is-active{% endif %}"
+                                                data-order-value="oldest">
+                                            {% trans "Date added (oldest first)" %}
+                                            {% if user_order_current == 'oldest' %}
+                                                <span>&check;</span>
+                                            {% endif %}
+                                        </button>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <ul class="tm-list">
+            {% for obj in cl.result_list %}
+                {% with up=obj.userprofile %}
+                    <li class="tm-item">
+                        <a class="tm-item__overlay" href="{% url cl.opts|admin_urlname:'change' obj.pk %}"></a>
+
+                        <div class="tm-avatar tm-avatar--c{{ obj.pk|default:forloop.counter|color_index:8 }}">
+                            {% with first=obj.first_name|default_if_none:""|slice:":1" last=obj.last_name|default_if_none:""|slice:":1" %}
+                                {% if first or last %}
+                                    {{ first }}{{ last }}
+                                {% else %}
+                                    {{ obj.username|default_if_none:""|slice:":2" }}
+                                {% endif %}
+                            {% endwith %}
+                        </div>
+
+                        <div class="tm-main">
+                            <div class="tm-name">
+                                {{ obj.get_full_name|default:obj.username }}
+                            </div>
+                            <div class="tm-contact">
+                                {% if obj.email %}
+                                    <span class="tm-contact__item">
+                                        <span class="tm-ico">@</span>
+                                        <a href="mailto:{{ obj.email }}">{{ obj.email }}</a>
+                                    </span>
+                                {% endif %}
+                                {% if up and up.phone %}
+                                    <span class="tm-contact__item">
+                                        <span class="tm-ico">&#9742;</span>
+                                        <a href="tel:{{ up.phone|cut:' ' }}">{{ up.phone }}</a>
+                                    </span>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="tm-right">
+                            {% if up %}
+                                <div class="tm-room">
+                                    <span class="tm-room__label">{% trans "Status" %}</span>
+                                    <span class="tm-room__pill">{{ up.client_status }}</span>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </li>
+                {% endwith %}
+            {% empty %}
+                <li class="tm-empty">{% trans "No users found." %}</li>
+            {% endfor %}
+        </ul>
+        <div class="tm-pagination">
+            <div class="tm-results">
+                {% if cl.paginator.count == 1 %}
+                    Showing 1 user
+                {% else %}
+                    Showing {{ cl.paginator.count }} users
+                {% endif %}
+            </div>
+
+        </div>
+    </div>
+{% endblock %}
