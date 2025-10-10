@@ -19,6 +19,8 @@ class UserAdminCardsTests(TestCase):
             username="admin",
             email="admin@example.com",
             password="adminpass123",
+            first_name="Alice",
+            last_name="Admin",
         )
         self.superuser.date_joined = now - timedelta(days=120)
         self.superuser.save()
@@ -28,6 +30,8 @@ class UserAdminCardsTests(TestCase):
             username="regular",
             email="regular@example.com",
             password="password123",
+            first_name="Bob",
+            last_name="Builder",
         )
         self.regular_user.date_joined = now - timedelta(days=60)
         self.regular_user.save()
@@ -37,6 +41,8 @@ class UserAdminCardsTests(TestCase):
             username="newbie",
             email="newbie@example.com",
             password="password123",
+            first_name="Nina",
+            last_name="Novak",
         )
         self.new_user.date_joined = now - timedelta(days=5)
         self.new_user.save()
@@ -51,13 +57,50 @@ class UserAdminCardsTests(TestCase):
             user=user,
             defaults={"phone": phone},
         )
-        if not created and profile.phone != phone:
+        updates = []
+        if profile.phone != phone:
             profile.phone = phone
-            profile.save(update_fields=["phone"])
+            updates.append("phone")
+        if updates:
+            profile.save(update_fields=updates)
         return profile
+
+    def _create_search_users(self):
+        if hasattr(self, "search_user") and hasattr(self, "phone_user"):
+            return self.search_user, self.phone_user
+        User = get_user_model()
+        now = timezone.now()
+        search_user = User.objects.create_user(
+            username="marina",
+            email="marina@example.com",
+            password="password123",
+            first_name="Marina",
+            last_name="Lopez",
+        )
+        search_user.date_joined = now - timedelta(days=45)
+        search_user.save()
+        self._ensure_profile(search_user, "+19995550101")
+
+        phone_user = User.objects.create_user(
+            username="digits",
+            email="digits@example.com",
+            password="password123",
+            first_name="Phillip",
+            last_name="Numbers",
+        )
+        phone_user.date_joined = now - timedelta(days=200)
+        phone_user.save()
+        self._ensure_profile(phone_user, "+1 (604) 555-7788")
+
+        self.search_user = search_user
+        self.phone_user = phone_user
+        return search_user, phone_user
 
     def _dates_from_response(self, response):
         return [user.date_joined for user in response.context["cl"].result_list]
+
+    def _usernames_from_response(self, response):
+        return {user.username for user in response.context["cl"].result_list}
 
     def test_default_order_newest_first(self):
         response = self.client.get(self.url, follow=True)
@@ -127,3 +170,45 @@ class UserAdminCardsTests(TestCase):
         payload = json.loads(response.content)
         self.assertIn("newbie", payload["html"])
         self.assertIn("result_count", payload["meta"])
+
+    def test_search_partial_first_name(self):
+        search_user, phone_user = self._create_search_users()
+        response = self.client.get(self.url, {"q": "mar"}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        usernames = self._usernames_from_response(response)
+        self.assertIn(search_user.username, usernames)
+        self.assertNotIn(phone_user.username, usernames)
+
+    def test_search_username_exact(self):
+        _, phone_user = self._create_search_users()
+        response = self.client.get(self.url, {"q": phone_user.username}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        usernames = self._usernames_from_response(response)
+        self.assertSetEqual(usernames, {phone_user.username})
+
+    def test_search_email_mixed_case(self):
+        response = self.client.get(self.url, {"q": self.regular_user.email.upper()}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        usernames = self._usernames_from_response(response)
+        self.assertSetEqual(usernames, {self.regular_user.username})
+
+    def test_search_phone_digits_only(self):
+        _, phone_user = self._create_search_users()
+        response = self.client.get(self.url, {"q": "6045557788"}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        usernames = self._usernames_from_response(response)
+        self.assertSetEqual(usernames, {phone_user.username})
+
+    def test_search_phone_with_separators(self):
+        _, phone_user = self._create_search_users()
+        response = self.client.get(self.url, {"q": "604 555 7788"}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        usernames = self._usernames_from_response(response)
+        self.assertSetEqual(usernames, {phone_user.username})
+
+    def test_search_empty_term_returns_all(self):
+        self._create_search_users()
+        response = self.client.get(self.url, {"q": "   "}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        User = get_user_model()
+        self.assertEqual(response.context["cl"].paginator.count, User.objects.count())

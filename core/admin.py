@@ -35,6 +35,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 import json
+import re
 from django.utils.dateparse import parse_date
 import csv
 from django.utils.translation import gettext_lazy as _
@@ -820,7 +821,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     # Fields shown in user list
     list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'source', 'client_status_col')
     list_filter = ('is_superuser', 'userprofile__how_heard', ClientStatusFilter)
-    search_fields = ('first_name', 'last_name', 'email', 'userprofile__phone', 'username')
+    search_fields = ()
     ordering = ('-date_joined',)
 
     # Field layout when editing a user
@@ -876,8 +877,41 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 
         # Stash the choice and drop the param before default admin validation runs.
         request._user_order_choice = user_order or 'newest'
+        if "user_order" in request.GET:
+            mutable_get = request.GET.copy()
+            mutable_get.pop("user_order", None)
+            request.GET = mutable_get
 
         return qs
+
+    @staticmethod
+    def _normalize_phone_digits(value: str) -> str:
+        return re.sub(r"\D+", "", value or "")
+
+    @classmethod
+    def _phone_regex_for_digits(cls, digits: str) -> str:
+        if not digits:
+            return ""
+        # Allow any number of non-digit separators between the input digits.
+        return r"\D*".join(re.escape(d) for d in digits)
+
+    def get_search_results(self, request, queryset, search_term):
+        search_term = (search_term or "").strip()
+        if not search_term:
+            return queryset, False
+
+        text_q = (
+            Q(first_name__icontains=search_term)
+            | Q(last_name__icontains=search_term)
+            | Q(email__icontains=search_term)
+            | Q(username__icontains=search_term)
+        )
+        digits = self._normalize_phone_digits(search_term)
+        if digits:
+            regex_pattern = self._phone_regex_for_digits(digits)
+            text_q |= Q(userprofile__phone__iregex=regex_pattern)
+
+        return queryset.filter(text_q), False
 
     def get_ordering(self, request):
         user_order = getattr(request, "_user_order_choice", None) or request.GET.get("user_order")
@@ -1000,7 +1034,8 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         )
         response = super().changelist_view(request, extra_context=extra_context)
         if hasattr(response, "context_data"):
-            cl = response.context_data.get("cl")
+            context = response.context_data
+            cl = context.get("cl")
             pagination = {
                 "has_previous": False,
                 "has_next": False,
@@ -1008,6 +1043,8 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
                 "next_page": None,
                 "current_page": 1,
                 "total_pages": 1,
+                "start_index": 0,
+                "end_index": 0,
             }
             if cl is not None:
                 paginator = getattr(cl, "paginator", None)
@@ -1015,6 +1052,13 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
                 current_page = getattr(cl, "page_num", 1) or 1
                 has_previous = current_page > 1
                 has_next = total_pages and current_page < total_pages
+                per_page = getattr(cl, "list_per_page", self.list_per_page)
+                result_count = getattr(getattr(cl, "paginator", None), "count", 0) or 0
+                start_index = 0
+                end_index = 0
+                if result_count:
+                    start_index = ((current_page - 1) * per_page) + 1
+                    end_index = min(start_index + per_page - 1, result_count)
                 pagination.update(
                     {
                         "has_previous": has_previous,
@@ -1023,16 +1067,35 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
                         "next_page": current_page + 1 if has_next else None,
                         "current_page": current_page,
                         "total_pages": total_pages,
+                        "start_index": start_index,
+                        "end_index": end_index,
                     }
                 )
-            response.context_data["user_pagination"] = pagination
-        if request.headers.get("x-requested-with") == "XMLHttpRequest" and hasattr(response, "context_data"):
+            context["user_pagination"] = pagination
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest" and hasattr(response, "context_data"):
             fragment_html = render_to_string(
                 "admin/users/includes/user_list_fragment.html",
                 response.context_data,
                 request=request,
             )
-            return JsonResponse({"html": fragment_html})
+            cl = response.context_data.get("cl")
+            pagination = response.context_data.get("user_pagination", {})
+            result_count = getattr(getattr(cl, "paginator", None), "count", 0) or 0
+            meta = {
+                "result_count": result_count,
+                "status_current": request.GET.get("client_status", "") or "",
+                "status_label": ClientStatusFilter.LOOKUP_TO_LABEL.get(request.GET.get("client_status", ""), ""),
+                "order_current": getattr(request, "_user_order_choice", "newest"),
+                "page": pagination.get("current_page", 1),
+                "has_next": pagination.get("has_next", False),
+                "has_previous": pagination.get("has_previous", False),
+                "next_page": pagination.get("next_page"),
+                "previous_page": pagination.get("previous_page"),
+                "start_index": pagination.get("start_index", 0),
+                "end_index": pagination.get("end_index", 0),
+                "total_pages": pagination.get("total_pages", 1),
+            }
+            return JsonResponse({"html": fragment_html, "meta": meta})
         return response
 
     def import_users_view(self, request):
@@ -2777,7 +2840,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     change_list_template = "admin/service/changelist_table.html"
     list_display = ('name', 'base_price', 'category', 'duration_min', 'image_admin_thumb')
-    search_fields = ('name',)
+    search_fields = ()
     filter_horizontal = ("pre_appointment_forms",)
     readonly_fields = ("image_preview",)
     list_per_page = 10
@@ -2826,12 +2889,22 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
 
         return qs.order_by("name", "pk")
 
+    def get_search_results(self, request, queryset, search_term):
+        """
+        Apply the custom service name search without relying on search_fields.
+        """
+        term = (request.GET.get("q") or search_term or "").strip()
+        if not term:
+            return queryset, False
+        return queryset.filter(name__icontains=term), False
+
     def get_ordering(self, request):
         return ("name", "pk")
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
         original_params = request.GET.copy()
+        search_term = (original_params.get("q") or "").strip()
 
         categories = ServiceCategory.objects.all().order_by("name")
         category_options = [{"value": "", "label": _("All Categories")}]
@@ -2860,6 +2933,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "category_options": category_options,
                 "current_category": current_category,
                 "currency_symbol": currency_symbol,
+                "current_search": search_term,
             }
         )
         extra_context.setdefault(
@@ -2891,11 +2965,12 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
             export_url = None
 
         if hasattr(response, "context_data"):
-            response.context_data["export_url"] = export_url
-            response.context_data["category_options"] = category_options
-            response.context_data["current_category"] = current_category
-            response.context_data["currency_symbol"] = currency_symbol
-            cl = response.context_data.get("cl")
+            context = response.context_data
+            context["export_url"] = export_url
+            context["category_options"] = category_options
+            context["current_category"] = current_category
+            context["currency_symbol"] = currency_symbol
+            cl = context.get("cl")
             pagination = {
                 "has_previous": False,
                 "has_next": False,
@@ -2903,6 +2978,8 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "next_page": None,
                 "current_page": 1,
                 "total_pages": 1,
+                "start_index": 0,
+                "end_index": 0,
             }
             if cl is not None:
                 paginator = getattr(cl, "paginator", None)
@@ -2910,6 +2987,13 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 current_page = getattr(cl, "page_num", 1) or 1
                 has_previous = current_page > 1
                 has_next = total_pages and current_page < total_pages
+                per_page = getattr(cl, "list_per_page", self.list_per_page)
+                result_count = getattr(getattr(cl, "paginator", None), "count", 0) or 0
+                start_index = 0
+                end_index = 0
+                if result_count:
+                    start_index = ((current_page - 1) * per_page) + 1
+                    end_index = min(start_index + per_page - 1, result_count)
                 pagination.update(
                     {
                         "has_previous": has_previous,
@@ -2918,17 +3002,44 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                         "next_page": current_page + 1 if has_next else None,
                         "current_page": current_page,
                         "total_pages": total_pages,
+                        "start_index": start_index,
+                        "end_index": end_index,
                     }
                 )
-            response.context_data["svc_pagination"] = pagination
+            context["svc_pagination"] = pagination
 
-        if request.headers.get("x-requested-with") == "XMLHttpRequest" and hasattr(response, "context_data"):
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest" and hasattr(response, "context_data"):
             fragment_html = render_to_string(
                 "admin/service/includes/service_list_fragment.html",
                 response.context_data,
                 request=request,
             )
-            return JsonResponse({"html": fragment_html})
+            cl = response.context_data.get("cl")
+            pagination = response.context_data.get("svc_pagination", {})
+            result_count = getattr(getattr(cl, "paginator", None), "count", 0) or 0
+            category_label = ""
+            for option in category_options:
+                if option["value"] == current_category:
+                    category_label = option["label"]
+                    break
+
+            meta = {
+                "result_count": getattr(cl, "result_count", result_count),
+                "page": getattr(cl, "page_num", 0),
+                "current_page": pagination.get("current_page", 1),
+                "total_pages": pagination.get("total_pages", 1),
+                "has_previous": pagination.get("has_previous", False),
+                "has_next": pagination.get("has_next", False),
+                "previous_page": pagination.get("previous_page"),
+                "next_page": pagination.get("next_page"),
+                "start_index": pagination.get("start_index", 0),
+                "end_index": pagination.get("end_index", 0),
+                "current_category": current_category,
+                "current_category_label": category_label,
+                "currency_symbol": currency_symbol,
+                "search_term": search_term,
+            }
+            return JsonResponse({"html": fragment_html, "meta": meta})
 
         return response
 

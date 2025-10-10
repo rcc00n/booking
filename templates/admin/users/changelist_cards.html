@@ -21,11 +21,27 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
     }
 
-    const searchFieldName = '{{ cl.search_var }}';
-    const searchInput = form.querySelector(`input[name="${searchFieldName}"]`);
+    const searchInput = form.querySelector('input[name="{{ cl.search_var }}"]');
+    const SEARCH_PARAM = 'q';
+    const actualSearchFieldName = (searchInput && searchInput.name) || SEARCH_PARAM;
     const statusDropdownEl = document.querySelector('[data-dropdown="status"]');
     const orderDropdownEl = document.querySelector('[data-dropdown="sort"]');
     const badgeEl = document.querySelector('.tm-badge');
+    const supportsAbort = typeof AbortController !== 'undefined';
+    let activeController = null;
+
+    const setLoadingState = (isLoading) => {
+        if (!fragmentRoot) {
+            return;
+        }
+        if (isLoading) {
+            fragmentRoot.setAttribute('aria-busy', 'true');
+            fragmentRoot.classList.add('is-loading');
+        } else {
+            fragmentRoot.removeAttribute('aria-busy');
+            fragmentRoot.classList.remove('is-loading');
+        }
+    };
 
     const closeAll = (except) => {
         dropdowns.forEach((dropdown) => {
@@ -38,11 +54,24 @@ document.addEventListener('DOMContentLoaded', function () {
     const buildUrl = () => {
         const formData = new FormData(form);
         if (searchInput) {
-            formData.set(searchFieldName, searchInput.value.trim());
+            const value = searchInput.value.trim();
+            formData.delete(actualSearchFieldName);
+            if (value) {
+                formData.set(SEARCH_PARAM, value);
+            } else {
+                formData.delete(SEARCH_PARAM);
+            }
         }
         formData.delete('csrfmiddlewaretoken');
         formData.delete('p');
-        const params = new URLSearchParams(formData);
+        formData.delete('');
+        const params = new URLSearchParams();
+        formData.forEach((value, key) => {
+            if (!key) {
+                return;
+            }
+            params.set(key, value);
+        });
         const qs = params.toString();
         return qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
     };
@@ -88,16 +117,37 @@ document.addEventListener('DOMContentLoaded', function () {
                 btn.classList.toggle('is-active', isActive);
             });
         }
+        if (fragmentRoot) {
+            if (typeof meta.page !== 'undefined') {
+                fragmentRoot.dataset.page = String(meta.page || 1);
+            }
+            if (typeof meta.total_pages !== 'undefined') {
+                fragmentRoot.dataset.totalPages = String(meta.total_pages || '');
+            }
+        }
     };
 
     const requestUpdate = (url) => {
-        fetch(url, {
+        if (!url) {
+            return;
+        }
+        if (supportsAbort && activeController) {
+            activeController.abort();
+        }
+        const controller = supportsAbort ? new AbortController() : null;
+        if (supportsAbort) {
+            activeController = controller;
+        }
+        const targetUrl = new URL(url, window.location.origin);
+        setLoadingState(true);
+        fetch(targetUrl.toString(), {
             headers: {
                 'X-Requested-With': 'XMLHttpRequest',
                 'Accept': 'application/json',
             },
             credentials: 'same-origin',
             cache: 'no-store',
+            signal: controller ? controller.signal : undefined,
         })
             .then((res) => {
                 if (!res.ok) {
@@ -106,15 +156,30 @@ document.addEventListener('DOMContentLoaded', function () {
                 return res.json();
             })
             .then((data) => {
+                if (supportsAbort && controller && controller.signal.aborted) {
+                    return;
+                }
                 fragmentRoot.innerHTML = data.html || '';
-                history.replaceState(null, '', url);
+                history.replaceState(null, '', `${targetUrl.pathname}${targetUrl.search}`);
                 if (data.meta) {
                     updateMeta(data.meta);
                 }
             })
-            .catch(() => {
+            .catch((error) => {
+                if (supportsAbort && error && error.name === 'AbortError') {
+                    return;
+                }
                 if (form && typeof HTMLFormElement !== 'undefined') {
                     HTMLFormElement.prototype.submit.call(form);
+                }
+            })
+            .finally(() => {
+                const isActiveRequest = !supportsAbort || activeController === controller;
+                if (supportsAbort && activeController === controller) {
+                    activeController = null;
+                }
+                if (isActiveRequest) {
+                    setLoadingState(false);
                 }
             });
     };
@@ -254,14 +319,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 <i class="fas fa-search tm-searchbox__icon" aria-hidden="true"></i>
                 <input
                         class="tm-searchbox__input"
-                        type="text"
+                        type="search"
                         name="{{ cl.search_var }}"
                         placeholder="{% trans 'Search users...' %}"
                         value="{{ request.GET.q|default:'' }}"
                         autocomplete="off"
                 />
                 {% for key, val in request.GET.items %}
-                    {% if key != cl.search_var and key != 'p' and key != 'o' and key != 'client_status' and key != 'user_order' and key != 'e' %}
+                    {% if key and key != cl.search_var and key != 'p' and key != 'o' and key != 'client_status' and key != 'user_order' and key != 'e' %}
                         <input type="hidden" name="{{ key }}" value="{{ val }}">
                     {% endif %}
                 {% endfor %}

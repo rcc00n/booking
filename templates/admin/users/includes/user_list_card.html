@@ -1,0 +1,42 @@
+{% load i18n admin_urls filters %}
+{% with color_seed=user.pk|default:counter %}
+<li class="tm-item" data-user-card data-user-id="{{ user.pk }}"{% if user.email %} data-user-email="{{ user.email }}"{% endif %}{% if user_profile and user_profile.phone %} data-user-phone="{{ user_profile.phone }}"{% endif %}>
+    <a class="tm-item__overlay" href="{% url cl.opts|admin_urlname:'change' user.pk %}"></a>
+    <div class="tm-avatar tm-avatar--c{{ color_seed|color_index:8 }}">
+        {% with first=user.first_name|default_if_none:''|slice:":1" last=user.last_name|default_if_none:''|slice:":1" %}
+            {% if first or last %}
+                {{ first }}{{ last }}
+            {% else %}
+                {{ user.username|default_if_none:''|slice:":2" }}
+            {% endif %}
+        {% endwith %}
+    </div>
+    <div class="tm-main">
+        <div class="tm-name">
+            {{ user.get_full_name|default:user.username }}
+        </div>
+        <div class="tm-contact">
+            {% if user.email %}
+                <span class="tm-contact__item">
+                    <span class="tm-ico">@</span>
+                    <a href="mailto:{{ user.email }}">{{ user.email }}</a>
+                </span>
+            {% endif %}
+            {% if user_profile and user_profile.phone %}
+                <span class="tm-contact__item">
+                    <span class="tm-ico">&#9742;</span>
+                    <a href="tel:{{ user_profile.phone|cut:' ' }}">{{ user_profile.phone }}</a>
+                </span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="tm-right">
+        {% if user_profile %}
+            <div class="tm-room">
+                <span class="tm-room__label">{% trans "Status" %}</span>
+                <span class="tm-room__pill">{{ user_profile.client_status }}</span>
+            </div>
+        {% endif %}
+    </div>
+</li>
+{% endwith %}

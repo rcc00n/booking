@@ -30,7 +30,11 @@
         {% empty %}
             <tr>
                 <td class="svc-empty" colspan="5">
-                    {% trans "No services found." %}
+                    {% if current_search %}
+                        {% blocktrans with term=current_search %}No services found for '{{ term }}'.{% endblocktrans %}
+                    {% else %}
+                        {% trans "No services found." %}
+                    {% endif %}
                 </td>
             </tr>
         {% endfor %}

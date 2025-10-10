@@ -91,6 +91,16 @@ class ServiceAdminListTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self._names(response), [self.active_service.name])
 
+    def test_search_service_description(self):
+        response = self.client.get(self.url, {"q": "soothing"}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self._names(response), [self.inactive_service.name])
+
+    def test_search_category_name(self):
+        response = self.client.get(self.url, {"q": "skin"}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self._names(response), [self.active_service.name])
+
     def test_category_options_in_context(self):
         response = self.client.get(self.url, follow=True)
         self.assertEqual(response.status_code, 200)
@@ -168,4 +178,11 @@ class ServiceAdminListTests(TestCase):
         payload = json.loads(response.content)
         self.assertIn("Hydra Facial", payload["html"])
         self.assertNotIn("Relax Massage", payload["html"])
-        self.assertEqual(payload["meta"]["current_page"], 1)
+        meta = payload["meta"]
+        self.assertEqual(meta["current_page"], 1)
+        self.assertEqual(meta["result_count"], 1)
+        self.assertEqual(meta["start_index"], 1)
+        self.assertEqual(meta["end_index"], 1)
+        self.assertFalse(meta["has_previous"])
+        self.assertFalse(meta["has_next"])
+        self.assertEqual(meta["search_term"], "Hydra")

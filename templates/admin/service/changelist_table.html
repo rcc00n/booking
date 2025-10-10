@@ -29,116 +29,196 @@
             <div class="svc-search">
                 <i class="fas fa-search svc-search__icon" aria-hidden="true"></i>
                 <input
-                        type="text"
-                        name="{{ cl.search_var }}"
-                        value="{{ request.GET.q|default:'' }}"
-                        placeholder="{% trans 'Search by service name...' %}"
+                        class="tm-searchbox__input"
+                        type="search"
+                        name="{{ cl.search_var|default:'q' }}"
+                        value="{{ current_search|default:'' }}"
+                        placeholder="{% trans 'Search services by name' %}"
                         autocomplete="off"
                 />
             </div>
 
-            <select name="svc_category" class="svc-select" onchange="this.form.submit()">
+            <select name="svc_category" class="svc-select">
                 {% for option in category_options %}
                     <option value="{{ option.value }}"{% if option.value == current_category %} selected{% endif %}>{{ option.label }}</option>
                 {% endfor %}
             </select>
 
             {% for key, val in request.GET.items %}
-                {% if key != cl.search_var and key != 'svc_category' and key != 'p' and key != 'e' %}
+                {% if key and key != cl.search_var and key != 'svc_category' and key != 'p' and key != 'o' and key != 'e'%}
                     <input type="hidden" name="{{ key }}" value="{{ val }}">
                 {% endif %}
             {% endfor %}
         </form>
 
-        <div data-svc-fragment>
-            {% include "admin/service/includes/service_list_fragment.html" %}
+        <div class="svc-fragment-wrapper">
+            <div data-svc-loading class="svc-loading" hidden role="status" aria-live="polite">
+                <span class="svc-loading__spinner" aria-hidden="true"></span>
+                <span class="svc-loading__label">{% trans "Loading..." %}</span>
+            </div>
+            <div data-svc-fragment>
+                {% include "admin/service/includes/service_list_fragment.html" %}
+            </div>
         </div>
     </div>
+
+    <script>
+/* 0) метка, что скрипт вообще загрузился */
+console.log("[svc] script tag reached");
+
+document.addEventListener("DOMContentLoaded", () => {
+  /* 1) заранее объявим глобалку — даже при раннем return она будет существовать */
+  window.__svc = { stage: "init" };
+
+  const form = document.querySelector(".svc-filters");
+  const fragmentRoot = document.querySelector("[data-svc-fragment]");
+  const loadingIndicator = document.querySelector("[data-svc-loading]");
+
+  // 2) guard — НЕЛЬЗЯ комментировать. И ДО него не обращаться к form.querySelector!
+  if (!form || !fragmentRoot) {
+    console.warn("[svc] missing nodes", { form, fragmentRoot });
+    window.__svc = { ...window.__svc, form, fragmentRoot, stage: "missing-nodes" };
+    return;
+  }
+
+  // 3) безопасный дефолт для имени поля поиска
+  const searchFieldName = "{{ cl.search_var|default:'q' }}";
+
+  // 4) теперь можно трогать form
+  const searchInput =
+    form.querySelector(`input[name="${searchFieldName}"]`) ||
+    form.querySelector('input[type="search"][name]');
+
+  const categorySelect = form.querySelector('select[name="svc_category"]');
+  const supportsAbort = typeof AbortController !== "undefined";
+  let activeController = null;
+  let debounceId = null;
+
+  const setLoadingState = (isLoading) => {
+    fragmentRoot.classList.toggle("is-loading", !!isLoading);
+    if (isLoading) fragmentRoot.setAttribute("aria-busy", "true");
+    else fragmentRoot.removeAttribute("aria-busy");
+    if (loadingIndicator) loadingIndicator.hidden = !isLoading;
+  };
+
+  const buildUrl = () => {
+    const fd = new FormData(form);
+    if (searchInput) fd.set(searchFieldName, (searchInput.value || "").trim());
+    fd.delete("csrfmiddlewaretoken");
+    fd.delete("p"); // при новом поиске всегда первая страница
+
+    const params = new URLSearchParams();
+    fd.forEach((v, k) => {
+      if (!k) return;
+      const val = String(v ?? "").trim();
+      if (val === "") return;
+      params.set(k, val);
+    });
+
+    const qs = params.toString();
+    return qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+  };
+
+  const updateMeta = (meta = {}) => {
+    if (searchInput && "search_term" in meta) {
+      searchInput.value = meta.search_term || "";
+      searchInput.dataset.lastValue = searchInput.value.trim();
+    }
+    if (categorySelect && "current_category" in meta) {
+      categorySelect.value = meta.current_category || "";
+    }
+  };
+
+  const requestUpdate = (url) => {
+    if (!url) return;
+    if (supportsAbort && activeController) activeController.abort();
+    const controller = supportsAbort ? new AbortController() : null;
+    if (supportsAbort) activeController = controller;
+    setLoadingState(true);
+
+    const targetUrl = url.startsWith("?") ? `${window.location.pathname}${url}` : url;
+
+    fetch(targetUrl, {
+      headers: { "X-Requested-With": "XMLHttpRequest", "Accept": "application/json" },
+      credentials: "same-origin",
+      cache: "no-store",
+      signal: controller ? controller.signal : undefined,
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(res.statusText || "Network error");
+        return res.json();
+      })
+      .then((data) => {
+        if (controller?.signal.aborted) return;
+        fragmentRoot.innerHTML = data.html || "";
+        if (data.meta) updateMeta(data.meta);
+        history.replaceState(null, "", targetUrl);
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+        console.error("[svc] fetch failed, fallback submit", err);
+        HTMLFormElement.prototype.submit.call(form);
+      })
+      .finally(() => {
+        if (activeController === controller) activeController = null;
+        setLoadingState(false);
+      });
+  };
+
+  const triggerSearch = () => {
+    if (searchInput) searchInput.dataset.lastValue = (searchInput.value || "").trim();
+    requestUpdate(buildUrl());
+  };
+
+  // Слушатели
+  if (searchInput) {
+    searchInput.dataset.lastValue = (searchInput.value || "").trim();
+    searchInput.addEventListener("input", () => {
+      if (debounceId) clearTimeout(debounceId);
+      debounceId = setTimeout(() => {
+        const next = (searchInput.value || "").trim();
+        if (searchInput.dataset.lastValue === next) return;
+        triggerSearch();
+      }, 350);
+    });
+    // на всякий случай (Safari / очистка поля крестиком)
+    searchInput.addEventListener("search", triggerSearch);
+  }
+
+  if (categorySelect) {
+    categorySelect.addEventListener("change", triggerSearch);
+  }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (debounceId) clearTimeout(debounceId);
+    triggerSearch();
+  });
+
+  fragmentRoot.addEventListener("click", (e) => {
+    const link = e.target.closest("[data-svc-page]");
+    if (!link || link.classList.contains("disabled")) return;
+    e.preventDefault();
+    const href = link.getAttribute("href");
+    if (href) requestUpdate(href);
+  });
+
+  // 5) в самом конце — опубликуем всё для отладки
+  window.__svc = {
+    stage: "ready",
+    form,
+    fragmentRoot,
+    loadingIndicator,
+    searchFieldName,
+    searchInput,
+    categorySelect,
+    buildUrl,
+    requestUpdate,
+  };
+  console.log("[svc] init ok", window.__svc);
+});
+</script>
 {% endblock %}
 
-<script>
-(function () {
-    const form = document.querySelector(".svc-filters");
-    const fragmentRoot = document.querySelector("[data-svc-fragment]");
-    if (!form || !fragmentRoot) {
-        return;
-    }
-    const searchFieldName = "{{ cl.search_var }}";
-    const searchInput = form.querySelector(`input[name="${searchFieldName}"]`);
 
-    const buildUrl = () => {
-        const formData = new FormData(form);
-        if (searchInput) {
-            formData.set(searchFieldName, searchInput.value.trim());
-        }
-        formData.delete("csrfmiddlewaretoken");
-        formData.delete("p");
-        const params = new URLSearchParams(formData);
-        const qs = params.toString();
-        return qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
-    };
 
-    const replaceFragment = (url, updateHistory = true) => {
-        fetch(url, {
-            headers: {
-                "X-Requested-With": "XMLHttpRequest",
-                "Accept": "application/json",
-            },
-            credentials: "same-origin",
-            cache: "no-store",
-        })
-            .then((res) => {
-                if (!res.ok) {
-                    throw new Error(res.statusText || "Network error");
-                }
-                return res.json();
-            })
-            .then((data) => {
-                fragmentRoot.innerHTML = data.html || "";
-                if (updateHistory) {
-                    history.replaceState(null, "", url);
-                }
-            })
-            .catch(() => {
-                if (form && typeof HTMLFormElement !== "undefined") {
-                    HTMLFormElement.prototype.submit.call(form);
-                }
-            });
-    };
-
-    let debounceId = null;
-    const triggerSearch = () => {
-        if (searchInput) {
-            searchInput.dataset.lastValue = searchInput.value.trim();
-        }
-        replaceFragment(buildUrl(), true);
-    };
-
-    if (searchInput) {
-        searchInput.dataset.lastValue = searchInput.value.trim();
-        searchInput.addEventListener("input", () => {
-            if (debounceId) {
-                clearTimeout(debounceId);
-            }
-            debounceId = setTimeout(triggerSearch, 350);
-        });
-    }
-
-    form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        if (debounceId) {
-            clearTimeout(debounceId);
-        }
-        triggerSearch();
-    });
-
-    fragmentRoot.addEventListener("click", (event) => {
-        const link = event.target.closest("[data-svc-page]");
-        if (!link || link.classList.contains("disabled")) {
-            return;
-        }
-        event.preventDefault();
-        replaceFragment(link.getAttribute("href"), true);
-    });
-})();
-</script>
