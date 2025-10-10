@@ -12,6 +12,7 @@ from django.core.exceptions import FieldError, PermissionDenied
 from django.db import transaction, IntegrityError
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
+from django.conf import settings
 from django.contrib import admin, messages
 from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField, Prefetch
 from itertools import cycle
@@ -2446,7 +2447,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     def items_preview(self, obj):
         items_mgr = getattr(obj, "appointmentitem_set", None) or getattr(obj, "items", None)
         if not items_mgr:
-            return "—"
+            return "-"
         parts = []
         for it in items_mgr.all()[:6]:
             s_name = getattr(it.service, "name", str(it.service))
@@ -2731,11 +2732,12 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     Admin interface for services.
     """
+    change_list_template = "admin/service/changelist_table.html"
     list_display = ('name', 'base_price', 'category', 'duration_min', 'image_admin_thumb')
-    search_fields = ('name',)
-    list_filter = ('category',)
+    search_fields = ('name', 'description', 'category__name')
     filter_horizontal = ("pre_appointment_forms",)
     readonly_fields = ("image_preview",)
+    list_per_page = 10
     fieldsets = (
         (None, {
             "fields": (
@@ -2760,13 +2762,132 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     )
     export_fields = ['name', 'description','base_price', 'category', 'duration_min', 'extra_time_min']
 
+    def get_queryset(self, request):
+        qs = (
+            super()
+            .get_queryset(request)
+            .select_related("category")
+        )
+
+        category_value = getattr(request, "_svc_category_filter", None)
+        if category_value is None:
+            category_value = request.GET.get("svc_category")
+        if category_value:
+            if category_value == "none":
+                qs = qs.filter(category__isnull=True)
+            else:
+                try:
+                    qs = qs.filter(category_id=int(category_value))
+                except (TypeError, ValueError):
+                    qs = qs.none()
+
+        return qs.order_by("name", "pk")
+
+    def get_ordering(self, request):
+        return ("name", "pk")
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        original_params = request.GET.copy()
+
+        categories = ServiceCategory.objects.all().order_by("name")
+        category_options = [{"value": "", "label": _("All Categories")}]
+        category_options.append({"value": "none", "label": _("Uncategorised")})
+        category_options.extend(
+            {"value": str(cat.pk), "label": cat.name}
+            for cat in categories
+        )
+
+        current_category = original_params.get("svc_category", "")
+        if current_category:
+            request._svc_category_filter = current_category
+        else:
+            request._svc_category_filter = None
+
+        currency_code = (getattr(settings, "STRIPE_CURRENCY", "USD") or "USD").upper()
+        currency_symbol = {
+            "CAD": "CA$",
+            "USD": "$",
+            "EUR": "\u20AC",
+            "GBP": "\u00A3",
+        }.get(currency_code, f"{currency_code} $")
+
+        extra_context.update(
+            {
+                "category_options": category_options,
+                "current_category": current_category,
+                "currency_symbol": currency_symbol,
+            }
+        )
+        extra_context.setdefault(
+            "svc_pagination",
+            {
+                "has_previous": False,
+                "has_next": False,
+                "previous_page": None,
+                "next_page": None,
+                "current_page": 1,
+                "total_pages": 1,
+            },
+        )
+
+        cleaned_params = original_params.copy()
+        cleaned_params.pop("svc_category", None)
+        request.GET = cleaned_params
+        try:
+            response = super().changelist_view(request, extra_context=extra_context)
+        finally:
+            request.GET = original_params
+
+        try:
+            opts = self.model._meta
+            export_url = reverse(f'admin:{opts.app_label}_{opts.model_name}_export_csv')
+            if original_params:
+                export_url += f"?{original_params.urlencode()}"
+        except NoReverseMatch:
+            export_url = None
+
+        if hasattr(response, "context_data"):
+            response.context_data["export_url"] = export_url
+            response.context_data["category_options"] = category_options
+            response.context_data["current_category"] = current_category
+            response.context_data["currency_symbol"] = currency_symbol
+            cl = response.context_data.get("cl")
+            pagination = {
+                "has_previous": False,
+                "has_next": False,
+                "previous_page": None,
+                "next_page": None,
+                "current_page": 1,
+                "total_pages": 1,
+            }
+            if cl is not None:
+                paginator = getattr(cl, "paginator", None)
+                total_pages = getattr(paginator, "num_pages", 1) or 1
+                current_page = getattr(cl, "page_num", 1) or 1
+                has_previous = current_page > 1
+                has_next = total_pages and current_page < total_pages
+                pagination.update(
+                    {
+                        "has_previous": has_previous,
+                        "has_next": has_next,
+                        "previous_page": current_page - 1 if has_previous else None,
+                        "next_page": current_page + 1 if has_next else None,
+                        "current_page": current_page,
+                        "total_pages": total_pages,
+                    }
+                )
+            response.context_data["svc_pagination"] = pagination
+
+        return response
+
     @admin.display(description="Preview", ordering=False)
     def image_admin_thumb(self, obj):
         if obj.image:
             return format_html('<img src="{}" style="height:48px;width:85px;object-fit:cover;border-radius:6px;" alt="{}"/>',
                                obj.image.url,
                                obj.card_image_alt)
-        return "—"
+        return "-"
 
     @admin.display(description="Current preview")
     def image_preview(self, obj):
@@ -2774,7 +2895,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
             return format_html('<img src="{}" style="max-width:320px;border-radius:10px;" alt="{}"/>',
                                obj.image.url,
                                obj.card_image_alt)
-        return "—"
+        return "-"
 
 
 @admin.register(ClientIntakeForm)

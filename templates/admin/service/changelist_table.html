@@ -1,0 +1,126 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static admin_list admin_urls filters %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'admin/css/master_profile.css' %}">
+    <link rel="stylesheet" href="{% static 'admin/css/user_cards.css' %}">
+    <link rel="stylesheet" href="{% static 'admin/css/service_table.css' %}">
+{% endblock %}
+
+{% block content %}
+    <div class="svc-container">
+        <div class="svc-header">
+            <div class="svc-header__info">
+                <h1 class="svc-title">{% trans "Services" %}</h1>
+                <p class="svc-subtitle">{% trans "Manage your service menu and pricing" %}</p>
+            </div>
+            <div class="svc-header__actions">
+                <a class="svc-btn svc-btn--ghost" href="{{ export_url|default:'#' }}">
+                    <i class="fas fa-download" aria-hidden="true"></i> {% trans "Export CSV" %}
+                </a>
+                <a class="svc-btn svc-btn--primary" href="{% url cl.opts|admin_urlname:'add' %}">
+                    <i class="fas fa-plus" aria-hidden="true"></i> {% trans "Add Service" %}
+                </a>
+            </div>
+        </div>
+
+        <form method="get" class="svc-filters">
+            <div class="svc-search">
+                <i class="fas fa-search svc-search__icon" aria-hidden="true"></i>
+                <input
+                        type="text"
+                        name="{{ cl.search_var }}"
+                        value="{{ request.GET.q|default:'' }}"
+                        placeholder="{% trans 'Search by service name...' %}"
+                        autocomplete="off"
+                />
+            </div>
+
+            <select name="svc_category" class="svc-select" onchange="this.form.submit()">
+                {% for option in category_options %}
+                    <option value="{{ option.value }}"{% if option.value == current_category %} selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+
+            {% for key, val in request.GET.items %}
+                {% if key != cl.search_var and key != 'svc_category' and key != 'p' and key != 'e' %}
+                    <input type="hidden" name="{{ key }}" value="{{ val }}">
+                {% endif %}
+            {% endfor %}
+        </form>
+
+        <div class="svc-table__wrapper">
+            <table class="svc-table">
+                <thead>
+                <tr>
+                    <th scope="col">{% trans "Service Name" %}</th>
+                    <th scope="col">{% trans "Category" %}</th>
+                    <th scope="col">{% trans "Duration" %}</th>
+                    <th scope="col">{% trans "Price" %}</th>
+                    <th scope="col" class="svc-actions">{% trans "Actions" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for obj in cl.result_list %}
+                        <tr>
+                            <td class="svc-name">
+                                <a href="{% url cl.opts|admin_urlname:'change' obj.pk %}">
+                                    {{ obj.name }}
+                                </a>
+                            </td>
+                            <td>{{ obj.category.name|default:"-" }}</td>
+                            <td>{{ obj|service_duration }}</td>
+                            <td>{{ currency_symbol }} {{ obj|service_price }}</td>
+                            <td class="svc-actions">
+                                <a class="svc-action-link" href="{% url cl.opts|admin_urlname:'change' obj.pk %}">
+                                    <i class="fas fa-ellipsis-h" aria-hidden="true"></i>
+                                </a>
+                            </td>
+                        </tr>
+                {% empty %}
+                    <tr>
+                        <td class="svc-empty" colspan="5">
+                            {% trans "No services found." %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="svc-pagination">
+            {% changelist_start cl as start_index %}
+            {% changelist_end cl as end_index %}
+            <div class="svc-results">
+                {% if cl.result_count %}
+                    {% if start_index == end_index %}
+                        {% trans "Showing" %} {{ start_index }} {% trans "of" %} {{ cl.result_count }} {% trans "services" %}
+                    {% else %}
+                        {% trans "Showing" %} {{ start_index }}-{{ end_index }} {% trans "of" %} {{ cl.result_count }} {% trans "services" %}
+                    {% endif %}
+                {% else %}
+                    {% trans "Showing 0 services" %}
+                {% endif %}
+            </div>
+
+            <div class="svc-pages">
+                {% with pagination=svc_pagination %}
+                    <div class="svc-page-nav">
+                        {% if pagination.has_previous %}
+                            <a class="svc-page-btn" href="{% service_page_url pagination.previous_page %}">{% trans "Previous" %}</a>
+                        {% else %}
+                            <span class="svc-page-btn disabled">{% trans "Previous" %}</span>
+                        {% endif %}
+                        {% if pagination.has_next %}
+                            <a class="svc-page-btn" href="{% service_page_url pagination.next_page %}">{% trans "Next" %}</a>
+                        {% else %}
+                            <span class="svc-page-btn disabled">{% trans "Next" %}</span>
+                        {% endif %}
+                    </div>
+                {% endwith %}
+            </div>
+
+        </div>
+    </div>
+{% endblock %}
