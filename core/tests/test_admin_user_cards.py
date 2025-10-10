@@ -1,3 +1,5 @@
+import json
+import re
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -82,3 +84,46 @@ class UserAdminCardsTests(TestCase):
         usernames = {user.username for user in response.context["cl"].result_list}
         expected = {self.superuser.username, self.regular_user.username}
         self.assertSetEqual(usernames, expected)
+
+    def test_pagination_controls(self):
+        User = get_user_model()
+        base_time = timezone.now()
+        for idx in range(12):
+            user = User.objects.create_user(
+                username=f"extra{idx}",
+                email=f"extra{idx}@example.com",
+                password="password123",
+            )
+            user.date_joined = base_time - timedelta(days=idx + 1)
+            user.save()
+            self._ensure_profile(user, f"+1999000{idx:03d}")
+
+        response = self.client.get(self.url, follow=True)
+        self.assertEqual(response.status_code, 200)
+        pagination = response.context["user_pagination"]
+        self.assertTrue(pagination["has_next"])
+        self.assertFalse(pagination["has_previous"])
+        self.assertEqual(pagination["next_page"], 2)
+
+        html = response.content.decode()
+        next_link = re.search(r'href="([^"]+)"[^>]*>\s*Next\s*<', html)
+        self.assertIsNotNone(next_link)
+        self.assertIn("p=2", next_link.group(1))
+
+        response_page2 = self.client.get(self.url, {"p": 2}, follow=True)
+        self.assertEqual(response_page2.status_code, 200)
+        pagination_page2 = response_page2.context["user_pagination"]
+        self.assertTrue(pagination_page2["has_previous"])
+        self.assertFalse(pagination_page2["has_next"])
+        self.assertEqual(pagination_page2["previous_page"], 1)
+        html_page2 = response_page2.content.decode()
+        prev_link = re.search(r'href="([^"]+)"[^>]*>\s*Previous\s*<', html_page2)
+        self.assertIsNotNone(prev_link)
+        self.assertNotIn("p=1", prev_link.group(1))
+
+    def test_ajax_fragment_search(self):
+        response = self.client.get(self.url, {"q": "new"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertIn("newbie", payload["html"])
+        self.assertIn("result_count", payload["meta"])

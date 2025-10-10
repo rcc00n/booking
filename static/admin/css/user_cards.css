@@ -105,6 +105,21 @@
     margin-top: 4px;
 }
 
+.tm-filter-summary.is-hidden {
+    display: none;
+}
+
+.tm-option-check {
+    margin-left: auto;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.tm-dropdown__option.is-active .tm-option-check {
+    opacity: 1;
+}
+
+
 .tm-chip.is-active {
     border-color: #6366f1;
     background: #eef2ff;

@@ -1,3 +1,4 @@
+import json
 import re
 
 from django.contrib.auth import get_user_model
@@ -160,3 +161,11 @@ class ServiceAdminListTests(TestCase):
         self.assertIsNotNone(prev_link)
         self.assertIn(f"svc_category={self.category_skin.pk}", prev_link.group(1))
         self.assertNotIn("p=1", prev_link.group(1))
+
+    def test_ajax_fragment_search(self):
+        response = self.client.get(self.url, {"q": "Hydra"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertIn("Hydra Facial", payload["html"])
+        self.assertNotIn("Relax Massage", payload["html"])
+        self.assertEqual(payload["meta"]["current_page"], 1)

@@ -766,6 +766,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     form = CustomUserChangeForm
     change_list_template = "admin/users/changelist_cards.html"
     export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
+    list_per_page = 10
 
     add_fieldsets = (
         (None, {
@@ -819,7 +820,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     # Fields shown in user list
     list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'source', 'client_status_col')
     list_filter = ('is_superuser', 'userprofile__how_heard', ClientStatusFilter)
-    search_fields = ('username', 'email', 'first_name', 'last_name', 'userprofile__phone')
+    search_fields = ('first_name', 'last_name', 'email', 'userprofile__phone', 'username')
     ordering = ('-date_joined',)
 
     # Field layout when editing a user
@@ -875,10 +876,6 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 
         # Stash the choice and drop the param before default admin validation runs.
         request._user_order_choice = user_order or 'newest'
-        if 'user_order' in request.GET:
-            mutable_get = request.GET.copy()
-            mutable_get.pop('user_order', None)
-            request.GET = mutable_get
 
         return qs
 
@@ -990,7 +987,53 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         if user_order not in ('newest', 'oldest'):
             user_order = 'newest'
         extra_context['user_order_current'] = user_order
-        return super().changelist_view(request, extra_context=extra_context)
+        extra_context.setdefault(
+            "user_pagination",
+            {
+                "has_previous": False,
+                "has_next": False,
+                "previous_page": None,
+                "next_page": None,
+                "current_page": 1,
+                "total_pages": 1,
+            },
+        )
+        response = super().changelist_view(request, extra_context=extra_context)
+        if hasattr(response, "context_data"):
+            cl = response.context_data.get("cl")
+            pagination = {
+                "has_previous": False,
+                "has_next": False,
+                "previous_page": None,
+                "next_page": None,
+                "current_page": 1,
+                "total_pages": 1,
+            }
+            if cl is not None:
+                paginator = getattr(cl, "paginator", None)
+                total_pages = getattr(paginator, "num_pages", 1) or 1
+                current_page = getattr(cl, "page_num", 1) or 1
+                has_previous = current_page > 1
+                has_next = total_pages and current_page < total_pages
+                pagination.update(
+                    {
+                        "has_previous": has_previous,
+                        "has_next": has_next,
+                        "previous_page": current_page - 1 if has_previous else None,
+                        "next_page": current_page + 1 if has_next else None,
+                        "current_page": current_page,
+                        "total_pages": total_pages,
+                    }
+                )
+            response.context_data["user_pagination"] = pagination
+        if request.headers.get("x-requested-with") == "XMLHttpRequest" and hasattr(response, "context_data"):
+            fragment_html = render_to_string(
+                "admin/users/includes/user_list_fragment.html",
+                response.context_data,
+                request=request,
+            )
+            return JsonResponse({"html": fragment_html})
+        return response
 
     def import_users_view(self, request):
         opts = self.model._meta
@@ -2734,7 +2777,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     change_list_template = "admin/service/changelist_table.html"
     list_display = ('name', 'base_price', 'category', 'duration_min', 'image_admin_thumb')
-    search_fields = ('name', 'description', 'category__name')
+    search_fields = ('name',)
     filter_horizontal = ("pre_appointment_forms",)
     readonly_fields = ("image_preview",)
     list_per_page = 10
@@ -2878,6 +2921,14 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                     }
                 )
             response.context_data["svc_pagination"] = pagination
+
+        if request.headers.get("x-requested-with") == "XMLHttpRequest" and hasattr(response, "context_data"):
+            fragment_html = render_to_string(
+                "admin/service/includes/service_list_fragment.html",
+                response.context_data,
+                request=request,
+            )
+            return JsonResponse({"html": fragment_html})
 
         return response
 

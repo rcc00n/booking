@@ -50,77 +50,95 @@
             {% endfor %}
         </form>
 
-        <div class="svc-table__wrapper">
-            <table class="svc-table">
-                <thead>
-                <tr>
-                    <th scope="col">{% trans "Service Name" %}</th>
-                    <th scope="col">{% trans "Category" %}</th>
-                    <th scope="col">{% trans "Duration" %}</th>
-                    <th scope="col">{% trans "Price" %}</th>
-                    <th scope="col" class="svc-actions">{% trans "Actions" %}</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for obj in cl.result_list %}
-                        <tr>
-                            <td class="svc-name">
-                                <a href="{% url cl.opts|admin_urlname:'change' obj.pk %}">
-                                    {{ obj.name }}
-                                </a>
-                            </td>
-                            <td>{{ obj.category.name|default:"-" }}</td>
-                            <td>{{ obj|service_duration }}</td>
-                            <td>{{ currency_symbol }} {{ obj|service_price }}</td>
-                            <td class="svc-actions">
-                                <a class="svc-action-link" href="{% url cl.opts|admin_urlname:'change' obj.pk %}">
-                                    <i class="fas fa-ellipsis-h" aria-hidden="true"></i>
-                                </a>
-                            </td>
-                        </tr>
-                {% empty %}
-                    <tr>
-                        <td class="svc-empty" colspan="5">
-                            {% trans "No services found." %}
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
-
-        <div class="svc-pagination">
-            {% changelist_start cl as start_index %}
-            {% changelist_end cl as end_index %}
-            <div class="svc-results">
-                {% if cl.result_count %}
-                    {% if start_index == end_index %}
-                        {% trans "Showing" %} {{ start_index }} {% trans "of" %} {{ cl.result_count }} {% trans "services" %}
-                    {% else %}
-                        {% trans "Showing" %} {{ start_index }}-{{ end_index }} {% trans "of" %} {{ cl.result_count }} {% trans "services" %}
-                    {% endif %}
-                {% else %}
-                    {% trans "Showing 0 services" %}
-                {% endif %}
-            </div>
-
-            <div class="svc-pages">
-                {% with pagination=svc_pagination %}
-                    <div class="svc-page-nav">
-                        {% if pagination.has_previous %}
-                            <a class="svc-page-btn" href="{% service_page_url pagination.previous_page %}">{% trans "Previous" %}</a>
-                        {% else %}
-                            <span class="svc-page-btn disabled">{% trans "Previous" %}</span>
-                        {% endif %}
-                        {% if pagination.has_next %}
-                            <a class="svc-page-btn" href="{% service_page_url pagination.next_page %}">{% trans "Next" %}</a>
-                        {% else %}
-                            <span class="svc-page-btn disabled">{% trans "Next" %}</span>
-                        {% endif %}
-                    </div>
-                {% endwith %}
-            </div>
-
+        <div data-svc-fragment>
+            {% include "admin/service/includes/service_list_fragment.html" %}
         </div>
     </div>
 {% endblock %}
+
+<script>
+(function () {
+    const form = document.querySelector(".svc-filters");
+    const fragmentRoot = document.querySelector("[data-svc-fragment]");
+    if (!form || !fragmentRoot) {
+        return;
+    }
+    const searchFieldName = "{{ cl.search_var }}";
+    const searchInput = form.querySelector(`input[name="${searchFieldName}"]`);
+
+    const buildUrl = () => {
+        const formData = new FormData(form);
+        if (searchInput) {
+            formData.set(searchFieldName, searchInput.value.trim());
+        }
+        formData.delete("csrfmiddlewaretoken");
+        formData.delete("p");
+        const params = new URLSearchParams(formData);
+        const qs = params.toString();
+        return qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    };
+
+    const replaceFragment = (url, updateHistory = true) => {
+        fetch(url, {
+            headers: {
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json",
+            },
+            credentials: "same-origin",
+            cache: "no-store",
+        })
+            .then((res) => {
+                if (!res.ok) {
+                    throw new Error(res.statusText || "Network error");
+                }
+                return res.json();
+            })
+            .then((data) => {
+                fragmentRoot.innerHTML = data.html || "";
+                if (updateHistory) {
+                    history.replaceState(null, "", url);
+                }
+            })
+            .catch(() => {
+                if (form && typeof HTMLFormElement !== "undefined") {
+                    HTMLFormElement.prototype.submit.call(form);
+                }
+            });
+    };
+
+    let debounceId = null;
+    const triggerSearch = () => {
+        if (searchInput) {
+            searchInput.dataset.lastValue = searchInput.value.trim();
+        }
+        replaceFragment(buildUrl(), true);
+    };
+
+    if (searchInput) {
+        searchInput.dataset.lastValue = searchInput.value.trim();
+        searchInput.addEventListener("input", () => {
+            if (debounceId) {
+                clearTimeout(debounceId);
+            }
+            debounceId = setTimeout(triggerSearch, 350);
+        });
+    }
+
+    form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (debounceId) {
+            clearTimeout(debounceId);
+        }
+        triggerSearch();
+    });
+
+    fragmentRoot.addEventListener("click", (event) => {
+        const link = event.target.closest("[data-svc-page]");
+        if (!link || link.classList.contains("disabled")) {
+            return;
+        }
+        event.preventDefault();
+        replaceFragment(link.getAttribute("href"), true);
+    });
+})();
+</script>

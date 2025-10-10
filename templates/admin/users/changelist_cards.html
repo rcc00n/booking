@@ -10,84 +10,208 @@
 {% block extrahead %}
     {{ block.super }}
     <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const dropdowns = document.querySelectorAll('[data-dropdown]');
-            const form = document.querySelector('.tm-searchbox__form');
-            const statusInput = document.getElementById('client-status-input');
-            const orderInput = document.getElementById('user-order-input');
+document.addEventListener('DOMContentLoaded', function () {
+    const dropdowns = document.querySelectorAll('[data-dropdown]');
+    const form = document.querySelector('.tm-searchbox__form');
+    const statusInput = document.getElementById('client-status-input');
+    const orderInput = document.getElementById('user-order-input');
+    const fragmentRoot = document.querySelector('[data-user-fragment]');
 
-            function closeAll(except) {
-                dropdowns.forEach(function (dropdown) {
-                    if (dropdown === except) {
-                        return;
-                    }
-                    dropdown.classList.remove('is-open');
-                });
+    if (!form || !fragmentRoot) {
+        return;
+    }
+
+    const searchFieldName = '{{ cl.search_var }}';
+    const searchInput = form.querySelector(`input[name="${searchFieldName}"]`);
+    const statusDropdownEl = document.querySelector('[data-dropdown="status"]');
+    const orderDropdownEl = document.querySelector('[data-dropdown="sort"]');
+    const badgeEl = document.querySelector('.tm-badge');
+
+    const closeAll = (except) => {
+        dropdowns.forEach((dropdown) => {
+            if (dropdown !== except) {
+                dropdown.classList.remove('is-open');
             }
+        });
+    };
 
-            dropdowns.forEach(function (dropdown) {
-                const trigger = dropdown.querySelector('[data-dropdown-trigger]');
-                const panel = dropdown.querySelector('[data-dropdown-panel]');
+    const buildUrl = () => {
+        const formData = new FormData(form);
+        if (searchInput) {
+            formData.set(searchFieldName, searchInput.value.trim());
+        }
+        formData.delete('csrfmiddlewaretoken');
+        formData.delete('p');
+        const params = new URLSearchParams(formData);
+        const qs = params.toString();
+        return qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    };
 
-                if (!trigger || !panel) {
-                    return;
+    const updateMeta = (meta = {}) => {
+        if (badgeEl && typeof meta.result_count !== 'undefined') {
+            badgeEl.textContent = meta.result_count;
+        }
+        if (statusInput) {
+            statusInput.value = meta.status_current || '';
+        }
+        if (orderInput) {
+            orderInput.value = meta.order_current || 'newest';
+        }
+        if (statusDropdownEl) {
+            statusDropdownEl.classList.toggle('is-active', Boolean(meta.status_current));
+            const statusChip = statusDropdownEl.querySelector('[data-dropdown-trigger]');
+            if (statusChip) {
+                statusChip.classList.toggle('is-active', Boolean(meta.status_current));
+            }
+            const summary = statusDropdownEl.querySelector('[data-filter-summary]');
+            if (summary) {
+                if (meta.status_label) {
+                    summary.textContent = meta.status_label;
+                    summary.classList.remove('is-hidden');
+                } else {
+                    summary.textContent = '';
+                    summary.classList.add('is-hidden');
                 }
-
-                trigger.addEventListener('click', function (event) {
-                    event.preventDefault();
-                    const alreadyOpen = dropdown.classList.contains('is-open');
-                    closeAll();
-                    if (!alreadyOpen) {
-                        dropdown.classList.add('is-open');
-                    }
-                });
-
-                panel.querySelectorAll('[data-status-value]').forEach(function (button) {
-                    button.addEventListener('click', function (event) {
-                        event.preventDefault();
-                        if (statusInput) {
-                            statusInput.value = button.getAttribute('data-status-value') || '';
-                        }
-                        if (form) {
-                            form.submit();
-                        }
-                    });
-                });
-
-                panel.querySelectorAll('[data-order-value]').forEach(function (button) {
-                    button.addEventListener('click', function (event) {
-                        event.preventDefault();
-                        if (orderInput) {
-                            orderInput.value = button.getAttribute('data-order-value') || '';
-                        }
-                        if (form) {
-                            form.submit();
-                        }
-                    });
-                });
-
-                panel.querySelectorAll('[data-action="clear-status"]').forEach(function (button) {
-                    button.addEventListener('click', function (event) {
-                        event.preventDefault();
-                        if (statusInput) {
-                            statusInput.value = '';
-                        }
-                        if (form) {
-                            form.submit();
-                        }
-                    });
-                });
+            }
+            statusDropdownEl.querySelectorAll('[data-status-value]').forEach((btn) => {
+                const isActive = (btn.getAttribute('data-status-value') || '') === (meta.status_current || '');
+                btn.classList.toggle('is-active', isActive);
             });
+        }
+        if (orderDropdownEl) {
+            const orderChip = orderDropdownEl.querySelector('[data-dropdown-trigger]');
+            if (orderChip) {
+                orderChip.classList.toggle('is-active', (meta.order_current || 'newest') !== 'newest');
+            }
+            orderDropdownEl.querySelectorAll('[data-order-value]').forEach((btn) => {
+                const isActive = (btn.getAttribute('data-order-value') || 'newest') === (meta.order_current || 'newest');
+                btn.classList.toggle('is-active', isActive);
+            });
+        }
+    };
 
-            document.addEventListener('click', function (event) {
-                dropdowns.forEach(function (dropdown) {
-                    if (!dropdown.contains(event.target)) {
-                        dropdown.classList.remove('is-open');
-                    }
-                });
+    const requestUpdate = (url) => {
+        fetch(url, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json',
+            },
+            credentials: 'same-origin',
+            cache: 'no-store',
+        })
+            .then((res) => {
+                if (!res.ok) {
+                    throw new Error(res.statusText || 'Network error');
+                }
+                return res.json();
+            })
+            .then((data) => {
+                fragmentRoot.innerHTML = data.html || '';
+                history.replaceState(null, '', url);
+                if (data.meta) {
+                    updateMeta(data.meta);
+                }
+            })
+            .catch(() => {
+                if (form && typeof HTMLFormElement !== 'undefined') {
+                    HTMLFormElement.prototype.submit.call(form);
+                }
+            });
+    };
+
+    dropdowns.forEach((dropdown) => {
+        const trigger = dropdown.querySelector('[data-dropdown-trigger]');
+        const panel = dropdown.querySelector('[data-dropdown-panel]');
+        if (!trigger || !panel) {
+            return;
+        }
+        trigger.addEventListener('click', (event) => {
+            event.preventDefault();
+            const alreadyOpen = dropdown.classList.contains('is-open');
+            closeAll();
+            if (!alreadyOpen) {
+                dropdown.classList.add('is-open');
+            }
+        });
+
+        panel.querySelectorAll('[data-status-value]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                if (statusInput) {
+                    statusInput.value = button.getAttribute('data-status-value') || '';
+                }
+                closeAll();
+                requestUpdate(buildUrl());
             });
         });
-    </script>
+
+        panel.querySelectorAll('[data-order-value]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                if (orderInput) {
+                    orderInput.value = button.getAttribute('data-order-value') || '';
+                }
+                closeAll();
+                requestUpdate(buildUrl());
+            });
+        });
+
+        panel.querySelectorAll('[data-action="clear-status"]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                if (statusInput) {
+                    statusInput.value = '';
+                }
+                closeAll();
+                requestUpdate(buildUrl());
+            });
+        });
+    });
+
+    document.addEventListener('click', function (event) {
+        dropdowns.forEach(function (dropdown) {
+            if (!dropdown.contains(event.target)) {
+                dropdown.classList.remove('is-open');
+            }
+        });
+    });
+
+    let debounceId = null;
+    if (searchInput) {
+        searchInput.dataset.lastValue = searchInput.value.trim();
+        searchInput.addEventListener('input', function () {
+            if (debounceId) {
+                clearTimeout(debounceId);
+            }
+            debounceId = setTimeout(function () {
+                searchInput.dataset.lastValue = searchInput.value.trim();
+                requestUpdate(buildUrl());
+            }, 350);
+        });
+    }
+
+    form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        if (debounceId) {
+            clearTimeout(debounceId);
+        }
+        if (searchInput) {
+            searchInput.dataset.lastValue = searchInput.value.trim();
+        }
+        requestUpdate(buildUrl());
+    });
+
+    fragmentRoot.addEventListener('click', function (event) {
+        const link = event.target.closest('[data-user-page]');
+        if (!link || link.classList.contains('disabled')) {
+            return;
+        }
+        event.preventDefault();
+        requestUpdate(link.getAttribute('href'));
+    });
+});
+</script>
+
 {% endblock %}
 
 {% block content %}
@@ -143,15 +267,14 @@
                 {% endfor %}
                 <input type="hidden" id="client-status-input" name="client_status" value="{{ client_status_current }}">
                 <input type="hidden" id="user-order-input" name="user_order" value="{{ user_order_current }}">
-
                 <div class="tm-searchbox__actions">
-                    <div class="tm-dropdown{% if client_status_current %} is-active{% endif %}" data-dropdown>
+                    <div class="tm-dropdown{% if client_status_current %} is-active{% endif %}" data-dropdown="status">
                         <button type="button" class="tm-chip{% if client_status_current %} is-active{% endif %}" data-dropdown-trigger>
                             <i class="fas fa-filter" aria-hidden="true"></i> {% trans "Filters" %}
                         </button>
-                        {% if client_status_current_label %}
-                            <div class="tm-filter-summary">{{ client_status_current_label }}</div>
-                        {% endif %}
+                        <div class="tm-filter-summary{% if not client_status_current_label %} is-hidden{% endif %}" data-filter-summary>
+                            {% if client_status_current_label %}{{ client_status_current_label }}{% endif %}
+                        </div>
                         <div class="tm-dropdown__panel" data-dropdown-panel>
                             <div class="tm-dropdown__section">
                                 <div class="tm-dropdown__title">{% trans "Client Status" %}</div>
@@ -164,20 +287,20 @@
                                     <li>
                                         <button type="button"
                                                 class="tm-dropdown__option{% if not client_status_current %} is-active{% endif %}"
-                                                data-status-value="">
+                                                data-status-value=""
+                                                data-status-label="">
                                             {% trans "All statuses" %}
-                                            {% if not client_status_current %}<span>&check;</span>{% endif %}
+                                            <span class="tm-option-check" aria-hidden="true">&check;</span>
                                         </button>
                                     </li>
                                     {% for option in client_status_options %}
                                         <li>
                                             <button type="button"
                                                     class="tm-dropdown__option{% if option.value == client_status_current %} is-active{% endif %}"
-                                                    data-status-value="{{ option.value }}">
+                                                    data-status-value="{{ option.value }}"
+                                                    data-status-label="{{ option.label }}">
                                                 {{ option.label }}
-                                                {% if option.value == client_status_current %}
-                                                    <span>&check;</span>
-                                                {% endif %}
+                                                <span class="tm-option-check" aria-hidden="true">&check;</span>
                                             </button>
                                         </li>
                                     {% endfor %}
@@ -186,7 +309,7 @@
                         </div>
                     </div>
 
-                    <div class="tm-dropdown" data-dropdown>
+                    <div class="tm-dropdown" data-dropdown="sort">
                         <button type="button" class="tm-chip{% if user_order_current != 'newest' %} is-active{% endif %}" data-dropdown-trigger>
                             <i class="fas fa-sort-amount-down" aria-hidden="true"></i> {% trans "Sort" %}
                         </button>
@@ -199,9 +322,7 @@
                                                 class="tm-dropdown__option{% if user_order_current == 'newest' %} is-active{% endif %}"
                                                 data-order-value="newest">
                                             {% trans "Date added (newest first)" %}
-                                            {% if user_order_current == 'newest' %}
-                                                <span>&check;</span>
-                                            {% endif %}
+                                            <span class="tm-option-check" aria-hidden="true">&check;</span>
                                         </button>
                                     </li>
                                     <li>
@@ -209,9 +330,7 @@
                                                 class="tm-dropdown__option{% if user_order_current == 'oldest' %} is-active{% endif %}"
                                                 data-order-value="oldest">
                                             {% trans "Date added (oldest first)" %}
-                                            {% if user_order_current == 'oldest' %}
-                                                <span>&check;</span>
-                                            {% endif %}
+                                            <span class="tm-option-check" aria-hidden="true">&check;</span>
                                         </button>
                                     </li>
                                 </ul>
@@ -222,65 +341,8 @@
             </form>
         </div>
 
-        <ul class="tm-list">
-            {% for obj in cl.result_list %}
-                {% with up=obj.userprofile %}
-                    <li class="tm-item">
-                        <a class="tm-item__overlay" href="{% url cl.opts|admin_urlname:'change' obj.pk %}"></a>
-
-                        <div class="tm-avatar tm-avatar--c{{ obj.pk|default:forloop.counter|color_index:8 }}">
-                            {% with first=obj.first_name|default_if_none:""|slice:":1" last=obj.last_name|default_if_none:""|slice:":1" %}
-                                {% if first or last %}
-                                    {{ first }}{{ last }}
-                                {% else %}
-                                    {{ obj.username|default_if_none:""|slice:":2" }}
-                                {% endif %}
-                            {% endwith %}
-                        </div>
-
-                        <div class="tm-main">
-                            <div class="tm-name">
-                                {{ obj.get_full_name|default:obj.username }}
-                            </div>
-                            <div class="tm-contact">
-                                {% if obj.email %}
-                                    <span class="tm-contact__item">
-                                        <span class="tm-ico">@</span>
-                                        <a href="mailto:{{ obj.email }}">{{ obj.email }}</a>
-                                    </span>
-                                {% endif %}
-                                {% if up and up.phone %}
-                                    <span class="tm-contact__item">
-                                        <span class="tm-ico">&#9742;</span>
-                                        <a href="tel:{{ up.phone|cut:' ' }}">{{ up.phone }}</a>
-                                    </span>
-                                {% endif %}
-                            </div>
-                        </div>
-
-                        <div class="tm-right">
-                            {% if up %}
-                                <div class="tm-room">
-                                    <span class="tm-room__label">{% trans "Status" %}</span>
-                                    <span class="tm-room__pill">{{ up.client_status }}</span>
-                                </div>
-                            {% endif %}
-                        </div>
-                    </li>
-                {% endwith %}
-            {% empty %}
-                <li class="tm-empty">{% trans "No users found." %}</li>
-            {% endfor %}
-        </ul>
-        <div class="tm-pagination">
-            <div class="tm-results">
-                {% if cl.paginator.count == 1 %}
-                    Showing 1 user
-                {% else %}
-                    Showing {{ cl.paginator.count }} users
-                {% endif %}
-            </div>
-
+        <div data-user-fragment>
+            {% include "admin/users/includes/user_list_fragment.html" %}
         </div>
     </div>
 {% endblock %}

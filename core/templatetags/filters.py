@@ -70,7 +70,7 @@ def changelist_end(cl):
     return start + len(cl.result_list) - 1 if cl.result_list else 0
 
 @register.simple_tag(takes_context=True)
-def service_page_url(context, page_number):
+def changelist_page_url(context, page_number):
     request = context.get("request")
     if request is None:
         return ""
