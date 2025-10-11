@@ -20,7 +20,24 @@
     --notify-btn-bg: #3fb079;
     --notify-btn-hover: #369d69;
 }
+@font-face{
+  font-family: "Angelica";
+  src: url("/static/fonts/Angelica.woff2") format("woff2");
+  font-weight: 100 900;           /* если variable; иначе укажи точный вес: 400 */
+  font-style: normal;             /* сделай второй блок для italic при необходимости */
+  font-display: swap;             /* важно для CLS и быстрого рендера */
+  /* unicode-range можно добавить для оптимизации, но не обязательно */
+}
 
+/* 2) Применяем по всему проекту */
+html {
+  font-family: "Angelica", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+/* 3) Чтобы формы не сбрасывали шрифт в Safari/Firefox */
+input, button, select, textarea {
+  font: inherit;
+}
 /* Layout container */
 .content {
     margin-left: 0 !important;
