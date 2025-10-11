@@ -85,7 +85,7 @@
 /* ЛЕНТА участников — ровно ОДНА колонка карточек */
 .tm-list{
     list-style:none;margin:0;padding:0;
-    display:flex;flex-direction:column;gap:12px;
+    display:flex;flex-direction:column;
 }
 
 /* карточка */

@@ -1,0 +1,56 @@
+{% load i18n admin_urls filters %}
+
+<!-- Header aligned to the same grid as rows -->
+<div class="uc-grid-head">
+  <div class="uc-head-spacer"></div>
+  <div class="uc-head-col uc-head-col--name">{% trans "Master name" %}</div>
+  <div class="uc-head-col uc-head-col--right">{% trans "Mobile number" %}</div>
+  <div class="uc-head-col uc-head-col--right">{% trans "Sales" %}</div>
+  <div class="uc-head-col uc-head-col--right">{% trans "Created at" %}</div>
+</div>
+
+<ul class="tm-list">
+  {% for obj in cl.result_list %}
+    {% with master_user=obj.user.user master_profile=obj user_profile=obj.user %}
+      {% include "admin/masters/includes/master_list_card.html" with master=master_user master_profile=master_profile user_profile=user_profile counter=forloop.counter %}
+    {% endwith %}
+  {% empty %}
+    <li class="uc-grid-row">{% trans "No masters found." %}</li>
+  {% endfor %}
+</ul>
+
+<div class="tm-pagination">
+  {% changelist_start cl as start_index %}
+  {% changelist_end cl as end_index %}
+  <div class="tm-results">
+    {% if cl.result_count %}
+      {% if start_index == end_index %}
+        {% trans "Showing" %} {{ start_index }} {% trans "of" %} {{ cl.result_count }} {% trans "masters" %}
+      {% else %}
+        {% trans "Showing" %} {{ start_index }}-{{ end_index }} {% trans "of" %} {{ cl.result_count }} {% trans "masters" %}
+      {% endif %}
+    {% else %}
+      {% trans "Showing 0 masters" %}
+    {% endif %}
+  </div>
+  <div class="tm-pages">
+    {% with current_page=cl.page_num total_pages=cl.paginator.num_pages %}
+      <div class="tm-page-nav">
+        {% if current_page > 1 %}
+          {% with prev_page=current_page|add:"-1" %}
+          <a class="tm-page-btn" data-master-page="{{ prev_page }}" href="{% changelist_page_url prev_page %}">{% trans "Previous" %}</a>
+          {% endwith %}
+        {% else %}
+          <span class="tm-page-btn disabled" data-master-page="">{% trans "Previous" %}</span>
+        {% endif %}
+        {% if total_pages and current_page < total_pages %}
+          {% with next_page=current_page|add:"1" %}
+          <a class="tm-page-btn" data-master-page="{{ next_page }}" href="{% changelist_page_url next_page %}">{% trans "Next" %}</a>
+          {% endwith %}
+        {% else %}
+          <span class="tm-page-btn disabled" data-master-page="">{% trans "Next" %}</span>
+        {% endif %}
+      </div>
+    {% endwith %}
+  </div>
+</div>

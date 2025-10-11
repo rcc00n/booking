@@ -3593,7 +3593,7 @@ class MasterMonthlySalesTargetAdmin(admin.ModelAdmin):
 class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
     inlines = [MasterWorkDayInline, MasterMonthlySalesTargetInline]
     add_form = MasterCreateFullForm
-    change_list_template = "admin/master/changelist_cards.html"
+    change_list_template = "admin/masters/changelist_cards.html"
     list_per_page = 24
 
     readonly_fields = ['password_display']

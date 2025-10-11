@@ -96,6 +96,12 @@
   background: #F4F6F9;
   position: relative;
   list-style: none;
+  transition: 0.3s;
+}
+
+.uc-grid-row:hover{
+
+    background: #eef1f8;
 }
 .uc-grid-row .tm-item__overlay{ position:absolute; inset:0; }
 
