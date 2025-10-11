@@ -14,7 +14,7 @@ from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.conf import settings
 from django.contrib import admin, messages
-from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField, Prefetch, Subquery, OuterRef
+from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField, Prefetch
 from itertools import cycle
 
 from django.utils.formats import number_format
@@ -850,31 +850,6 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         # Prefetch the attached profile to avoid N+1 lookups.
         qs = super().get_queryset(request).select_related('userprofile')
 
-        amount_field = DecimalField(max_digits=12, decimal_places=2)
-        payments_subquery = (
-            Payment.objects.filter(
-                appointment__client__user_id=OuterRef("pk"),
-                status="succeeded",
-            )
-            .values("appointment__client__user_id")
-            .annotate(
-                total_amount=Coalesce(
-                    Sum("amount", output_field=amount_field),
-                    Value(Decimal("0"), output_field=amount_field),
-                    output_field=amount_field,
-                )
-            )
-            .values("total_amount")[:1]
-        )
-
-        qs = qs.annotate(
-            total_spent=Coalesce(
-                Subquery(payments_subquery, output_field=amount_field),
-                Value(Decimal("0"), output_field=amount_field),
-                output_field=amount_field,
-            )
-        )
-
         status_key = request.GET.get('client_status')
         if status_key:
             status_label = ClientStatusFilter.LOOKUP_TO_LABEL.get(status_key)
@@ -1042,14 +1017,6 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         extra_context['client_status_current_label'] = (
             ClientStatusFilter.LOOKUP_TO_LABEL.get(current_status, '') if current_status else ''
         )
-        currency_code = (getattr(settings, "STRIPE_CURRENCY", "USD") or "USD").upper()
-        currency_symbol = {
-            "CAD": "CA$",
-            "USD": "$",
-            "EUR": "\u20AC",
-            "GBP": "\u00A3",
-        }.get(currency_code, f"{currency_code} $")
-        extra_context['currency_symbol'] = currency_symbol
         user_order = request.GET.get('user_order') or 'newest'
         if user_order not in ('newest', 'oldest'):
             user_order = 'newest'
@@ -1068,7 +1035,6 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         response = super().changelist_view(request, extra_context=extra_context)
         if hasattr(response, "context_data"):
             context = response.context_data
-            context["currency_symbol"] = currency_symbol
             cl = context.get("cl")
             pagination = {
                 "has_previous": False,
@@ -2874,7 +2840,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     change_list_template = "admin/service/changelist_table.html"
     list_display = ('name', 'base_price', 'category', 'duration_min', 'image_admin_thumb')
-    search_fields = ()
+    search_fields = ('name',)
     filter_horizontal = ("pre_appointment_forms",)
     readonly_fields = ("image_preview",)
     list_per_page = 10

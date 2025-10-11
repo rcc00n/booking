@@ -1,7 +1,7 @@
 :root {
     --icon-sidebar-width: 4.6rem;
     --icon-sidebar-expanded-width: 15rem;
-    --icon-sidebar-offset-top: 4.5rem;
+    --icon-sidebar-offset-top: 5.7vh;
     --sidebar-bg: #1f242a;
     --sidebar-hover-accent: rgba(63, 178, 120, 0.16);
     --sidebar-active-bg: rgba(47, 133, 90, 0.45);
@@ -55,8 +55,8 @@ input, button, select, textarea {
     transition: margin-left 0.3s ease;
 }
 
-body.sidebar-hover .content-wrapper,
-body.sidebar-hover .main-header,
+
+
 body.sidebar-hover .main-footer {
     margin-left: var(--icon-sidebar-expanded-width) !important;
     width: calc(100% - var(--icon-sidebar-expanded-width)) !important;
@@ -82,9 +82,9 @@ body.sidebar-hover .main-footer {
     transition: width 0.3s ease;
     overflow: hidden;
     position: fixed;
-    top: var(--icon-sidebar-offset-top);
+    /* top: var(--icon-sidebar-offset-top); */
     left: 0;
-    height: calc(100vh - var(--icon-sidebar-offset-top));
+    height: calc(100vh);
     z-index: 1045;
     display: flex;
     flex-direction: column;
