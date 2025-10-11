@@ -458,7 +458,7 @@ def ensure_payment_statuses(sender, **kwargs):
 
     PaymentMethod = apps.get_model('core', 'PaymentMethod')
     with transaction.atomic():
-        for name in ("Stripe", "Cash", "Manual"):
+        for name in ("Stripe", "Cash", "Manual", "Credit card", "Debit card"):
             PaymentMethod.objects.get_or_create(name=name)
 
 from django.apps import apps

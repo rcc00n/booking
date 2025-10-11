@@ -330,6 +330,8 @@ class AppointmentItemInlineForm(forms.ModelForm):
 
         # 2) Инициализация unit_price от услуги (если ещё не задан)
         service = self.initial.get("service") or getattr(self.instance, "service", None)
+        if service and not hasattr(service, 'duration_min'):
+            service = Service.objects.filter(pk=service).first()
         if "unit_price" in self.fields:
             has_price_initial = self.initial.get("unit_price") or getattr(self.instance, "unit_price", None)
             if not has_price_initial and service and getattr(service, "base_price", None) is not None:

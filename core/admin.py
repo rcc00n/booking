@@ -2748,10 +2748,9 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
     list_display = (
         'appointment',
         'amount',
-        'currency',
         'status',
-        'amount_received',
         'method',
+        'receipt_link',
         'livemode',
         'created_at',
     )
@@ -2773,6 +2772,12 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
         'amount_refunded', 'method', 'livemode', 'stripe_payment_intent_id',
         'stripe_charge_id', 'created_at',
     ]
+
+    @admin.display(description="Receipt")
+    def receipt_link(self, obj):
+        if obj.receipt_url:
+            return format_html('<a href="{}" target="_blank">View</a>', obj.receipt_url)
+        return "-"
 
 
 # -----------------------------
@@ -2891,12 +2896,17 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
 
     def get_search_results(self, request, queryset, search_term):
         """
-        Apply the custom service name search without relying on search_fields.
+        Apply a broader search across service name, description, and category.
         """
         term = (request.GET.get("q") or search_term or "").strip()
         if not term:
             return queryset, False
-        return queryset.filter(name__icontains=term), False
+        filters = (
+            Q(name__icontains=term)
+            | Q(description__icontains=term)
+            | Q(category__name__icontains=term)
+        )
+        return queryset.filter(filters), False
 
     def get_ordering(self, request):
         return ("name", "pk")
@@ -4710,3 +4720,7 @@ def custom_index(request):
 
     ctx = {"userprof": userprof}
     return TemplateResponse(request, "admin/index.html", ctx)
+
+
+
+

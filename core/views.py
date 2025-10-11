@@ -362,70 +362,6 @@ def api_cart_remove(request, item_id):
 @login_required
 @require_POST
 @csrf_protect
-def api_cart_checkout(request):
-    profile = _ensure_profile(request.user)
-    cart = BookingCart.for_user(profile)
-    items = list(cart.items.select_related("service", "master__user"))
-
-    if not items:
-        return JsonResponse({"error": "cart is empty"}, status=400)
-
-    try:
-        appt = create_appointment_from_cart_items(profile=profile, items=items)
-    except ValidationError as exc:
-        messages = []
-        if hasattr(exc, "message_dict"):
-            for vals in exc.message_dict.values():
-                if isinstance(vals, (list, tuple)):
-                    messages.extend(vals)
-                else:
-                    messages.append(str(vals))
-        else:
-            messages.extend(getattr(exc, "messages", [str(exc)]))
-        return JsonResponse({"error": messages[0] if messages else "Invalid data"}, status=400)
-
-    try:
-        bundle = payment_services.create_or_update_payment_intent(appt)
-    except ImproperlyConfigured as cfg_err:
-        return JsonResponse({"error": str(cfg_err)}, status=500)
-    except stripe.error.StripeError as err:
-        return JsonResponse({"error": getattr(err, "user_message", str(err))}, status=502)
-
-    cart.clear()
-
-    payment_payload = {
-        "id": str(bundle.payment.id),
-        "status": bundle.payment.status,
-        "amount": str(bundle.payment.amount),
-        "amount_received": str(bundle.payment.amount_received),
-        "currency": bundle.payment.currency,
-        "livemode": bundle.payment.livemode,
-        "client_secret": getattr(bundle.intent, "client_secret", None) if bundle.intent else None,
-        "payment_intent_id": getattr(bundle.intent, "id", None) if bundle.intent else bundle.payment.stripe_payment_intent_id,
-        "publishable_key": settings.STRIPE_PUBLIC_KEY,
-    }
-
-    return JsonResponse({
-        "ok": True,
-        "appointment": {
-            "id": str(appt.pk),
-            "start_time": appt.start_time.isoformat() if appt.start_time else None,
-            "items": [
-                {
-                    "service": it.service.name,
-                    "master": _master_display(it.master),
-                    "start_time": it.start_time.isoformat() if it.start_time else None,
-                }
-                for it in appt.items.select_related("service", "master__user")
-            ],
-        },
-        "payment": payment_payload,
-    }, status=201)
-
-
-@login_required
-@require_POST
-@csrf_protect
 def api_payment_verify(request, appt_id):
     appt = get_object_or_404(
         Appointment.objects.select_related("client", "payment_status").prefetch_related("payments"),
@@ -474,31 +410,7 @@ def api_payment_verify(request, appt_id):
     })
 
 
-@csrf_exempt
-@require_POST
-def stripe_webhook(request):
-    payload = request.body
-    sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
 
-    if not settings.STRIPE_WEBHOOK_SECRET:
-        return HttpResponse(status=503)
-
-    if not sig_header:
-        return HttpResponse(status=400)
-
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-        )
-    except (ValueError, stripe.error.SignatureVerificationError):
-        return HttpResponse(status=400)
-
-    try:
-        payment_services.handle_webhook_event(event)
-    except (Payment.DoesNotExist, ValueError):
-        return HttpResponse(status=202)
-
-    return HttpResponse(status=200)
 # --- API: отмена/перенос записи ---
 from django.views.decorators.http import require_POST
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden, HttpResponse, Http404
@@ -712,3 +624,10 @@ def service_promocodes_api(request, service_id: str):
         for pc in qs
     ]
     return JsonResponse(data, safe=False)
+
+
+
+
+
+
+

@@ -12,6 +12,7 @@ from django.utils import timezone
 from core.forms import CustomUserCreationForm, CustomUserChangeForm
 from core.models import (
     Appointment,
+    BookingCart,
     MasterProfile,
     MasterWorkDay,
     PaymentStatus,
@@ -88,30 +89,30 @@ class RegistrationTests(TestCase):
 @override_settings(STRIPE_SECRET_KEY='sk_test_dummy', STRIPE_PUBLIC_KEY='pk_test_dummy')
 class CartApiTests(TestCase):
     def setUp(self):
-        create_intent_patcher = patch('core.views.payment_services.create_or_update_payment_intent')
-        self.addCleanup(create_intent_patcher.stop)
-        self.mock_create_intent = create_intent_patcher.start()
-
-        payment_stub = SimpleNamespace(
-            id='pay_test',
-            status='requires_payment_method',
-            amount=Decimal('0'),
-            amount_received=Decimal('0'),
+        self.customer_patcher = patch('core.payments.stripe_api.stripe.Customer.create', return_value=SimpleNamespace(id='cus_test'))
+        self.intent_patcher = patch('core.payments.stripe_api.stripe.PaymentIntent.create')
+        self.mock_customer = self.customer_patcher.start()
+        self.mock_intent = self.intent_patcher.start()
+        self.addCleanup(self.customer_patcher.stop)
+        self.addCleanup(self.intent_patcher.stop)
+        self.mock_intent.return_value = SimpleNamespace(
+            id='pi_test',
+            client_secret='secret_test',
+            amount=8000,
             currency='cad',
             livemode=False,
-            stripe_payment_intent_id='pi_test',
         )
-        intent_stub = SimpleNamespace(id='pi_test', client_secret='secret_test')
-        self.mock_create_intent.return_value = SimpleNamespace(payment=payment_stub, intent=intent_stub)
-
         User = get_user_model()
-        self.password = "testpass123"
-        self.user = User.objects.create_user(username="client", password=self.password, email="client@example.com")
-        self.profile, _ = UserProfile.objects.get_or_create(user=self.user)
+        self.password = 'testpass123'
+        self.user = User.objects.create_user(username='client', password=self.password, email='client@example.com')
+        self.profile = self.user.userprofile
 
-        self.master_user = User.objects.create_user(username="master", password="masterpass", email="master@example.com")
-        self.master_profile_user, _ = UserProfile.objects.get_or_create(user=self.master_user)
-        self.master_profile = MasterProfile.objects.create(user=self.master_profile_user)
+        self.master_user = User.objects.create_user(username='master', password='masterpass', email='master@example.com')
+        self.master_user.first_name = 'Master'
+        self.master_user.last_name = 'Stylist'
+        self.master_user.save(update_fields=['first_name', 'last_name'])
+        self.master_user.userprofile.username = self.master_user.username
+        self.master_profile = MasterProfile.objects.create(user=self.master_user.userprofile)
         for weekday in range(7):
             MasterWorkDay.objects.create(
                 master=self.master_profile,
@@ -120,74 +121,71 @@ class CartApiTests(TestCase):
                 end_time=time(20, 0),
             )
 
-        self.category = ServiceCategory.objects.create(name="Cuts")
+        self.category = ServiceCategory.objects.create(name='Cuts')
         self.service1 = Service.objects.create(
-            name="Service One",
-            base_price=50,
+            name='Service One',
+            base_price=Decimal('50.00'),
             duration_min=30,
             category=self.category,
         )
         self.service2 = Service.objects.create(
-            name="Service Two",
-            base_price=30,
+            name='Service Two',
+            base_price=Decimal('30.00'),
             duration_min=20,
             category=self.category,
         )
         ServiceMaster.objects.create(service=self.service1, master=self.master_profile)
         ServiceMaster.objects.create(service=self.service2, master=self.master_profile)
 
-        PaymentStatus.objects.create(name="Pending")
+        PaymentStatus.objects.get_or_create(name='Pending')
 
-        self.client.login(username="client", password=self.password)
+        self.client.login(username='client', password=self.password)
 
-    def test_add_multiple_services_and_checkout(self):
-        base_dt = timezone.localtime(timezone.now() + timedelta(days=1))
-        base_start = base_dt.replace(hour=10, minute=0, second=0, microsecond=0)
-
-        payload1 = {
-            "service": str(self.service1.pk),
-            "master": self.master_profile.id,
-            "start_time": base_start.isoformat(),
+    def _add_to_cart(self, service, start_time):
+        payload = {
+            'service': str(service.pk),
+            'master': self.master_profile.id,
+            'start_time': start_time.isoformat(),
         }
-        resp1 = self.client.post(
-            "/accounts/api/cart/add/",
-            data=json.dumps(payload1),
-            content_type="application/json",
+        resp = self.client.post(
+            '/accounts/api/cart/add/',
+            data=json.dumps(payload),
+            content_type='application/json',
         )
-        self.assertEqual(resp1.status_code, 201)
+        self.assertEqual(resp.status_code, 201, resp.json())
 
-        payload2 = {
-            "service": str(self.service2.pk),
-            "master": self.master_profile.id,
-            "start_time": (base_start + timedelta(minutes=45)).isoformat(),
-        }
-        resp2 = self.client.post(
-            "/accounts/api/cart/add/",
-            data=json.dumps(payload2),
-            content_type="application/json",
-        )
-        self.assertEqual(resp2.status_code, 201)
-
-        summary = self.client.get("/accounts/api/cart/")
-        self.assertEqual(summary.status_code, 200)
-        data = summary.json()
-        self.assertEqual(data["count"], 2)
-
-        checkout = self.client.post(
-            "/accounts/api/cart/checkout/",
+    def test_create_intent_requires_authentication(self):
+        self.client.logout()
+        response = self.client.post(
+            '/accounts/api/payments/cart/create-intent/',
             data=json.dumps({}),
-            content_type="application/json",
+            content_type='application/json',
         )
-        self.assertEqual(checkout.status_code, 201, checkout.json())
+        self.assertEqual(response.status_code, 302)
 
-        appt = Appointment.objects.first()
-        self.assertIsNotNone(appt)
-        self.assertEqual(appt.client, self.profile)
-        self.assertEqual(appt.items.count(), 2)
+    def test_create_intent_returns_client_secret(self):
+        base_dt = timezone.localtime(timezone.now() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+        self._add_to_cart(self.service1, base_dt)
+        self._add_to_cart(self.service2, base_dt + timedelta(minutes=45))
 
-        summary_after = self.client.get("/accounts/api/cart/")
-        self.assertEqual(summary_after.status_code, 200)
-        self.assertEqual(summary_after.json()["count"], 0)
+        response = self.client.post(
+            '/accounts/api/payments/cart/create-intent/',
+            data=json.dumps({}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200, response.json())
+        payload = response.json()
+        self.assertEqual(payload.get('client_secret'), 'secret_test')
+        self.assertEqual(payload.get('currency'), 'cad')
+        self.assertEqual(payload.get('amount'), str(Decimal('80.00')))
+        self.mock_customer.assert_called_once()
+        self.mock_intent.assert_called_once()
+        expected_amount = int(Decimal('80.00') * Decimal('100'))
+        self.assertEqual(self.mock_intent.call_args.kwargs['amount'], expected_amount)
+        self.assertEqual(BookingCart.for_user(self.profile).items.count(), 2)
+        self.assertEqual(Appointment.objects.count(), 0)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.stripe_customer_id, 'cus_test')
 
 
 class AdminUserFormTests(TestCase):

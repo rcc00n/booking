@@ -11,9 +11,15 @@ from .views import (
 from django.contrib.auth.views import LogoutView
 from core.views import (
     public_mainmenu, api_availability, api_book,
-    api_appointment_cancel, api_appointment_reschedule,   # ← добавить
-    api_cart_summary, api_cart_add, api_cart_remove, api_cart_checkout,
+    api_appointment_cancel, api_appointment_reschedule,   # ?+? D'D_D?D?D?D,?,?O
+    api_cart_summary, api_cart_add, api_cart_remove,
     api_payment_verify,
+)
+from core.payments.stripe_api import (
+    stripe_create_cart_intent,
+    stripe_list_cards,
+    stripe_set_default_card,
+    stripe_no_show_charge,
 )
 
 
@@ -38,7 +44,10 @@ urlpatterns = [
     path("api/cart/",             api_cart_summary,   name="api-cart"),
     path("api/cart/add/",        api_cart_add,       name="api-cart-add"),
     path("api/cart/<int:item_id>/remove/", api_cart_remove, name="api-cart-remove"),
-    path("api/cart/checkout/",  api_cart_checkout,  name="api-cart-checkout"),
+    path("api/payments/cart/create-intent/", stripe_create_cart_intent, name="stripe-cart-intent"),
+    path("api/payments/cards/", stripe_list_cards, name="stripe-cards"),
+    path("api/payments/cards/set-default/", stripe_set_default_card, name="stripe-set-default"),
+    path("api/payments/no-show/charge/", stripe_no_show_charge, name="stripe-no-show-charge"),
     path(
         "api/appointment/<uuid:appt_id>/payments/verify/",
         api_payment_verify,
@@ -50,3 +59,11 @@ urlpatterns = [
     path("api/appointment/<uuid:appt_id>/reschedule/", api_appointment_reschedule, name="api-appt-reschedule"),
     
 ]
+
+
+
+
+
+
+
+

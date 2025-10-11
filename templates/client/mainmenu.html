@@ -832,7 +832,7 @@
       const apiAvail= "/accounts/api/availability/";
       const apiCart = "/accounts/api/cart/";
       const apiCartAdd = "/accounts/api/cart/add/";
-      const apiCartCheckout = "/accounts/api/cart/checkout/";
+      const apiStripeCartIntent = "/accounts/api/payments/cart/create-intent/";
       const cartRemoveUrl = (id)=>`/accounts/api/cart/${id}/remove/`;
       const paymentVerifyUrl = (id)=>`/accounts/api/appointment/${id}/payments/verify/`;
 
@@ -1292,23 +1292,32 @@
         if(cartCheckout) cartCheckout.disabled=true;
         setCartMessage(null);
         try{
-          const resp=await fetch(apiCartCheckout,{
+          const resp = await fetch(apiStripeCartIntent,{
             method:'POST',
             headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
             credentials:'same-origin',
             body:JSON.stringify({})
           });
-          const data=await resp.json().catch(()=>({}));
+          const data = await resp.json().catch(()=>({}));
           if(!resp.ok){
-            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):translate('services.cart.checkoutFailed');
+            const msg = (data && (data.error || data.detail)) ? (data.error || data.detail) : translate('services.cart.checkoutFailed');
             throw new Error(msg);
           }
-          await refreshCart(true);
-          // Temporary bypass: skip payment modal while backend flow is adjusted.
-          setCartMessage('success','services.cart.checkoutSuccess');
-          if(cartCheckout) cartCheckout.disabled=false;
-          setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 600);
-          return;
+          const payment = {
+            client_secret: data.client_secret || null,
+            payment_intent_id: data.payment_intent_id || null,
+            amount: data.amount || '0',
+            currency: data.currency || 'cad',
+          };
+          const context = {
+            payment,
+            appointment: {
+              items: Array.isArray(cartState.items) ? cartState.items : [],
+              start_time: cartState.items?.[0]?.start_time || null,
+            },
+          };
+          closeCartModal();
+          openPaymentModal(context);
         }catch(err){
           const fallback = err && err.message;
           const defaultMessage = translate('services.cart.checkoutFailed');
@@ -1317,6 +1326,7 @@
           }else{
             setCartMessage('error','services.cart.checkoutFailed');
           }
+        }finally{
           if(cartCheckout) cartCheckout.disabled=false;
         }
       }
@@ -1429,65 +1439,32 @@
         window.setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 1200);
       }
 
-      async function verifyPayment(apptId, intentId){
-        if(!apptId || !intentId) return;
-        try{
-          const resp = await fetch(paymentVerifyUrl(apptId), {
-            method:'POST',
-            headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
-            credentials:'same-origin',
-            body:JSON.stringify({payment_intent_id:intentId})
-          });
-          const data = await resp.json().catch(()=>({}));
-          if(!resp.ok){
-            throw new Error((data && data.error) || PAYMENT_COPY.verifyFailed);
-          }
-
-          const status = data?.payment?.status;
-          if (status === 'processing' || status === 'requires_action' || status === 'requires_confirmation'){
-            setPaymentMessage('status', PAYMENT_COPY.processing);
-            window.setTimeout(()=>verifyPayment(apptId, intentId), 1500);
-            return;
-          }
-
-          if (status !== 'succeeded'){
-            throw new Error(PAYMENT_COPY.failedGeneric);
-          }
-
-          setPaymentMessage('success', PAYMENT_COPY.success);
-          setConfirmLoading(false);
-          if (paymentConfirm) paymentConfirm.disabled = true;
-          redirectAfterPayment();
-        }catch(err){
-          const msg = err && err.message ? err.message : PAYMENT_COPY.failedShort;
-          setPaymentMessage('error', msg);
-          setConfirmLoading(false);
-        }
-      }
-
-      async function confirmPayment(){
+async function confirmPayment(){
         if (!currentPaymentContext || !currentPaymentContext.payment) return;
-        const { payment, appointment } = currentPaymentContext;
-        if (!payment.client_secret){
-          setPaymentMessage('success', PAYMENT_COPY.success);
-          setConfirmLoading(false);
-          redirectAfterPayment();
-          return;
-        }
+        const { payment } = currentPaymentContext;
         const stripe = ensureStripe();
-        if (!stripe){
+        const requiresCard = Boolean(payment.client_secret);
+        if (requiresCard && !stripe){
           setPaymentMessage('error', PAYMENT_COPY.missingKey);
           return;
         }
         const details = gatherBillingDetails();
-        if (!emailRegex.test(details.email || '')){
+        if (requiresCard && !emailRegex.test(details.email || '')){
           setPaymentMessage('error', 'Please provide a valid email address for your receipt.');
           checkPaymentForm();
           return;
         }
         setConfirmLoading(true);
-        setPaymentMessage('status', PAYMENT_COPY.processing);
         try{
+          if (!requiresCard){
+            setPaymentMessage('success', PAYMENT_COPY.success);
+            await refreshCart(true);
+            setConfirmLoading(false);
+            if (paymentConfirm) paymentConfirm.disabled = true;
+            redirectAfterPayment();
+            return;
+          }
+          setPaymentMessage('status', PAYMENT_COPY.processing);
           const result = await stripe.confirmCardPayment(payment.client_secret, {
             payment_method: {
               card: stripeCardElement,
@@ -1509,7 +1486,24 @@
           if (result.error){
             throw new Error(result.error.message || PAYMENT_COPY.failedGeneric);
           }
-          await verifyPayment(appointment.id, payment.payment_intent_id || result.paymentIntent?.id);
+          const intent = result.paymentIntent;
+          if (intent && intent.status === 'succeeded'){
+            setPaymentMessage('success', PAYMENT_COPY.success);
+            await refreshCart(true);
+            setConfirmLoading(false);
+            if (paymentConfirm) paymentConfirm.disabled = true;
+            redirectAfterPayment();
+            return;
+          }
+          if (intent && intent.status === 'processing'){
+            setPaymentMessage('status', PAYMENT_COPY.processing);
+            await refreshCart(true);
+            setConfirmLoading(false);
+            if (paymentConfirm) paymentConfirm.disabled = true;
+            redirectAfterPayment();
+            return;
+          }
+          throw new Error(PAYMENT_COPY.failedShort);
         }catch(err){
           const msg = err && err.message ? err.message : PAYMENT_COPY.failedShort;
           setPaymentMessage('error', msg);

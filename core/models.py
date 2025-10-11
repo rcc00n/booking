@@ -97,12 +97,21 @@ class UserProfile(models.Model):
         default="online",   # по умолчанию считаем, что онлайн
         editable=False,
     )
+    stripe_customer_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Stripe Customer ID for billing integrations.",
+        db_index=True,
+    )
     def save(self, *args, **kwargs):
         # Нормализуем индекс (uppercase, без пробелов). Пустое — ок.
         if self.phone == "":
             self.phone = None
         if self.postal_code:
             self.postal_code = clean_ab_postal_code(self.postal_code)
+        if self.stripe_customer_id:
+            self.stripe_customer_id = self.stripe_customer_id.strip()
         super().save(*args, **kwargs)
 
     def health_summary(self) -> str:
@@ -1418,6 +1427,41 @@ class ProductSale(models.Model):
 
 # --- 5. PAYMENTS ---
 
+class ClientCard(models.Model):
+    """Snapshot of a client card saved in Stripe (non-sensitive)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    client = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='cards')
+    stripe_customer_id = models.CharField(max_length=255, db_index=True)
+    stripe_payment_method_id = models.CharField(max_length=255, unique=True)
+    brand = models.CharField(max_length=32)
+    last4 = models.CharField(max_length=4)
+    exp_month = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(12)])
+    exp_year = models.PositiveSmallIntegerField(validators=[MinValueValidator(2000), MaxValueValidator(2100)])
+    funding = models.CharField(max_length=16)
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['client', 'stripe_payment_method_id'],
+                name='uniq_client_card_by_method',
+            )
+        ]
+        indexes = [
+            models.Index(fields=['client', 'is_default'], name='clientcard_default_idx'),
+        ]
+
+    def __str__(self) -> str:
+        return self.label()
+
+    def label(self) -> str:
+        dots = '\u2022' * 4
+        return f"{self.brand} {dots} {self.last4} ({self.exp_month}/{self.exp_year})"
+
+
 class PaymentMethod(models.Model):
     """
     Represents a method of payment (e.g., Credit Card, Cash).
@@ -1441,7 +1485,13 @@ class Payment(models.Model):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    appointment = models.ForeignKey(Appointment, on_delete=models.CASCADE, related_name="payments")
+    appointment = models.ForeignKey(
+        Appointment,
+        on_delete=models.CASCADE,
+        related_name="payments",
+        null=True,
+        blank=True,
+    )
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=10, default="cad")
     method = models.ForeignKey(PaymentMethod, on_delete=models.CASCADE)
@@ -1456,9 +1506,9 @@ class Payment(models.Model):
         null=True,
         blank=True,
     )
-    stripe_payment_method_id = models.CharField(max_length=255, blank=True, default="")
-    stripe_charge_id = models.CharField(max_length=255, blank=True, default="")
-    receipt_url = models.URLField(blank=True, default="")
+    stripe_payment_method_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    stripe_charge_id = models.CharField(max_length=255, null=True, blank=True)
+    receipt_url = models.URLField(blank=True)
     livemode = models.BooleanField(default=False)
     metadata = models.JSONField(default=dict, blank=True)
     raw_response = models.JSONField(default=dict, blank=True)
@@ -1480,10 +1530,12 @@ class Payment(models.Model):
         indexes = [
             models.Index(fields=["stripe_payment_intent_id"], name="payment_intent_idx"),
             models.Index(fields=["status"], name="payment_status_idx"),
+            models.Index(fields=["stripe_payment_method_id"], name="payment_method_idx"),
         ]
 
     def __str__(self):
-        return f"Payment {self.amount} {self.currency} for {self.appointment_id}"
+        target = self.appointment_id or "unlinked"
+        return f"Payment {self.amount} {self.currency} for {target}"
 
 # --- 6. PREPAYMENTS ---
 
