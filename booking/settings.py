@@ -114,13 +114,13 @@ DATABASES = {
 # }
 
 
-# DATABASES = {
-#     "default": dj_database_url.parse(
-#         os.environ["DATABASE_URL"],
-#         conn_max_age=600,
-#         ssl_require=False,
-#     )
-# }
+DATABASES = {
+    "default": dj_database_url.parse(
+        os.environ["DATABASE_URL"],
+        conn_max_age=600,
+        ssl_require=False,
+    )
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
