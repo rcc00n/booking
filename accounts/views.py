@@ -92,6 +92,11 @@ class MainMenuView(LoginRequiredMixin, TemplateView):
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
 
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["stripe_public_key"] = settings.STRIPE_PUBLIC_KEY
+        return ctx
+
 
 # =========================
 # Личный кабинет клиента

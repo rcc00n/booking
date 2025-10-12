@@ -27,9 +27,10 @@ from core.models import (
     PaymentMethod,
     PaymentStatus,
     UserProfile,
-    get_price_for,
 )
 from core.services.booking import create_appointment_from_cart_items
+from core.services import payments as payment_services
+from core.services.pricing import compute_cart_pricing, PricingComputationError
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ if getattr(settings, "STRIPE_API_VERSION", None):
 # === Utility helpers ========================================================
 
 def _require_stripe_config() -> None:
+    print(settings.STRIPE_SECRET_KEY)
     if not settings.STRIPE_SECRET_KEY:
         raise ImproperlyConfigured("Stripe secret key is not configured.")
     if not stripe.api_key:
@@ -104,9 +106,35 @@ def _store_profile_customer_id(profile: UserProfile, customer_id: str) -> None:
         profile.save(update_fields=["stripe_customer_id"])
 
 
+def _clear_profile_customer(profile: UserProfile, customer_id: Optional[str]) -> None:
+    if not customer_id:
+        return
+    ClientCard.objects.filter(client=profile, stripe_customer_id=customer_id).delete()
+    if profile.stripe_customer_id == customer_id:
+        profile.stripe_customer_id = ""
+        profile.save(update_fields=["stripe_customer_id"])
+    logger.info("Cleared invalid Stripe customer %s for profile %s", customer_id, profile.pk)
+
+
+def _stripe_customer_exists(customer_id: str) -> bool:
+    if not customer_id:
+        return False
+    _require_stripe_config()
+    try:
+        stripe.Customer.retrieve(customer_id)
+        return True
+    except stripe.error.InvalidRequestError as exc:
+        if getattr(exc, "code", "") == "resource_missing":
+            return False
+        raise
+
+
 def _get_or_create_stripe_customer(profile: UserProfile) -> str:
-    if profile.stripe_customer_id:
-        return profile.stripe_customer_id
+    existing_customer_id = profile.stripe_customer_id or ""
+    if existing_customer_id:
+        if _stripe_customer_exists(existing_customer_id):
+            return existing_customer_id
+        _clear_profile_customer(profile, existing_customer_id)
 
     existing_card = (
         ClientCard.objects.filter(client=profile)
@@ -114,8 +142,11 @@ def _get_or_create_stripe_customer(profile: UserProfile) -> str:
         .first()
     )
     if existing_card:
-        _store_profile_customer_id(profile, existing_card.stripe_customer_id)
-        return existing_card.stripe_customer_id
+        card_customer_id = existing_card.stripe_customer_id
+        if card_customer_id and _stripe_customer_exists(card_customer_id):
+            _store_profile_customer_id(profile, card_customer_id)
+            return card_customer_id
+        _clear_profile_customer(profile, card_customer_id)
 
     _require_stripe_config()
     customer = stripe.Customer.create(
@@ -125,13 +156,6 @@ def _get_or_create_stripe_customer(profile: UserProfile) -> str:
     )
     _store_profile_customer_id(profile, customer.id)
     return customer.id
-
-
-def _calculate_cart_total(profile: UserProfile, cart: BookingCart) -> Decimal:
-    total = Decimal("0.00")
-    for item in cart.items.select_related("service"):
-        total += get_price_for(item.service, profile, None)
-    return total.quantize(Decimal("0.01"))
 
 
 def _fetch_intent(intent_obj: Any) -> stripe.PaymentIntent:
@@ -175,26 +199,56 @@ def _ensure_appointment_from_metadata(metadata: dict[str, Any]) -> Optional[Appo
         return None
 
 
-def _ensure_appointment_from_cart(profile: UserProfile, metadata: dict[str, Any]) -> Optional[Appointment]:
+def _ensure_appointment_from_cart(
+    profile: UserProfile,
+    metadata: dict[str, Any],
+    *,
+    pricing: Optional[dict[str, Any]] = None,
+) -> tuple[Optional[Appointment], Optional[dict[str, Any]]]:
     cart_id = metadata.get("cart_id")
-    if cart_id:
-        cart = (
-            BookingCart.objects.select_for_update()
-            .filter(pk=cart_id, owner=profile)
-            .first()
+    with transaction.atomic():
+        cart_qs = BookingCart.objects.select_for_update().filter(owner=profile)
+        if cart_id:
+            cart_qs = cart_qs.filter(pk=cart_id)
+        cart = cart_qs.first()
+        if not cart:
+            logger.warning(
+                "Booking cart missing for user %s while processing payment",
+                profile.pk,
+            )
+            return None, pricing
+        computed_pricing = pricing
+        if computed_pricing is None:
+            try:
+                computed_pricing = compute_cart_pricing(profile, cart=cart)
+            except PricingComputationError:
+                logger.exception(
+                    "Failed to compute cart pricing for user %s (cart %s)",
+                    profile.pk,
+                    cart.pk,
+                )
+                return None, pricing
+        if computed_pricing.get("is_empty"):
+            logger.warning(
+                "Booking cart %s for user %s is empty during payment",
+                cart.pk,
+                profile.pk,
+            )
+            return None, computed_pricing
+        items = list(cart.items.select_related("service", "master"))
+        if not items:
+            logger.warning(
+                "Booking cart %s for user %s had no items during payment conversion",
+                cart.pk,
+                profile.pk,
+            )
+            return None, computed_pricing
+        appointment = create_appointment_from_cart_items(
+            profile=profile,
+            items=items,
         )
-    else:
-        cart = BookingCart.for_user(profile)
-    if not cart:
-        logger.warning("Booking cart missing for user %s while processing payment", profile.pk)
-        return None
-    items = list(cart.items.select_related("service", "master"))
-    if not items:
-        logger.warning("Booking cart %s for user %s is empty during payment", cart.pk, profile.pk)
-        return None
-    appointment = create_appointment_from_cart_items(profile=profile, items=items)
-    cart.clear()
-    return appointment
+        cart.clear()
+    return appointment, computed_pricing
 
 def _sync_client_card(
     profile: Optional[UserProfile],
@@ -303,6 +357,7 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
     intent = _fetch_intent(intent_obj)
     metadata = dict(getattr(intent, "metadata", {}) or {})
     appointment = _ensure_appointment_from_metadata(metadata)
+    pricing_snapshot: Optional[dict[str, Any]] = None
 
     payment = (
         Payment.objects.filter(stripe_payment_intent_id=intent.id)
@@ -323,9 +378,17 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
                 .first()
             )
         if profile:
-            appointment = _ensure_appointment_from_cart(profile, metadata)
+            appointment, pricing_snapshot = _ensure_appointment_from_cart(
+                profile,
+                metadata,
+            )
+            if appointment:
+                profile = appointment.client
         elif payment and payment.appointment:
             appointment = payment.appointment
+            profile = appointment.client
+    elif appointment:
+        profile = appointment.client
 
     payment_method_id = getattr(intent, "payment_method", None)
     if not payment_method_id:
@@ -341,10 +404,40 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
     if profile or (appointment and appointment.client):
         _sync_client_card(profile or appointment.client, getattr(intent, "customer", None), payment_method_id, payment_method_data)
 
-    _update_appointment_payment_status(appointment, succeeded=True)
+    meta_changed = False
+    meta = dict(payment.metadata or {})
+    if pricing_snapshot:
+        meta["cart_pricing"] = pricing_snapshot
+        expected_total = pricing_snapshot.get("total")
+        intent_amount = getattr(intent, "amount_received", None)
+        if intent_amount is None:
+            intent_amount = getattr(intent, "amount", None)
+        if (
+            isinstance(intent_amount, int)
+            and isinstance(expected_total, int)
+            and expected_total != intent_amount
+        ):
+            meta["pricing_amount_mismatch"] = {
+                "expected": expected_total,
+                "intent": intent_amount,
+            }
+            logger.warning(
+                "Stripe intent %s amount mismatch (expected %s, got %s)",
+                intent.id,
+                expected_total,
+                intent_amount,
+            )
+        meta_changed = True
+
     if appointment and metadata.get("appointment_id") != str(appointment.pk):
-        payment.metadata = {**payment.metadata, "appointment_id": str(appointment.pk)}
+        meta["appointment_id"] = str(appointment.pk)
+        meta_changed = True
+
+    if meta_changed:
+        payment.metadata = meta
         payment.save(update_fields=["metadata", "updated_at"])
+
+    _update_appointment_payment_status(appointment, succeeded=True)
     return payment
 
 
@@ -396,38 +489,99 @@ def _handle_payment_method_attached(method_obj: Any) -> None:
 def stripe_create_cart_intent(request):
     profile = request.user.userprofile
     cart = BookingCart.for_user(profile)
-    total = _calculate_cart_total(profile, cart)
-    if total <= Decimal("0.00"):
-        return JsonResponse({"error": "Cart total must be greater than zero."}, status=400)
+    try:
+        with transaction.atomic():
+            locked_cart = (
+                BookingCart.objects.select_for_update()
+                .filter(pk=cart.pk)
+                .first()
+            )
+            pricing = compute_cart_pricing(profile, cart=locked_cart or cart)
+    except PricingComputationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    if pricing.get("is_empty"):
+        return JsonResponse({"error": "Cart is empty."}, status=400)
+
+    if pricing["total"] <= 0:
+        with transaction.atomic():
+            appointment, pricing_snapshot = _ensure_appointment_from_cart(
+                profile,
+                {"cart_id": pricing["cart_id"]},
+                pricing=pricing,
+            )
+            if not appointment:
+                return JsonResponse(
+                    {"error": "Unable to create appointment from cart."},
+                    status=400,
+                )
+            bundle = payment_services.create_or_update_payment_intent(
+                appointment,
+                amount=Decimal("0.00"),
+                currency=pricing["currency"],
+            )
+            payment = bundle.payment
+            meta = dict(payment.metadata or {})
+            meta["cart_pricing"] = pricing_snapshot or pricing
+            meta["cart_checkout"] = {"mode": "free"}
+            payment.metadata = meta
+            payment.raw_response = {"source": "cart_zero_total"}
+            payment.save(update_fields=["metadata", "raw_response", "updated_at"])
+            _update_appointment_payment_status(appointment, succeeded=True)
+        pricing_payload = pricing_snapshot or pricing
+        return JsonResponse(
+            {
+                "requires_payment": False,
+                "appointment_id": str(appointment.pk),
+                "payment_id": str(payment.pk),
+                "amount": pricing_payload["total_decimal"],
+                "amount_minor": pricing_payload["total"],
+                "currency": pricing_payload["currency"],
+                "cart": pricing_payload,
+            }
+        )
 
     try:
         customer_id = _get_or_create_stripe_customer(profile)
-        metadata = {
-            "user_id": str(profile.pk),
-            "cart_id": str(cart.pk),
-            "booking_type": "appointment_cart",
-            "cart_total": str(total),
-        }
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except stripe.error.StripeError as exc:
+        logger.exception("Stripe error retrieving customer for user %s", profile.pk)
+        return JsonResponse({"error": getattr(exc, "user_message", str(exc))}, status=400)
+
+    stripe_metadata = {
+        "user_id": str(profile.pk),
+        "cart_id": str(pricing["cart_id"]),
+        "booking_type": "appointment_cart",
+        "cart_total_minor": str(pricing["total"]),
+        "cart_currency": pricing["currency"],
+        "cart_item_count": str(pricing.get("count", len(pricing.get("items", [])))),
+    }
+
+    try:
         intent = stripe.PaymentIntent.create(
-            amount=_to_minor_units(total),
-            currency=_default_currency(),
+            amount=pricing["total"],
+            currency=pricing["currency"],
             customer=customer_id,
             automatic_payment_methods={"enabled": True},
             setup_future_usage="off_session",
-            metadata=metadata,
+            metadata=stripe_metadata,
         )
     except ImproperlyConfigured as exc:
         return JsonResponse({"error": str(exc)}, status=503)
     except stripe.error.StripeError as exc:
         logger.exception("Stripe error creating payment intent for user %s", profile.pk)
-        return JsonResponse({"error": getattr(exc, "user_message", str(exc))}, status=502)
+        return JsonResponse({"error": getattr(exc, "user_message", str(exc))}, status=400)
 
     return JsonResponse(
         {
+            "requires_payment": True,
             "client_secret": intent.client_secret,
             "payment_intent_id": intent.id,
-            "amount": str(total),
-            "currency": _default_currency(),
+            "amount": pricing["total_decimal"],
+            "amount_minor": pricing["total"],
+            "currency": pricing["currency"],
+            "cart": pricing,
         }
     )
 

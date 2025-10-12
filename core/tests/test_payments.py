@@ -1,15 +1,32 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import timedelta, time
 from types import SimpleNamespace
 from unittest import mock
 
 from django.contrib.auth import get_user_model
+from django.db.models.signals import post_save
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from core.models import Appointment, Payment, PaymentMethod, PaymentStatus
+from core import signals as core_signals
+from core.models import (
+    Appointment,
+    BookingCart,
+    BookingCartItem,
+    MasterProfile,
+    MasterWorkDay,
+    Payment,
+    PaymentMethod,
+    PaymentStatus,
+    Service,
+    ServiceDiscount,
+    ServiceMaster,
+)
 from core.services import payments as payment_services
+from core.services.pricing import compute_cart_pricing
+from core.payments import stripe_api
 
 
 class FakeIntent(SimpleNamespace):
@@ -25,6 +42,61 @@ class FakeIntent(SimpleNamespace):
 
         return {k: convert(v) for k, v in self.__dict__.items()}
 
+
+class CartTestMixin:
+    def setUp(self):
+        super().setUp()
+        self._disconnect_signals()
+        self.now = timezone.now()
+        self.today = self.now.date()
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(
+            username="client",
+            email="client@example.com",
+            password="testpass",
+        )
+        self.profile = self.user.userprofile
+        master_user = user_model.objects.create_user(
+            username="master",
+            email="master@example.com",
+            password="masterpass",
+        )
+        self.master_profile = MasterProfile.objects.create(user=master_user.userprofile)
+        MasterWorkDay.objects.create(
+            master=self.master_profile,
+            weekday=self.now.weekday(),
+            start_time=time(8, 0),
+            end_time=time(20, 0),
+        )
+        self.cart = BookingCart.for_user(self.profile)
+
+    def tearDown(self):
+        self._reconnect_signals()
+        super().tearDown()
+
+    def _disconnect_signals(self):
+        post_save.disconnect(core_signals.appointment_post_save, sender=Appointment)
+
+    def _reconnect_signals(self):
+        post_save.connect(core_signals.appointment_post_save, sender=Appointment)
+
+    def create_service(self, name: str = "Service", price: str = "50.00") -> Service:
+        service = Service.objects.create(
+            name=name,
+            base_price=Decimal(price),
+            duration_min=60,
+            extra_time_min=0,
+        )
+        ServiceMaster.objects.create(service=service, master=self.master_profile)
+        return service
+
+    def add_cart_item(self, service: Service, *, start_time=None) -> BookingCartItem:
+        return BookingCartItem.objects.create(
+            cart=self.cart,
+            service=service,
+            master=self.master_profile,
+            start_time=start_time or self.now,
+        )
 
 class PaymentServiceTests(TestCase):
     def setUp(self):
@@ -130,3 +202,167 @@ class PaymentServiceTests(TestCase):
         self.assertEqual(payment.status, "succeeded")
         self.assertTrue(payment.receipt_url)
         self.assertEqual(self.appointment.payment_status.name, "Paid")
+
+
+class CartPricingTests(CartTestMixin, TestCase):
+    def test_compute_cart_pricing_applies_service_and_personal_discounts(self):
+        service = self.create_service(name="Facial Moisture", price="70.00")
+        ServiceDiscount.objects.create(
+            service=service,
+            discount_percent=10,
+            start_date=self.today - timedelta(days=1),
+            end_date=self.today + timedelta(days=1),
+        )
+        self.profile.personal_discount_percent = 5
+        self.profile.save(update_fields=["personal_discount_percent"])
+        self.add_cart_item(service)
+
+        pricing = compute_cart_pricing(self.profile)
+
+        self.assertEqual(pricing["total"], 5985)
+        self.assertEqual(pricing["total_decimal"], "59.85")
+        self.assertEqual(pricing["count"], 1)
+        item = pricing["items"][0]
+        self.assertEqual(item["unit_price_decimal"], "59.85")
+        discount_types = {entry["type"] for entry in item["discounts"]}
+        self.assertIn("service", discount_types)
+        self.assertIn("personal", discount_types)
+
+
+class CartCheckoutViewTests(CartTestMixin, TestCase):
+    def test_create_cart_intent_handles_zero_total(self):
+        service = self.create_service(name="Free consultation", price="0.00")
+        self.add_cart_item(service)
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/accounts/api/payments/cart/create-intent/",
+            data={},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data["requires_payment"])
+        self.assertEqual(data["amount"], "0.00")
+        self.assertEqual(Appointment.objects.filter(client=self.profile).count(), 1)
+        appointment = Appointment.objects.get(client=self.profile)
+        self.assertEqual(appointment.items.count(), 1)
+        item = appointment.items.first()
+        self.assertIsNotNone(item)
+        self.assertEqual(item.final_price, Decimal("0.00"))
+        payment = Payment.objects.get(appointment=appointment)
+        self.assertEqual(payment.amount, Decimal("0.00"))
+        self.assertEqual(payment.status, "succeeded")
+        self.assertFalse(self.cart.items.exists())
+
+    @mock.patch("core.payments.stripe_api._get_or_create_stripe_customer", return_value="cus_test")
+    @mock.patch("core.payments.stripe_api.stripe.PaymentIntent.create")
+    def test_create_cart_intent_returns_payment_intent(
+        self,
+        mock_create_intent,
+        _mock_customer,
+    ):
+        service = self.create_service(name="Facial Moisture", price="63.00")
+        self.add_cart_item(service)
+        self.client.force_login(self.user)
+        mock_create_intent.return_value = SimpleNamespace(
+            id="pi_test",
+            client_secret="secret_test",
+        )
+
+        response = self.client.post(
+            "/accounts/api/payments/cart/create-intent/",
+            data={},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["requires_payment"])
+        self.assertEqual(data["amount"], "63.00")
+        self.assertEqual(data["amount_minor"], 6300)
+        mock_create_intent.assert_called_once()
+        kwargs = mock_create_intent.call_args.kwargs
+        self.assertEqual(kwargs["amount"], 6300)
+        self.assertEqual(kwargs["currency"], "cad")
+        self.assertEqual(kwargs["metadata"]["cart_id"], data["cart"]["cart_id"])
+
+
+class StripeWebhookTests(CartTestMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.service_paid = self.create_service(name="Facial Moisture", price="63.00")
+        self.service_free = self.create_service(name="Consultation", price="0.00")
+
+    def _prime_cart(self):
+        self.cart.items.all().delete()
+        self.add_cart_item(self.service_paid, start_time=self.now)
+        self.add_cart_item(self.service_free, start_time=self.now + timedelta(hours=1))
+        return compute_cart_pricing(self.profile)
+
+    def _build_intent(self, pricing) -> FakeIntent:
+        charge = {
+            "id": "ch_test",
+            "receipt_url": "https://example.com/receipt",
+            "amount_refunded": 0,
+            "payment_method": "pm_card",
+        }
+        return FakeIntent(
+            id="pi_test",
+            metadata={
+                "user_id": str(self.profile.pk),
+                "cart_id": pricing["cart_id"],
+            },
+            amount=pricing["total"],
+            amount_received=pricing["total"],
+            currency=pricing["currency"],
+            customer="cus_test",
+            status="succeeded",
+            charges=SimpleNamespace(data=[charge]),
+            livemode=False,
+        )
+
+    @mock.patch("core.payments.stripe_api._retrieve_payment_method")
+    @mock.patch("core.payments.stripe_api._fetch_intent")
+    def test_webhook_success_creates_appointment_and_payment(
+        self,
+        mock_fetch_intent,
+        mock_retrieve_method,
+    ):
+        pricing = self._prime_cart()
+        intent = self._build_intent(pricing)
+        mock_fetch_intent.return_value = intent
+        mock_retrieve_method.return_value = ("pm_card", {"card": {"funding": "credit"}})
+
+        payment = stripe_api._handle_payment_intent_succeeded({"id": intent.id})
+
+        appointment = payment.appointment
+        self.assertIsNotNone(appointment)
+        self.assertEqual(appointment.items.count(), 2)
+        zero_item = appointment.items.filter(final_price=Decimal("0.00")).first()
+        self.assertIsNotNone(zero_item)
+        self.assertEqual(payment.amount, Decimal("63.00"))
+        self.assertEqual(payment.status, "succeeded")
+        self.assertEqual(payment.method.name, "Credit card")
+        self.assertEqual(payment.metadata.get("cart_pricing", {}).get("total"), pricing["total"])
+        self.assertFalse(self.cart.items.exists())
+
+    @mock.patch("core.payments.stripe_api._retrieve_payment_method")
+    @mock.patch("core.payments.stripe_api._fetch_intent")
+    def test_webhook_success_is_idempotent(
+        self,
+        mock_fetch_intent,
+        mock_retrieve_method,
+    ):
+        pricing = self._prime_cart()
+        intent = self._build_intent(pricing)
+        mock_fetch_intent.return_value = intent
+        mock_retrieve_method.return_value = ("pm_card", {"card": {"funding": "credit"}})
+
+        first_payment = stripe_api._handle_payment_intent_succeeded({"id": intent.id})
+        second_payment = stripe_api._handle_payment_intent_succeeded({"id": intent.id})
+
+        self.assertEqual(Appointment.objects.count(), 1)
+        self.assertEqual(Payment.objects.filter(stripe_payment_intent_id=intent.id).count(), 1)
+        self.assertEqual(first_payment.pk, second_payment.pk)
+        self.assertEqual(first_payment.appointment_id, second_payment.appointment_id)
+        self.assertEqual(first_payment.metadata.get("cart_pricing", {}), second_payment.metadata.get("cart_pricing", {}))

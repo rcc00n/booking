@@ -21,11 +21,15 @@ from core.models import (
     AppointmentItem, BookingCart, BookingCartItem, Payment, ClientIntakeForm,
 )
 from core.services.booking import (
-    get_available_slots, get_service_masters,
-    get_or_create_status, get_default_payment_status, _tz_aware,
+    get_available_slots,
+    get_service_masters,
+    get_or_create_status,
+    get_default_payment_status,
+    _tz_aware,
     create_appointment_from_cart_items,
 )
 from core.services import payments as payment_services
+from core.services.pricing import compute_cart_pricing
 
 def _build_catalog_context(request):
     """Общий конструктор контекста каталога."""
@@ -222,56 +226,13 @@ def _ensure_profile(user):
         profile = UserProfile.objects.create(user=user)
     return profile
 
-
-def _master_display(master: MasterProfile) -> str:
-    if not master:
-        return ""
-    profile = getattr(master, "user", None)
-    name = ""
-    if profile and hasattr(profile, "get_full_name"):
-        name = profile.get_full_name() or ""
-    if not name:
-        linked_user = getattr(profile, "user", None)
-        if linked_user:
-            name = linked_user.get_full_name() or linked_user.username
-    return name
-
-
-def _cart_payload(item: BookingCartItem) -> dict:
-    master_label = _master_display(item.master)
-    return {
-        "id": item.id,
-        "service": {
-            "id": item.service.id,
-            "name": item.service.name,
-            "duration_min": item.service.duration_min,
-            "extra_time_min": item.service.extra_time_min,
-            "price": str(item.service.base_price),
-        },
-        "master": {
-            "id": item.master.id,
-            "name": master_label,
-        } if item.master else None,
-        "start_time": item.start_time.isoformat() if item.start_time else None,
-    }
-
-
 @login_required
 @require_GET
 def api_cart_summary(request):
     profile = _ensure_profile(request.user)
     cart = BookingCart.for_user(profile)
-    items = list(cart.items.select_related("service", "master__user"))
-
-    total_price = sum((it.service.base_price or 0) for it in items)
-    total_duration = sum(((it.service.duration_min or 0) + (it.service.extra_time_min or 0)) for it in items)
-
-    return JsonResponse({
-        "items": [_cart_payload(it) for it in items],
-        "count": len(items),
-        "total_price": str(total_price),
-        "total_duration_min": total_duration,
-    })
+    pricing = compute_cart_pricing(profile, cart=cart)
+    return JsonResponse(pricing)
 
 
 @login_required
@@ -343,7 +304,11 @@ def api_cart_add(request):
             messages.extend(getattr(exc, "messages", [str(exc)]))
         return JsonResponse({"error": messages[0] if messages else "Invalid data"}, status=400)
 
-    return JsonResponse({"ok": True, "item": _cart_payload(item)}, status=201)
+    pricing = compute_cart_pricing(profile, cart=cart)
+    return JsonResponse(
+        {"ok": True, "item_id": str(item.pk), "cart": pricing},
+        status=201,
+    )
 
 
 @login_required
