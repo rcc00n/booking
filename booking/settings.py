@@ -36,7 +36,7 @@ SECRET_KEY = env("SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["malvabeauty.duckdns.org", "127.0.0.1"]
+ALLOWED_HOSTS = ["malvabeauty.duckdns.org", "127.0.0.1", "localhost"]
 
 
 # Application definition
@@ -95,16 +95,16 @@ WSGI_APPLICATION = 'booking.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'Malva', # Change to your local DB name
-        'USER': 'postgres', # Change to your local user name
-        'PASSWORD': 'admin', # Change to your local user password
-        'HOST': 'localhost',
-        'PORT': '5433',
-    }
-}
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'Malva', # Change to your local DB name
+#         'USER': 'postgres', # Change to your local user name
+#         'PASSWORD': 'admin', # Change to your local user password
+#         'HOST': 'localhost',
+#         'PORT': '5433',
+#     }
+# }
 
 # DATABASES = {
 #     "default": env.db(
@@ -182,7 +182,7 @@ STRIPE_PUBLIC_KEY = env(
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
 STRIPE_CURRENCY = env("STRIPE_CURRENCY", default="cad")
-STRIPE_API_VERSION = env("STRIPE_API_VERSION", default="2025-09-30.clover")
+STRIPE_API_VERSION = env("STRIPE_API_VERSION", default="2024-11-20.acacia")
 STRIPE_PAYMENT_METHOD_TYPES = env.list(
     "STRIPE_PAYMENT_METHOD_TYPES",
     default=["card"],

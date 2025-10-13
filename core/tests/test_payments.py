@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from datetime import timedelta, time
+from datetime import datetime, timedelta, time
 from types import SimpleNamespace
 from unittest import mock
 
@@ -47,8 +47,10 @@ class CartTestMixin:
     def setUp(self):
         super().setUp()
         self._disconnect_signals()
-        self.now = timezone.now()
-        self.today = self.now.date()
+        current_tz = timezone.get_current_timezone()
+        today = timezone.now().astimezone(current_tz).date()
+        self.now = timezone.make_aware(datetime.combine(today, time(12, 0)), current_tz)
+        self.today = today
         user_model = get_user_model()
         self.user = user_model.objects.create_user(
             username="client",
@@ -62,12 +64,13 @@ class CartTestMixin:
             password="masterpass",
         )
         self.master_profile = MasterProfile.objects.create(user=master_user.userprofile)
-        MasterWorkDay.objects.create(
-            master=self.master_profile,
-            weekday=self.now.weekday(),
-            start_time=time(8, 0),
-            end_time=time(20, 0),
-        )
+        for weekday in range(7):
+            MasterWorkDay.objects.create(
+                master=self.master_profile,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(20, 0),
+            )
         self.cart = BookingCart.for_user(self.profile)
 
     def tearDown(self):

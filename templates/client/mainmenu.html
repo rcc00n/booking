@@ -1077,7 +1077,6 @@
         if(!el) return;
         const wasActive = modalState.current === el;
         el.classList.remove('modal--open');
-        el.setAttribute('aria-hidden','true');
 
         if(wasActive){
           clearBackgroundInert(modalState.inertRecords);
@@ -1094,6 +1093,7 @@
           modalState.restoreFocus = null;
           modalState.restoreFocusFallback = null;
           modalState.onRequestClose = null;
+          let ariaHiddenUpdateScheduled = false;
 
           if(shouldRestore){
             let nextFocus = canRestoreFocusTo(focusTarget) ? focusTarget : null;
@@ -1101,9 +1101,18 @@
               nextFocus = focusFallback;
             }
             if(nextFocus){
-              window.requestAnimationFrame(()=>{ focusElement(nextFocus); });
+              ariaHiddenUpdateScheduled = true;
+              window.requestAnimationFrame(()=>{
+                focusElement(nextFocus);
+                el.setAttribute('aria-hidden','true');
+              });
             }
           }
+          if(!ariaHiddenUpdateScheduled){
+            el.setAttribute('aria-hidden','true');
+          }
+        } else {
+          el.setAttribute('aria-hidden','true');
         }
 
         if(!document.querySelector('.modal.modal--open')){
@@ -2565,7 +2574,7 @@ async function confirmPayment(){
           document.getElementById('services')?.scrollIntoView({behavior:'smooth', block:'start'});
         });
       }
-
+      window.DEBUG_checkoutCart = checkoutCart;
       applyServiceNameTranslations(document.getElementById('serverContent'));
     });
   </script>

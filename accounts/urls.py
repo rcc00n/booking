@@ -20,6 +20,7 @@ from core.payments.stripe_api import (
     stripe_list_cards,
     stripe_set_default_card,
     stripe_no_show_charge,
+    stripe_webhook
 )
 
 
@@ -53,11 +54,11 @@ urlpatterns = [
         api_payment_verify,
         name="api-payment-verify",
     ),
+    path("api/stripe/webhook/", stripe_webhook, name="api-stripe-webhook"),
     path("logout/", LogoutView.as_view(next_page="/accounts/"), name="logout"),
     
     path("api/appointment/<uuid:appt_id>/cancel/",     api_appointment_cancel,     name="api-appt-cancel"),
     path("api/appointment/<uuid:appt_id>/reschedule/", api_appointment_reschedule, name="api-appt-reschedule"),
-    
 ]
 
 

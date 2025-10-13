@@ -12,7 +12,7 @@ from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ImproperlyConfigured
-from django.db import transaction
+from django.db import connection, transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -53,6 +53,15 @@ def _default_currency() -> str:
     return (getattr(settings, "STRIPE_CURRENCY", "cad") or "cad").lower()
 
 
+def _lockable(queryset):
+    """
+    Apply select_for_update only when the database backend supports it.
+    """
+    if getattr(connection.features, "has_select_for_update", False):
+        return queryset.select_for_update()
+    return queryset
+
+
 def _to_minor_units(amount: Decimal) -> int:
     scaled = (amount * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     return int(scaled)
@@ -90,9 +99,15 @@ def _payment_method_from_funding(funding: Optional[str]) -> PaymentMethod:
     return method
 
 
-def _retrieve_payment_method(payment_method_id: Optional[str]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
-    if not payment_method_id:
+def _retrieve_payment_method(payment_method: Optional[Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    if payment_method is None:
         return None, None
+    if hasattr(payment_method, "id"):
+        try:
+            return payment_method.id, payment_method.to_dict_recursive()
+        except AttributeError:
+            return getattr(payment_method, "id", None), None
+    payment_method_id = str(payment_method)
     try:
         pm = stripe.PaymentMethod.retrieve(payment_method_id)
     except stripe.error.StripeError as exc:
@@ -207,7 +222,7 @@ def _ensure_appointment_from_cart(
 ) -> tuple[Optional[Appointment], Optional[dict[str, Any]]]:
     cart_id = metadata.get("cart_id")
     with transaction.atomic():
-        cart_qs = BookingCart.objects.select_for_update().filter(owner=profile)
+        cart_qs = _lockable(BookingCart.objects.filter(owner=profile))
         if cart_id:
             cart_qs = cart_qs.filter(pk=cart_id)
         cart = cart_qs.first()
@@ -302,11 +317,9 @@ def _upsert_payment_from_intent(
     method = _payment_method_from_funding((payment_method_data or {}).get("card", {}).get("funding"))
 
     with transaction.atomic():
-        payment = (
-            Payment.objects.select_for_update()
-            .filter(stripe_payment_intent_id=intent.id)
-            .first()
-        )
+        payment = _lockable(Payment.objects).filter(
+            stripe_payment_intent_id=intent.id
+        ).first()
         if payment is None:
             payment = Payment.objects.create(
                 appointment=appointment,
@@ -364,6 +377,7 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
         .select_related("appointment__client")
         .first()
     )
+    previous_metadata = dict(payment.metadata or {}) if payment else {}
     if payment and payment.appointment:
         appointment = payment.appointment
 
@@ -372,8 +386,7 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
         user_id = metadata.get("user_id")
         if user_id:
             profile = (
-                UserProfile.objects.select_for_update()
-                .select_related("user")
+                UserProfile.objects.select_related("user")
                 .filter(pk=user_id)
                 .first()
             )
@@ -429,6 +442,10 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
             )
         meta_changed = True
 
+    if "cart_pricing" not in meta and "cart_pricing" in previous_metadata:
+        meta["cart_pricing"] = previous_metadata["cart_pricing"]
+        meta_changed = True
+
     if appointment and metadata.get("appointment_id") != str(appointment.pk):
         meta["appointment_id"] = str(appointment.pk)
         meta_changed = True
@@ -467,8 +484,7 @@ def _handle_payment_method_attached(method_obj: Any) -> None:
     if not customer_id:
         return
     profile = (
-        UserProfile.objects.select_for_update()
-        .filter(stripe_customer_id=customer_id)
+        UserProfile.objects.filter(stripe_customer_id=customer_id)
         .first()
     )
     if not profile:
@@ -491,11 +507,9 @@ def stripe_create_cart_intent(request):
     cart = BookingCart.for_user(profile)
     try:
         with transaction.atomic():
-            locked_cart = (
-                BookingCart.objects.select_for_update()
-                .filter(pk=cart.pk)
-                .first()
-            )
+            locked_cart = _lockable(
+                BookingCart.objects.filter(pk=cart.pk)
+            ).first()
             pricing = compute_cart_pricing(profile, cart=locked_cart or cart)
     except PricingComputationError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
