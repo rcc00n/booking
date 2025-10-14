@@ -46,7 +46,6 @@ input, button, select, textarea {
     display: none !important;
 }
 .content-wrapper,
-.main-header,
 .main-footer {
     margin-left: var(--icon-sidebar-width) !important;
     width: calc(100% - var(--icon-sidebar-width)) !important;
@@ -55,8 +54,15 @@ input, button, select, textarea {
     transition: margin-left 0.3s ease;
 }
 
-
-
+.main-header{
+    margin-left: 0px !important;
+}
+.input-group-append {
+  display: none !important;
+}
+.form-control-navbar{
+    display: none !important;
+}
 body.sidebar-hover .main-footer {
     margin-left: var(--icon-sidebar-expanded-width) !important;
     width: calc(100% - var(--icon-sidebar-expanded-width)) !important;

@@ -298,6 +298,7 @@
 {% endblock %}
 
 {% block content %}
+    <script src="{% static 'admin/js/admin/RelatedObjectLookups.js' %}"></script>
     <div class="ab-wrap">
         <form method="post" action="" id="appt-form" class="ab-card">
             {% csrf_token %}
@@ -333,6 +334,17 @@
                             {% endfor %}
                         </select>
                     </div>  {# ←ВАЖНО: закрываем .combo #}
+                    {% url 'admin:auth_user_add' as raw_add_client_url %}
+                    {% with raw_add_client_url|add:'?_to_field=id&_popup=1' as add_client_url %}
+                        <a
+                            href="{{ add_client_url }}"
+                            class="related-widget-wrapper-link add-related"
+                            id="add_id_client"
+                            title="Add client"
+                            onclick="return showAddAnotherPopup(this);"
+                            style="margin-left:8px"
+                        >＋ Add client</a>
+                    {% endwith %}
 
                     {% if field_errors.client %}
                         {% for e in field_errors.client %}<div class="ab-field-error">{{ e }}</div>{% endfor %}

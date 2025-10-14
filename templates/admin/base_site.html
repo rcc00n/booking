@@ -1,14 +1,27 @@
 {% extends "admin/base.html" %}
 {% load static %}
 {% load filters %}
-{%block extrahead %}
+{% block extrahead %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'admin/css/custom_header.css' %}">
     <link rel="stylesheet" href="{% static 'admin/css/custom_sidebar.css' %}">
+
     {% comment %} Add fonts {% endcomment %}
     {% comment %} <link rel="preload" href="{% static 'fonts/Angelica.woff2' %}" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="{% static 'admin/css/font.css' %}">  {% endcomment %}
     <script defer src="{% static 'admin/js/custom_sidebar.js' %}"></script>
     <script defer src="{% static 'admin/js/send_notification.js' %}"></script>
 
+
+{% endblock %}
+
+{% block branding %}
+    {% with logo_path=site_logo|default:'admin/icons/logo.png' %}
+        <a class="custom-admin-brand" href="{% url 'admin:index' %}">
+            <img class="custom-admin-brand__logo" src="{% static logo_path %}" alt="{{ site_brand|default:site_header }}">
+            <span class="custom-admin-brand__text">{{ site_brand|default:site_header }}</span>
+        </a>
+    {% endwith %}
 {% endblock %}
 
 {% block sidebar %}
