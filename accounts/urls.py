@@ -7,6 +7,9 @@ from .views import (
     ClientRegisterView,
     MainMenuView,  # можно оставить, если где-то используется
     ProductSalesView,
+    api_verification_begin,
+    api_verification_confirm,
+    api_verification_resend,
 )
 from django.contrib.auth.views import LogoutView
 from core.views import (
@@ -45,6 +48,9 @@ urlpatterns = [
     path("api/cart/",             api_cart_summary,   name="api-cart"),
     path("api/cart/add/",        api_cart_add,       name="api-cart-add"),
     path("api/cart/<int:item_id>/remove/", api_cart_remove, name="api-cart-remove"),
+    path("api/verification/begin/",   api_verification_begin,   name="api-verify-begin"),
+    path("api/verification/confirm/", api_verification_confirm, name="api-verify-confirm"),
+    path("api/verification/resend/",  api_verification_resend,  name="api-verify-resend"),
     path("api/payments/cart/create-intent/", stripe_create_cart_intent, name="stripe-cart-intent"),
     path("api/payments/cards/", stripe_list_cards, name="stripe-cards"),
     path("api/payments/cards/set-default/", stripe_set_default_card, name="stripe-set-default"),

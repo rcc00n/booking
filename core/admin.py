@@ -3542,6 +3542,24 @@ class UserProfileAdmin(admin.ModelAdmin):
             return False
         return super().has_delete_permission(request, obj)
 
+
+@admin.register(EmailVerification)
+class EmailVerificationAdmin(admin.ModelAdmin):
+    list_display = ("user", "purpose", "sent_to", "created_at", "expires_at", "last_sent_at", "attempts", "is_used")
+    list_filter = ("purpose", "is_used", "created_at")
+    search_fields = ("user__username", "user__email", "sent_to", "code")
+    readonly_fields = ("user", "purpose", "code", "sent_to", "created_at", "expires_at", "attempts", "last_sent_at", "is_used")
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 class MasterWorkDayInline(admin.TabularInline):
     model = MasterWorkDay
     extra = 7  # сразу 7 строк для всех дней

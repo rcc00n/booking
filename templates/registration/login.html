@@ -255,6 +255,14 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
 }
 .modal__close{position:absolute;top:18px;right:22px;border:none;background:none;font-size:26px;font-weight:600;cursor:pointer;color:#666;}
 .modal h2{margin:0 0 1.4rem;font-size:1.9rem;font-weight:600;text-align:center;color:var(--green);}
+.modal--verify{z-index:130;}
+.modal__dialog--narrow{max-width:420px;padding:32px 32px 28px;}
+.modal--verify .modal__dialog{padding:32px 32px 28px;}
+.modal__footer{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:1.5rem;}
+.modal__footer .btn{flex:1;}
+.verify-modal__messages{margin-top:.75rem;}
+#verifyErr{display:none;color:var(--error-text);font-size:.92rem;}
+#verifyOk{display:none;color:var(--green);font-size:.92rem;}
 
 /* ===== Responsive ===== */
 @media(max-width:500px){
@@ -373,6 +381,114 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
   color:var(--dgray);
   line-height:1.45;
 }
+
+/* ===== Verify modal (email code) ===== */
+.modal--verify{
+  z-index: 130; /* уже выше .modal регистрации */
+}
+
+.modal--verify .modal__dialog{
+  width:min(460px, 96vw);
+  max-height: calc(100dvh - 2rem);
+  padding: 28px 26px 22px;
+  border-radius: 22px;
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  box-shadow: 0 22px 44px rgba(0,0,0,.22);
+}
+
+.modal--verify h2{
+  margin: 0 0 10px;
+  font-size: 1.4rem;
+  line-height: 1.2;
+  font-weight: 700;
+  text-align: center;
+  color: var(--green);
+}
+
+/* поля внутри verify-модалки — крупнее и «воздушнее» */
+.modal--verify .field{
+  --control-padding-y: 16px;
+  --control-padding-x: 18px;
+  --control-padding-left: var(--control-padding-x);
+  --control-padding-right: var(--control-padding-x);
+  --control-radius-local: 16px;
+  --label-float-top: calc(var(--control-padding-y) - 2px);
+  --label-float-transform: translateY(-58%);
+  --control-padding-top: calc(var(--control-padding-y) + 8px);
+  --control-padding-bottom: calc(var(--control-padding-y) - 2px);
+  margin-top: 10px;
+}
+
+.modal--verify .field input{
+  font-size: 16px;
+  background: var(--field-bg);
+  box-shadow: var(--control-outline);
+}
+
+.modal--verify .field input:focus{
+  background: #fff;
+  box-shadow: var(--control-outline-active);
+}
+
+/* email — как «readonly chip» */
+#verifyEmail[readonly]{
+  background: color-mix(in srgb, #fff 85%, var(--taupe));
+  cursor: default;
+}
+
+/* 6-значный код — моноширинный, с интервалом между символами */
+#verifyCode{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  letter-spacing: .28em;
+  text-align: center;
+  caret-color: var(--green);
+  /* чтобы «пустой плейсхолдер» не подпрыгивал label */
+  ime-mode: disabled;
+}
+#verifyCode::-webkit-outer-spin-button,
+#verifyCode::-webkit-inner-spin-button{ -webkit-appearance: none; margin: 0; }
+#verifyCode{ -moz-appearance:textfield; }
+
+/* сообщения об ошибке/успехе */
+.verify-modal__messages{
+  margin-top: .25rem;
+  min-height: 1.25rem; /* чтобы не дёргался макет */
+}
+#verifyErr,
+#verifyOk{
+  display: none;
+  font-size: .95rem;
+  line-height: 1.35;
+}
+#verifyErr.show{ display:block; color: var(--error-text); background: var(--error-bg); padding:.5rem .65rem; border-radius: 10px; }
+#verifyOk.show{  display:block; color: var(--green); background: rgba(32,64,41,.08); padding:.5rem .65rem; border-radius: 10px; }
+
+/* футер — кнопки на всю ширину и с правильным гепом */
+.modal--verify .modal__footer{
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.modal--verify .btn{
+  padding: 14px;
+  font-size: 15px;
+  border-radius: 999px;
+}
+
+/* состояние disabled у Confirm — понятно визуально */
+.modal--verify .btn[disabled]{
+  opacity:.6; cursor:not-allowed; box-shadow:none; transform:none;
+}
+
+/* мелкие экраны: ужимаем отступы и размер шрифта заголовка */
+@media (max-width: 420px){
+  .modal--verify .modal__dialog{ padding: 22px 18px 18px; }
+  .modal--verify h2{ font-size: 1.25rem; }
+  #verifyCode{ letter-spacing: .22em; }
+}
+
 
 </style>
 </head>
@@ -501,6 +617,30 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
   </div>
 </div>
 
+<!-- ===== V E R I F I C A T I O N  M O D A L ===== -->
+<div id="verifyModal" class="modal modal--verify" aria-hidden="true" role="dialog" aria-modal="true">
+  <div class="modal__dialog modal__dialog--narrow" role="document">
+    <button class="modal__close" type="button" data-verify-close aria-label="Close">&times;</button>
+    <h2>Confirm your email</h2>
+    <div class="field">
+      <input type="email" id="verifyEmail" readonly placeholder=" ">
+      <label for="verifyEmail">Email</label>
+    </div>
+    <div class="field">
+      <input type="text" id="verifyCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder=" ">
+      <label for="verifyCode">Verification code</label>
+    </div>
+    <div class="verify-modal__messages">
+      <div id="verifyErr"></div>
+      <div id="verifyOk"></div>
+    </div>
+    <div class="modal__footer">
+      <button type="button" class="btn btn--ghost" data-verify-resend>Resend</button>
+      <button type="button" class="btn btn--primary" data-verify-submit disabled>Confirm</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== S C R I P T S ===== -->
 <script>
 /* particles */
@@ -535,6 +675,16 @@ const regForm=document.getElementById('regForm');
 const regErrors=document.getElementById('regErrors');
 const authFlash=document.getElementById('authFlash');
 
+const verifyModal=document.getElementById('verifyModal');
+const verifyEmailInput=document.getElementById('verifyEmail');
+const verifyCodeInput=document.getElementById('verifyCode');
+const verifyErr=document.getElementById('verifyErr');
+const verifyOk=document.getElementById('verifyOk');
+const verifySubmitBtn=verifyModal ? verifyModal.querySelector('[data-verify-submit]') : null;
+const verifyResendBtn=verifyModal ? verifyModal.querySelector('[data-verify-resend]') : null;
+const verifyCloseBtn=verifyModal ? verifyModal.querySelector('[data-verify-close]') : null;
+let verifyEmailValue='';
+
 const openRegBtn=document.getElementById('openReg');
 if(openRegBtn){
   openRegBtn.addEventListener('click',()=>{
@@ -546,7 +696,17 @@ const regCloseBtn=document.getElementById('regClose');
 if(regCloseBtn){
   regCloseBtn.addEventListener('click',()=>modal&&modal.classList.remove('show'));
 }
-addEventListener('keydown',e=>e.key==='Escape'&&modal&&modal.classList.remove('show'));
+addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  if(verifyModal && verifyModal.classList.contains('show')){
+    e.preventDefault();
+    closeVerifyModal();
+    return;
+  }
+  if(modal){
+    modal.classList.remove('show');
+  }
+});
 
 function renderRegErrors(messages){
   if(!regErrors) return;
@@ -572,6 +732,177 @@ function showAuthFlash(message){
   authFlash.textContent=message;
   authFlash.style.display='block';
   authFlash.classList.add('show');
+}
+
+function getCookie(name){
+  const match=document.cookie.match('(?:^|;)\\s*'+name+'=([^;]*)');
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+function resetVerifyMessages(){
+  if(verifyErr){verifyErr.textContent='';verifyErr.style.display='none';}
+  if(verifyOk){verifyOk.textContent='';verifyOk.style.display='none';}
+}
+
+function showVerifyError(message){
+  if(!verifyErr) return;
+  verifyErr.textContent=message||'';
+  verifyErr.style.display=message ? 'block' : 'none';
+  if(message && verifyOk){verifyOk.style.display='none';verifyOk.textContent='';}
+}
+
+function showVerifySuccess(message){
+  if(!verifyOk) return;
+  verifyOk.textContent=message||'';
+  verifyOk.style.display=message ? 'block' : 'none';
+  if(message && verifyErr){verifyErr.style.display='none';verifyErr.textContent='';}
+}
+
+function openVerifyModal(email){
+  if(!verifyModal) return;
+  verifyEmailValue=(email||'').trim().toLowerCase();
+  if(verifyEmailInput){verifyEmailInput.value=verifyEmailValue;}
+  if(verifyCodeInput){verifyCodeInput.value='';}
+  if(verifySubmitBtn){verifySubmitBtn.disabled=true;}
+  resetVerifyMessages();
+  verifyModal.classList.add('show');
+  verifyModal.setAttribute('aria-hidden','false');
+  if(verifyCodeInput){
+    requestAnimationFrame(()=>verifyCodeInput.focus({preventScroll:true}));
+  }
+}
+
+function closeVerifyModal(){
+  if(!verifyModal) return;
+  verifyModal.classList.remove('show');
+  verifyModal.setAttribute('aria-hidden','true');
+  resetVerifyMessages();
+}
+
+function formatRetryAfter(seconds){
+  if(typeof seconds!=='number' || !isFinite(seconds)) return '';
+  if(seconds<60) return `${Math.max(1,Math.round(seconds))}s`;
+  const mins=Math.max(1,Math.round(seconds/60));
+  return `${mins} minute${mins===1?'':'s'}`;
+}
+
+const VERIFY_ENDPOINTS={
+  confirm:'/accounts/api/verification/confirm/',
+  resend:'/accounts/api/verification/resend/'
+};
+
+if(verifyCloseBtn){
+  verifyCloseBtn.addEventListener('click',()=>closeVerifyModal());
+}
+
+if(verifyCodeInput){
+  verifyCodeInput.addEventListener('input',()=>{
+    const digits=(verifyCodeInput.value||'').replace(/\D+/g,'').slice(0,6);
+    verifyCodeInput.value=digits;
+    if(verifySubmitBtn){
+      verifySubmitBtn.disabled=digits.length!==6;
+    }
+    if(digits.length){
+      showVerifyError('');
+      showVerifySuccess('');
+    }
+  });
+}
+
+if(verifyResendBtn){
+  verifyResendBtn.addEventListener('click',async ()=>{
+    const email=(verifyEmailValue || (verifyEmailInput ? verifyEmailInput.value : '') || '').trim().toLowerCase();
+    if(!email){
+      showVerifyError('Email missing. Please reopen the registration form.');
+      return;
+    }
+    showVerifyError('');
+    showVerifySuccess('');
+    verifyResendBtn.disabled=true;
+    verifyResendBtn.classList.add('btn--loading');
+    try{
+      const resp=await fetch(VERIFY_ENDPOINTS.resend,{
+        method:'POST',
+        headers:{
+          'X-CSRFToken':getCookie('csrftoken'),
+          'X-Requested-With':'XMLHttpRequest'
+        },
+        body:new URLSearchParams({email})
+      });
+      const data=await resp.json().catch(()=>({}));
+      if(!resp.ok || !data || data.ok!==true){
+        const retry=typeof data.retry_after==='number' ? data.retry_after : null;
+        let message=data && data.error ? String(data.error) : 'Unable to resend right now. Try again later.';
+        if(retry){
+          const formatted=formatRetryAfter(retry);
+          if(formatted) message+=` (${formatted})`;
+        }
+        showVerifyError(message);
+      }else{
+        showVerifySuccess('Code resent. Check your inbox.');
+      }
+    }catch(err){
+      console.error(err);
+      showVerifyError('Unable to resend right now. Try again later.');
+    }finally{
+      verifyResendBtn.classList.remove('btn--loading');
+      verifyResendBtn.disabled=false;
+    }
+  });
+}
+
+if(verifySubmitBtn){
+  verifySubmitBtn.addEventListener('click',async ()=>{
+    const email=(verifyEmailValue || (verifyEmailInput ? verifyEmailInput.value : '') || '').trim().toLowerCase();
+    const code=(verifyCodeInput ? verifyCodeInput.value : '').trim();
+    if(!email){
+      showVerifyError('Email missing. Please reopen the registration form.');
+      return;
+    }
+    if(code.length!==6){
+      showVerifyError('Enter the 6-digit code from your email.');
+      return;
+    }
+    showVerifyError('');
+    showVerifySuccess('');
+    verifySubmitBtn.disabled=true;
+    verifySubmitBtn.classList.add('btn--loading');
+    let unlock=true;
+    try{
+      const resp=await fetch(VERIFY_ENDPOINTS.confirm,{
+        method:'POST',
+        headers:{
+          'X-CSRFToken':getCookie('csrftoken'),
+          'X-Requested-With':'XMLHttpRequest'
+        },
+        body:new URLSearchParams({email,code})
+      });
+      const data=await resp.json().catch(()=>({}));
+      if(!resp.ok || !data || data.ok!==true){
+        const message=data && data.error ? String(data.error) : (resp.status===429 ? 'Too many attempts. Try again later.' : 'Invalid or expired code.');
+        showVerifyError(message);
+        return;
+      }
+      unlock=false;
+      showVerifySuccess('Email verified! Redirecting…');
+      setTimeout(()=>{
+        closeVerifyModal();
+        if(modal){
+          modal.classList.remove('show');
+        }
+        const next=(data && data.redirect) ? data.redirect : '/accounts/';
+        window.location.href=next;
+      },700);
+    }catch(err){
+      console.error(err);
+      showVerifyError('Invalid or expired code.');
+    }finally{
+      verifySubmitBtn.classList.remove('btn--loading');
+      if(unlock){
+        verifySubmitBtn.disabled=false;
+      }
+    }
+  });
 }
 
 function extractMessages(payload){
@@ -616,8 +947,16 @@ if(regForm){
         try{payload=JSON.parse(text);}catch{payload=text;}
       }
 
-      if(response.ok && payload && payload.status==='ok'){
+      const isSuccess=response.ok && payload && (payload.status==='ok' || payload.ok===true);
+      if(isSuccess){
         renderRegErrors([]);
+        const registeredEmail=((payload && payload.email) || formData.get('email') || '').toString().trim().toLowerCase();
+        if(payload && payload.verification==='required'){
+          openVerifyModal(registeredEmail);
+          showVerifySuccess('We sent a 6-digit code to your email. Enter it below.');
+          return;
+        }
+
         if(modal) modal.classList.remove('show');
 
         const generatedUsername=payload.username || formData.get('username') || '';

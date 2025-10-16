@@ -104,6 +104,8 @@ class UserProfile(models.Model):
         help_text="Stripe Customer ID for billing integrations.",
         db_index=True,
     )
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+
     def save(self, *args, **kwargs):
         # Нормализуем индекс (uppercase, без пробелов). Пустое — ок.
         if self.phone == "":
@@ -419,6 +421,35 @@ class MasterRoom(models.Model):
 
     def __str__(self):
         return self.room
+
+class EmailVerification(models.Model):
+    """
+    Tracks email verification codes for a specific user and purpose.
+    Only one active (unused) verification should exist per user/purpose pair.
+    """
+    PURPOSE_REGISTER = "register"
+    PURPOSES = [(PURPOSE_REGISTER, "Register")]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="email_verifications")
+    purpose = models.CharField(max_length=32, choices=PURPOSES, default=PURPOSE_REGISTER, db_index=True)
+    code = models.CharField(max_length=6)
+    sent_to = models.EmailField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    last_sent_at = models.DateTimeField(auto_now=True)
+    is_used = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "purpose", "is_used"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
 
 class MasterProfile(models.Model):
     """
