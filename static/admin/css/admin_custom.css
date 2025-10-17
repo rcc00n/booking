@@ -35,3 +35,30 @@
 .sidebar-mini.sidebar-collapse .main-sidebar .nav-sidebar .has-treeview.menu-open > .nav-link {
     background-color: inherit !important;
 }
+/* Jazzmin/AdminLTE: страница логина */
+.login-page .login-logo img,
+.login-page .brand-link img,
+.login-page .brand-image,
+.login-page .brand-image-xl {
+  max-height: 48px !important; /* выставь нужную высоту */
+  width: auto !important;
+  object-fit: contain;
+}
+
+/* Чуть ровнее выравнивание логотипа и текста */
+.login-page .login-logo a,
+.login-page .brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+/* На очень узких экранах чуть меньше */
+@media (max-width: 420px) {
+  .login-page .login-logo img,
+  .login-page .brand-link img,
+  .login-page .brand-image,
+  .login-page .brand-image-xl {
+    max-height: 40px !important;
+  }
+}

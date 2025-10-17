@@ -1,0 +1,18 @@
+{% extends "admin/login.html" %}
+{% load static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    /* Только страница логина */
+    .login-page .login-logo img,
+    .login-page .brand-link img,
+    .login-page .brand-image,
+    .login-page .brand-image-xl,
+    .login-box .login-logo h1 picture img {
+      max-height: 80px !important;
+      width: auto !important;
+      object-fit: contain;
+    }
+  </style>
+{% endblock %}
