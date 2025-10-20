@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Sequence, Iterable
 from urllib.parse import urlencode
 
 from django.contrib.admin import DateFieldListFilter
-
+from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.core.exceptions import FieldError, PermissionDenied
 from django.db import transaction, IntegrityError
@@ -14,7 +14,7 @@ from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.conf import settings
 from django.contrib import admin, messages
-from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField, Prefetch
+from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField, Prefetch, OuterRef, Subquery
 from itertools import cycle
 
 from django.utils.formats import number_format
@@ -883,6 +883,57 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             request.GET = mutable_get
 
         return qs
+
+    def history_view(self, request, object_id, extra_context=None):
+        if request.GET.get("mode") == "log":
+            return super().history_view(request, object_id, extra_context)
+
+        user_model = get_user_model()
+        user_obj = get_object_or_404(user_model, pk=object_id)
+        profile = getattr(user_obj, "userprofile", None)
+
+        from core.models import Appointment, AppointmentItem, AppointmentStatusHistory
+
+        current_status_sq = (
+            AppointmentStatusHistory.objects
+            .filter(appointment_id=OuterRef("pk"))
+            .order_by("-set_at")
+            .values("status__name")[:1]
+        )
+
+        if profile is None:
+            visits_qs = Appointment.objects.none()
+        else:
+            visits_qs = (
+                Appointment.objects.filter(client=profile)
+                .annotate(current_status=Subquery(current_status_sq))
+                .select_related("client__user", "payment_status")
+                .prefetch_related(
+                    Prefetch(
+                        "items",
+                        queryset=AppointmentItem.objects.select_related(
+                            "service",
+                            "master__user",
+                        ).order_by("start_time"),
+                    )
+                )
+                .order_by("-start_time")
+            )
+
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "original": user_obj,
+            "title": _("History"),
+            "user_obj": user_obj,
+            "visits": list(visits_qs[:200]),
+            "change_url_name": "admin:core_appointment_change",
+        }
+
+        if extra_context:
+            context.update(extra_context)
+
+        return TemplateResponse(request, "admin/users/history_visits.html", context)
 
     @staticmethod
     def _normalize_phone_digits(value: str) -> str:
