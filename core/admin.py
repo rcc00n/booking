@@ -1669,7 +1669,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         # карта мастер → [услуги]
         ms_map = defaultdict(list)
-        for sm in ServiceMaster.objects.select_related("service", "master").order_by("service__name"):
+        for sm in ServiceMaster.objects.select_related("service", "service__category", "master").order_by("service__name"):
             sid = str(sm.service_id)
             service = sm.service
             duration_min = service.duration_min or 0
@@ -1683,6 +1683,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "extra_time_min": extra_min,
                 "total_duration_min": total_duration,
                 "svc_disc": svc_discounts.get(sid, 0),  # %
+                "category": service.category.name if service.category_id else "Other",
             })
 
         # промокоды
@@ -1953,6 +1954,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             sid = str(svc.pk)
             active_forms = list(svc.active_forms())
             form_ids = [str(form.pk) for form in active_forms]
+            category_name = svc.category.name if svc.category_id else "Other"
             service_forms_map[sid] = form_ids
             services_info[sid] = {
                 "id": sid,
@@ -1962,6 +1964,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "extra_time_min": svc.extra_time_min,
                 "total_duration_min": (svc.duration_min or 0) + (svc.extra_time_min or 0),
                 "forms": form_ids,
+                "category": category_name,
             }
             for form in active_forms:
                 intake_forms_map[str(form.pk)] = form
@@ -1969,7 +1972,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         services_by_master: Dict[str, List[Dict[str, Any]]] = {}
         qs = (
             ServiceMaster.objects
-            .select_related("service", "master")
+            .select_related("service", "service__category", "master")
             .values(
                 "master_id",
                 "service__id",
@@ -1977,6 +1980,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "service__base_price",
                 "service__duration_min",
                 "service__extra_time_min",
+                "service__category__name",
+                "service__category_id",
             )
         )
         for r in qs:
@@ -1984,6 +1989,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             base = services_info.get(sid)
             if not base:
                 forms = service_forms_map.get(sid, [])
+                category_name = r["service__category__name"] if r["service__category_id"] else "Other"
                 base = {
                     "id": sid,
                     "name": r["service__name"],
@@ -1992,6 +1998,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                     "extra_time_min": r["service__extra_time_min"],
                     "total_duration_min": (r["service__duration_min"] or 0) + (r["service__extra_time_min"] or 0),
                     "forms": forms,
+                    "category": category_name,
                 }
                 services_info[sid] = base
             payload = {
@@ -2002,6 +2009,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "extra_time_min": base.get("extra_time_min", 0),
                 "total_duration_min": base.get("total_duration_min", (base.get("duration_min") or 0)),
                 "forms": list(base.get("forms", [])),
+                "category": base.get("category", "Other"),
             }
             services_by_master.setdefault(str(r["master_id"]), []).append(payload)
 
