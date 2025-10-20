@@ -2816,7 +2816,7 @@ class AppointmentStatusHistoryAdmin(ExportCsvMixin,admin.ModelAdmin):
     """
     exclude = ('set_by',)
     list_display = ('appointment', 'status', 'set_by', 'set_at')
-    list_filter = ('appointment','set_by')
+    list_filter = ('appointment', StaffSetByFilter)
     export_fields = ['appointment', 'status', 'set_by', 'set_at']
     def has_delete_permission(self, request, obj=None):
         # Суперадмин может всегда
