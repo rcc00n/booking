@@ -316,8 +316,15 @@ EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
 ANYMAIL = {
     "SENDGRID_API_KEY": env("SENDGRID_API_KEY"),
 }
-DEFAULT_FROM_EMAIL=env("DEFAULT_FROM_EMAIL")
-SERVER_EMAIL=env("SERVER_EMAIL")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL")
+SERVER_EMAIL = env("SERVER_EMAIL")
+BUSINESS_NAME = env("BUSINESS_NAME", default="Malva Booking")
+BUSINESS_ADDRESS = env("BUSINESS_ADDRESS", default="")
+BUSINESS_PHONE = env("BUSINESS_PHONE", default="")
+BUSINESS_EMAIL = env("BUSINESS_EMAIL", default=DEFAULT_FROM_EMAIL)
+BUSINESS_SUPPORT_EMAIL = env("BUSINESS_SUPPORT_EMAIL", default=BUSINESS_EMAIL)
+BUSINESS_BCC_EMAIL = env("BUSINESS_BCC_EMAIL", default="")
+BUSINESS_WEBSITE = env("BUSINESS_WEBSITE", default="")
 
 # для административных уведомлений
 # хороший дефолт, чтобы Django формировал абсолютные ссылки в письмах:

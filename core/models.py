@@ -1540,6 +1540,12 @@ class Payment(models.Model):
     stripe_payment_method_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     stripe_charge_id = models.CharField(max_length=255, null=True, blank=True)
     receipt_url = models.URLField(blank=True)
+    receipt_pdf = models.FileField(
+        upload_to="receipts/%Y/%m/",
+        blank=True,
+        null=True,
+    )
+    receipt_sent_at = models.DateTimeField(blank=True, null=True)
     livemode = models.BooleanField(default=False)
     metadata = models.JSONField(default=dict, blank=True)
     raw_response = models.JSONField(default=dict, blank=True)

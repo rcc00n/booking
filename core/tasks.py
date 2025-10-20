@@ -19,8 +19,11 @@ from core.models import (
     Notification,
     UserProfile,
     ReminderSchedule,
-    AppointmentItem
+    AppointmentItem,
+    Payment,
 )
+from core.services.mailer import send_payment_receipt_email
+from core.services.receipts import generate_payment_receipt_pdf, persist_payment_receipt
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Конфигурация
@@ -551,3 +554,44 @@ def send_cancellation_email(appointment_id: str, reason: str | None = None) -> b
             defaults={"message": f"{marker_prefix}[FAILED] {text}\n{e}", "status": "failed", "error": str(e)},
         )
         return False
+
+
+@shared_task(name="core.tasks.generate_payment_receipt")
+def generate_payment_receipt_task(payment_id: str, force: bool = False) -> str:
+    """
+    Persist a payment receipt PDF via default storage.
+    """
+    return persist_payment_receipt(payment_id, force=force)
+
+
+@shared_task(name="core.tasks.email_payment_receipt")
+def email_payment_receipt_task(payment_id: str, force: bool = False) -> None:
+    """
+    Deliver the payment receipt PDF to the client via email.
+    """
+    payment = (
+        Payment.objects.select_related("appointment__client__user")
+        .filter(pk=payment_id)
+        .first()
+    )
+    if not payment:
+        return
+
+    if payment.receipt_sent_at and not force:
+        return
+
+    pdf_bytes: bytes | None = None
+    if payment.receipt_pdf and not force:
+        try:
+            pdf_bytes = payment.receipt_pdf.read()
+        except Exception:
+            pdf_bytes = None
+
+    if pdf_bytes is None:
+        pdf_bytes = generate_payment_receipt_pdf(str(payment.pk))
+
+    if not pdf_bytes:
+        return
+
+    if send_payment_receipt_email(payment, pdf_bytes):
+        Payment.objects.filter(pk=payment_id).update(receipt_sent_at=timezone.now())

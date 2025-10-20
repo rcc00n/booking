@@ -1,0 +1,10 @@
+Hi {{ client_name|default:"" }},
+
+Thank you for your payment of {{ payment.amount }} {{ payment.currency|upper }} on {{ payment.created_at|date:"Y-m-d H:i" }}.
+Your receipt is attached as a PDF.
+
+Appointment: {{ appointment_datetime|default:"N/A" }}
+Total: {{ payment.amount }} {{ payment.currency|upper }}
+
+If you have questions, reply to this email.
+{{ business.name }}

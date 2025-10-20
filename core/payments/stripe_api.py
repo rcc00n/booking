@@ -31,6 +31,7 @@ from core.models import (
 from core.services.booking import create_appointment_from_cart_items
 from core.services import payments as payment_services
 from core.services.pricing import compute_cart_pricing, PricingComputationError
+from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
 
 logger = logging.getLogger(__name__)
 
@@ -353,6 +354,7 @@ def _upsert_payment_from_intent(
             payment.amount_received = amount_received
             payment.amount_refunded = amount_refunded
             payment.captured_at = captured_at
+            payment._skip_receipt_signal = True
             payment.save()
     return payment
 
@@ -455,6 +457,12 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
         payment.save(update_fields=["metadata", "updated_at"])
 
     _update_appointment_payment_status(appointment, succeeded=True)
+
+    if payment.status == "succeeded":
+        payment_id = str(payment.pk)
+        generate_payment_receipt_task.delay(payment_id)
+        email_payment_receipt_task.delay(payment_id)
+
     return payment
 
 

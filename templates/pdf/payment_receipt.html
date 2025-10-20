@@ -1,0 +1,247 @@
+{% load tz %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <title>Payment Receipt</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 25mm 20mm;
+        }
+
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 12px;
+            color: #222;
+            line-height: 1.5;
+        }
+
+        .header,
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            margin: 0;
+            letter-spacing: 1px;
+        }
+
+        .business-info {
+            text-align: right;
+            font-size: 12px;
+        }
+
+        .section {
+            margin-top: 24px;
+        }
+
+        .section h2 {
+            font-size: 14px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 4px;
+            letter-spacing: 0.5px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 8px 6px;
+            border-bottom: 1px solid #eee;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f5f5f5;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 11px;
+        }
+
+        .totals {
+            margin-top: 12px;
+            max-width: 320px;
+            margin-left: auto;
+        }
+
+        .totals table {
+            border: 1px solid #eee;
+        }
+
+        .totals td {
+            border-bottom: none;
+        }
+
+        .totals tr:last-child td {
+            border-top: 1px solid #ddd;
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .footer {
+            margin-top: 40px;
+            border-top: 1px solid #ddd;
+            padding-top: 12px;
+            font-size: 11px;
+        }
+
+        .text-muted {
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>{{ business.name|default:"Receipt" }}</h1>
+            <p class="text-muted">
+                Receipt No.: {{ receipt_number }}<br/>
+                Issued on: {{ issued_at|date:"Y-m-d H:i" }}<br/>
+                Payment date: {{ payment.created_at|date:"Y-m-d H:i" }}
+            </p>
+        </div>
+        <div class="business-info">
+            {% if business.address %}<div>{{ business.address }}</div>{% endif %}
+            {% if business.phone %}<div>{{ business.phone }}</div>{% endif %}
+            {% if business.email %}<div>{{ business.email }}</div>{% endif %}
+            {% if business.website %}<div>{{ business.website }}</div>{% endif %}
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Client</h2>
+        <table>
+            <tr>
+                <td>Name</td>
+                <td>{{ client_contact.name|default:"" }}</td>
+            </tr>
+            <tr>
+                <td>Email</td>
+                <td>{{ client_contact.email|default:"" }}</td>
+            </tr>
+            <tr>
+                <td>Phone</td>
+                <td>{{ client_contact.phone|default:"" }}</td>
+            </tr>
+        </table>
+    </div>
+
+    {% if appointment %}
+    <div class="section">
+        <h2>Appointment</h2>
+        <table>
+            <tr>
+                <td>Date &amp; Time</td>
+                <td>
+                    {% if appointment.start_time %}
+                        {{ appointment.start_time|date:"Y-m-d H:i" }}
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>Total Duration</td>
+                <td>
+                    {% if appointment.time_span %}
+                        {% with span=appointment.time_span %}
+                            {{ span.0|date:"H:i" }} - {{ span.1|date:"H:i" }}
+                        {% endwith %}
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </td>
+            </tr>
+        </table>
+    </div>
+    {% endif %}
+
+    <div class="section">
+        <h2>Services</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 35%;">Service</th>
+                    <th style="width: 25%;">Master</th>
+                    <th style="width: 20%;">Schedule</th>
+                    <th style="width: 10%;">Duration</th>
+                    <th style="width: 10%; text-align: right;">Price</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if items %}
+                    {% for item in items %}
+                        <tr>
+                            <td>{{ item.name }}</td>
+                            <td>{{ item.master }}</td>
+                            <td>
+                                {% if item.start_at %}
+                                    {{ item.start_at|date:"Y-m-d H:i" }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if item.duration_min %}
+                                    {{ item.duration_min }} min
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td style="text-align: right;">
+                                {{ item.price|floatformat:2 }} {{ totals.currency }}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="5">No services recorded for this payment.</td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="totals">
+        <table>
+            <tr>
+                <td>Subtotal</td>
+                <td style="text-align: right;">{{ totals.subtotal|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            <tr>
+                <td>Discounts</td>
+                <td style="text-align: right;">{{ totals.discount_total|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            <tr>
+                <td>Taxes</td>
+                <td style="text-align: right;">{{ totals.tax_total|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            <tr>
+                <td>Total Paid</td>
+                <td style="text-align: right;">{{ totals.total|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="footer">
+        <div>
+            Thank you for choosing {{ business.name|default:"us" }}.
+        </div>
+        <div>
+            {% if business.support_email %}
+                Questions? Contact us at {{ business.support_email }}.
+            {% elif business.email %}
+                Questions? Contact us at {{ business.email }}.
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

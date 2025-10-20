@@ -17,8 +17,12 @@ from .models import (
     AppointmentStatusHistory,
     Notification,
     AppointmentItem,
-    AppointmentItemPromoCode, UserProfile, PaymentStatus
+    AppointmentItemPromoCode,
+    UserProfile,
+    PaymentStatus,
+    Payment,
 )
+from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Email utility (локальная, чтобы избежать циклических импортов)
@@ -483,3 +487,52 @@ def ensure_user_profile(sender, instance, created, **kwargs):
         UserProfile.objects.get_or_create(user=instance, defaults={"phone": None})
 
 post_save.connect(ensure_user_profile, sender=get_user_model())
+
+
+@receiver(pre_save, sender=Payment)
+def cache_previous_payment_state(sender, instance: Payment, **kwargs):
+    if not instance.pk:
+        instance._previous_status = None
+        instance._previous_receipt_sent_at = None
+        return
+
+    previous = (
+        sender.objects.filter(pk=instance.pk)
+        .values_list("status", "receipt_sent_at")
+        .first()
+    )
+    if previous:
+        instance._previous_status = previous[0]
+        instance._previous_receipt_sent_at = previous[1]
+    else:
+        instance._previous_status = None
+        instance._previous_receipt_sent_at = None
+
+
+@receiver(post_save, sender=Payment)
+def trigger_receipt_pipeline(sender, instance: Payment, created: bool, **kwargs):
+    if kwargs.get("raw"):
+        return
+
+    if getattr(instance, "_skip_receipt_signal", False):
+        return
+
+    if instance.status != "succeeded":
+        return
+
+    if created and getattr(instance, "stripe_payment_intent_id", None):
+        return
+
+    previous_status = getattr(instance, "_previous_status", None)
+    if not created and previous_status == "succeeded":
+        return
+
+    if instance.receipt_sent_at:
+        return
+
+    if not instance.appointment_id:
+        return
+
+    payment_id = str(instance.pk)
+    generate_payment_receipt_task.delay(payment_id)
+    email_payment_receipt_task.delay(payment_id)

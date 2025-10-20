@@ -52,6 +52,7 @@ from core.services.user_import import (
     UserImportError,
     UserImportSchemaError,
 )
+from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
 
 # -----------------------------
 # Custom filter for filtering users by Role
@@ -2848,7 +2849,8 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
         'amount',
         'status',
         'method',
-        'receipt_link',
+        'receipt_column',
+        'email_sent_column',
         'livemode',
         'created_at',
     )
@@ -2867,18 +2869,92 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
         'created_at', 'updated_at', 'stripe_payment_intent_id', 'stripe_charge_id',
         'stripe_payment_method_id', 'receipt_url', 'raw_response', 'metadata',
         'amount_received', 'amount_refunded', 'captured_at', 'livemode',
+        'receipt_pdf', 'receipt_sent_at', 'resend_receipt_action',
     )
     export_fields = [
         'appointment', 'amount', 'currency', 'status', 'amount_received',
         'amount_refunded', 'method', 'livemode', 'stripe_payment_intent_id',
         'stripe_charge_id', 'created_at',
     ]
+    actions = ["action_generate_receipts", "action_send_receipts"]
+
+    def get_fields(self, request, obj=None):
+        fields = list(super().get_fields(request, obj))
+        if "resend_receipt_action" not in fields:
+            fields.append("resend_receipt_action")
+        return fields
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "<uuid:payment_id>/resend-receipt/",
+                self.admin_site.admin_view(self.resend_receipt_view),
+                name="core_payment_resend_receipt",
+            ),
+        ]
+        return custom_urls + urls
+
+    def resend_receipt_view(self, request, payment_id):
+        payment = self.get_object(request, str(payment_id))
+        if not payment:
+            self.message_user(request, "Payment not found.", level=messages.ERROR)
+            return redirect("admin:core_payment_changelist")
+        if not self.has_change_permission(request, payment):
+            raise PermissionDenied
+        email_payment_receipt_task.delay(str(payment.pk), force=True)
+        self.message_user(request, "Receipt email queued for delivery.", level=messages.SUCCESS)
+        return redirect("admin:core_payment_change", payment.pk)
 
     @admin.display(description="Receipt")
-    def receipt_link(self, obj):
+    def receipt_column(self, obj):
+        if getattr(obj, "receipt_pdf", None):
+            try:
+                url = obj.receipt_pdf.url
+            except Exception:
+                url = None
+            if url:
+                return format_html('<a href="{}" target="_blank">Download</a>', url)
         if obj.receipt_url:
-            return format_html('<a href="{}" target="_blank">View</a>', obj.receipt_url)
-        return "-"
+            return format_html('<a href="{}" target="_blank">Stripe</a>', obj.receipt_url)
+        return "—"
+
+    @admin.display(description="Email sent", ordering="receipt_sent_at")
+    def email_sent_column(self, obj):
+        if obj.receipt_sent_at:
+            return localtime(obj.receipt_sent_at).strftime("%Y-%m-%d %H:%M")
+        return "—"
+
+    @admin.display(description="Resend receipt")
+    def resend_receipt_action(self, obj):
+        if not obj or not obj.pk or obj.status != "succeeded":
+            return "—"
+        url = reverse("admin:core_payment_resend_receipt", args=[obj.pk])
+        return format_html('<a class="button" href="{}">Send again</a>', url)
+
+    @admin.action(description="Generate PDF receipts")
+    def action_generate_receipts(self, request, queryset):
+        succeeded = queryset.filter(status="succeeded")
+        count = 0
+        for payment in succeeded:
+            generate_payment_receipt_task.delay(str(payment.pk))
+            count += 1
+        if count:
+            self.message_user(request, f"Queued receipt generation for {count} payments.")
+        else:
+            self.message_user(request, "No succeeded payments selected.", level=messages.WARNING)
+
+    @admin.action(description="Send/Resend receipt emails")
+    def action_send_receipts(self, request, queryset):
+        succeeded = queryset.filter(status="succeeded")
+        count = 0
+        for payment in succeeded:
+            email_payment_receipt_task.delay(str(payment.pk), force=True)
+            count += 1
+        if count:
+            self.message_user(request, f"Queued receipt emails for {count} payments.")
+        else:
+            self.message_user(request, "No succeeded payments selected.", level=messages.WARNING)
 
 
 # -----------------------------
