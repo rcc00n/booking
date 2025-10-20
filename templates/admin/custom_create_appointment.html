@@ -354,7 +354,7 @@
             </div>
 
             <!-- STEP 2: ITEMS -->
-            <div id="items-section" class="ab-hidden" style="margin-top:20px">
+            <div id="items-section" style="margin-top:20px">
                 <div class="ab-actions" style="margin-bottom:10px">
                     <button type="button" class="ab-btn success" id="btn-add-item">
                         <!-- плюс -->
@@ -453,7 +453,6 @@
 
             // ---- Elements
             const clientEl    = document.getElementById('id_client');
-            const itemsSection= document.getElementById('items-section');
             const container   = document.getElementById('items-container');
             const totalForms  = document.getElementById('id_items-TOTAL_FORMS');
             const grandTotal  = document.getElementById('grand-total');
@@ -527,7 +526,6 @@
                     input.value = item.label;
                     clientEl.value = item.id;
                     clientEl.dispatchEvent(new Event('change', { bubbles:true }));
-                    itemsSection.classList.toggle('ab-hidden', !clientEl.value);
                     close();
                 }
 
@@ -535,8 +533,6 @@
                     const found = ALL.find(x => String(x.id) === String(POSTED_CLIENT));
                     if (found){ clientEl.value = found.id; input.value = found.label; }
                 }
-                itemsSection.classList.toggle('ab-hidden', !clientEl.value);
-
                 input.addEventListener('focus', () => { filter(input.value); open(); });
                 input.addEventListener('click',  () => { filter(input.value); open(); });
                 input.addEventListener('input', () => { filter(input.value); open(); clientEl.value = ''; });
@@ -1772,7 +1768,6 @@
             // init
             (function init(){
                 if (POSTED_CLIENT){ clientEl.value = POSTED_CLIENT; }
-                itemsSection.classList.toggle('ab-hidden', !clientEl.value);
 
                 if (IS_MASTER && CURRENT_MASTER_ID){
                     if (!INITIAL_FIRST || typeof INITIAL_FIRST !== 'object') window.INITIAL_FIRST = {};
@@ -1808,10 +1803,6 @@
                 paintItemErrors();
                 renderIntakeForms();
             })();
-
-            clientEl.addEventListener('change', () => {
-                itemsSection.classList.toggle('ab-hidden', !clientEl.value);
-            });
 
             document.getElementById('btn-add-item')
                 .addEventListener('click', () => addRow({ master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : '' }));
