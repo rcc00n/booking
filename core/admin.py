@@ -2933,7 +2933,7 @@ class ServiceMasterAdmin(ExportCsvMixin, admin.ModelAdmin):
     Admin interface to assign masters to services.
     """
     list_display = ('master', 'service')
-    search_fields = ('master__user__first_name', 'master__user__last_name', 'service__name')
+    search_fields = ('master__user__user__first_name', 'master__user__user__last_name', 'service__name')
     export_fields = ['master', 'service']
 
 # -----------------------------
@@ -3219,7 +3219,7 @@ class NotificationAdmin(admin.ModelAdmin):
     """
     list_display = ('user', 'appointment', 'channel', 'short_message')
     list_filter = (('sent_at', DateFieldListFilter), 'channel')
-    search_fields = ('user__user__first_name', 'user__user__last_name', 'appointment__service__name')
+    search_fields = ('user__user__first_name', 'user__user__last_name', 'appointment__items__service__name')
     ordering = ['-sent_at']
 
     @admin.display(description="message")
@@ -3233,9 +3233,9 @@ class NotificationAdmin(admin.ModelAdmin):
 
 @admin.register(ReminderSchedule)
 class ReminderScheduleAdmin(admin.ModelAdmin):
-    list_display = ("name", "is_active", "offset_amount", "offset_unit", "email_template", "email_subject", "slug")
+    list_display = ("name", "is_active", "offset_amount", "offset_unit", "email_subject", "slug")
     list_filter  = ("is_active", "offset_unit")
-    search_fields = ("name", "slug", "email_subject", "email_template")
+    # search_fields = ("name", "slug", "email_subject", "email_template")
     fields = (
         "name", "slug", "is_active",
         "offset_amount", "offset_unit",

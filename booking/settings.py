@@ -196,42 +196,25 @@ STRIPE_ALLOW_PROMISE_PAYMENT = env.bool(
 
 # # AWS credentials
 
-# AWS_S3_SIGNATURE_NAME  = 's3v4'
-# # Your S3 bucket name
-# AWS_STORAGE_BUCKET_NAME = 'malvatest1'
-# AWS_S3_REGION_NAME = 'ca-central-1'
-# # Optional: Make files public
-# AWS_QUERYSTRING_AUTH = False
+AWS_S3_SIGNATURE_NAME  = env.str("AWS_S3_SIGNATURE_NAME")
+# Your S3 bucket name
+AWS_STORAGE_BUCKET_NAME = env.str("AWS_STORAGE_BUCKET_NAME")
+AWS_S3_REGION_NAME = env.str("AWS_S3_REGION_NAME")
+# Optional: Make files public
+AWS_QUERYSTRING_AUTH = env.bool("AWS_QUERYSTRING_AUTH")
 
-# # Optional: Customize file URLs
-# AWS_S3_FILE_OVERWRITE = False
-# AWS_DEFAULT_ACL = None
-# # Optional: Specify custom domain (if you use CloudFront or static hosting)
-# # AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
+# Optional: Customize file URLs
+AWS_S3_FILE_OVERWRITE = env.bool("AWS_S3_FILE_OVERWRITE")
+AWS_DEFAULT_ACL = env.str("AWS_DEFAULT_ACL", default=None)
+if isinstance(AWS_DEFAULT_ACL, str) and AWS_DEFAULT_ACL.lower() == "none":
+    AWS_DEFAULT_ACL = None
+# Optional: Specify custom domain (if you use CloudFront or static hosting)
+# AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
 
-# AWS_ACCESS_KEY_ID=env("AWS_ACCESS_KEY_ID")
-# AWS_SECRET_ACCESS_KEY=env("AWS_SECRET_ACCESS_KEY")
+AWS_ACCESS_KEY_ID=env("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY=env("AWS_SECRET_ACCESS_KEY")
 
-# settings.py
-from environ import Env
-env = Env()
 
-USE_S3 = env.bool("USE_S3", default=False)
-
-if USE_S3:
-    INSTALLED_APPS += ["storages"]
-    AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY")
-    AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
-    AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="us-east-1")
-    AWS_S3_SIGNATURE_VERSION = "s3v4"
-    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-else:
-    # локально — файловая система
-    # MEDIA_URL = "/media/"
-    # MEDIA_ROOT = BASE_DIR / "media"
-    STATIC_ROOT = "/app/storage/static"
-    MEDIA_ROOT  = "/app/storage/media"
 # # Media URL for S3
 # MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.ca-central-1.amazonaws.com/'
 # REVIEW_FORM_URL = "https://your-domain.tld/review/{appointment_id}/"
@@ -245,8 +228,8 @@ else:
 
   # для административных уведомлений
 # хороший дефолт, чтобы Django формировал абсолютные ссылки в письмах:
-from environ import Env
-env = Env()
+
+
 
 # ===== Email =====
 USE_SENDGRID = env.bool("USE_SENDGRID", default=False)
