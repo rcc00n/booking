@@ -2181,6 +2181,15 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 initial_first_item["start_time_date"] = dt.strftime("%Y-%m-%d")
 
                 initial_first_item["start_time_time"] = dt.strftime("%H:%M:%S" if dt.second else "%H:%M")
+            else:
+
+                if q_date:
+
+                    initial_first_item.setdefault("start_time_date", q_date)
+
+                if q_time:
+
+                    initial_first_item.setdefault("start_time_time", q_time[:5])
 
 
 

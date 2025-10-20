@@ -796,6 +796,17 @@
                 return Number.isNaN(dt.getTime()) ? null : dt;
             }
 
+            function syncTimeControl(timeInput){
+                if (!timeInput) return;
+                const picker = timeInput.nextElementSibling;
+                const val = timeInput.value || '';
+                if (picker && picker.classList && picker.classList.contains('js-quarter-picker')){
+                    picker.value = val;
+                }
+                timeInput.dispatchEvent(new Event('input', { bubbles:true }));
+                timeInput.dispatchEvent(new Event('change', { bubbles:true }));
+            }
+
             function availabilityUrlFor(serviceId, masterId, dateStr){
                 if (!AVAILABILITY_URL) return null;
                 const params = new URLSearchParams({ service: serviceId, date: dateStr });
@@ -962,13 +973,27 @@
                     const serviceId = serviceEl.value;
                     const dateStr = dateEl.value;
                     const seq = ++requestSeq;
-                    setStatus('loading', 'Loading available slots…');
+                    setStatus('loading', 'Loading available slots...');
                     fetchAvailability(serviceId, masterId, dateStr)
                         .then(payload => {
                             if (seq !== requestSeq) return;
-                            const masters = payload && Array.isArray(payload.masters) ? payload.masters : [];
-                            const entry = masters.find(m => String(m.id) === String(masterId));
-                            const slots = entry ? entry.slots || [] : [];
+                            const masters = (payload && Array.isArray(payload.masters)) ? payload.masters : [];
+                            let slots = [];
+                            if (masters.length){
+                                let entry = null;
+                                if (masterId){
+                                    entry = masters.find(m => String(m.id) === String(masterId)) || null;
+                                }
+                                if (!entry){
+                                    entry = masters[0] || null;
+                                }
+                                if (entry && Array.isArray(entry.slots)){
+                                    slots = entry.slots.slice();
+                                }
+                            }
+                            if (!slots.length && payload && Array.isArray(payload.slots)){
+                                slots = payload.slots.slice();
+                            }
                             renderSlots(slots);
                         })
                         .catch(err => {
@@ -1498,7 +1523,7 @@
                             const optionEl = document.createElement('div');
                             optionEl.className = 'combo-item';
                             optionEl.setAttribute('role', 'option');
-                            optionEl.textContent = item.label;
+                            optionEl.textContent = item.displayLabel;
                             optionEl.dataset.value = item.id;
                             optionEl.addEventListener('mousedown', (evt) => {
                                 evt.preventDefault();
@@ -1836,7 +1861,8 @@
                     }
                     recalcGrandTotal();
                     renderIntakeForms();
-                    if (availability) availability.refresh();
+                    const preserveTime = !!(timeInp && timeInp.value);
+                    if (availability) availability.refresh({ preserveSelection: preserveTime });
                     refreshPromos({ selected: '' });
                 });
 
@@ -1860,7 +1886,8 @@
                     hint.textContent = totalDur ? (`Duration: ${totalDur} min`) : '';
                     recalcGrandTotal();
                     renderIntakeForms();
-                    if (availability) availability.refresh();
+                    const preserveTime = !!(timeInp && timeInp.value);
+                    if (availability) availability.refresh({ preserveSelection: preserveTime });
                     refreshPromos({ selected: '' });
                 });
 
@@ -1927,6 +1954,7 @@
                 if (prefill && prefill.start_time_0) dateInp.value = prefill.start_time_0;
                 if (prefill && prefill.start_time_1){
                     timeInp.value = prefill.start_time_1.length===5 ? prefill.start_time_1 : prefill.start_time_1.slice(0,5);
+                    syncTimeControl(timeInp);
                 }
                 if (prefill && prefill.unit_price) priceInp.value = prefill.unit_price;
                 if (durationInp){
