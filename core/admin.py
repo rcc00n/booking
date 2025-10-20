@@ -2854,11 +2854,14 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
     )
     list_filter = ('method', 'status', 'livemode')
     search_fields = (
-        'appointment__client__user__first_name', 'appointment__client__user__last_name',
+        'appointment__client__user__first_name',
+        'appointment__client__user__last_name',
         'appointment__client__user__email',
-        'appointment__master__user__first_name', 'appointment__master__user__last_name',
-        'appointment__service__name',
-        'stripe_payment_intent_id', 'stripe_charge_id',
+        'appointment__items__master__user__user__first_name',
+        'appointment__items__master__user__user__last_name',
+        'appointment__items__service__name',
+        'stripe_payment_intent_id',
+        'stripe_charge_id',
     )
     readonly_fields = (
         'created_at', 'updated_at', 'stripe_payment_intent_id', 'stripe_charge_id',
@@ -3345,7 +3348,7 @@ class ProductCategoryAdmin(admin.ModelAdmin):
     )
 
 
-class ProductAdmin(admin.ModelAdmin):
+class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
     list_display = (
         "name",
         "category",
@@ -3368,6 +3371,60 @@ class ProductAdmin(admin.ModelAdmin):
     @admin.display(description="Low stock", boolean=True)
     def low_stock_indicator(self, obj):
         return obj.is_low_on_stock
+
+    def _export_all_xlsx_view(self, request):
+        queryset = self.get_queryset(request).select_related("category")
+        headers = [
+            "ID",
+            "Name",
+            "SKU",
+            "Category",
+            "Description",
+            "Price",
+            "Quantity In Stock",
+            "Low Stock Threshold",
+            "Low Stock?",
+            "Active",
+            "Created At",
+            "Updated At",
+        ]
+        rows = [
+            [
+                product.pk,
+                product.name,
+                product.sku or "",
+                product.category.name if product.category else "",
+                product.description,
+                product.price,
+                product.quantity_in_stock,
+                product.low_stock_threshold,
+                product.is_low_on_stock,
+                product.is_active,
+                product.created_at,
+                product.updated_at,
+            ]
+            for product in queryset
+        ]
+        return self._xlsx_response(
+            "products.xlsx",
+            "Products",
+            headers,
+            rows,
+            money_cols={6},
+            datetime_cols={11, 12},
+        )
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        try:
+            opts = self.model._meta
+            query_string = f"?{request.GET.urlencode()}" if request.GET else ""
+            export_url = reverse(f"admin:{opts.app_label}_{opts.model_name}_export_xlsx") + query_string
+            extra_context["export_url"] = export_url
+            extra_context["export_label"] = "📤 Export XLSX"
+        except NoReverseMatch:
+            extra_context.setdefault("export_url", None)
+        return super().changelist_view(request, extra_context=extra_context)
 
 
 class ProductSaleAdmin(admin.ModelAdmin):
