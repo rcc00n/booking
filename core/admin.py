@@ -775,7 +775,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         (None, {
             'classes': ('wide',),
             'fields': (
-                'username', 'usable_password', 'password1', 'password2',
+                'usable_password', 'password1', 'password2',
                 'email', 'first_name', 'last_name',
                 'phone', 'birth_date', 'address', 'postal_code',
                 'personal_discount_percent', 'how_heard', 'email_marketing_consent',
@@ -828,7 +828,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 
     # Field layout when editing a user
     fieldsets = (
-        (None, {'fields': ('username', 'email', 'password', 'personal_discount_percent')}),
+        (None, {'fields': ('email', 'password', 'personal_discount_percent')}),
         ('Personal Info', {'fields': (
             'first_name', 'last_name', 'phone', 'birth_date', 'address',
             'postal_code', 'how_heard', 'email_marketing_consent'

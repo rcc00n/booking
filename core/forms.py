@@ -14,11 +14,11 @@ from django.contrib.auth.forms import (
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.db.models import Prefetch, Q
 from django.forms import BaseInlineFormSet, inlineformset_factory
 from django.template import TemplateDoesNotExist, engines
 from django.utils.safestring import mark_safe
-from django.utils.text import slugify
 
 import phonenumbers
 
@@ -504,7 +504,7 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
     class Meta:
         model = User
         fields = [
-            'username', 'email', 'first_name', 'last_name',
+            'email', 'first_name', 'last_name',
             'phone', 'birth_date',
             'address',
             'usable_password', 'password1', 'password2',
@@ -529,23 +529,19 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
         user.first_name = self.cleaned_data['first_name']
         user.last_name = self.cleaned_data['last_name']
 
-        if not (self.cleaned_data.get('username') or user.username):
-            base = slugify(user.email.split('@')[0]) or 'user'
-            candidate = base
-            idx = 1
-            User = get_user_model()
-            while User.objects.filter(username=candidate).exists():
-                candidate = f"{base}{idx}"
-                idx += 1
-            user.username = candidate
+        phone = self.cleaned_data.get('phone')
+        user.username = phone
 
-        user = self.set_password_and_save(user, commit=commit)
+        try:
+            user = self.set_password_and_save(user, commit=commit)
+        except IntegrityError as exc:
+            self.add_error('phone', "User with such phone already exists.")
+            raise forms.ValidationError("User with such phone already exists.") from exc
 
         if commit and hasattr(self, 'save_m2m'):
             self.save_m2m()
 
         if commit:
-            phone = self.cleaned_data.get('phone')
             birth_date = self.cleaned_data.get('birth_date')
             how_heard = self.cleaned_data.get('how_heard')
             email_marketing_consent = self.cleaned_data.get('email_marketing_consent')
@@ -579,6 +575,10 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
             phone = _normalize_phone(raw_phone)
         except ValidationError as exc:
             raise forms.ValidationError(exc.message)
+
+        User = get_user_model()
+        if User.objects.filter(username=phone).exists():
+            raise forms.ValidationError("User with such phone number already exists.")
 
         if UserProfile.objects.filter(phone=phone).exists():
             raise forms.ValidationError("User with such phone number already exists.")
@@ -748,7 +748,6 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
     class Meta:
         model = User
         fields = [
-            'username',
             'email',
             'first_name',
             'last_name',
@@ -800,10 +799,20 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         - Sync UserRole assignments
         """
         user = super().save(commit=False)
-        user.save()
+        phone_raw = self.cleaned_data.get('phone', "")
+        try:
+            phone = _normalize_phone(phone_raw)
+        except ValidationError as exc:
+            self.add_error('phone', exc.message)
+            raise forms.ValidationError(exc.message) from exc
+        user.username = phone
+        try:
+            user.save()
+        except IntegrityError as exc:
+            self.add_error('phone', "User with such phone number already exists.")
+            raise forms.ValidationError("User with such phone number already exists.") from exc
 
         # Update profile
-        phone = self.cleaned_data.get('phone', "")
         birth_date = self.cleaned_data.get('birth_date', None)
         how_heard = self.cleaned_data.get('how_heard', None)
         notes = self.cleaned_data.get('notes', None)
@@ -845,6 +854,13 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
             qs = qs.exclude(user=self.instance)
         if qs.exists():
             raise forms.ValidationError("User with such phone number already exists.")
+
+        User = get_user_model()
+        user_qs = User.objects.filter(username=phone)
+        if self.instance.pk:
+            user_qs = user_qs.exclude(pk=self.instance.pk)
+        if user_qs.exists():
+            raise forms.ValidationError("User with such phone number already exists.")
         return phone
 
 class ServicesDropdown(forms.CheckboxSelectMultiple):
@@ -853,7 +869,6 @@ class ServicesDropdown(forms.CheckboxSelectMultiple):
 
 class MasterCreateFullForm(forms.ModelForm):
     # Общие поля
-    username = forms.CharField()
     email = forms.EmailField()
     first_name = forms.CharField(required=True)
     last_name = forms.CharField(required=True)
@@ -903,7 +918,6 @@ class MasterCreateFullForm(forms.ModelForm):
             self.fields.pop('password2')
 
             # Заполняем initial для полей пользователя
-            self.fields['username'].initial = user.username
             self.fields['email'].initial = user.email
             self.fields['first_name'].initial = user.first_name
             self.fields['last_name'].initial = user.last_name
@@ -941,30 +955,29 @@ class MasterCreateFullForm(forms.ModelForm):
         return password2
 
     def clean_phone(self):
-        phone = self.cleaned_data.get('phone')
+        raw_phone = self.cleaned_data.get('phone', "")
+        try:
+            phone = _normalize_phone(raw_phone)
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.message)
 
         qs = UserProfile.objects.filter(phone=phone)
 
-        if self.instance.pk:
-            # если редактируем, исключаем текущего пользователя
+        if self.instance.pk and hasattr(self.instance, 'user'):
+            # If editing, exclude the current user
             qs = qs.exclude(user=self.instance.user.user)
 
         if qs.exists():
-            raise forms.ValidationError("This phone number is already registered!")
+            raise forms.ValidationError('This phone number is already registered!')
+
+        User = get_user_model()
+        user_qs = User.objects.filter(username=phone)
+        if self.instance.pk and hasattr(self.instance, 'user'):
+            user_qs = user_qs.exclude(pk=self.instance.user.user_id)
+        if user_qs.exists():
+            raise forms.ValidationError('This phone number is already registered!')
 
         return phone
-
-    def clean_username(self):
-        username = self.cleaned_data.get("username")
-        if not username:
-            return username
-        User = get_user_model()
-        qs = User.objects.filter(username=username)
-        if self.instance.pk and hasattr(self.instance, "user"):
-            qs = qs.exclude(pk=self.instance.user.user_id)
-        if qs.exists():
-            raise forms.ValidationError("A user with this username already exists.")
-        return username
 
     def save(self, commit=True):
         """
@@ -977,23 +990,34 @@ class MasterCreateFullForm(forms.ModelForm):
          - синхронизируем ServiceMaster: добавляем новые, удаляем снятые
        """
         selected_services = list(self.cleaned_data.get('services') or [])
+        phone_raw = self.cleaned_data.get('phone', "")
+        try:
+            phone = _normalize_phone(phone_raw)
+        except ValidationError as exc:
+            self.add_error('phone', exc.message)
+            raise forms.ValidationError(exc.message) from exc
+
         if not self.instance.pk:
             # Создание нового пользователя
             User = get_user_model()
-            user = User.objects.create_user(
-                username=self.cleaned_data['username'],
-                email=self.cleaned_data['email'],
-                password=self.cleaned_data['password1'],
-                first_name=self.cleaned_data['first_name'],
-                last_name=self.cleaned_data['last_name'],
-            )
+            try:
+                user = User.objects.create_user(
+                    username=phone,
+                    email=self.cleaned_data['email'],
+                    password=self.cleaned_data['password1'],
+                    first_name=self.cleaned_data['first_name'],
+                    last_name=self.cleaned_data['last_name'],
+                )
+            except IntegrityError as exc:
+                self.add_error('phone', 'User with such phone already exists.')
+                raise forms.ValidationError('User with such phone already exists.') from exc
             user.is_staff = True
             user.is_active = True
             user.save()
 
             # Профиль пользователя
             user_profile, _ = UserProfile.objects.get_or_create(user=user)
-            user_profile.phone = self.cleaned_data.get('phone')
+            user_profile.phone = phone
             user_profile.postal_code = self.cleaned_data.get('postal_code') or ""
             user_profile.email_marketing_consent = True
             user_profile.birth_date = self.cleaned_data.get('birth_date')
@@ -1020,13 +1044,17 @@ class MasterCreateFullForm(forms.ModelForm):
             user_profile = self.instance.user
             user = user_profile.user
 
-            user.username = self.cleaned_data['username']
             user.email = self.cleaned_data['email']
             user.first_name = self.cleaned_data['first_name']
             user.last_name = self.cleaned_data['last_name']
-            user.save()
+            user.username = phone
+            try:
+                user.save()
+            except IntegrityError as exc:
+                self.add_error('phone', 'User with such phone already exists.')
+                raise forms.ValidationError('User with such phone already exists.') from exc
 
-            user_profile.phone = self.cleaned_data.get('phone')
+            user_profile.phone = phone
             user_profile.postal_code = self.cleaned_data.get('postal_code') or ""
             user_profile.birth_date = self.cleaned_data.get('birth_date')
             user_profile.save()
@@ -1048,43 +1076,42 @@ class MasterCreateFullForm(forms.ModelForm):
             if to_del_ids:
                 ServiceMaster.objects.filter(master=master, service_id__in=to_del_ids).delete()
 
-
             return master
 
     class Media:
-        # Небольшая косметика для чекбоксов (опционально)
+        # ÐÐµÐ±Ð¾Ð»ÑŒÑˆÐ°Ñ ÐºÐ¾ÑÐ¼ÐµÑ‚Ð¸ÐºÐ° Ð´Ð»Ñ Ñ‡ÐµÐºÐ±Ð¾ÐºÑÐ¾Ð² (Ð¾Ð¿Ñ†Ð¸Ð¾Ð½Ð°Ð»ÑŒÐ½Ð¾)
         css = {
             'all': (
-                # можно положить этот CSS в static и подключить здесь
-                # пример встроенного мини-CSS:
-                # admin сама проглотит inline-css? Обычно лучше внешний файл.
+                # Ð¼Ð¾Ð¶Ð½Ð¾ Ð¿Ð¾Ð»Ð¾Ð¶Ð¸Ñ‚ÑŒ ÑÑ‚Ð¾Ñ‚ CSS Ð² static Ð¸ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð·Ð´ÐµÑÑŒ
+                # Ð¿Ñ€Ð¸Ð¼ÐµÑ€ Ð²ÑÑ‚Ñ€Ð¾ÐµÐ½Ð½Ð¾Ð³Ð¾ Ð¼Ð¸Ð½Ð¸-CSS:
+                # admin ÑÐ°Ð¼Ð° Ð¿Ñ€Ð¾Ð³Ð»Ð¾Ñ‚Ð¸Ñ‚ inline-css? ÐžÐ±Ñ‹Ñ‡Ð½Ð¾ Ð»ÑƒÑ‡ÑˆÐµ Ð²Ð½ÐµÑˆÐ½Ð¸Ð¹ Ñ„Ð°Ð¹Ð».
             )
         }
 
 
 def assign_services_to_master(master, selected_services):
-    # 1) мастер должен быть сохранён
+    # 1) Ð¼Ð°ÑÑ‚ÐµÑ€ Ð´Ð¾Ð»Ð¶ÐµÐ½ Ð±Ñ‹Ñ‚ÑŒ ÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½
     if not master.pk:
         master.save()
 
-    # 2) работаем по ID, чтобы не было ошибки с несохранёнными инстансами
+    # 2) Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÐµÐ¼ Ð¿Ð¾ ID, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ Ð±Ñ‹Ð»Ð¾ Ð¾ÑˆÐ¸Ð±ÐºÐ¸ Ñ Ð½ÐµÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½Ð½Ñ‹Ð¼Ð¸ Ð¸Ð½ÑÑ‚Ð°Ð½ÑÐ°Ð¼Ð¸
     service_ids = []
     for s in selected_services:
-        sid = getattr(s, "pk", s)  # поддержим как объекты, так и уже id
+        sid = getattr(s, "pk", s)  # Ð¿Ð¾Ð´Ð´ÐµÑ€Ð¶Ð¸Ð¼ ÐºÐ°Ðº Ð¾Ð±ÑŠÐµÐºÑ‚Ñ‹, Ñ‚Ð°Ðº Ð¸ ÑƒÐ¶Ðµ id
         if sid:
             service_ids.append(sid)
 
     if not service_ids:
         return
 
-    # 3) найдём уже существующие связи, чтобы не дублировать
+    # 3) Ð½Ð°Ð¹Ð´Ñ‘Ð¼ ÑƒÐ¶Ðµ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÑŽÑ‰Ð¸Ðµ ÑÐ²ÑÐ·Ð¸, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ Ð´ÑƒÐ±Ð»Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ
     existing = set(
         ServiceMaster.objects
         .filter(master_id=master.pk, service_id__in=service_ids)
         .values_list("service_id", flat=True)
     )
 
-    # 4) создадим только недостающие связи
+    # 4) ÑÐ¾Ð·Ð´Ð°Ð´Ð¸Ð¼ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð½ÐµÐ´Ð¾ÑÑ‚Ð°ÑŽÑ‰Ð¸Ðµ ÑÐ²ÑÐ·Ð¸
     for sid in service_ids:
         if sid not in existing:
             ServiceMaster.objects.create(master_id=master.pk, service_id=sid)
