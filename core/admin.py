@@ -2674,10 +2674,6 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             'appointment__client', 'service', 'master'
         ).prefetch_related('appointment__items__service')
 
-        masters = MasterProfile.objects.filter(
-            id__in=appointments.values_list('master_id', flat=True)
-        ).distinct()
-
         start_of_day = make_aware(datetime.combine(selected_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(selected_date, datetime.max.time()))
 
@@ -2696,6 +2692,13 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             appointments = appointments.filter(
                 appointment__payment_status_id__in=request.GET.getlist("payment_status")
             )
+        master_ids = request.GET.getlist("master")
+        if master_ids:
+            appointments = appointments.filter(master_id__in=master_ids)
+
+        masters = MasterProfile.objects.filter(
+            id__in=appointments.values_list('master_id', flat=True)
+        ).distinct()
 
         # Слоты по 15 минут
         start_hour = 8
@@ -2714,6 +2717,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 html = render_to_string('admin/appointments_calendar_partial.html', {
                     "calendar_table": calendar_table,
                     'masters': masters,
+                    'selected_masters': master_ids,
                 })
                 return JsonResponse({"html": html})
 
@@ -2721,6 +2725,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 html = render_to_string('admin/appointments_calendar_partial.html', {
                     'calendar_table': calendar_table,
                     'masters': masters,
+                    'selected_masters': master_ids,
                 }, request=request)
                 return JsonResponse({'html': html})
 
@@ -2746,6 +2751,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             context.update({
                 "calendar_table": calendar_table,
                 "masters": masters,
+                "selected_masters": master_ids,
                 "selected_date": selected_date,
                 "prev_date": (selected_date - timedelta(days=1)).strftime("%Y-%m-%d"),
                 "next_date": (selected_date + timedelta(days=1)).strftime("%Y-%m-%d"),

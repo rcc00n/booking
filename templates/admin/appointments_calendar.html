@@ -98,6 +98,27 @@
 
             <div class="filter-section">
                 <div class="filter-header" onclick="toggleSection(this)">
+                    👨‍🏫 Masters <span class="arrow">⌄</span>
+                </div>
+                <div class="filter-content">
+                    {% for m in masters %}
+                        {% with mid=m.id|stringformat:"s" %}
+                            <label class="checkbox-wrapper">
+                                <input
+                                        type="checkbox"
+                                        name="master"
+                                        value="{{ mid }}"
+                                        {% if mid in selected_masters %}checked{% endif %}
+                                >
+                                <span>{{ m }}</span>
+                            </label>
+                        {% endwith %}
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="filter-section">
+                <div class="filter-header" onclick="toggleSection(this)">
                     🏷️ Services <span class="arrow">Edit</span>
                 </div>
                 <div class="filter-content">
