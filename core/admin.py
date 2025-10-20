@@ -770,6 +770,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     change_list_template = "admin/users/changelist_cards.html"
     export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
     list_per_page = 10
+    readonly_fields = getattr(BaseUserAdmin, "readonly_fields", tuple()) + ("password_change_link",)
 
     add_fieldsets = (
         (None, {
@@ -828,7 +829,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 
     # Field layout when editing a user
     fieldsets = (
-        (None, {'fields': ('email', 'password', 'personal_discount_percent')}),
+        (None, {'fields': ('email', 'password_change_link', 'personal_discount_percent')}),
         ('Personal Info', {'fields': (
             'first_name', 'last_name', 'phone', 'birth_date', 'address',
             'postal_code', 'how_heard', 'email_marketing_consent'
@@ -847,6 +848,17 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             ),
         }),
     )
+
+    def password_change_link(self, obj):
+        if not obj or not getattr(obj, "pk", None):
+            return _("Change password after saving the user.")
+        try:
+            url = reverse("admin:auth_user_password_change", args=[obj.pk])
+        except NoReverseMatch:
+            return _("Change password")
+        return mark_safe(f'<a href="{url}">{_("Change password")}</a>')
+
+    password_change_link.short_description = _("Password")
 
     def get_queryset(self, request):
         # Prefetch the attached profile to avoid N+1 lookups.
@@ -4096,15 +4108,19 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
 
     def password_display(self, obj):
         from django.utils.html import format_html
-        reset_url = f"/admin/auth/user/{obj.user.id}/password/"
+
+        if not obj or not getattr(obj, "user", None) or not getattr(obj.user, "id", None):
+            return _("Save the master to manage password.")
+
+        try:
+            url = reverse("admin:auth_user_password_change", args=[obj.user.id])
+        except NoReverseMatch:
+            return _("Change password")
+
         return format_html(
-            '<div style="word-break: break-all;">'
-            '<strong>algorithm:</strong> pbkdf2_sha256<br>'
-            '<strong>hash:</strong> {}<br><br>'
-            '<a href="{}" class="button" style="color: #fff; background: #007bff; padding: 4px 8px; text-decoration: none; border-radius: 4px;">Reset password</a>'
-            '</div>',
-            obj.user.password,
-            reset_url
+            '<a href="{}" class="button" style="color: #fff; background: #007bff; padding: 4px 8px; text-decoration: none; border-radius: 4px;">{}</a>',
+            url,
+            _("Change password"),
         )
     password_display.short_description = "Password"
 

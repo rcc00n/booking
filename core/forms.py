@@ -774,6 +774,12 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         """
         super().__init__(*args, **kwargs)
 
+        password_field = self.fields.get('password')
+        if password_field:
+            password_field.widget = forms.HiddenInput()
+            password_field.required = False
+            password_field.help_text = ""
+
         if self.instance and hasattr(self.instance, 'userprofile'):
             self._set_health_initials(self.instance)
             up = self.instance.userprofile
