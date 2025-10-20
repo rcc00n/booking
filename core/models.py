@@ -1544,6 +1544,7 @@ class Payment(models.Model):
         upload_to="receipts/%Y/%m/",
         blank=True,
         null=True,
+        storage=S3Boto3Storage()
     )
     receipt_sent_at = models.DateTimeField(blank=True, null=True)
     livemode = models.BooleanField(default=False)

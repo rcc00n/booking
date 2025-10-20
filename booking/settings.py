@@ -192,7 +192,7 @@ STRIPE_ALLOW_PROMISE_PAYMENT = env.bool(
 )
 
 # # Use S3 as default storage for uploaded media
-# DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 
 # # AWS credentials
 
