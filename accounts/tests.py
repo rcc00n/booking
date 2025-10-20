@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta, time
+from datetime import date, timedelta, time
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -285,3 +285,104 @@ class AdminUserFormTests(TestCase):
         self.assertEqual(updated_profile.how_heard, "google")
         self.assertTrue(updated_profile.email_marketing_consent)
         self.assertEqual(updated_profile.personal_discount_percent, 7)
+
+
+class AdminUserAdminViewTests(TestCase):
+    def setUp(self):
+        self.User = get_user_model()
+        self.admin_password = "AdminPass123!"
+        self.admin_user = self.User.objects.create_superuser(
+            username="admin",
+            email="admin@example.com",
+            password=self.admin_password,
+        )
+        self.client.force_login(self.admin_user)
+
+    def _creation_payload(self):
+        return {
+            "username": "adminclient",
+            "email": "client_admin@example.com",
+            "first_name": "Admin",
+            "last_name": "Client",
+            "phone": "403-555-7890",
+            "address": "42 Flower Road",
+            "postal_code": "T2X1A1",
+            "how_heard": "instagram",
+            "email_marketing_consent": "on",
+            "notes": "VIP client",
+            "personal_discount_percent": "5",
+            "password1": "StrongPass123!",
+            "password2": "StrongPass123!",
+            "usable_password": "true",
+            "is_active": "on",
+            "is_staff": "",
+            "is_superuser": "",
+            "groups": [],
+            "chronic_conditions": [],
+            "contraindications": [],
+            "birth_date_year": "1991",
+            "birth_date_month": "2",
+            "birth_date_day": "20",
+            "_save": "Save",
+        }
+
+    def test_admin_add_view_persists_profile_fields(self):
+        add_url = reverse("admin:auth_user_add")
+        response = self.client.post(add_url, self._creation_payload(), follow=True)
+        self.assertEqual(response.status_code, 200)
+        created_user = self.User.objects.get(email="client_admin@example.com")
+        profile = created_user.userprofile
+        profile.refresh_from_db()
+        self.assertEqual(profile.phone, "+14035557890")
+        self.assertEqual(profile.address, "42 Flower Road")
+        self.assertEqual(profile.postal_code, "T2X1A1")
+        self.assertEqual(profile.birth_date, date(1991, 2, 20))
+
+    def test_admin_change_view_updates_profile_fields(self):
+        user = self.User.objects.create_user(
+            username="change_client",
+            email="change_client@example.com",
+            password="OldPass123!",
+            first_name="Change",
+            last_name="Client",
+        )
+        profile = user.userprofile
+        profile.phone = "+14035550000"
+        profile.address = "Initial address"
+        profile.postal_code = "T2X0A1"
+        profile.birth_date = date(1990, 1, 15)
+        profile.save()
+
+        change_url = reverse("admin:auth_user_change", args=[user.pk])
+        payload = {
+            "username": user.username,
+            "email": "change_client@example.com",
+            "first_name": "Change",
+            "last_name": "Client",
+            "phone": "(403) 777-1111",
+            "address": "500 Updated Ave",
+            "postal_code": "T2Y7B1",
+            "how_heard": "google",
+            "email_marketing_consent": "on",
+            "notes": "Updated note",
+            "personal_discount_percent": "7",
+            "is_active": "on",
+            "is_staff": "",
+            "is_superuser": "",
+            "groups": [],
+            "user_permissions": [],
+            "password": user.password,
+            "chronic_conditions": [],
+            "contraindications": [],
+            "birth_date_year": "1992",
+            "birth_date_month": "5",
+            "birth_date_day": "30",
+            "_save": "Save",
+        }
+        response = self.client.post(change_url, payload, follow=True)
+        self.assertEqual(response.status_code, 200)
+        profile.refresh_from_db()
+        self.assertEqual(profile.phone, "+14037771111")
+        self.assertEqual(profile.address, "500 Updated Ave")
+        self.assertEqual(profile.postal_code, "T2Y7B1")
+        self.assertEqual(profile.birth_date, date(1992, 5, 30))

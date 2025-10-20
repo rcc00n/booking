@@ -1010,8 +1010,34 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         return self.add_form if obj is None else self.form
 
     def save_model(self, request, obj, form, change):
-        # Save user and assign roles
-        super().save_model(request, obj, form, change)
+        # Persist the user first using the parent logic
+        with transaction.atomic():
+            super().save_model(request, obj, form, change)
+
+            if not hasattr(form, "cleaned_data"):
+                return
+
+            profile_data = {}
+            for form_field, profile_field in (
+                ("phone", "phone"),
+                ("birth_date", "birth_date"),
+                ("address", "address"),
+                ("postal_code", "postal_code"),
+            ):
+                if form_field in form.cleaned_data:
+                    profile_data[profile_field] = form.cleaned_data.get(form_field)
+
+            if not profile_data:
+                return
+
+            profile, _ = UserProfile.objects.select_for_update().get_or_create(user=obj)
+
+            phone_value = profile_data.get("phone")
+            profile.phone = phone_value or profile.phone
+            profile.birth_date = profile_data.get("birth_date", profile.birth_date)
+            profile.address = profile_data.get("address", profile.address) or ""
+            profile.postal_code = profile_data.get("postal_code", profile.postal_code) or ""
+            profile.save()
 
     # Custom display methods for user profile fields
     def phone(self, instance):
