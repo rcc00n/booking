@@ -3427,9 +3427,8 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
         return super().changelist_view(request, extra_context=extra_context)
 
 
-class ProductSaleAdmin(admin.ModelAdmin):
+class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
     form = ProductSaleAdminForm
-    date_hierarchy = "sold_at"
     list_display = (
         "sold_at",
         "product",
@@ -3563,6 +3562,85 @@ class ProductSaleAdmin(admin.ModelAdmin):
         except Product.DoesNotExist:
             return JsonResponse({"error": "Product not found"}, status=404)
         return JsonResponse({"unit_price": str(product.price)})
+
+    def _export_all_xlsx_view(self, request):
+        queryset = (
+            self.get_queryset(request)
+            .select_related(
+                "product__category",
+                "sold_by__user",
+                "client__user",
+                "appointment",
+            )
+        )
+        headers = [
+            "ID",
+            "Sold At",
+            "Product",
+            "Product SKU",
+            "Category",
+            "Quantity",
+            "Unit Price",
+            "Total Amount",
+            "Sold By",
+            "Client",
+            "Appointment ID",
+            "Notes",
+            "Created At",
+            "Updated At",
+        ]
+        rows = []
+        for sale in queryset:
+            product = getattr(sale, "product", None)
+            product_category = getattr(product, "category", None)
+            sold_by_profile = getattr(sale, "sold_by", None)
+            sold_by_user = getattr(sold_by_profile, "user", None)
+            client_profile = getattr(sale, "client", None)
+            client_user = getattr(client_profile, "user", None)
+            sold_by_display = ""
+            if sold_by_user:
+                sold_by_display = sold_by_user.get_full_name() or sold_by_user.username
+            client_display = ""
+            if client_user:
+                client_display = client_user.get_full_name() or client_user.username
+            rows.append(
+                [
+                    sale.pk,
+                    sale.sold_at,
+                    product.name if product else "",
+                    product.sku if product and product.sku else "",
+                    product_category.name if product_category else "",
+                    sale.quantity,
+                    sale.unit_price,
+                    sale.total_amount,
+                    sold_by_display,
+                    client_display,
+                    sale.appointment.pk if sale.appointment else "",
+                    sale.notes or "",
+                    sale.created_at,
+                    sale.updated_at,
+                ]
+            )
+        return self._xlsx_response(
+            "product_sales.xlsx",
+            "Product Sales",
+            headers,
+            rows,
+            money_cols={7, 8},
+            datetime_cols={2, 13, 14},
+        )
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        try:
+            opts = self.model._meta
+            query_string = f"?{request.GET.urlencode()}" if request.GET else ""
+            export_url = reverse(f"admin:{opts.app_label}_{opts.model_name}_export_xlsx") + query_string
+            extra_context["export_url"] = export_url
+            extra_context["export_label"] = "📤 Export XLSX"
+        except NoReverseMatch:
+            extra_context.setdefault("export_url", None)
+        return super().changelist_view(request, extra_context=extra_context)
 
     def save_model(self, request, obj, form, change):
         if not obj.sold_by_id:
