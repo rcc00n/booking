@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Sequence, Iterable
 from urllib.parse import urlencode
 
 from django.contrib.admin import DateFieldListFilter
+from django.contrib.admin.options import IS_POPUP_VAR, TO_FIELD_VAR
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.core.exceptions import FieldError, PermissionDenied
@@ -1006,6 +1007,36 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     def birth_date(self, instance):
         return instance.userprofile.birth_date if hasattr(instance, 'userprofile') else '-'
 
+    def _is_popup(self, request):
+        return IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET
+
+    def _profile_popup_response(self, request, profile, *, action):
+        if profile is None:
+            return None
+        to_field = request.POST.get(TO_FIELD_VAR) or request.GET.get(TO_FIELD_VAR)
+        if to_field:
+            try:
+                field = profile._meta.get_field(to_field)
+            except Exception:
+                value = getattr(profile, to_field, profile.pk)
+            else:
+                value = field.value_from_object(profile)
+        else:
+            value = profile.pk
+        popup_response_data = {
+            "action": action,
+            "value": str(value),
+            "obj": str(profile),
+        }
+        return TemplateResponse(
+            request,
+            self.popup_response_template,
+            {
+                **self.admin_site.each_context(request),
+                "popup_response_data": json.dumps(popup_response_data),
+            },
+        )
+
     def _maybe_redirect_back(self, request, response):
         """
         Если пришли из Appointment (по нашему параметру _from_appointment),
@@ -1017,10 +1048,20 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         return response
 
     def response_add(self, request, obj, post_url_continue=None):
+        if self._is_popup(request):
+            profile = getattr(obj, "userprofile", None)
+            popup_resp = self._profile_popup_response(request, profile, action="add")
+            if popup_resp is not None:
+                return popup_resp
         resp = super().response_add(request, obj, post_url_continue)
         return self._maybe_redirect_back(request, resp)
 
     def response_change(self, request, obj):
+        if self._is_popup(request):
+            profile = getattr(obj, "userprofile", None)
+            popup_resp = self._profile_popup_response(request, profile, action="change")
+            if popup_resp is not None:
+                return popup_resp
         resp = super().response_change(request, obj)
         return self._maybe_redirect_back(request, resp)
 
@@ -3500,6 +3541,27 @@ class AppointmentItemPromoCodeAdmin(admin.ModelAdmin):
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
     form = UserProfileChangeForm
+
+    def _user_admin_url(self, suffix, *args):
+        user_model = get_user_model()
+        return reverse(f"admin:{user_model._meta.app_label}_{user_model._meta.model_name}_{suffix}", args=args)
+
+    def _redirect_to_user_admin(self, request, suffix, *args):
+        base_url = self._user_admin_url(suffix, *args)
+        query_string = request.META.get("QUERY_STRING")
+        if query_string:
+            base_url = f"{base_url}?{query_string}"
+        return redirect(base_url)
+
+    def add_view(self, request, form_url="", extra_context=None):
+        return self._redirect_to_user_admin(request, "add")
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        profile = self.get_object(request, object_id)
+        if profile and profile.user_id:
+            return self._redirect_to_user_admin(request, "change", profile.user_id)
+        return super().change_view(request, object_id, form_url, extra_context)
+
     search_fields = (
         "user__first_name",
         "user__last_name",
