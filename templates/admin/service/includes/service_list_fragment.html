@@ -1,4 +1,4 @@
-{% load i18n admin_urls filters %}
+{% load i18n admin_urls filters static %}
 <div class="svc-table__wrapper">
     <table class="svc-table">
         <thead>
@@ -7,6 +7,7 @@
             <th scope="col">{% trans "Category" %}</th>
             <th scope="col">{% trans "Duration" %}</th>
             <th scope="col">{% trans "Price" %}</th>
+            <th scope="col">{% trans "Active" %}</th>
             <th scope="col" class="svc-actions">{% trans "Actions" %}</th>
         </tr>
         </thead>
@@ -20,7 +21,28 @@
                 </td>
                 <td>{{ obj.category.name|default:"-" }}</td>
                 <td>{{ obj|service_duration }}</td>
-                <td>{{ currency_symbol }} {{ obj|service_price }}</td>
+                <td>
+                    {% with discount=obj.get_active_discount %}
+                        {% if discount %}
+                            {% with discounted_price=obj.get_discounted_price %}
+                                <span class="svc-price">
+                                    <span class="svc-price__old">{{ currency_symbol }} {{ obj|service_price }}</span>
+                                    
+                                    <span class="svc-price__new">{{ currency_symbol }} {{ discounted_price|floatformat:2 }}</span>
+                                </span>
+                            {% endwith %}
+                        {% else %}
+                            <span class="svc-price__normal">{{ currency_symbol }} {{ obj|service_price }}</span>
+                        {% endif %}
+                    {% endwith %}
+                </td>
+                <td>
+                    {% if obj.is_active %}
+                        <span class="svc-active svc-active--yes" aria-label="{% trans 'Active' %}"><img src={% static "admin/icons/active.svg" %} height=16 width=16></span>
+                    {% else %}
+                        <span class="svc-active svc-active--no" aria-label="{% trans 'Inactive' %}"><img src={% static "admin/icons/not-active.png" %} height=16 width=16></span>
+                    {% endif %}
+                </td>
                 <td class="svc-actions">
                     <a class="svc-action-link" href="{% url cl.opts|admin_urlname:'change' obj.pk %}">
                         <i class="fas fa-ellipsis-h" aria-hidden="true"></i>
@@ -29,7 +51,7 @@
             </tr>
         {% empty %}
             <tr>
-                <td class="svc-empty" colspan="5">
+                <td class="svc-empty" colspan="6">
                     {% if current_search %}
                         {% blocktrans with term=current_search %}No services found for '{{ term }}'.{% endblocktrans %}
                     {% else %}

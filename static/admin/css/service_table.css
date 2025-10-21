@@ -197,6 +197,35 @@
     box-shadow:none;
 }
 
+/* --- Prices --- */
+.svc-price{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+}
+.svc-price__old{
+    text-decoration:line-through;
+    color:#40454c;
+    opacity: 0.8;
+}
+.svc-price__arrow{
+    opacity:0.6;
+}
+
+
+/* --- Active indicator --- */
+.svc-active{
+    font-size:12px;
+    line-height:1;
+    vertical-align:middle;
+}
+.svc-active--yes{
+    color:#16a34a;
+}
+.svc-active--no{
+    color:#94a3b8;
+}
+
 @media (max-width:768px){
     .svc-header{
         flex-direction:column;
