@@ -1,4 +1,4 @@
-﻿from bisect import bisect_left
+from bisect import bisect_left
 from collections import defaultdict
 from decimal import Decimal
 from io import BytesIO
@@ -27,7 +27,7 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 from datetime import date, timedelta, time as time_cls
 from django.contrib.admin.views.decorators import staff_member_required
-from django.http import HttpRequest, HttpResponse, Http404
+from django.http import HttpRequest, HttpResponse, Http404, HttpResponseRedirect
 from django.contrib.auth.models import Permission
 from django.db.models.functions import Coalesce, Concat, Greatest
 from django.db.models import DecimalField, Value
@@ -2134,6 +2134,32 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         return custom + urls
 
 
+    def _calendar_date_for_obj(self, obj) -> str | None:
+        start = getattr(obj, "start_time", None)
+        if not start:
+            return None
+        try:
+            localized = localtime(start)
+        except Exception:
+            localized = start
+        try:
+            return localized.date().isoformat()
+        except Exception:
+            return None
+
+    def _redirect_to_calendar(self, request, *, date: str | None = None) -> HttpResponseRedirect:
+        url = reverse("admin:core_appointment_changelist")
+        passthrough: dict[str, str] = {}
+        if date:
+            passthrough["date"] = date
+        else:
+            existing = request.GET.get("date") or request.POST.get("date")
+            if existing:
+                passthrough["date"] = existing
+        if passthrough:
+            url = f"{url}?{urlencode(passthrough)}"
+        return redirect(url)
+
     def _default_payment_status_id(self):
         obj, _ = PaymentStatus.objects.get_or_create(name="Not Paid")
         return obj.id
@@ -2807,7 +2833,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                         )
 
             messages.success(request, "Appointment created.")
-            return redirect("admin:core_appointment_change", appt.pk)
+            target_date = self._calendar_date_for_obj(appt)
+            return self._redirect_to_calendar(request, date=target_date)
 
         except ValidationError as ve:
             # Переносим ошибки из моделей в наш мешок и показываем в той же форме
@@ -2882,6 +2909,26 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "availability_url": availability_url,
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
+
+    def response_add(self, request, obj, post_url_continue=None):
+        response = super().response_add(request, obj, post_url_continue)
+        if IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET:
+            return response
+        return self._redirect_to_calendar(request, date=self._calendar_date_for_obj(obj))
+
+    def response_post_save_add(self, request, obj):
+        response = super().response_post_save_add(request, obj)
+        if IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET:
+            return response
+        return self._redirect_to_calendar(request, date=self._calendar_date_for_obj(obj))
+
+    def response_change(self, request, obj):
+        response = super().response_change(request, obj)
+        if IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET:
+            return response
+        if "_saveasnew" in request.POST:
+            return self._redirect_to_calendar(request, date=self._calendar_date_for_obj(obj))
+        return response
 
     @admin.display(description=_("Позиций"), ordering="_items_count")
     def items_count_display(self, obj):
@@ -5362,6 +5409,3 @@ def custom_index(request):
 
     ctx = {"userprof": userprof}
     return TemplateResponse(request, "admin/index.html", ctx)
-
-
-
