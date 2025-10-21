@@ -302,7 +302,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 {% endif %}
                 {% if export_url %}
                     <a class="tm-btn tm-btn--ghost" href="{{ export_url }}">
-                        <i class="fas fa-download" aria-hidden="true"></i> {% trans "Export CSV" %}
+                        <i class="fas fa-download" aria-hidden="true"></i> {% trans "Export XSLX" %}
                     </a>
                 {% endif %}
                 <a class="tm-btn tm-btn--success" href="{% url cl.opts|admin_urlname:'add' %}">

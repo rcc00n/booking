@@ -2,7 +2,7 @@ from bisect import bisect_left
 from collections import defaultdict
 from decimal import Decimal
 from io import BytesIO
-from typing import Dict, Any, List, Sequence, Iterable
+from typing import Dict, Any, List, Sequence, Iterable, Tuple, Optional
 from urllib.parse import urlencode
 
 from django.contrib.admin import DateFieldListFilter
@@ -38,7 +38,6 @@ from django.utils.decorators import method_decorator
 import json
 import re
 from django.utils.dateparse import parse_date
-import csv
 from django.utils.translation import gettext_lazy as _
 from django.urls import path, reverse, NoReverseMatch, re_path
 from django.http import HttpResponse
@@ -72,6 +71,118 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, numbers
 
 
+def _autosize_columns(ws):
+    """Resize worksheet columns based on content length with sane bounds."""
+    if ws.max_column == 0:
+        return
+
+    for col_idx in range(1, ws.max_column + 1):
+        max_len = 0
+        for column_cells in ws.iter_cols(
+            min_col=col_idx,
+            max_col=col_idx,
+            min_row=1,
+            max_row=ws.max_row or 1,
+        ):
+            for cell in column_cells:
+                value = cell.value
+                text_length = 0 if value is None else len(str(value))
+                if text_length > max_len:
+                    max_len = text_length
+        adjusted_width = min(60, max(10, max_len + 2))
+        ws.column_dimensions[get_column_letter(col_idx)].width = adjusted_width
+
+
+def _write_xlsx(headers, rows, *, filename="export.xlsx", sheet_name="Export"):
+    """Build an XLSX response preserving header order and basic formatting."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = (sheet_name or "Export")[:31]
+
+    if headers:
+        ws.append(list(headers))
+
+    for row in rows:
+        if isinstance(row, dict):
+            ordered = [row.get(h) for h in headers] if headers else list(row.values())
+        elif isinstance(row, (list, tuple)):
+            ordered = list(row)
+        else:
+            try:
+                ordered = list(row)
+            except TypeError:
+                ordered = [row]
+
+        current = []
+        for value in ordered:
+            if value is None:
+                current.append(None)
+                continue
+
+            if isinstance(value, datetime):
+                processed = value
+                if is_aware(processed):
+                    try:
+                        processed = localtime(processed)
+                    except Exception:
+                        pass
+                processed = processed.replace(tzinfo=None)
+                current.append(processed)
+                continue
+
+            if isinstance(value, date):
+                current.append(value)
+                continue
+
+            if isinstance(value, time_cls):
+                current.append(value)
+                continue
+
+            if isinstance(value, (int, float, bool, Decimal)):
+                current.append(value)
+                continue
+
+            if isinstance(value, str):
+                current.append(value)
+                continue
+
+            current.append(str(value))
+
+        ws.append(current)
+
+    if headers:
+        for col_idx, header in enumerate(headers, start=1):
+            key = (header or "").lower()
+            if "date" in key or "time" in key or key.endswith("_at") or key == "at":
+                for column_cells in ws.iter_cols(
+                    min_col=col_idx,
+                    max_col=col_idx,
+                    min_row=2,
+                    max_row=ws.max_row,
+                ):
+                    for cell in column_cells:
+                        value = cell.value
+                        if value is None:
+                            continue
+                        if isinstance(value, datetime):
+                            cell.number_format = "YYYY-MM-DD HH:MM"
+                        elif isinstance(value, date):
+                            cell.number_format = "YYYY-MM-DD"
+
+    _autosize_columns(ws)
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
 def _coerce_json(value):
     if isinstance(value, dict):
         return {k: _coerce_json(v) for k, v in value.items()}
@@ -86,6 +197,92 @@ def _coerce_json(value):
     if isinstance(value, Decimal):
         return str(value)
     return value
+
+# --- Preset Date Range Filter (factory) ---
+def _start_of_week(d: date) -> date:
+    """Return Monday for the given date."""
+    return d - timedelta(days=d.weekday())
+
+
+def _start_of_month(d: date) -> date:
+    return d.replace(day=1)
+
+
+def _month_bounds_for_last_month(d: date) -> Tuple[date, date]:
+    first_this_month = _start_of_month(d)
+    last_month_end = first_this_month - timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    return last_month_start, last_month_end
+
+
+def make_preset_date_filter(
+    *, date_field: str, title: str = _("Period"), param: str = "period"
+):
+    """
+    Factory returning a SimpleListFilter bound to a given date/datetime field.
+    Usage: list_filter += [make_preset_date_filter(date_field="created_at")]
+    """
+
+    filter_title = title
+    filter_param = param
+    filter_date_field = date_field
+
+    class PresetDateRangeFilter(admin.SimpleListFilter):
+        title = filter_title
+        parameter_name = filter_param
+
+        def lookups(self, request, model_admin):
+            return [
+                ("today", _("Сегодня")),
+                ("week_to_date", _("С начала недели")),
+                ("month_to_date", _("С начала месяца")),
+                ("last_week", _("Прошлая неделя (Пн–Вс)")),
+                ("last_month", _("Прошлый календарный месяц")),
+            ]
+
+        def queryset(self, request, queryset):
+            value = self.value()
+            if not value:
+                return queryset
+
+            today = timezone.localdate()
+            start: Optional[date] = None
+            end: Optional[date] = None
+
+            if value == "today":
+                start = end = today
+            elif value == "week_to_date":
+                start = _start_of_week(today)
+                end = today
+            elif value == "month_to_date":
+                start = _start_of_month(today)
+                end = today
+            elif value == "last_week":
+                start = _start_of_week(today) - timedelta(days=7)
+                end = start + timedelta(days=6)
+            elif value == "last_month":
+                start, end = _month_bounds_for_last_month(today)
+
+            if start is None or end is None:
+                return queryset
+
+            # Prefer __date lookup for DateTime fields; fallback to plain lookup for DateField.
+            try:
+                return queryset.filter(
+                    **{
+                        f"{filter_date_field}__date__gte": start,
+                        f"{filter_date_field}__date__lte": end,
+                    }
+                )
+            except FieldError:
+                return queryset.filter(
+                    **{
+                        f"{filter_date_field}__gte": start,
+                        f"{filter_date_field}__lte": end,
+                    }
+                )
+
+    return PresetDateRangeFilter
 
 from core.models import (
     Appointment, AppointmentItem, Payment,
@@ -314,21 +511,24 @@ class ExportCsvMixin:
     def export_all_csv(self, request):
         queryset = self.get_queryset(request)
 
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename={self.model._meta.model_name}.csv'
-
         fields = self.export_fields or [field.name for field in self.model._meta.fields]
-        writer = csv.writer(response)
-        writer.writerow(fields)
+        filename = f"{self.model._meta.model_name}.xlsx"
 
-        for obj in queryset:
-            if hasattr(self, 'get_export_row'):
-                row = self.get_export_row(obj)
-            else:
-                row = [getattr(obj, field) for field in fields]
-            writer.writerow(row)
+        def iter_rows():
+            for obj in queryset:
+                if hasattr(self, "get_export_row"):
+                    row = self.get_export_row(obj)
+                else:
+                    row = [getattr(obj, field) for field in fields]
 
-        return response
+                if isinstance(row, dict):
+                    yield [row.get(field) for field in fields]
+                elif isinstance(row, (list, tuple)):
+                    yield list(row)
+                else:
+                    yield [row]
+
+        return _write_xlsx(fields, iter_rows(), filename=filename)
 
     def changelist_view(self, request, extra_context=None):
         # Попробуем reverse без краша
@@ -2909,7 +3109,12 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
         'livemode',
         'created_at',
     )
-    list_filter = ('method', 'status', 'livemode')
+    list_filter = (
+        "method",
+        "status",
+        "livemode",
+        make_preset_date_filter(date_field="created_at", title=_("Period")),
+    )
     search_fields = (
         'appointment__client__user__first_name',
         'appointment__client__user__last_name',
@@ -3417,7 +3622,7 @@ class ServiceDiscountAdmin(ExportCsvMixin ,admin.ModelAdmin):
     list_display = ('service', 'discount_percent', 'start_date', 'end_date', 'is_active')
     list_filter = ('start_date', 'end_date', 'service')
     search_fields = ('service__name',)
-    export_fields = ['service', 'discount_percent', 'start_date', 'end_date', 'is_active']
+    export_fields = ['service', 'discount_percent', 'start_date', 'end_date']
     @admin.display(boolean=True)
     def is_active(self, obj):
         return obj.is_active()
@@ -3431,6 +3636,25 @@ class PromoCodeAdmin(ExportCsvMixin ,admin.ModelAdmin):
     list_filter = ('start_date', 'end_date')
 
     export_fields = ['code', 'applicable_services', 'discount_percent', 'start_date', 'end_date']
+
+    def get_export_row(self, obj):
+        services_manager = getattr(obj, "applicable_services", None)
+        services_display = ""
+        if services_manager is not None:
+            if hasattr(services_manager, "all"):
+                services_display = ", ".join(
+                    str(service) for service in services_manager.all() if service is not None
+                )
+            else:
+                services_display = str(services_manager)
+
+        return [
+            getattr(obj, "code", ""),
+            services_display,
+            getattr(obj, "discount_percent", None),
+            getattr(obj, "start_date", None),
+            getattr(obj, "end_date", None),
+        ]
 
     @admin.display(boolean=True)
     def is_active(self, obj):
@@ -3574,7 +3798,7 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
         "product__category",
         "product",
         "sold_by",
-        ("sold_at", DateFieldListFilter),
+        make_preset_date_filter(date_field="sold_at", title=_("Sold period")),
     )
     search_fields = (
         "product__name",
@@ -3976,7 +4200,7 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
     list_per_page = 24
 
     readonly_fields = ['password_display']
-    export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","postal_code", "profession", 'bio', "room", "is_staff", "is_superuser", 'is_active']
+    export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","postal_code", "profession", 'bio', "", "", "room", "is_staff", "is_superuser", 'is_active']
     search_fields = (
         "user__user__username",
         "user__user__first_name",
@@ -4102,27 +4326,44 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
             request.GET = original_get
 
     def get_export_row(self, obj):
-        phone = obj.user.userprofile.phone if hasattr(obj, 'user') else ''
-        birth_date = obj.user.userprofile.birth_date if hasattr(obj, 'user') else ''
-        postal_code = obj.user.userprofile.postal_code if hasattr(obj, 'user') else ''
+        user_profile = getattr(obj, "user", None)
+        auth_user = None
 
+        if user_profile and hasattr(user_profile, "user"):
+            auth_user = user_profile.user
+        else:
+            auth_user = user_profile
+            if auth_user and hasattr(auth_user, "userprofile"):
+                user_profile = auth_user.userprofile
+
+        if not auth_user:
+            auth_user = getattr(obj, "user", None)
+
+        phone = getattr(user_profile, "phone", "")
+        birth_date = getattr(user_profile, "birth_date", "")
+        postal_code = getattr(user_profile, "postal_code", "")
+
+        room_display = ""
+        room = getattr(obj, "room", None)
+        if room is not None:
+            room_display = getattr(room, "room", room)
 
         return [
-            obj.user.first_name,
-            obj.user.last_name,
-            obj.user.email,
-            obj.user.username,
+            getattr(auth_user, "first_name", ""),
+            getattr(auth_user, "last_name", ""),
+            getattr(auth_user, "email", ""),
+            getattr(auth_user, "username", ""),
             phone,
             birth_date,
             postal_code,
-            obj.profession,
-            obj.bio,
-            obj.work_start,
-            obj.work_end,
-            obj.room,
-            obj.user.is_staff,
-            obj.user.is_superuser,
-            obj.user.is_active,
+            getattr(obj, "profession", ""),
+            getattr(obj, "bio", ""),
+            getattr(obj, "work_start", ""),
+            getattr(obj, "work_end", ""),
+            room_display,
+            getattr(auth_user, "is_staff", ""),
+            getattr(auth_user, "is_superuser", ""),
+            getattr(auth_user, "is_active", ""),
         ]
     form = MasterCreateFullForm  # на редактирование тоже можно оставить ту же
 
