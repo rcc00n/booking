@@ -30,7 +30,6 @@ class RegistrationTests(TestCase):
 
     def test_password_mismatch_does_not_create_user(self):
         data = {
-            "username": "",
             "email": "newclient@example.com",
             "phone": "+1 (403) 555-1234",
             "password1": "StrongPass123!",
@@ -43,7 +42,6 @@ class RegistrationTests(TestCase):
 
     def test_successful_registration_creates_profile_and_allows_login(self):
         data = {
-            "username": "",  # разрешаем автогенерацию
             "email": "Client@Example.com",
             "phone": "403-555-1234",
             "first_name": "Test",

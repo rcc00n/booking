@@ -6,7 +6,6 @@ from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from django.utils.text import slugify
 
 import phonenumbers
 
@@ -18,12 +17,14 @@ from core.models import (
     Product,
     ProductSale,
 )
+from core.forms import _normalize_phone
 
 
 # ---------- Registration ----------
 class ClientRegistrationForm(UserCreationForm):
     """
-    Регистрация клиента: e-mail, телефон, (необязательный) username + пароль.
+    Регистрация клиента: e-mail, телефон + пароль.
+    Username берётся из нормализованного номера телефона (как в админке).
     После save():
         • создаёт UserProfile (включая address / how_heard / email_marketing_consent),
         • назначает роль «Client».
@@ -62,8 +63,6 @@ class ClientRegistrationForm(UserCreationForm):
         error_messages={"required": "Date of birth is required."},
     )
 
-    username = forms.CharField(required=False, label="Username (optional)")
-
     # --- NEW: дополнительные поля регистрации ---
     address = forms.CharField(
         required=False, label="Address",
@@ -83,7 +82,7 @@ class ClientRegistrationForm(UserCreationForm):
     class Meta(UserCreationForm.Meta):
         model = CustomUserDisplay
         fields = (
-            "username", "first_name", "last_name", "email", "phone", "birth_date",
+            "first_name", "last_name", "email", "phone", "birth_date",
             "address", "how_heard", "email_marketing_consent",
             "password1", "password2"
         )
@@ -97,33 +96,24 @@ class ClientRegistrationForm(UserCreationForm):
         return email
 
     def clean_phone(self):
-        raw = (self.cleaned_data.get("phone") or "").strip()
-        # Оставляем только цифры и '+'
-        raw = "".join(ch for ch in raw if ch.isdigit() or ch == "+")
-        # Если код страны не указан — подставим +1
-        if raw and not raw.startswith("+"):
-            raw = "+1" + raw
-        # Парсим и приводим к E.164
         try:
-            parsed = phonenumbers.parse(raw, None)
-        except phonenumbers.NumberParseException:
-            raise forms.ValidationError("Invalid phone number format.")
-        phone_e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
-        # Проверка уникальности среди профилей
-        if UserProfile.objects.filter(phone=phone_e164).exists():
-            raise forms.ValidationError("This phone number is already in use.")
-        return phone_e164
+            phone = _normalize_phone(self.cleaned_data.get("phone", ""))
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.message)
 
-    def clean_username(self):
-        username = (self.cleaned_data.get("username") or "").strip()
-        if username:
-            qs = CustomUserDisplay.objects.filter(username=username)
-            instance_pk = getattr(self.instance, "pk", None)
-            if instance_pk:
-                qs = qs.exclude(pk=instance_pk)
-            if qs.exists():
-                raise forms.ValidationError("This username is already taken.")
-        return username or None
+        qs = CustomUserDisplay.objects.filter(username=phone)
+        instance_pk = getattr(self.instance, "pk", None)
+        if instance_pk:
+            qs = qs.exclude(pk=instance_pk)
+        if qs.exists():
+            raise forms.ValidationError("This phone number is already in use.")
+
+        profile_qs = UserProfile.objects.filter(phone=phone)
+        if instance_pk:
+            profile_qs = profile_qs.exclude(user_id=instance_pk)
+        if profile_qs.exists():
+            raise forms.ValidationError("This phone number is already in use.")
+        return phone
 
     def clean_birth_date(self):
         birth_date = self.cleaned_data.get("birth_date")
@@ -147,26 +137,15 @@ class ClientRegistrationForm(UserCreationForm):
     def save(self, commit=True):
         user = super().save(commit=False)
 
-        # email / username
+        phone = self.cleaned_data["phone"]
         user.email = self.cleaned_data["email"]
         user.first_name = self.cleaned_data["first_name"]
         user.last_name = self.cleaned_data["last_name"]
-        provided_username = self.cleaned_data.get("username")
-        if provided_username:
-            user.username = provided_username
-        else:
-            base = slugify(user.email.split("@")[0]) or "user"
-            candidate = base
-            suffix = 1
-            while CustomUserDisplay.objects.filter(username=candidate).exclude(pk=user.pk).exists():
-                candidate = f"{base}{suffix}"
-                suffix += 1
-            user.username = candidate
+        user.username = phone
 
         if commit:
             user.save()
 
-            phone = self.cleaned_data["phone"]  # уже в E.164
             birth_date = self.cleaned_data.get("birth_date")
             address = self.cleaned_data.get("address") or ""
             how_heard = self.cleaned_data.get("how_heard") or ""
