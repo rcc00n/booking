@@ -27,15 +27,24 @@
                         </h4>
                         <ul class="srvdd__ul">
                             {% for option in group %}
-                                <li class="srvdd__li" data-item data-text="{{ option.label|lower|escape }}">
+                                <li class="srvdd__li"
+                                    data-item
+                                    data-text="{{ option.label|lower|escape }}"
+                                    data-inactive="{% if widget.disabled_choices and option.value|stringformat:'s' in widget.disabled_choices %}1{% else %}0{% endif %}">
                                     <label class="srvdd__item">
                                         <input type="checkbox"
                                                name="{{ widget.name }}"
                                                value="{{ option.value }}"
                                                {% if option.selected %}checked{% endif %}
+                                               {% if widget.disabled_choices and option.value|stringformat:'s' in widget.disabled_choices %}disabled{% endif %}
                                                 {% include "django/forms/widgets/attrs.html" with widget=option %}
                                         >
-                                        <span class="srvdd__label">{{ option.label }}</span>
+                                        <span class="srvdd__label">
+                                            {{ option.label }}
+                                            {% if widget.disabled_choices and option.value|stringformat:'s' in widget.disabled_choices %}
+                                                <span class="srvdd__badge">Inactive</span>
+                                            {% endif %}
+                                        </span>
                                     </label>
                                 </li>
                             {% endfor %}
@@ -102,6 +111,7 @@
     }
     .srvdd__item:hover{ background:#FAFAF7; box-shadow: inset 0 0 0 1px #EFEBD9; }
     .srvdd__label{ line-height:1.35; }
+    .srvdd__badge{ margin-left:.35rem; padding:.1rem .35rem; font-size:.7rem; font-weight:700; color:#8E5000; background:#FCEFD8; border-radius:.35rem; text-transform:uppercase; letter-spacing:.05em; }
 
     .srvdd__group[data-hidden="1"]{ display:none }
     .srvdd__li[data-hidden="1"]{ display:none }
@@ -211,6 +221,9 @@
                     catCheck.indeterminate = false;
                     const target = catCheck.checked;
                     items.forEach(i=>{
+                        if(i.disabled){
+                            return;
+                        }
                         if(i.checked !== target){
                             i.checked = target;
                             i.dispatchEvent(new Event('change', { bubbles:true }));

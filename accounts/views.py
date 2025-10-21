@@ -178,7 +178,7 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         ctx["profile"] = getattr(user, "userprofile", None)
 
         # быстрые действия — список услуг
-        ctx["services"] = Service.objects.all().order_by("name")
+        ctx["services"] = Service.objects.filter(is_active=True).order_by("name")
 
         # подзапрос на последний статус записи
         latest_status = (

@@ -13,6 +13,7 @@ from core.models import (
     MasterAvailability, AppointmentStatus, AppointmentStatusHistory,
     PaymentStatus, MasterProfile,
 )
+from core.validators import validate_service_is_active
 from django.db import transaction
 
 Slot = Tuple[datetime, datetime]
@@ -199,6 +200,11 @@ def create_appointment_from_cart_items(
     items = list(items)
     if not items:
         raise ValueError("Cart is empty")
+    for cart_item in items:
+        service = getattr(cart_item, "service", None)
+        if service is None and getattr(cart_item, "service_id", None):
+            service = Service.objects.filter(pk=cart_item.service_id).only("is_active").first()
+        validate_service_is_active(service)
 
     starts = [it.start_time for it in items if it.start_time]
     primary_start = min(starts) if starts else None

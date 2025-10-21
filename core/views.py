@@ -37,7 +37,7 @@ def _build_catalog_context(request):
     cat = request.GET.get("cat") or ""
 
     services_qs = (
-        Service.objects
+        Service.objects.filter(is_active=True)
         .select_related("category")
         .prefetch_related(
             Prefetch(
@@ -109,6 +109,9 @@ def api_availability(request):
         return HttpResponseBadRequest("service and date required")
 
     service = get_object_or_404(Service.objects.select_related("category"), pk=service_id)
+    if not service.is_active:
+        from django.http import HttpResponseBadRequest
+        return HttpResponseBadRequest("service is inactive")
     day = parse_date(date_str)
     if not day:
         from django.http import HttpResponseBadRequest
@@ -152,6 +155,8 @@ def api_book(request):
         return HttpResponseBadRequest("service, master, start_time required")
 
     service = get_object_or_404(Service, pk=service_id)
+    if not service.is_active:
+        return JsonResponse({"error": "service is inactive"}, status=400)
     master  = get_object_or_404(MasterProfile, pk=master_id)
 
     if not get_service_masters(service).filter(pk=master.pk).exists():
@@ -253,6 +258,8 @@ def api_cart_add(request):
         return JsonResponse({"error": "service, master and start_time required"}, status=400)
 
     service = get_object_or_404(Service, pk=service_id)
+    if not service.is_active:
+        return JsonResponse({"error": "service is inactive"}, status=400)
     master = get_object_or_404(MasterProfile, pk=master_id)
 
     if not get_service_masters(service).filter(pk=master.pk).exists():
@@ -510,7 +517,7 @@ def service_search(request):
     q = (request.GET.get('q') or '').strip()
     cat = request.GET.get('cat') or ''
     qs = (
-        Service.objects
+        Service.objects.filter(is_active=True)
         .select_related('category')
         .prefetch_related(
             Prefetch(

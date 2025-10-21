@@ -26,6 +26,17 @@ from .models import *
 from .validators import *
 
 
+def _services_for_selection(include_ids=None, *, include_inactive_ids=False):
+    """
+    Build queryset of services filtered to active ones, optionally including specific ids even if inactive.
+    """
+    base = Service.objects.filter(is_active=True)
+    if include_inactive_ids and include_ids:
+        extra_ids = set(include_ids)
+        base = Service.objects.filter(Q(pk__in=extra_ids) | Q(is_active=True))
+    return base.select_related("category").order_by("category__name", "name")
+
+
 HEALTH_CHRONIC_CHOICES = [
     ("asthma", "Asthma"),
     ("diabetes", "Diabetes"),
@@ -265,6 +276,7 @@ class AppointmentAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        current_ids = []
         if self.instance.pk:
             last = (AppointmentStatusHistory.objects
                     .filter(appointment=self.instance)
@@ -332,6 +344,9 @@ class AppointmentItemInlineForm(forms.ModelForm):
         service = self.initial.get("service") or getattr(self.instance, "service", None)
         if service and not hasattr(service, 'duration_min'):
             service = Service.objects.filter(pk=service).first()
+        service_field = self.fields.get("service")
+        if service_field:
+            service_field.queryset = _services_for_selection()
         if "unit_price" in self.fields:
             has_price_initial = self.initial.get("unit_price") or getattr(self.instance, "unit_price", None)
             if not has_price_initial and service and getattr(service, "base_price", None) is not None:
@@ -391,6 +406,51 @@ class AppointmentItemInlineForm(forms.ModelForm):
                 item.save()
 
         return item
+
+
+class ServiceDiscountAdminForm(forms.ModelForm):
+    class Meta:
+        model = ServiceDiscount
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        field = self.fields.get("service")
+        if field:
+            current_id = getattr(self.instance, "service_id", None)
+            include_ids = [current_id] if current_id else None
+            field.queryset = _services_for_selection(include_ids, include_inactive_ids=True)
+
+
+class PromoCodeAdminForm(forms.ModelForm):
+    class Meta:
+        model = PromoCode
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        field = self.fields.get("applicable_services")
+        if field:
+            current_ids = []
+            if self.instance and self.instance.pk:
+                current_ids = list(
+                    self.instance.applicable_services.values_list("pk", flat=True)
+                )
+            field.queryset = _services_for_selection(current_ids, include_inactive_ids=True)
+
+
+class ServiceMasterAdminForm(forms.ModelForm):
+    class Meta:
+        model = ServiceMaster
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        field = self.fields.get("service")
+        if field:
+            current_id = getattr(self.instance, "service_id", None)
+            include_ids = [current_id] if current_id else None
+            field.queryset = _services_for_selection(include_ids)
 # -----------------------------
 # Custom User Creation Form
 # -----------------------------
@@ -872,6 +932,10 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
 class ServicesDropdown(forms.CheckboxSelectMultiple):
     template_name = "widget/service_dropdown.html"
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.disabled_choices = set()
+
 
 class MasterCreateFullForm(forms.ModelForm):
     # Общие поля
@@ -884,7 +948,7 @@ class MasterCreateFullForm(forms.ModelForm):
     services = forms.ModelMultipleChoiceField(
         label="Services",
         required=False,
-        queryset=Service.objects.select_related("category").order_by("category__name", "name"),
+        queryset=Service.objects.none(),
         widget=ServicesDropdown(attrs={
             "id": "id_services_dropdown",
             "placeholder": "Select services"
@@ -905,15 +969,16 @@ class MasterCreateFullForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        current_ids = []
 
         # Если редактируем — заменяем пароли на read-only поле
         if self.instance and self.instance.pk:
 
-            current_ids = ServiceMaster.objects.filter(
-                master=self.instance
-            ).values_list('service_id', flat=True)
-            self.fields['services'].initial = list(current_ids)
-
+            current_ids = list(
+                ServiceMaster.objects.filter(
+                    master=self.instance
+                ).values_list('service_id', flat=True)
+            )
             user_profile = self.instance.user
             user = user_profile.user  # сам Django User
             self.fields['password'] = ReadOnlyPasswordHashField(label="Password")
@@ -931,16 +996,31 @@ class MasterCreateFullForm(forms.ModelForm):
             self.fields['phone'].initial = user_profile.phone
             self.fields['postal_code'].initial = getattr(user_profile, 'postal_code', "")
             self.fields['birth_date'].initial = user_profile.birth_date
-        cats = (ServiceCategory.objects
-                .order_by("name")
-                .prefetch_related("service_set"))
+        services_qs = _services_for_selection()
+        self.fields["services"].queryset = services_qs
+        if current_ids:
+            active_current = list(
+                services_qs.filter(pk__in=current_ids).values_list("pk", flat=True)
+            )
+            self.initial["services"] = active_current
+
+        cats = (
+            ServiceCategory.objects
+            .order_by("name")
+            .prefetch_related(
+                Prefetch(
+                    "service_set",
+                    queryset=_services_for_selection(),
+                )
+            )
+        )
         choices = []
         for cat in cats:
             opts = [(str(s.pk), s.name) for s in cat.service_set.all()]
             if opts:
                 choices.append((cat.name, opts))
         # Неотнесённые к категории — в конец
-        uncategorized = Service.objects.filter(category__isnull=True).order_by("name")
+        uncategorized = services_qs.filter(category__isnull=True)
         if uncategorized.exists():
             choices.append(("Other", [(str(s.pk), s.name) for s in uncategorized]))
 

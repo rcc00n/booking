@@ -2167,7 +2167,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         services_info: Dict[str, Dict[str, Any]] = {}
 
         services_qs = (
-            Service.objects
+            Service.objects.filter(is_active=True)
             .select_related("category")
             .prefetch_related(
                 Prefetch(
@@ -2198,6 +2198,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         services_by_master: Dict[str, List[Dict[str, Any]]] = {}
         qs = (
             ServiceMaster.objects
+            .filter(service__is_active=True)
             .select_related("service", "service__category", "master")
             .values(
                 "master_id",
@@ -3268,6 +3269,7 @@ class ServiceMasterAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     Admin interface to assign masters to services.
     """
+    form = ServiceMasterAdminForm
     list_display = ('master', 'service')
     search_fields = ('master__user__user__first_name', 'master__user__user__last_name', 'service__name')
     export_fields = ['master', 'service']
@@ -3281,8 +3283,9 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     Admin interface for services.
     """
     change_list_template = "admin/service/changelist_table.html"
-    list_display = ('name', 'base_price', 'category', 'duration_min', 'image_admin_thumb')
+    list_display = ('name', 'base_price', 'category', 'duration_min', 'is_active', 'image_admin_thumb')
     search_fields = ('name',)
+    list_filter = ('is_active', 'category')
     filter_horizontal = ("pre_appointment_forms",)
     readonly_fields = ("image_preview",)
     list_per_page = 10
@@ -3292,6 +3295,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "name",
                 "description",
                 "category",
+                "is_active",
                 "base_price",
                 "duration_min",
                 "extra_time_min",
@@ -3308,7 +3312,16 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
             "fields": ("pre_appointment_forms",),
         }),
     )
+    actions = ["mark_active", "mark_inactive"]
     export_fields = ['name', 'description','base_price', 'category', 'duration_min', 'extra_time_min']
+
+    @admin.action(description="Mark selected services as active")
+    def mark_active(self, request, queryset):
+        queryset.update(is_active=True)
+
+    @admin.action(description="Mark selected services as inactive")
+    def mark_inactive(self, request, queryset):
+        queryset.update(is_active=False)
 
     def get_queryset(self, request):
         qs = (
@@ -3622,6 +3635,7 @@ class ServiceDiscountAdmin(ExportCsvMixin ,admin.ModelAdmin):
     list_display = ('service', 'discount_percent', 'start_date', 'end_date', 'is_active')
     list_filter = ('start_date', 'end_date', 'service')
     search_fields = ('service__name',)
+    form = ServiceDiscountAdminForm
     export_fields = ['service', 'discount_percent', 'start_date', 'end_date']
     @admin.display(boolean=True)
     def is_active(self, obj):
@@ -3634,6 +3648,7 @@ class ServiceDiscountAdmin(ExportCsvMixin ,admin.ModelAdmin):
 class PromoCodeAdmin(ExportCsvMixin ,admin.ModelAdmin):
     list_display = ('code', 'discount_percent', 'start_date', 'end_date',)
     list_filter = ('start_date', 'end_date')
+    form = PromoCodeAdminForm
 
     export_fields = ['code', 'applicable_services', 'discount_percent', 'start_date', 'end_date']
 

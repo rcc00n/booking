@@ -36,8 +36,10 @@ def clean_ab_postal_code(value: str) -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def validate_service_is_active(service) -> None:
+    if not service:
+        return
     if hasattr(service, "is_active") and not service.is_active:
-        raise ValidationError(_("Выбранная услуга отключена."))
+        raise ValidationError(_("Selected service is inactive."))
 
 
 def validate_quantity_positive(qty: Optional[int]) -> None:

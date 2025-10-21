@@ -13,7 +13,7 @@ from importlib import import_module
 from django.db.models import OuterRef, Subquery, Sum, Prefetch, F, Q
 from django.utils import timezone
 from django.utils.timezone import localtime
-from core.validators import clean_phone, clean_ab_postal_code
+from core.validators import clean_phone, clean_ab_postal_code, validate_service_is_active
 from django.conf import settings
 
 
@@ -315,6 +315,7 @@ class Service(models.Model):
         related_name="services",
         help_text="Forms the client must complete before attending this service.",
     )
+    is_active = models.BooleanField(default=True, db_index=True)
 
     def __str__(self):
         return self.name
@@ -582,6 +583,11 @@ class BookingCartItem(models.Model):
         super().clean()
         if self.start_time and not timezone.is_aware(self.start_time):
             self.start_time = timezone.make_aware(self.start_time, timezone.get_current_timezone())
+
+        service_obj = getattr(self, "service", None)
+        if service_obj is None and self.service_id:
+            service_obj = Service.objects.only("is_active").filter(pk=self.service_id).first()
+        validate_service_is_active(service_obj)
 
         if not ServiceMaster.objects.filter(service=self.service, master=self.master).exists():
             raise ValidationError({"master": "Selected master cannot perform this service."})
@@ -1052,6 +1058,13 @@ class AppointmentItem(models.Model):
     def clean(self):
         # === 0) Базовые вычисления: старт/длительность/конец ===
         start_dt = self._resolve_start_dt()
+
+        service_obj = getattr(self, "service", None)
+        if service_obj is None and self.service_id:
+            service_obj = Service.objects.filter(pk=self.service_id).select_related("category").first()
+            if service_obj is not None:
+                self.service = service_obj
+        validate_service_is_active(service_obj)
 
         # Хард-стоп по времени суток
         if start_dt and start_dt.time() > time(23, 59):
