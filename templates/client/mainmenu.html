@@ -1445,8 +1445,15 @@ function updateCartUI(data){
         remove.type='button';
         remove.className='cart-remove';
         remove.dataset.removeId=item.id;
-        remove.innerHTML='A-';
+        const img = document.createElement('img');
+        img.src = '../static/admin/icons/delete.svg';      // путь к твоему файлу
+        img.alt = '';                              // пустой alt, если у кнопки будет aria-label
+        img.width = 24;                            // задай размер
+        img.height = 24;
+        img.decoding = 'async';
+        img.loading = 'lazy';
         remove.setAttribute('aria-label', translate('services.cart.remove', null, 'Remove item'));
+        remove.replaceChildren(img);   
         row.appendChild(remove);
 
         cartItems.appendChild(row);
