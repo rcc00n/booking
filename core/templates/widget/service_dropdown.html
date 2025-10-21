@@ -14,8 +14,17 @@
 
             <div class="srvdd__list" data-list role="group" aria-label="Services">
                 {% for group_name, group, index in widget.optgroups %}
+                    {% with group_label=group_name|default:"Без категории" %}
                     <section class="srvdd__group" data-group>
-                        <h4 class="srvdd__groupTitle" data-group-title>{{ group_name|default:"Без категории" }}</h4>
+                        <h4 class="srvdd__groupTitle" data-group-title>
+                            <label class="srvdd__cat">
+                                <input type="checkbox"
+                                       class="srvdd__catCheck"
+                                       data-cat-check
+                                       aria-label="{% if group_name %}Select all in {{ group_name|escape }}{% else %}Select all in this category{% endif %}">
+                                <span class="srvdd__catLabel">{{ group_label }}</span>
+                            </label>
+                        </h4>
                         <ul class="srvdd__ul">
                             {% for option in group %}
                                 <li class="srvdd__li" data-item data-text="{{ option.label|lower|escape }}">
@@ -32,6 +41,7 @@
                             {% endfor %}
                         </ul>
                     </section>
+                    {% endwith %}
                 {% endfor %}
             </div>
         </div>
@@ -70,7 +80,20 @@
     .srvdd__group{ padding:.35rem .25rem .85rem; }
     .srvdd__groupTitle{
         font-weight:800; color:#204029; background:#F7F5EF; border:1px solid #E8E3D3;
-        padding:.35rem .6rem; border-radius:.45rem; margin:.4rem .25rem .6rem; position:sticky; top:.5rem; z-index:1
+        padding:.35rem .45rem; border-radius:.45rem; margin:.4rem .25rem .6rem; position:sticky; top:.5rem; z-index:1;
+        display:flex; align-items:center;
+    }
+    .srvdd__cat{
+        display:flex; align-items:center; gap:.55rem; width:100%; color:inherit; text-decoration:none; cursor:pointer;
+    }
+    .srvdd__catCheck{
+        width:1.05rem; height:1.05rem; margin:0; flex:0 0 auto;
+    }
+    .srvdd__catCheck:focus-visible{
+        outline:2px solid #3B6D42; outline-offset:2px;
+    }
+    .srvdd__catLabel{
+        flex:1; display:flex; align-items:center; gap:.35rem;
     }
     .srvdd__ul{ list-style:none; margin:0; padding:0; }
     .srvdd__item{
@@ -101,8 +124,23 @@
         const inner = root.querySelector('[data-panel-inner]');
         const input = root.querySelector('.srvdd__searchInput');
         const groups= [...root.querySelectorAll('[data-group]')];
+        const q = (el, sel)=> el ? el.querySelector(sel) : null;
+        const qa = (el, sel)=> el ? Array.from(el.querySelectorAll(sel)) : [];
+        const setCatState = (catInput, total, checked)=>{
+            if(!catInput) return;
+            catInput.indeterminate = checked > 0 && checked < total;
+            catInput.checked = checked === total && total > 0;
+        };
+        const rebuildGroupState = (group)=>{
+            const catCheck = q(group, '[data-cat-check]');
+            const itemChecks = qa(group, 'input[type="checkbox"][name="{{ widget.name }}"]');
+            const total = itemChecks.length;
+            const checked = itemChecks.filter(i=> i.checked).length;
+            setCatState(catCheck, total, checked);
+        };
 
         let isOpen = false;
+        const updatePanelHeight = ()=>{ if(isOpen) panel.style.maxHeight = inner.scrollHeight + 'px'; };
 
         function openPanel(){
             // Переход 0px -> контентная высота
@@ -143,8 +181,7 @@
         });
 
         // Пересчёт высоты на ресайз/изменение контента
-        const onResize = ()=> { if(isOpen) panel.style.maxHeight = inner.scrollHeight + 'px'; };
-        window.addEventListener('resize', onResize);
+        window.addEventListener('resize', updatePanelHeight);
 
         // ---- ЖИВОЙ ПОИСК ----
         const deb = (fn,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};};
@@ -162,8 +199,36 @@
                 g.setAttribute('data-hidden', visible ? '0' : '1');
             });
             // обновляем целевую высоту, чтобы transition оставался плавным
-            if(isOpen) panel.style.maxHeight = inner.scrollHeight + 'px';
+            updatePanelHeight();
         }, 120);
+
+        groups.forEach(group=>{
+            const catCheck = q(group, '[data-cat-check]');
+            const items = qa(group, 'input[type="checkbox"][name="{{ widget.name }}"]');
+
+            if(catCheck){
+                catCheck.addEventListener('change', ()=>{
+                    catCheck.indeterminate = false;
+                    const target = catCheck.checked;
+                    items.forEach(i=>{
+                        if(i.checked !== target){
+                            i.checked = target;
+                            i.dispatchEvent(new Event('change', { bubbles:true }));
+                        }
+                    });
+                    rebuildGroupState(group);
+                    updatePanelHeight();
+                });
+            }
+
+            items.forEach(i=>{
+                i.addEventListener('change', ()=>{
+                    rebuildGroupState(group);
+                }, { passive:true });
+            });
+        });
+
+        groups.forEach(rebuildGroupState);
 
         input.addEventListener('input', filter);
     })();
