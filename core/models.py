@@ -305,6 +305,13 @@ class Service(models.Model):
         help_text="Accessible text for the service image; defaults to the service name."
     )
     category = models.ForeignKey(ServiceCategory, on_delete=models.CASCADE, blank=True, null=True)
+    room = models.ForeignKey(
+        "core.MasterRoom",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="services",
+    )
     # prepayment_option = models.ForeignKey(PrepaymentOption, on_delete=models.CASCADE, blank=True, null=True)
     base_price = models.DecimalField(max_digits=10, decimal_places=2)
     duration_min = models.IntegerField()
@@ -459,7 +466,6 @@ class MasterProfile(models.Model):
     user = models.OneToOneField(UserProfile, on_delete=models.CASCADE, related_name="master_profile")
     profession = models.CharField(max_length=100, blank=True)
     bio = models.TextField(blank=True)
-    room = models.ForeignKey(MasterRoom, on_delete=models.CASCADE, blank=True, null=True)
 
     def __str__(self):
         return f"{self.user.get_full_name()}"
@@ -949,7 +955,10 @@ class AppointmentItem(models.Model):
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)  # '', 'service', 'promocode'
 
     class Meta:
-        indexes = [models.Index(fields=["master", "start_time"])]
+        indexes = [
+            models.Index(fields=["master", "start_time"]),
+            models.Index(fields=["service", "start_time"]),
+        ]
     def __str__(self):
         return f"{self.appointment.client} for {self.service} at {self.start_time}"
     @property
@@ -1149,63 +1158,38 @@ class AppointmentItem(models.Model):
                         f"({work_end_dt.strftime('%H:%M')})."
                     )
                 })
+        # === 3) Ensure a room is not double-booked when both services use the same room ===
+        room_id = None
+        service = getattr(self, "service", None)
+        if service is not None:
+            room_id = getattr(service, "room_id", None)
+        elif self.service_id:
+            room_id = Service.objects.filter(pk=self.service_id).values_list("room_id", flat=True).first()
 
-        # === 3) Кабинет: два мастера не могут работать в одном кабинете одновременно ===
-        # Ищем «room» на master_profile или прямо на item/appointment (под разные схемы)
-        room = getattr(master_profile, "room", None)
-        if room is None:
-            room = getattr(self, "room", None)
-        if room is None:
-            room = getattr(getattr(self, "appointment", None), "room", None)
-
-        if room is not None:
+        if room_id:
             room_overlap_qs = type(self).objects.filter(
-                # любой мастер, но тот же кабинет
+                service__room_id=room_id,
                 start_time__lt=this_end,
                 start_time__gt=start_dt - timedelta(hours=24),
             )
-            # фильтрация по «room» — где бы он ни лежал
-            # 1) room на item:
-            try:
-                room_overlap_qs = room_overlap_qs.filter(room=room)
-                room_on_item = True
-            except Exception:
-                room_on_item = False
+            if self.pk:
+                room_overlap_qs = room_overlap_qs.exclude(pk=self.pk)
+            if cancelled_status:
+                room_overlap_qs = room_overlap_qs.exclude(
+                    appointment__appointmentstatushistory__status=cancelled_status
+                )
 
-            # 2) room на master_profile:
-            if not room_on_item:
-                try:
-                    room_overlap_qs = room_overlap_qs.filter(master__master_profile__room=room)
-                except Exception:
-                    # 3) room прямо на master:
-                    try:
-                        room_overlap_qs = room_overlap_qs.filter(master__room=room)
-                    except Exception:
-                        # 4) room на appointment:
-                        try:
-                            room_overlap_qs = room_overlap_qs.filter(appointment__room=room)
-                        except Exception:
-                            room_overlap_qs = None  # поле не найдено — пропустим проверку
+            for other in room_overlap_qs.select_related("service", "appointment", "master"):
+                if not other.start_time:
+                    continue
+                other_total = other.duration_min if hasattr(other, "duration_min") else 0
+                other_end = other.start_time + timedelta(minutes=other_total)
+                if start_dt < other_end and this_end > other.start_time:
+                    raise ValidationError({
+                        "start_time": "This room is currently used by another service for the selected time."
+                    })
 
-            if room_overlap_qs is not None:
-                if self.pk:
-                    room_overlap_qs = room_overlap_qs.exclude(pk=self.pk)
-                if cancelled_status:
-                    room_overlap_qs = room_overlap_qs.exclude(
-                        appointment__appointmentstatushistory__status=cancelled_status
-                    )
-
-                for other in room_overlap_qs.select_related("service", "appointment", "master"):
-                    if not other.start_time:
-                        continue
-                    other_total = other.duration_min if hasattr(other, "duration_min") else 0
-                    other_end = other.start_time + timedelta(minutes=other_total)
-                    if start_dt < other_end and this_end > other.start_time:
-                        raise ValidationError({
-                            "start_time": "В этом кабинете уже есть запись на это время."
-                        })
-
-        # === 4) Недоступность мастера (time off / vacation / blocked) ===
+# === 4) Недоступность мастера (time off / vacation / blocked) ===
         # Поддержим несколько возможных имён модели и полей, чтобы не «падать», если схема немного отличается.
         timeoff_model = None
         for model_name in ("MasterAvailability", "MasterTimeOff", "MasterBlock", "MasterAbsence"):

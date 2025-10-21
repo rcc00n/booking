@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from core.models import MasterProfile, MasterRoom, UserProfile
+from core.models import MasterProfile, UserProfile
 
 
 class MasterAdminCardsTests(TestCase):
@@ -20,16 +20,12 @@ class MasterAdminCardsTests(TestCase):
         self.client.force_login(self.superuser)
         self.url = reverse("admin:core_masterprofile_changelist")
 
-        self.room_one = MasterRoom.objects.create(room="Room 1")
-        self.room_two = MasterRoom.objects.create(room="Room 2")
-
         self.master_anna = self._make_master(
             username="anna",
             first_name="Anna",
             last_name="Baker",
             email="anna@example.com",
             phone="+15550001",
-            room=self.room_one,
             profession="Hair Stylist",
         )
         self.master_bella = self._make_master(
@@ -38,7 +34,6 @@ class MasterAdminCardsTests(TestCase):
             last_name="Clark",
             email="bella@example.com",
             phone="+15550002",
-            room=self.room_two,
             profession="Nail Technician",
         )
         self.master_cara = self._make_master(
@@ -47,12 +42,11 @@ class MasterAdminCardsTests(TestCase):
             last_name="Dunn",
             email="cara@example.com",
             phone="+15550003",
-            room=None,
             profession="Hair Stylist",
         )
 
     @staticmethod
-    def _make_master(username, first_name, last_name, email, phone, room, profession):
+    def _make_master(username, first_name, last_name, email, phone, profession):
         User = get_user_model()
         user = User.objects.create_user(
             username=username,
@@ -65,7 +59,7 @@ class MasterAdminCardsTests(TestCase):
         if profile.phone != phone:
             profile.phone = phone
             profile.save(update_fields=["phone"])
-        return MasterProfile.objects.create(user=profile, room=room, profession=profession)
+        return MasterProfile.objects.create(user=profile, profession=profession)
 
     def _names(self, response):
         return [obj.user.user.first_name for obj in response.context["cl"].result_list]
@@ -79,16 +73,6 @@ class MasterAdminCardsTests(TestCase):
         response = self.client.get(self.url, {"name_order": "za"}, follow=True)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self._names(response), ["Cara", "Bella", "Anna"])
-
-    def test_filter_by_room(self):
-        response = self.client.get(self.url, {"room": str(self.room_one.pk)}, follow=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self._names(response), ["Anna"])
-
-    def test_filter_by_room_unassigned(self):
-        response = self.client.get(self.url, {"room": "none"}, follow=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self._names(response), ["Cara"])
 
     def test_filter_by_profession(self):
         response = self.client.get(self.url, {"profession": "Hair Stylist"}, follow=True)
@@ -109,3 +93,30 @@ class MasterAdminCardsTests(TestCase):
         response = self.client.get(self.url, {"q": "cara@example.com"}, follow=True)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self._names(response), ["Cara"])
+
+    def test_change_view_loads_without_room_field(self):
+        change_url = reverse("admin:core_masterprofile_change", args=[self.master_anna.pk])
+        response = self.client.get(change_url, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('name="room"', response.content.decode())
+
+    def test_change_view_save_without_room(self):
+        change_url = reverse("admin:core_masterprofile_change", args=[self.master_anna.pk])
+        data = {
+            "email": "anna@example.com",
+            "first_name": "Anna",
+            "last_name": "Baker",
+            "phone": "+15550001",
+            "profession": "Hair Stylist",
+            "bio": "Updated bio",
+            "services": [],
+            "postal_code": "",
+            "birth_date_year": "",
+            "birth_date_month": "",
+            "birth_date_day": "",
+            "_save": "Save",
+        }
+        response = self.client.post(change_url, data, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.master_anna.refresh_from_db()
+        self.assertEqual(self.master_anna.bio, "Updated bio")

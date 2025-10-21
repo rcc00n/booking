@@ -1,4 +1,4 @@
-from bisect import bisect_left
+﻿from bisect import bisect_left
 from collections import defaultdict
 from decimal import Decimal
 from io import BytesIO
@@ -2858,9 +2858,10 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
-        except Exception:
+        except Exception as e:
             # На проде — лог, а пользователю безопасно
             bag["__all__"].append("Unexpected error while creating appointment.")
+            print("Error" + str(e))
             ctx = {
                 **self.admin_site.each_context(request),
                 "clients": clients,
@@ -3283,9 +3284,9 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     Admin interface for services.
     """
     change_list_template = "admin/service/changelist_table.html"
-    list_display = ('name', 'base_price', 'category', 'duration_min', 'is_active', 'image_admin_thumb')
+    list_display = ('name', 'base_price', 'category', 'room', 'duration_min', 'is_active', 'image_admin_thumb')
     search_fields = ('name',)
-    list_filter = ('is_active', 'category')
+    list_filter = ('is_active', 'category', 'room')
     filter_horizontal = ("pre_appointment_forms",)
     readonly_fields = ("image_preview",)
     list_per_page = 10
@@ -3295,6 +3296,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "name",
                 "description",
                 "category",
+                "room",
                 "is_active",
                 "base_price",
                 "duration_min",
@@ -3313,7 +3315,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
         }),
     )
     actions = ["mark_active", "mark_inactive"]
-    export_fields = ['name', 'description','base_price', 'category', 'duration_min', 'extra_time_min']
+    export_fields = ['name', 'description','base_price', 'category', 'room', 'duration_min', 'extra_time_min']
 
     @admin.action(description="Mark selected services as active")
     def mark_active(self, request, queryset):
@@ -4215,7 +4217,22 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
     list_per_page = 24
 
     readonly_fields = ['password_display']
-    export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","postal_code", "profession", 'bio', "", "", "room", "is_staff", "is_superuser", 'is_active']
+    export_fields = [
+        "first_name",
+        "last_name",
+        "email",
+        "username",
+        "phone",
+        "birth_date",
+        "postal_code",
+        "profession",
+        "bio",
+        "work_start",
+        "work_end",
+        "is_staff",
+        "is_superuser",
+        "is_active",
+    ]
     search_fields = (
         "user__user__username",
         "user__user__first_name",
@@ -4225,8 +4242,8 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
     )
 
     def get_queryset(self, request):
-        # Prefetch related auth user + room to minimize queries in cards template.
-        qs = super().get_queryset(request).select_related("user__user", "room")
+        # Prefetch related auth user to minimize queries in cards template.
+        qs = super().get_queryset(request).select_related("user__user")
 
         name_order = getattr(request, "_master_order_choice", request.GET.get("name_order"))
         if name_order not in {"az", "za"}:
@@ -4258,27 +4275,6 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
 
-        rooms_qs = MasterRoom.objects.order_by("room")
-        room_options = [
-            {"value": "", "label": _("All rooms")},
-        ]
-        if self.model.objects.filter(room__isnull=True).exists():
-            room_options.append({"value": "none", "label": _("Unassigned")})
-        room_options.extend(
-            {"value": str(room.pk), "label": room.room}
-            for room in rooms_qs
-        )
-        room_current = request.GET.get("room", "")
-        room_current_label = ""
-        if room_current:
-            if room_current == "none":
-                room_current_label = _("Unassigned")
-            else:
-                for option in room_options:
-                    if option["value"] == room_current:
-                        room_current_label = option["label"]
-                        break
-
         professions = (
             self.model.objects.exclude(profession__isnull=True)
             .exclude(profession__exact="")
@@ -4289,23 +4285,17 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
         profession_options = [{"value": "", "label": _("All professions")}]
         profession_options.extend({"value": prof, "label": prof} for prof in professions)
         profession_current = request.GET.get("profession", "")
-        profession_current_label = ""
-        if profession_current:
-            profession_current_label = profession_current
+        profession_current_label = profession_current if profession_current else ""
 
         name_order = request.GET.get("name_order") or "az"
         if name_order not in {"az", "za"}:
             name_order = "az"
 
-        request._master_room_filter = room_current
         request._master_profession_filter = profession_current
         request._master_order_choice = name_order
 
         extra_context.update(
             {
-                "room_options": room_options,
-                "room_current": room_current,
-                "room_current_label": room_current_label,
                 "profession_options": profession_options,
                 "profession_current": profession_current,
                 "profession_current_label": profession_current_label,
@@ -4323,11 +4313,6 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
 
         original_get = request.GET
         cleaned_get = original_get.copy()
-        if room_current == "none":
-            cleaned_get.pop("room", None)
-            cleaned_get["room__isnull"] = "True"
-        elif room_current and not room_current.isdigit():
-            cleaned_get.pop("room", None)
         if profession_current:
             cleaned_get.pop("profession", None)
             cleaned_get["profession__iexact"] = profession_current
@@ -4358,11 +4343,6 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
         birth_date = getattr(user_profile, "birth_date", "")
         postal_code = getattr(user_profile, "postal_code", "")
 
-        room_display = ""
-        room = getattr(obj, "room", None)
-        if room is not None:
-            room_display = getattr(room, "room", room)
-
         return [
             getattr(auth_user, "first_name", ""),
             getattr(auth_user, "last_name", ""),
@@ -4375,7 +4355,6 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
             getattr(obj, "bio", ""),
             getattr(obj, "work_start", ""),
             getattr(obj, "work_end", ""),
-            room_display,
             getattr(auth_user, "is_staff", ""),
             getattr(auth_user, "is_superuser", ""),
             getattr(auth_user, "is_active", ""),
@@ -4384,9 +4363,9 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related("user__user", "room")
+        return qs.select_related("user__user")
 
-    list_display = ("get_name", "room", "profession")
+    list_display = ("get_name", "profession")
 
     def get_fieldsets(self, request, obj=None):
         form = self.form(instance=obj if obj else None)
@@ -5383,7 +5362,6 @@ def custom_index(request):
 
     ctx = {"userprof": userprof}
     return TemplateResponse(request, "admin/index.html", ctx)
-
 
 
 

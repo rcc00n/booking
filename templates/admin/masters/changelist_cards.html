@@ -13,7 +13,6 @@
     document.addEventListener('DOMContentLoaded', function () {
       const dropdowns = document.querySelectorAll('[data-dropdown]');
       const form = document.querySelector('.tm-searchbox__form');
-      const roomInput = document.getElementById('filter-room-input');
       const professionInput = document.getElementById('filter-profession-input');
       const orderInput = document.getElementById('name-order-input');
 
@@ -41,30 +40,6 @@
           if (!alreadyOpen) {
             dropdown.classList.add('is-open');
           }
-        });
-
-        panel.querySelectorAll('[data-room-value]').forEach(function (button) {
-          button.addEventListener('click', function (event) {
-            event.preventDefault();
-            if (roomInput) {
-              roomInput.value = button.getAttribute('data-room-value') || '';
-            }
-            if (form) {
-              form.submit();
-            }
-          });
-        });
-
-        panel.querySelectorAll('[data-action="clear-room"]').forEach(function (button) {
-          button.addEventListener('click', function (event) {
-            event.preventDefault();
-            if (roomInput) {
-              roomInput.value = '';
-            }
-            if (form) {
-              form.submit();
-            }
-          });
         });
 
         panel.querySelectorAll('[data-profession-value]').forEach(function (button) {
@@ -151,53 +126,24 @@
           autocomplete="off"
         />
         {% for key, val in request.GET.items %}
-          {% if key != cl.search_var and key != 'p' and key != 'e' and key != 'room' and key != 'profession' and key != 'name_order' %}
+          {% if key != cl.search_var and key != 'p' and key != 'e' and key != 'profession' and key != 'name_order' %}
             <input type="hidden" name="{{ key }}" value="{{ val }}">
           {% endif %}
         {% endfor %}
-        <input type="hidden" id="filter-room-input" name="room" value="{{ room_current }}">
         <input type="hidden" id="filter-profession-input" name="profession" value="{{ profession_current }}">
         <input type="hidden" id="name-order-input" name="name_order" value="{{ name_order_current }}">
 
         <div class="tm-searchbox__actions">
-          <div class="tm-dropdown{% if room_current or profession_current %} is-active{% endif %}" data-dropdown>
-            <button type="button" class="tm-chip{% if room_current or profession_current %} is-active{% endif %}" data-dropdown-trigger>
+          <div class="tm-dropdown{% if profession_current %} is-active{% endif %}" data-dropdown>
+            <button type="button" class="tm-chip{% if profession_current %} is-active{% endif %}" data-dropdown-trigger>
               <i class="fas fa-filter" aria-hidden="true"></i> {% trans "Filters" %}
             </button>
-            {% if room_current_label or profession_current_label %}
+            {% if profession_current_label %}
               <div class="tm-filter-summary">
-                {% if room_current_label %}
-                  {% trans "Room" %}: {{ room_current_label }}
-                {% endif %}
-                {% if room_current_label and profession_current_label %} &middot; {% endif %}
-                {% if profession_current_label %}
-                  {% trans "Profession" %}: {{ profession_current_label }}
-                {% endif %}
+                {% trans "Profession" %}: {{ profession_current_label }}
               </div>
             {% endif %}
             <div class="tm-dropdown__panel" data-dropdown-panel>
-              <div class="tm-dropdown__section">
-                <div class="tm-dropdown__title">{% trans "Room" %}</div>
-                <div class="tm-dropdown__actions">
-                  <button type="button" class="tm-action--clear" data-action="clear-room">
-                    {% trans "Clear" %}
-                  </button>
-                </div>
-                <ul class="tm-dropdown__list">
-                  {% for option in room_options %}
-                    <li>
-                      <button type="button"
-                              class="tm-dropdown__option{% if option.value == room_current %} is-active{% endif %}"
-                              data-room-value="{{ option.value }}">
-                        {{ option.label }}
-                        {% if option.value == room_current %}
-                          <span>&check;</span>
-                        {% endif %}
-                      </button>
-                    </li>
-                  {% endfor %}
-                </ul>
-              </div>
               <div class="tm-dropdown__section">
                 <div class="tm-dropdown__title">{% trans "Profession" %}</div>
                 <div class="tm-dropdown__actions">
