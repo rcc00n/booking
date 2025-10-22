@@ -3331,6 +3331,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     Admin interface for services.
     """
     change_list_template = "admin/service/changelist_table.html"
+    change_form_template = "admin/service/change_form.html"
     list_display = ('name', 'base_price', 'category', 'room', 'duration_min', 'is_active', 'image_admin_thumb')
     search_fields = ('name',)
     list_filter = ('is_active', 'category', 'room')
@@ -3409,6 +3410,57 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
 
     def get_ordering(self, request):
         return ("name", "pk")
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        if request.method == "POST" and "_duplicate" in request.POST:
+            original = self.get_object(request, object_id)
+            if original is None:
+                raise Http404(_("Service not found."))
+
+            if not self.has_change_permission(request, original) or not self.has_add_permission(request):
+                raise PermissionDenied
+
+            clone = None
+            try:
+                with transaction.atomic():
+                    service_model = self.model
+                    base_name = original.name
+                    new_name = base_name
+
+                    manager = service_model._default_manager
+                    if manager.filter(name=new_name).exclude(pk=original.pk).exists():
+                        suffix_index = 1
+                        while True:
+                            suffix = " (copy)" if suffix_index == 1 else f" (copy {suffix_index})"
+                            candidate = f"{base_name}{suffix}"
+                            if not manager.filter(name=candidate).exists():
+                                new_name = candidate
+                                break
+                            suffix_index += 1
+
+                    clone = service_model(
+                        name=new_name,
+                        description=original.description,
+                        base_price=original.base_price,
+                        duration_min=original.duration_min,
+                        extra_time_min=original.extra_time_min,
+                        category=original.category,
+                        room=original.room,
+                        image=original.image,
+                        image_alt_text=original.image_alt_text,
+                        is_active=getattr(original, "is_active", True),
+                    )
+                    clone.save()
+                    clone.pre_appointment_forms.set(original.pre_appointment_forms.all())
+            except Exception:
+                messages.error(request, _("Could not duplicate service."))
+            else:
+                if clone is not None:
+                    self.log_addition(request, clone, f"Duplicated from Service {original.pk}.")
+                messages.success(request, _("Service duplicated."))
+                return redirect(reverse("admin:core_service_changelist"))
+
+        return super().change_view(request, object_id, form_url=form_url, extra_context=extra_context)
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
