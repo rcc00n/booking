@@ -40,6 +40,15 @@ def _payment_totals(payment: Payment, items: Iterable[AppointmentItem]) -> Recei
         price = getattr(item, "final_price", None) or getattr(item, "unit_price", None) or Decimal("0.00")
         subtotal += _quantize(price)
 
+    appointment = getattr(payment, "appointment", None)
+    sales_list = []
+    if appointment is not None:
+        product_sales_rel = getattr(appointment, "product_sales", None)
+        if product_sales_rel is not None:
+            sales_list = list(product_sales_rel.all())
+            for sale in sales_list:
+                subtotal += _quantize(getattr(sale, "total_amount", Decimal("0.00")) or Decimal("0.00"))
+
     total = _quantize(payment.amount_received or payment.amount or Decimal("0.00"))
 
     discount_total = subtotal - total
@@ -60,6 +69,15 @@ def _payment_totals(payment: Payment, items: Iterable[AppointmentItem]) -> Recei
                     computed_tax = Decimal(str(tax_decimal))
                 except Exception:
                     computed_tax = Decimal("0.00")
+
+    if computed_tax == Decimal("0.00"):
+        item_tax_total = Decimal("0.00")
+        for item in items:
+            item_tax_total += _quantize(getattr(item, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+        sale_tax_total = Decimal("0.00")
+        for sale in sales_list:
+            sale_tax_total += _quantize(getattr(sale, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+        computed_tax = item_tax_total + sale_tax_total
 
     return ReceiptTotals(
         subtotal=_quantize(subtotal),

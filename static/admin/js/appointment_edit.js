@@ -17,6 +17,19 @@
     const MS_MAP = parseJSON("ms-map-data", {}); // { master_id: [ {id,name,base_price,svc_disc}, ... ] }
     const PROMO_BY_SERVICE = parseJSON("promos-by-service-data", {}); // { service_id: [ {id,text,discount}, ... ] }
     const PROMO_GLOBAL = parseJSON("promos-global-data", []);        // [ {id,text,discount}, ... ]
+    const GST_PERCENT = Number(parseJSON("gst-percent", "5.0")) || 5;
+    const GST_ENABLED = Boolean(parseJSON("gst-enabled", true));
+    const CURRENCY_CODE = String(parseJSON("currency-code", "CAD") || "CAD").toLowerCase();
+    const CURRENCY_SYMBOL = ((code) => {
+        switch (code) {
+            case "cad":
+                return "CA$";
+            case "usd":
+                return "$";
+            default:
+                return code ? code.toUpperCase() + " " : "CA$";
+        }
+    })(CURRENCY_CODE);
 
     const $ = (sel, root = document) => root.querySelector(sel);
     const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -27,6 +40,14 @@
     const SALE_DEFAULTS = parseJSON("product-sale-defaults", {});
     const appointmentClientSelect = document.getElementById("id_client");
     if (!itemsContainer) return;
+    const subtotalDisplay = document.getElementById("appt-subtotal");
+    const taxDisplay = document.getElementById("appt-tax");
+    const totalDisplay = document.getElementById("appt-total");
+    const taxRowDisplay = document.getElementById("appt-tax-row");
+    const gstLabelDisplay = document.getElementById("gst-label");
+    if (taxRowDisplay && !GST_ENABLED) {
+        taxRowDisplay.classList.add("ab-hidden");
+    }
 
     function buildOption(value, text) {
         const o = document.createElement("option");
@@ -62,6 +83,22 @@
         }
         select.value = val;
     }
+    function roundCurrency(value) {
+        return Math.round((Number(value) || 0) * 100) / 100;
+    }
+    function formatPercent(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) {
+            return "";
+        }
+        const fixed = num % 1 === 0 ? num.toFixed(0) : num.toFixed(2);
+        return fixed.replace(/\.0+$/, "").replace(/0+$/, "").replace(/\.$/, "");
+    }
+    function money(value) {
+        const amount = Number(value || 0);
+        return `${CURRENCY_SYMBOL}${amount.toFixed(2)}`;
+    }
+    const GST_LABEL = `GST ${formatPercent(GST_PERCENT)}%`;
     function populateMasters(uiSelect) {
            uiSelect.innerHTML = "";
            // всегда показываем всех — нужно корректно отрисовать чужие строки
@@ -76,6 +113,7 @@
             if (s.base_price != null) opt.dataset.price = s.base_price;
             if (s.duration_min != null) opt.dataset.duration = s.duration_min;
             if (s.total_duration_min != null) opt.dataset.totalDuration = s.total_duration_min;
+            if (s.is_taxable != null) opt.dataset.isTaxable = s.is_taxable ? "1" : "0";
             uiSelect.appendChild(opt);
         });
         uiSelect.disabled = list.length === 0;
@@ -92,6 +130,86 @@
             seen.add(p.id);
             uiSelect.appendChild(buildOption(p.id, p.text));
         });
+    }
+    function updateRowSummary(row) {
+        const priceInput = row.querySelector('input[name$="-unit_price"]');
+        const deleteInput = row.querySelector('input[name$="-DELETE"]');
+        const isDeleted = !!(deleteInput && deleteInput.checked);
+        const datasetValue = row.dataset.finalPrice ? Number(row.dataset.finalPrice) : 0;
+        const rawValue = priceInput && priceInput.value !== '' ? Number(priceInput.value) : NaN;
+        const subtotal = isDeleted ? 0 : roundCurrency(Number.isFinite(rawValue) ? rawValue : datasetValue);
+        row.dataset.finalPrice = String(subtotal.toFixed(2));
+        const taxable = !isDeleted && GST_ENABLED && row.dataset.taxable === "1";
+        const tax = taxable ? roundCurrency(subtotal * GST_PERCENT / 100) : 0;
+        const total = roundCurrency(subtotal + tax);
+
+        const subtotalEl = row.querySelector('.js-item-subtotal');
+        if (subtotalEl) subtotalEl.textContent = money(subtotal);
+        const taxRowEl = row.querySelector('.js-item-tax-row');
+        if (taxRowEl) taxRowEl.classList.toggle('ab-hidden', !taxable);
+        const taxLabelEl = row.querySelector('.js-item-tax-label');
+        if (taxLabelEl) taxLabelEl.textContent = GST_LABEL;
+        const taxEl = row.querySelector('.js-item-tax');
+        if (taxEl) taxEl.textContent = money(tax);
+        const totalEl = row.querySelector('.js-item-total');
+        if (totalEl) totalEl.textContent = money(total);
+
+        return { subtotal, tax, total };
+    }
+
+    function updateSaleSummary(row) {
+        const quantityInput = row.querySelector('input[name$="-quantity"]');
+        const unitPriceInput = row.querySelector('input[name$="-unit_price"]');
+        const deleteInput = row.querySelector('input[name$="-DELETE"]');
+        const isDeleted = !!(deleteInput && deleteInput.checked);
+        const datasetValue = row.dataset.saleSubtotal ? Number(row.dataset.saleSubtotal) : 0;
+        const quantity = quantityInput && quantityInput.value !== '' ? Number(quantityInput.value) : NaN;
+        const unitPrice = unitPriceInput && unitPriceInput.value !== '' ? Number(unitPriceInput.value) : NaN;
+        const subtotal = isDeleted ? 0 : roundCurrency(Number.isFinite(quantity) && Number.isFinite(unitPrice) ? quantity * unitPrice : datasetValue);
+        row.dataset.saleSubtotal = String(subtotal.toFixed(2));
+        const taxable = !isDeleted && GST_ENABLED;
+        const tax = taxable ? roundCurrency(subtotal * GST_PERCENT / 100) : 0;
+        row.dataset.saleTax = String(tax.toFixed(2));
+        const total = roundCurrency(subtotal + tax);
+        const subtotalEl = row.querySelector('.js-sale-subtotal');
+        if (subtotalEl) subtotalEl.textContent = money(subtotal);
+        const taxRowEl = row.querySelector('.js-sale-tax-row');
+        if (taxRowEl) taxRowEl.classList.toggle('ab-hidden', !taxable);
+        const taxLabelEl = row.querySelector('.js-sale-tax-label');
+        if (taxLabelEl) taxLabelEl.textContent = GST_LABEL;
+        const taxEl = row.querySelector('.js-sale-tax');
+        if (taxEl) taxEl.textContent = money(tax);
+        const totalEl = row.querySelector('.js-sale-total');
+        if (totalEl) totalEl.textContent = money(total);
+        const totalBadge = row.querySelector('[data-product-sale-role="total"]');
+        if (totalBadge) totalBadge.textContent = money(total);
+        return { subtotal, tax, total };
+    }
+
+function recomputeAllTotals() {
+        let subtotalSum = 0;
+        let taxSum = 0;
+        $$('.ab-item', itemsContainer).forEach(row => {
+            const { subtotal, tax } = updateRowSummary(row);
+            subtotalSum += subtotal;
+            taxSum += tax;
+        });
+        if (salesContainer) {
+            $$('.ps-item', salesContainer).forEach(row => {
+                const { subtotal, tax } = updateSaleSummary(row);
+                subtotalSum += subtotal;
+                taxSum += tax;
+            });
+        }
+        subtotalSum = roundCurrency(subtotalSum);
+        taxSum = roundCurrency(taxSum);
+        const totalSum = roundCurrency(subtotalSum + taxSum);
+
+        if (subtotalDisplay) subtotalDisplay.textContent = money(subtotalSum);
+        if (taxDisplay) taxDisplay.textContent = money(taxSum);
+        if (totalDisplay) totalDisplay.textContent = money(totalSum);
+        if (taxRowDisplay) taxRowDisplay.classList.toggle('ab-hidden', !GST_ENABLED);
+        if (gstLabelDisplay) gstLabelDisplay.textContent = GST_LABEL;
     }
     // disabled поля не уезжают в POST — подложим hidden-клон
     function readValueFor(el) {
@@ -167,8 +285,17 @@
         const nativePrice  = $("[name$='-unit_price']", row);   // реальное поле
         const durationInput = $("[name$='-duration_override_min']", row);
         const discountInput = $("[name$='-manual_discount_percent']", row);
+        const deleteInputToggle = $("input[name$='-DELETE']", row);
         const delWrap      = $(".js-del-wrap", row);
         const roBadge      = $(".js-ro-badge", row);
+        row.dataset.taxable = "0";
+
+        const syncTaxableMeta = () => {
+            const opt = uiSvc && uiSvc.selectedOptions ? uiSvc.selectedOptions[0] : null;
+            const taxable = !!(opt && opt.dataset && opt.dataset.isTaxable === "1");
+            row.dataset.taxable = taxable ? "1" : "0";
+            return taxable;
+        };
 
         // наполним мастеров и выставим значения
         populateMasters(uiMaster);
@@ -184,7 +311,15 @@
                 if (Number.isNaN(val)) return;
                 if (val < 0) discountInput.value = '0';
                 if (val > 100) discountInput.value = '100';
+                recomputeAllTotals();
             });
+        }
+        if (deleteInputToggle) {
+            deleteInputToggle.addEventListener('change', recomputeAllTotals);
+        }
+        if (nativePrice) {
+            nativePrice.addEventListener('input', recomputeAllTotals);
+            nativePrice.addEventListener('change', recomputeAllTotals);
         }
 
         // не трогаем значение master у существующих строк; просто отражаем его в UI
@@ -211,6 +346,8 @@
 
         const label = uiSvc.selectedOptions?.[0]?.textContent || "";
         setSelectValueEnsuringOption(nativeSvc, uiSvc.value, label);
+        syncTaxableMeta();
+        updateRowSummary(row);
 
 
 // при изменении сервиса пользователем: и в native опции/значение
@@ -232,6 +369,8 @@
             if (typeof populatePromos === "function") {
                 populatePromos(uiPromo, uiSvc.value);
             }
+            syncTaxableMeta();
+            recomputeAllTotals();
         });
         // промокоды (UI остаётся disabled по умолчанию, включим ниже для «моих»)
         if (nativeSvc && nativeSvc.value) {
@@ -256,6 +395,8 @@
                     if (nativeSvc) nativeSvc.value = uiSvc.value;
                     populatePromos(uiPromo, uiSvc.value);
                     if (nativePromo) nativePromo.value = uiPromo.value;
+                    syncTaxableMeta();
+                    recomputeAllTotals();
                 });
 
                 // промо в нативу
@@ -406,6 +547,9 @@
         if (!row || row.dataset.defaultsApplied === "1") return;
         const objIdInput = row.querySelector('input[name$="-id"]');
         if (objIdInput && objIdInput.value) {
+            row.dataset.saleSubtotal = row.dataset.saleSubtotal || "0.00";
+            row.dataset.saleTax = row.dataset.saleTax || "0.00";
+            updateSaleSummary(row);
             row.dataset.defaultsApplied = "1";
             return;
         }
@@ -445,6 +589,9 @@
                 window.jQuery(clientSelect).trigger("change");
             }
         }
+        row.dataset.saleSubtotal = row.dataset.saleSubtotal || "0.00";
+        row.dataset.saleTax = row.dataset.saleTax || "0.00";
+        updateSaleSummary(row);
         row.dataset.defaultsApplied = "1";
     }
 
@@ -480,6 +627,7 @@
 
         // Инициализация строки (селекты, таймпикер и т.д.)
         initRow(node);
+        recomputeAllTotals();
     }
 
     // Product sales helpers
@@ -501,14 +649,40 @@
         if (window.ProductSaleForm && typeof window.ProductSaleForm.enhanceScope === "function") {
             window.ProductSaleForm.enhanceScope(row);
         }
+        const quantityInput = row.querySelector('input[name$="-quantity"]');
+        const unitPriceInput = row.querySelector('input[name$="-unit_price"]');
         const deleteCheckbox = row.querySelector(`input[type="checkbox"][name$='-DELETE']`);
         const removeBtn = $(".js-sale-remove", row);
-        if (deleteCheckbox && removeBtn) {
-            removeBtn.addEventListener("click", () => {
-                deleteCheckbox.checked = true;
-                row.classList.add("ab-hidden");
+        const handleRecompute = () => {
+            updateSaleSummary(row);
+            recomputeAllTotals();
+        };
+        if (quantityInput) {
+            quantityInput.addEventListener('input', handleRecompute);
+            quantityInput.addEventListener('change', handleRecompute);
+        }
+        if (unitPriceInput) {
+            unitPriceInput.addEventListener('input', handleRecompute);
+            unitPriceInput.addEventListener('change', handleRecompute);
+        }
+        if (deleteCheckbox) {
+            deleteCheckbox.addEventListener('change', () => {
+                if (deleteCheckbox.checked) {
+                    row.classList.add('ab-hidden');
+                } else {
+                    row.classList.remove('ab-hidden');
+                }
+                handleRecompute();
             });
         }
+        if (removeBtn) {
+            removeBtn.addEventListener('click', () => {
+                if (deleteCheckbox) deleteCheckbox.checked = true;
+                row.classList.add('ab-hidden');
+                handleRecompute();
+            });
+        }
+        handleRecompute();
     }
     function initExistingSales() {
         if (!salesContainer) return;
@@ -576,6 +750,7 @@
         }
         initExistingRows();
         initExistingSales();
+        recomputeAllTotals();
         if (salesContainer && !salesContainer.querySelector(".ps-item")) {
             addProductSale();
         }

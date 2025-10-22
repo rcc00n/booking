@@ -1162,6 +1162,9 @@ class MasterCreateFullForm(forms.ModelForm):
             if to_del_ids:
                 ServiceMaster.objects.filter(master=master, service_id__in=to_del_ids).delete()
 
+            if commit:
+                master.save()
+
             return master
 
     class Media:

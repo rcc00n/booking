@@ -93,7 +93,14 @@ def create_or_update_payment_intent(
 ) -> PaymentIntentBundle:
     """Create or update a Stripe PaymentIntent for the appointment."""
 
-    total = Decimal(amount if amount is not None else appointment.final_price or 0)
+    if amount is not None:
+        total = Decimal(amount)
+    else:
+        if hasattr(appointment, "total_with_tax"):
+            total = Decimal(appointment.total_with_tax or Decimal("0.00"))
+        else:
+            total = Decimal(appointment.final_price or Decimal("0.00"))
+    total = total.quantize(Decimal("0.01"))
     currency = (currency or settings.STRIPE_CURRENCY or "cad").lower()
     pm_types = list(payment_method_types or settings.STRIPE_PAYMENT_METHOD_TYPES)
 

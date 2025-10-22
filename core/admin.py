@@ -1209,6 +1209,8 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         # Return different form on add vs change
         return self.add_form if obj is None else self.form
 
+
+
     def save_model(self, request, obj, form, change):
         # Persist the user first using the parent logic
         with transaction.atomic():
@@ -1909,6 +1911,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "extra_time_min": extra_min,
                 "total_duration_min": total_duration,
                 "svc_disc": svc_discounts.get(sid, 0),  # %
+                "is_taxable": bool(service.is_taxable),
                 "category": service.category.name if service.category_id else "Other",
             })
 
@@ -1971,6 +1974,9 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             # === важные флаги для шаблонов/JS ===
             "is_master": is_master(request.user),
             "current_master_id": mp.id if mp else None,
+            "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+            "gst_enabled": getattr(settings, "GST_ENABLED", True),
+            "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
         })
         return super().render_change_form(request, ctx, add=add, change=change, form_url=form_url, obj=obj)
 
@@ -2041,6 +2047,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "back_url": reverse("admin:core_appointment_change", args=[appointment.pk]),
         }
         return TemplateResponse(request, "admin/appointment_manage_form.html", context)
+
+
 
     def save_model(self, request, obj, form, change):
         # Админка валидирует формы, но мы дополнительно страхуемся:
@@ -2217,6 +2225,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "total_duration_min": (svc.duration_min or 0) + (svc.extra_time_min or 0),
                 "forms": form_ids,
                 "category": category_name,
+                "is_taxable": bool(svc.is_taxable),
             }
             for form in active_forms:
                 intake_forms_map[str(form.pk)] = form
@@ -2233,6 +2242,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "service__base_price",
                 "service__duration_min",
                 "service__extra_time_min",
+                "service__is_taxable",
                 "service__category__name",
                 "service__category_id",
             )
@@ -2252,6 +2262,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                     "total_duration_min": (r["service__duration_min"] or 0) + (r["service__extra_time_min"] or 0),
                     "forms": forms,
                     "category": category_name,
+                    "is_taxable": bool(r.get("service__is_taxable")),
                 }
                 services_info[sid] = base
             payload = {
@@ -2263,6 +2274,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "total_duration_min": base.get("total_duration_min", (base.get("duration_min") or 0)),
                 "forms": list(base.get("forms", [])),
                 "category": base.get("category", "Other"),
+                "is_taxable": bool(base.get("is_taxable", False)),
             }
             services_by_master.setdefault(str(r["master_id"]), []).append(payload)
 
@@ -2483,7 +2495,9 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "current_master_id": mp.id if mp else None,
 
                 "availability_url": availability_url,
-
+                "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+                "gst_enabled": getattr(settings, "GST_ENABLED", True),
+                "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
 
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
@@ -2716,6 +2730,9 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
                 "availability_url": availability_url,
+                "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+                "gst_enabled": getattr(settings, "GST_ENABLED", True),
+                "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -2858,6 +2875,9 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
                 "availability_url": availability_url,
+                "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+                "gst_enabled": getattr(settings, "GST_ENABLED", True),
+                "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -2882,6 +2902,9 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
                 "availability_url": availability_url,
+                "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+                "gst_enabled": getattr(settings, "GST_ENABLED", True),
+                "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -2907,6 +2930,9 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
                 "availability_url": availability_url,
+                "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+                "gst_enabled": getattr(settings, "GST_ENABLED", True),
+                "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -3131,6 +3157,8 @@ class AppointmentStatusHistoryAdmin(ExportCsvMixin,admin.ModelAdmin):
         if hasattr(request.user, "master_profile"):
             return True
         return False
+
+
     def save_model(self, request, obj, form, change):
         if not obj.set_by_id:
             profile = getattr(request.user, "userprofile", None)
@@ -3332,9 +3360,9 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     change_list_template = "admin/service/changelist_table.html"
     change_form_template = "admin/service/change_form.html"
-    list_display = ('name', 'base_price', 'category', 'room', 'duration_min', 'is_active', 'image_admin_thumb')
+    list_display = ('name', 'base_price', 'category', 'room', 'duration_min', 'is_taxable', 'is_active', 'image_admin_thumb')
     search_fields = ('name',)
-    list_filter = ('is_active', 'category', 'room')
+    list_filter = ('is_active', 'is_taxable', 'category', 'room')
     filter_horizontal = ("pre_appointment_forms",)
     readonly_fields = ("image_preview",)
     list_per_page = 10
@@ -3346,6 +3374,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "category",
                 "room",
                 "is_active",
+                "is_taxable",
                 "base_price",
                 "duration_min",
                 "extra_time_min",
@@ -3363,7 +3392,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
         }),
     )
     actions = ["mark_active", "mark_inactive"]
-    export_fields = ['name', 'description','base_price', 'category', 'room', 'duration_min', 'extra_time_min']
+    export_fields = ['name', 'description','base_price', 'category', 'room', 'duration_min', 'extra_time_min', 'is_taxable']
 
     @admin.action(description="Mark selected services as active")
     def mark_active(self, request, queryset):
@@ -4113,6 +4142,8 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
             extra_context.setdefault("export_url", None)
         return super().changelist_view(request, extra_context=extra_context)
 
+
+
     def save_model(self, request, obj, form, change):
         if not obj.sold_by_id:
             profile = getattr(request.user, "userprofile", None)
@@ -4513,6 +4544,30 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
 
     def get_name(self, obj):
         return obj.user.get_full_name() or obj.user.username
+
+
+
+    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
+        obj = self.get_object(request, object_id) if object_id else None
+        if request.method == "POST":
+            post = request.POST
+            if hasattr(post, "_mutable"):
+                mutable = post._mutable
+                post._mutable = True
+                for inline in self.get_inline_instances(request, obj):
+                    formset_class = inline.get_formset(request, obj)
+                    prefix = formset_class.get_default_prefix()
+                    total_key = f"{prefix}-TOTAL_FORMS"
+                    if total_key not in post:
+                        post[total_key] = "0"
+                        post[f"{prefix}-INITIAL_FORMS"] = "0"
+                        post.setdefault(f"{prefix}-MIN_NUM_FORMS", "0")
+                        max_num = getattr(formset_class, "max_num", None)
+                        if max_num in (None, 0):
+                            max_num = getattr(formset_class, "DEFAULT_MAX_NUM", "1000")
+                        post.setdefault(f"{prefix}-MAX_NUM_FORMS", str(max_num))
+                post._mutable = mutable
+        return super().changeform_view(request, object_id, form_url, extra_context)
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)

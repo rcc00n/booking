@@ -576,6 +576,8 @@ def stripe_create_cart_intent(request):
         "cart_id": str(pricing["cart_id"]),
         "booking_type": "appointment_cart",
         "cart_total_minor": str(pricing["total"]),
+        "cart_subtotal_minor": str(pricing.get("subtotal", 0)),
+        "cart_tax_minor": str(pricing.get("tax_total", 0)),
         "cart_currency": pricing["currency"],
         "cart_item_count": str(pricing.get("count", len(pricing.get("items", [])))),
     }

@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 import sys
 from decouple import config, Csv
@@ -190,6 +191,11 @@ STRIPE_ALLOW_PROMISE_PAYMENT = env.bool(
     "STRIPE_ALLOW_PROMISE_PAYMENT",
     default=False,
 )
+
+# --- Tax / currency defaults ---
+GST_PERCENT = Decimal(env("GST_PERCENT", default="5.0"))
+GST_ENABLED = env.bool("GST_ENABLED", default=True)
+CURRENCY_CODE = env.str("CURRENCY_CODE", default="CAD")
 
 # # Use S3 as default storage for uploaded media
 DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'

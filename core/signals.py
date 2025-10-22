@@ -87,7 +87,17 @@ def _short_labels(appt: Appointment) -> tuple[str, str]:
     if len(items) == 1:
         it = items[0]
         s_name = it.service.name
-        m_name = it.master.user.get_full_name() or it.master.user.username
+        master_profile = getattr(it.master, "user", None)
+        auth_user = getattr(master_profile, "user", None) if master_profile else None
+        name_candidates = []
+        if master_profile and hasattr(master_profile, "get_full_name"):
+            name_candidates.append(master_profile.get_full_name())
+        if auth_user and hasattr(auth_user, "get_full_name"):
+            name_candidates.append(auth_user.get_full_name())
+        if auth_user:
+            name_candidates.extend([getattr(auth_user, "username", ""), getattr(auth_user, "email", "")])
+        name_candidates.append(str(master_profile) if master_profile is not None else "")
+        m_name = next((n for n in name_candidates if n), "")
         return s_name, m_name
     return f"{len(items)} services", "multiple masters"
 

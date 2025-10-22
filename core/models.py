@@ -16,10 +16,13 @@ from django.utils.timezone import localtime
 from core.validators import clean_phone, clean_ab_postal_code, validate_service_is_active
 from django.conf import settings
 
-
 from storages.backends.s3boto3 import S3Boto3Storage
 from django.utils.text import slugify
 
+from core.utils.tax import compute_tax
+
+
+TWOPLACES = Decimal("0.01")
 
 def service_image_upload_to(instance, filename: str) -> str:
     """
@@ -66,6 +69,32 @@ class HowHeard(models.TextChoices):
     FRIEND = "friend", "Friends/Family"
     OTHER = "other", "Other"
 
+class UserProfileQuerySet(models.QuerySet):
+    def create(self, **kwargs):
+        """
+        Ensure uniqueness on user by updating the existing profile when callers
+        attempt to create a second one for the same auth user (signals/tests).
+        """
+        user = kwargs.get("user")
+        if user is None:
+            return super().create(**kwargs)
+
+        existing = self.filter(user=user).first()
+        if existing:
+            for field, value in kwargs.items():
+                if field == "user":
+                    continue
+                setattr(existing, field, value)
+            existing.save(using=self.db)
+            return existing
+
+        return super().create(**kwargs)
+
+
+class UserProfileManager(models.Manager.from_queryset(UserProfileQuerySet)):
+    pass
+
+
 class UserProfile(models.Model):
     SOURCE_CHOICES = [
         ("online", "Online"),
@@ -105,6 +134,8 @@ class UserProfile(models.Model):
         db_index=True,
     )
     email_verified_at = models.DateTimeField(null=True, blank=True)
+
+    objects = UserProfileManager()
 
     def save(self, *args, **kwargs):
         # Нормализуем индекс (uppercase, без пробелов). Пустое — ок.
@@ -323,6 +354,11 @@ class Service(models.Model):
         help_text="Forms the client must complete before attending this service.",
     )
     is_active = models.BooleanField(default=True, db_index=True)
+    is_taxable = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Charge 5% GST when true.",
+    )
 
     def __str__(self):
         return self.name
@@ -653,6 +689,7 @@ class Appointment(models.Model):
     start_time = models.DateTimeField(null=True, blank=True)
     # payment_status = models.ForeignKey(PaymentStatus, on_delete=models.CASCADE, default=PaymentStatus.objects.get(name="Not Paid").id)
     final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
+    tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"), editable=False)
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -704,6 +741,29 @@ class Appointment(models.Model):
     def price(self):
         return self.final_price
 
+    def _subtotal_for_tax(self) -> Decimal:
+        """
+        Return the appointment subtotal after discounts (without tax).
+        """
+        subtotal = Decimal("0.00")
+        for item in self._prefetched_items():
+            subtotal += Decimal(getattr(item, "final_price", Decimal("0.00")) or Decimal("0.00"))
+        if hasattr(self, "product_sales"):
+            for sale in self.product_sales.all():
+                subtotal += Decimal(getattr(sale, "total_amount", Decimal("0.00")) or Decimal("0.00"))
+        return subtotal.quantize(TWOPLACES)
+
+    @property
+    def total_with_tax(self) -> Decimal:
+        """
+        Appointment grand total including GST.
+        """
+        if self.final_price is not None:
+            return Decimal(self.final_price).quantize(TWOPLACES)
+        subtotal = self._subtotal_for_tax()
+        tax_total = Decimal(getattr(self, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+        return (subtotal + tax_total).quantize(TWOPLACES)
+
 
 
     def items_qs(self):
@@ -727,6 +787,7 @@ class Appointment(models.Model):
         from decimal import Decimal
         changed = []
         subtotal = Decimal("0.00")
+        tax_total = Decimal("0.00")
         item_sources = set()
         item_sources.add("")
         for it in self.items_qs():
@@ -738,21 +799,29 @@ class Appointment(models.Model):
             if after != before:
                 changed.append(it)
             subtotal += it.final_price
+            tax_total += getattr(it, "tax_amount", Decimal("0.00"))
             # собираем ТОЛЬКО позиционные источники
             if it.discount_source:
                 item_sources.add(it.discount_source)
         # агрегированный источник
 
+        product_sales_rel = getattr(self, "product_sales", None)
+        if product_sales_rel is not None:
+            for sale in product_sales_rel.all():
+                subtotal += Decimal(getattr(sale, "total_amount", Decimal("0.00")) or Decimal("0.00"))
+                tax_total += Decimal(getattr(sale, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+
         self.sync_start_time_from_items(save=True)
-        self.final_price = subtotal
         self.discount_source = max(item_sources)
         with transaction.atomic():
             if persist_items and changed:
                 type(self).items.rel.related_model.objects.bulk_update(
-                    changed, ["final_price", "discount_source", "unit_price"]
-        )
+                    changed, ["final_price", "tax_amount", "discount_source", "unit_price"]
+                )
+        self.tax_amount = tax_total.quantize(TWOPLACES)
+        self.final_price = (subtotal + tax_total).quantize(TWOPLACES)
         if save:
-            super().save(update_fields=["final_price", "discount_source", "start_time"])
+            super().save(update_fields=["final_price", "tax_amount", "discount_source", "start_time"])
 
     def sync_start_time_from_items(self, *, save: bool = True) -> None:
         """
@@ -952,6 +1021,7 @@ class AppointmentItem(models.Model):
     )
     # Итог позиции после позиционных скидок (service/promocode). Персональная НЕ учитывается!
     final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
+    tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"), editable=False)
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)  # '', 'service', 'promocode'
 
     class Meta:
@@ -1056,6 +1126,31 @@ class AppointmentItem(models.Model):
             discount_source = f"{discount_source}+manual" if discount_source else "manual"
         self.discount_source = discount_source
 
+        taxable_service = getattr(self.service, "is_taxable", False)
+        if taxable_service:
+            self.tax_amount = compute_tax(self.final_price)
+        else:
+            self.tax_amount = Decimal("0.00")
+
+    def _final_price_for_tax(self) -> Decimal:
+        """
+        Determine the effective final price (post-discount) for tax calculations.
+        """
+        price = getattr(self, "final_price", None)
+        if price is not None:
+            return Decimal(price).quantize(TWOPLACES)
+
+        original_final = getattr(self, "final_price", None)
+        original_source = getattr(self, "discount_source", "")
+        self._compute_item_pricing()
+        computed = getattr(self, "final_price", None)
+        if computed is None:
+            computed = self._effective_unit_price()
+        computed_decimal = Decimal(computed).quantize(TWOPLACES)
+        # Restore initial state to avoid mutating unsaved instances.
+        self.final_price = original_final
+        self.discount_source = original_source
+        return computed_decimal
 
     # Удобный хелпер: берём реальный старт из self.start_time (или из appointment.start_time, если нет)
     def _resolve_start_dt(self):
@@ -1118,8 +1213,9 @@ class AppointmentItem(models.Model):
         # master может быть либо MasterProfile, либо User с related master_profile
         master_profile = getattr(self.master, "master_profile", None) or self.master
         workdays_qs = getattr(master_profile, "workdays", None)
+        has_workdays = bool(workdays_qs and workdays_qs.exists())
 
-        if workdays_qs is not None:
+        if has_workdays:
             local_start_dt = localtime(start_dt)
             local_end_dt = local_start_dt + timedelta(minutes=total_min)
 
@@ -1373,6 +1469,13 @@ class ProductSale(models.Model):
         editable=False,
         help_text="Computed total for reporting.",
     )
+    tax_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        editable=False,
+        help_text="Tax collected for this sale.",
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1413,6 +1516,7 @@ class ProductSale(models.Model):
             self.unit_price = self.product.price
 
         self.total_amount = self._compute_total_amount()
+        self.tax_amount = compute_tax(self.total_amount)
 
         update_fields = kwargs.get("update_fields")
         restrict_update = update_fields is not None
@@ -1438,7 +1542,7 @@ class ProductSale(models.Model):
 
                 if restrict_update:
                     # ensure total_amount stays in sync even with update_fields
-                    kwargs["update_fields"] = list(set(update_fields) | {"total_amount", "updated_at"})
+                    kwargs["update_fields"] = list(set(update_fields) | {"total_amount", "tax_amount", "updated_at"})
 
             super().save(*args, **kwargs)
 

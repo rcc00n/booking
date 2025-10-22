@@ -305,12 +305,55 @@
         .btn-success:hover{background:var(--ab-green-600)}
 
         .ab-total{
-
-            border-radius:14px;padding:12px 18px;display:flex;align-items:center;justify-content:space-between;
-
+            border:1px solid var(--ab-border);
+            border-radius:14px;
+            padding:16px;
+            background:#fff;
+            display:flex;
+            flex-direction:column;
+            gap:8px;
         }
-        .ab-total::before{content:"Total";font-size:16px;font-weight:400;color:#1f2937}
-        #grand-total{font-size:28px;font-weight:500;color:#0f172a}
+        .ab-total-line{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            font-size:16px;
+            color:#1f2937;
+        }
+        .ab-total-line strong{
+            font-size:18px;
+            font-weight:600;
+            color:#0f172a;
+        }
+        .ab-total-line--grand{
+            border-top:1px solid var(--ab-border);
+            padding-top:8px;
+            margin-top:4px;
+            font-weight:600;
+        }
+        .ab-total-line--grand strong{
+            font-size:24px;
+        }
+        .ab-summary{
+            display:flex;
+            flex-direction:column;
+            gap:4px;
+            align-items:flex-end;
+        }
+        .ab-summary-line{
+            display:flex;
+            justify-content:space-between;
+            gap:16px;
+            font-size:14px;
+            color:#1f2937;
+        }
+        .ab-summary-line strong{
+            font-weight:600;
+            color:#0f172a;
+        }
+        .ab-summary-line--total strong{
+            font-size:16px;
+        }
 
         @media (prefers-reduced-motion: reduce){
             .ab-btn,.btn{transition:none}
@@ -395,8 +438,19 @@
 
             <div class="ab-items" id="items-container"></div>
 
-            <div class="ab-total">
-                <strong id="grand-total">$0.00</strong>
+            <div class="ab-total" id="appt-totals">
+                <div class="ab-total-line">
+                    <span>Subtotal</span>
+                    <strong id="appt-subtotal">CA$0.00</strong>
+                </div>
+                <div class="ab-total-line" id="appt-tax-row">
+                    <span id="gst-label">GST</span>
+                    <strong id="appt-tax">CA$0.00</strong>
+                </div>
+                <div class="ab-total-line ab-total-line--grand">
+                    <span>Total</span>
+                    <strong id="appt-total">CA$0.00</strong>
+                </div>
             </div>
         </div>
 
@@ -437,6 +491,10 @@
     {{ intake_forms_catalog|json_script:"ab-intake-forms" }}
     {{ availability_url|json_script:"ab-availability-url" }}
 
+    {{ gst_percent|json_script:"ab-gst-percent" }}
+    {{ gst_enabled|json_script:"ab-gst-enabled" }}
+    {{ currency_code|json_script:"ab-currency-code" }}
+
     {{ posted_items|default:'[]'|json_script:"ab-posted-items" }}
     {{ item_errors|default:'{}'|json_script:"ab-item-errors" }}
     {{ field_errors|default:'{}'|json_script:"ab-field-errors" }}
@@ -460,6 +518,19 @@
             const INITIAL_FIRST = JSON.parse(document.getElementById('ab-initial-first').textContent || '{}');
             const SERVICE_FORMS = JSON.parse(document.getElementById('ab-service-forms').textContent || '{}');
             const INTAKE_FORMS = JSON.parse(document.getElementById('ab-intake-forms').textContent || '{}');
+            const GST_PERCENT = Number(JSON.parse(document.getElementById('ab-gst-percent').textContent || '"5.0"')) || 5;
+            const GST_ENABLED = Boolean(JSON.parse(document.getElementById('ab-gst-enabled').textContent || 'true'));
+            const CURRENCY_CODE = (JSON.parse(document.getElementById('ab-currency-code').textContent || '"CAD"') || "CAD").toLowerCase();
+            const CURRENCY_SYMBOL = (function(code){
+                switch(code){
+                    case "cad":
+                        return "CA$";
+                    case "usd":
+                        return "$";
+                    default:
+                        return code ? code.toUpperCase() + " " : "CA$";
+                }
+            })(CURRENCY_CODE);
 
             const POSTED_ITEMS = JSON.parse(document.getElementById('ab-posted-items').textContent || '[]');
             const ITEM_ERRORS  = JSON.parse(document.getElementById('ab-item-errors').textContent || '{}');
@@ -477,7 +548,14 @@
             const clientEl    = document.getElementById('id_client');
             const container   = document.getElementById('items-container');
             const totalForms  = document.getElementById('id_items-TOTAL_FORMS');
-            const grandTotal  = document.getElementById('grand-total');
+            const subtotalDisplay = document.getElementById('appt-subtotal');
+            const taxDisplay = document.getElementById('appt-tax');
+            const totalDisplay = document.getElementById('appt-total');
+            const taxRowDisplay = document.getElementById('appt-tax-row');
+            const gstLabelDisplay = document.getElementById('gst-label');
+            if (taxRowDisplay && !GST_ENABLED) {
+                taxRowDisplay.classList.add('ab-hidden');
+            }
             const intakeSection = document.getElementById('intake-section');
             const intakeContainer = document.getElementById('intake-forms-container');
             const intakePayloadInput = document.getElementById('id_intake_payload');
@@ -570,7 +648,25 @@
             })();
 
             /* ────────────── Items helpers ────────────── */
-            function money(n){ n = Number(n||0); return '$' + n.toFixed(2); }
+            function money(n){
+                const amount = Number(n || 0);
+                return `${CURRENCY_SYMBOL}${amount.toFixed(2)}`;
+            }
+
+            function roundCurrency(value){
+                return Math.round((Number(value) || 0) * 100) / 100;
+            }
+
+            function formatPercent(value){
+                const num = Number(value);
+                if (!Number.isFinite(num)) {
+                    return "";
+                }
+                const fixed = num % 1 === 0 ? num.toFixed(0) : num.toFixed(2);
+                return fixed.replace(/\.0+$/, "").replace(/0+$/, "").replace(/\.$/, "");
+            }
+
+            const GST_LABEL = `GST ${formatPercent(GST_PERCENT)}%`;
             function buildOption(v, t){ const o = document.createElement('option'); o.value=v; o.textContent=t; return o; }
 
             const PROMO_ENDPOINT_ROOT = '/accounts/api/services/';
@@ -740,6 +836,7 @@
                         if (svc.total_duration_min != null) {
                             o.dataset.totalDuration = svc.total_duration_min;
                         }
+                        o.dataset.isTaxable = svc.is_taxable ? "1" : "0";
                         o.dataset.category = cat;
                         grp.appendChild(o);
                     });
@@ -775,13 +872,51 @@
                     }
                 }
             }
+            function updateRowSummary(row){
+                const priceInput = row.querySelector('.js-price');
+                const rawValue = priceInput && priceInput.value !== '' ? Number(priceInput.value) : NaN;
+                const datasetValue = row.dataset.finalPrice ? Number(row.dataset.finalPrice) : 0;
+                const subtotal = roundCurrency(Number.isFinite(rawValue) ? rawValue : datasetValue);
+                row.dataset.finalPrice = String(subtotal.toFixed(2));
+                const taxable = GST_ENABLED && row.dataset.taxable === "1";
+                const tax = taxable ? roundCurrency(subtotal * GST_PERCENT / 100) : 0;
+                const total = roundCurrency(subtotal + tax);
+
+                const subtotalEl = row.querySelector('.js-item-subtotal');
+                if (subtotalEl) subtotalEl.textContent = money(subtotal);
+
+                const taxRowEl = row.querySelector('.js-item-tax-row');
+                if (taxRowEl) taxRowEl.classList.toggle('ab-hidden', !taxable);
+
+                const taxLabelEl = row.querySelector('.js-item-tax-label');
+                if (taxLabelEl) taxLabelEl.textContent = GST_LABEL;
+
+                const taxEl = row.querySelector('.js-item-tax');
+                if (taxEl) taxEl.textContent = money(tax);
+
+                const totalEl = row.querySelector('.js-item-total');
+                if (totalEl) totalEl.textContent = money(total);
+
+                return { subtotal, tax, total };
+            }
+
             function recalcGrandTotal(){
-                let sum = 0;
-                container.querySelectorAll('.js-price').forEach(inp => {
-                    const v = parseFloat(inp.value);
-                    if (!isNaN(v)) sum += v;
+                let subtotalSum = 0;
+                let taxSum = 0;
+                container.querySelectorAll('.ab-item').forEach(row => {
+                    const { subtotal, tax } = updateRowSummary(row);
+                    subtotalSum += subtotal;
+                    taxSum += tax;
                 });
-                grandTotal.textContent = money(sum);
+                subtotalSum = roundCurrency(subtotalSum);
+                taxSum = roundCurrency(taxSum);
+                const totalSum = roundCurrency(subtotalSum + taxSum);
+
+                if (subtotalDisplay) subtotalDisplay.textContent = money(subtotalSum);
+                if (taxDisplay) taxDisplay.textContent = money(taxSum);
+                if (totalDisplay) totalDisplay.textContent = money(totalSum);
+                if (taxRowDisplay) taxRowDisplay.classList.toggle('ab-hidden', !GST_ENABLED);
+                if (gstLabelDisplay) gstLabelDisplay.textContent = GST_LABEL;
             }
 
             function formatSlotLabel(dateObj){
@@ -1759,6 +1894,23 @@
       </div>
     </div>
 
+    <div class="ab-foot">
+      <div class="ab-summary">
+        <div class="ab-summary-line">
+          <span>Subtotal</span>
+          <strong class="js-item-subtotal">CA$0.00</strong>
+        </div>
+        <div class="ab-summary-line js-item-tax-row">
+          <span class="js-item-tax-label">GST</span>
+          <strong class="js-item-tax">CA$0.00</strong>
+        </div>
+        <div class="ab-summary-line ab-summary-line--total">
+          <span>Total</span>
+          <strong class="js-item-total">CA$0.00</strong>
+        </div>
+      </div>
+    </div>
+
     <button type="button" class="ab-remove js-remove" title="Remove">
     <img
         src="{% static 'admin/icons/delete-item.svg' %}"
@@ -1772,6 +1924,7 @@
       Remove
     </button>
   `;
+                wrap.dataset.finalPrice = "0.00";
                 return wrap;
             }
 
@@ -1786,6 +1939,14 @@
                 const durationInp = row.querySelector('.js-duration');
                 const discountInp = row.querySelector('.js-discount');
                 const hint      = row.querySelector('.js-service-hint');
+                row.dataset.taxable = "0";
+
+                const syncTaxableMeta = () => {
+                    const opt = serviceSel.selectedOptions && serviceSel.selectedOptions[0];
+                    const taxable = !!(opt && opt.dataset && opt.dataset.isTaxable === "1");
+                    row.dataset.taxable = taxable ? "1" : "0";
+                    return taxable;
+                };
 
                 resetPromoSelect(promoSel, { disabled: true });
                 const refreshPromos = (opts = {}) => {
@@ -1852,6 +2013,7 @@
                 } else {
                     populateServices(serviceSel, masterSel.value, { combo: serviceCombo });
                 }
+                syncTaxableMeta();
 
                 masterSel.addEventListener('change', () => {
                     populateServices(serviceSel, masterSel.value, { combo: serviceCombo, resetSelection: true });
@@ -1863,6 +2025,7 @@
                     if (discountInp) {
                         discountInp.value = '';
                     }
+                    syncTaxableMeta();
                     recalcGrandTotal();
                     renderIntakeForms();
                     const preserveTime = !!(timeInp && timeInp.value);
@@ -1888,6 +2051,7 @@
                         }
                     }
                     hint.textContent = totalDur ? (`Duration: ${totalDur} min`) : '';
+                    syncTaxableMeta();
                     recalcGrandTotal();
                     renderIntakeForms();
                     const preserveTime = !!(timeInp && timeInp.value);
@@ -1904,7 +2068,7 @@
                 refreshPromos({ preserve: true });
 
                 // вернём наружу, чтобы синхронизировать при префилле
-                return { serviceCombo, availability, refreshPromos };
+                return { serviceCombo, availability, refreshPromos, syncTaxableMeta };
             }
 
             function addRow(prefill){
@@ -1953,6 +2117,12 @@
                         }
                     }
                 }
+                if (ref && typeof ref.syncTaxableMeta === "function") {
+                    ref.syncTaxableMeta();
+                }
+                row.dataset.finalPrice = prefill && prefill.final_price
+                    ? String(prefill.final_price)
+                    : (priceInp.value && priceInp.value !== '' ? priceInp.value : (row.dataset.finalPrice || '0.00'));
                 if (ref && ref.serviceCombo && serviceSel.value){ ref.serviceCombo.syncFromSelect(); }
 
                 if (prefill && prefill.start_time_0) dateInp.value = prefill.start_time_0;

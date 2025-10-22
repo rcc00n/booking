@@ -83,6 +83,10 @@
         /* Items block */
         .ab-items{display:flex;flex-direction:column;gap:16px}
         .ab-item{padding:16px;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa}
+        .ab-summary{display:flex;flex-direction:column;gap:4px;align-items:flex-end}
+        .ab-summary-line{display:flex;justify-content:space-between;gap:16px;font-size:14px;color:#1f2937}
+        .ab-summary-line strong{font-weight:600;color:#0f172a}
+        .ab-summary-line--total strong{font-size:16px}
         .ab-foot{display:flex;justify-content:space-between;align-items:center}
 
         .ab-item.readonly{opacity:.75}
@@ -160,8 +164,23 @@
                             {% endif %}
                         </div>
                         <div class="ab-field" style="grid-column:3/5; text-align:right">
-                            <label>Visit total (after personal)</label>
-                            <div><strong>${{ form.instance.final_price|default_if_none:"0.00" }}</strong></div>
+                            <label>Totals</label>
+                            <div class="ab-summary">
+                                {% with gross=form.instance.final_price|default_if_none:0 tax=form.instance.tax_amount|default_if_none:0 %}
+                                <div class="ab-summary-line">
+                                    <span>Subtotal</span>
+                                    <strong id="appt-subtotal">CA${{ gross|subtract:tax|floatformat:2 }}</strong>
+                                </div>
+                                <div class="ab-summary-line" id="appt-tax-row">
+                                    <span id="gst-label">GST</span>
+                                    <strong id="appt-tax">CA${{ tax|floatformat:2 }}</strong>
+                                </div>
+                                <div class="ab-summary-line ab-summary-line--total">
+                                    <span>Total</span>
+                                    <strong id="appt-total">CA${{ gross|floatformat:2 }}</strong>
+                                </div>
+                                {% endwith %}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -176,7 +195,7 @@
 
                     <div id="items-container" class="ab-items">
                         {% for f in items_formset.forms %}
-                            <div class="ab-item" data-form-index="{{ forloop.counter0 }}">
+                            <div class="ab-item" data-form-index="{{ forloop.counter0 }}" data-final-price="{{ f.instance.final_price|default_if_none:'0.00' }}">
                                 {% if f.non_field_errors %}<div class="ab-err">{{ f.non_field_errors }}</div>{% endif %}
                                 {% for h in f.hidden_fields %}{{ h }}{% endfor %}
 
@@ -251,9 +270,19 @@
                                         <span class="ab-muted">Discount source (item):</span>
                                         <span class="ab-pill">{{ f.instance.discount_source|default:"—" }}</span>
                                     </div>
-                                    <div>
-                                        <span class="ab-muted">Item total:&nbsp;</span>
-                                        <strong id="grand-total" class="js-item-total">${{ f.instance.final_price|default_if_none:"0.00" }}</strong>
+                                    <div class="ab-summary">
+                                        <div class="ab-summary-line">
+                                            <span>Subtotal</span>
+                                            <strong class="js-item-subtotal">CA${{ f.instance.final_price|default_if_none:0|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line js-item-tax-row">
+                                            <span class="js-item-tax-label">GST</span>
+                                            <strong class="js-item-tax">CA${{ f.instance.tax_amount|default_if_none:0|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line ab-summary-line--total">
+                                            <span>Total</span>
+                                            <strong class="js-item-total">CA${{ f.instance.final_price|default_if_none:0|add:f.instance.tax_amount|floatformat:2 }}</strong>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -270,7 +299,7 @@
 
                     <!-- empty form template -->
                     <template id="empty-form-tpl">
-                        <div class="ab-item" data-form-index="__prefix__">
+                        <div class="ab-item" data-form-index="__prefix__" data-final-price="0.00">
                             {% with f=items_formset.empty_form %}
                                 {% for h in f.hidden_fields %}{{ h.as_widget }}{% endfor %}
 
@@ -329,8 +358,23 @@
 
                                 <div class="ab-hr"></div>
                                 <div class="ab-foot">
-                                    <div><span class="ab-muted">Discount source (item):</span> <span class="ab-pill">—</span></div>
-                                    <div><span class="ab-muted">Item total:&nbsp;</span><strong class="js-item-total">$0.00</strong></div>
+                                    <div>
+                                        <span class="ab-muted">Discount source (item):</span> <span class="ab-pill">—</span>
+                                    </div>
+                                    <div class="ab-summary">
+                                        <div class="ab-summary-line">
+                                            <span>Subtotal</span>
+                                            <strong class="js-item-subtotal">CA${{ 0|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line js-item-tax-row">
+                                            <span class="js-item-tax-label">GST</span>
+                                            <strong class="js-item-tax">CA${{ 0|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line ab-summary-line--total">
+                                            <span>Total</span>
+                                            <strong class="js-item-total">CA${{ 0|floatformat:2 }}</strong>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 {% if items_formset.can_delete %}
@@ -414,7 +458,7 @@
                         {% with sales_forms=product_sales_forms|default:product_sales_formset.forms %}
                         <div id="product-sales-container" class="ab-items">
                             {% for f in sales_forms %}
-                                <div class="ab-item ps-item" data-form-index="{{ forloop.counter0 }}" data-product-sale-form="1">
+                                <div class="ab-item ps-item" data-form-index="{{ forloop.counter0 }}" data-product-sale-form="1" data-sale-subtotal="{{ f.instance.total_amount|default_if_none:0|floatformat:2 }}" data-sale-tax="{{ f.instance.tax_amount|default_if_none:0|floatformat:2 }}">
                                     {% if f.non_field_errors %}<div class="ab-err">{{ f.non_field_errors }}</div>{% endif %}
                                     {% for h in f.hidden_fields %}{{ h }}{% endfor %}
 
@@ -436,9 +480,9 @@
                                             <label>Total amount</label>
                                             <div class="ab-pill" data-product-sale-role="total">
                                                 {% if f.instance and f.instance.total_amount %}
-                                                    ${{ f.instance.total_amount|floatformat:2 }}
+                                                    CA${{ f.instance.total_amount|add:f.instance.tax_amount|floatformat:2 }}
                                                 {% else %}
-                                                    $0.00
+                                                    CA${{ 0|floatformat:2 }}
                                                 {% endif %}
                                             </div>
                                         </div>
@@ -461,6 +505,21 @@
                                         </div>
                                     </div>
 
+                                    <div class="ab-summary">
+                                        <div class="ab-summary-line">
+                                            <span>Subtotal</span>
+                                            <strong class="js-sale-subtotal">CA${{ f.instance.total_amount|default_if_none:0|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line js-sale-tax-row">
+                                            <span class="js-sale-tax-label">GST</span>
+                                            <strong class="js-sale-tax">CA${{ f.instance.tax_amount|default_if_none:0|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line ab-summary-line--total">
+                                            <span>Total</span>
+                                            <strong class="js-sale-total">CA${{ f.instance.total_amount|default_if_none:0|add:f.instance.tax_amount|floatformat:2 }}</strong>
+                                        </div>
+                                    </div>
+
                                     {% if product_sales_can_delete %}
                                         <div class="ab-hidden">{{ f.DELETE }}</div>
                                         <div class="ab-r"><button type="button" class="ab-btn danger js-sale-remove">Remove</button></div>
@@ -477,7 +536,7 @@
                         </div>
 
                         <template id="product-sale-empty-form">
-                            <div class="ab-item ps-item" data-form-index="__prefix__" data-product-sale-form="1">
+                            <div class="ab-item ps-item" data-form-index="__prefix__" data-product-sale-form="1" data-sale-subtotal="0.00" data-sale-tax="0.00">
                                 {% with f=product_sales_formset.empty_form %}
                                     {% for h in f.hidden_fields %}{{ h.as_widget }}{% endfor %}
 
@@ -494,7 +553,7 @@
                                         </div>
                                         <div class="ab-field">
                                             <label>Total amount</label>
-                                            <div class="ab-pill" data-product-sale-role="total">$0.00</div>
+                                            <div class="ab-pill" data-product-sale-role="total">CA${{ 0|floatformat:2 }}</div>
                                         </div>
                                     </div>
 
@@ -509,6 +568,21 @@
                                         </div>
                                         <div class="ab-field" style="grid-column:3/5">
                                             {{ f.notes.label_tag }}{{ f.notes }}
+                                        </div>
+                                    </div>
+
+                                    <div class="ab-summary">
+                                        <div class="ab-summary-line">
+                                            <span>Subtotal</span>
+                                            <strong class="js-sale-subtotal">CA${{ 0|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line js-sale-tax-row">
+                                            <span class="js-sale-tax-label">GST</span>
+                                            <strong class="js-sale-tax">CA${{ 0|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line ab-summary-line--total">
+                                            <span>Total</span>
+                                            <strong class="js-sale-total">CA${{ 0|floatformat:2 }}</strong>
                                         </div>
                                     </div>
 
@@ -537,6 +611,9 @@
     {{ promos_by_service_data|json_script:"promos-by-service-data" }}
     {{ promos_global_data|json_script:"promos-global-data" }}
     {{ product_sale_defaults|json_script:"product-sale-defaults" }}
+    {{ gst_percent|json_script:"gst-percent" }}
+    {{ gst_enabled|json_script:"gst-enabled" }}
+    {{ currency_code|json_script:"currency-code" }}
 
     <script>
         window.APPOINTMENT_CTX = {

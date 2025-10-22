@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Union
 from django.conf import settings
 
 from core.models import BookingCart, BookingCartItem, UserProfile
+from core.utils.tax import compute_tax, gst_enabled, gst_percent
 
 
 HUNDRED = Decimal("100")
@@ -97,6 +98,9 @@ def _build_item_pricing(
     cart_item: BookingCartItem,
     profile: UserProfile,
     currency: str,
+    *,
+    tax_percent: Decimal,
+    tax_enabled: bool,
 ) -> Dict[str, Any]:
     service = cart_item.service
     base_price = _quantize(
@@ -146,6 +150,13 @@ def _build_item_pricing(
     subtotal_minor = unit_minor * qty
     subtotal_decimal = _minor_to_decimal(subtotal_minor)
 
+    taxable = bool(getattr(service, "is_taxable", False))
+    tax_decimal = compute_tax(price, percent=tax_percent, enabled=tax_enabled) if taxable else Decimal("0.00")
+    tax_decimal = _quantize(tax_decimal)
+    tax_minor = _to_minor_units(tax_decimal)
+    total_with_tax_decimal = _quantize(price + tax_decimal)
+    total_with_tax_minor = _to_minor_units(total_with_tax_decimal)
+
     duration_min = int(
         (getattr(service, "duration_min", 0) or 0)
         + (getattr(service, "extra_time_min", 0) or 0)
@@ -162,6 +173,7 @@ def _build_item_pricing(
         # Preserve legacy field expected by the UI (now discounted).
         "price": f"{price:.2f}",
         "price_display": _format_currency(price, currency),
+        "is_taxable": taxable,
     }
 
     master = cart_item.master if hasattr(cart_item, "master") else None
@@ -187,6 +199,13 @@ def _build_item_pricing(
         "subtotal": subtotal_minor,
         "subtotal_decimal": f"{subtotal_decimal:.2f}",
         "subtotal_display": _format_currency(subtotal_decimal, currency),
+        "is_taxable": taxable,
+        "tax": tax_minor,
+        "tax_decimal": f"{tax_decimal:.2f}",
+        "tax_display": _format_currency(tax_decimal, currency),
+        "total_with_tax": total_with_tax_minor,
+        "total_with_tax_decimal": f"{total_with_tax_decimal:.2f}",
+        "total_with_tax_display": _format_currency(total_with_tax_decimal, currency),
         "currency": currency,
         "duration_min": duration_min,
         "start_time": (
@@ -212,25 +231,47 @@ def compute_cart_pricing(
     profile = _resolve_profile(user)
     cart_obj = cart or BookingCart.for_user(profile)
     currency_code = (currency or DEFAULT_CURRENCY).lower()
+    tax_percent = gst_percent()
+    tax_enabled_flag = gst_enabled()
 
     items_qs = cart_obj.items.select_related("service", "master__user")
     items_payload: List[Dict[str, Any]] = []
-    total_minor = 0
+    subtotal_minor = 0
+    tax_minor_total = 0
     total_duration = 0
 
     for cart_item in items_qs:
-        payload = _build_item_pricing(cart_item, profile, currency_code)
+        payload = _build_item_pricing(
+            cart_item,
+            profile,
+            currency_code,
+            tax_percent=tax_percent,
+            tax_enabled=tax_enabled_flag,
+        )
         items_payload.append(payload)
-        total_minor += payload["subtotal"]
+        subtotal_minor += payload["subtotal"]
+        tax_minor_total += payload.get("tax", 0) or 0
         total_duration += payload.get("duration_min", 0) or 0
 
+    total_minor = subtotal_minor + tax_minor_total
+    subtotal_decimal = _minor_to_decimal(subtotal_minor)
+    tax_decimal_total = _minor_to_decimal(tax_minor_total)
     total_decimal = _minor_to_decimal(total_minor)
+    tax_percent_display = f"{_quantize(tax_percent):.2f}"
 
     return {
         "cart_id": str(cart_obj.pk),
         "currency": currency_code,
         "items": items_payload,
         "count": len(items_payload),
+        "subtotal": subtotal_minor,
+        "subtotal_decimal": f"{subtotal_decimal:.2f}",
+        "subtotal_display": _format_currency(subtotal_decimal, currency_code),
+        "tax_total": tax_minor_total,
+        "tax_total_decimal": f"{tax_decimal_total:.2f}",
+        "tax_total_display": _format_currency(tax_decimal_total, currency_code),
+        "tax_percent": tax_percent_display,
+        "tax_enabled": tax_enabled_flag,
         "total": total_minor,
         "total_decimal": f"{total_decimal:.2f}",
         "total_display": _format_currency(total_decimal, currency_code),

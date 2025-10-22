@@ -1,4 +1,5 @@
 import hashlib
+from decimal import Decimal, InvalidOperation
 
 from django import template
 from django.utils.formats import number_format
@@ -51,6 +52,23 @@ def service_duration(service):
 def service_price(service):
     price = getattr(service, "base_price", None) or 0
     return number_format(price, decimal_pos=2)
+
+@register.filter
+def subtract(value, arg):
+    """
+    Perform safe subtraction that tolerates None and string inputs.
+    """
+    def _as_decimal(val):
+        if val in (None, ""):
+            return Decimal("0")
+        if isinstance(val, Decimal):
+            return val
+        try:
+            return Decimal(str(val))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal("0")
+
+    return _as_decimal(value) - _as_decimal(arg)
 
 @register.simple_tag
 def changelist_start(cl):
