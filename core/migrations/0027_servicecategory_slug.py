@@ -39,10 +39,31 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
-            model_name="servicecategory",
-            name="slug",
-            field=models.SlugField(blank=True, max_length=150, null=True, unique=True),
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunSQL(
+                    sql="""
+                        ALTER TABLE core_servicecategory
+                        ADD COLUMN IF NOT EXISTS slug varchar(150);
+                    """,
+                    reverse_sql="""
+                        ALTER TABLE core_servicecategory
+                        DROP COLUMN IF EXISTS slug;
+                    """,
+                ),
+            ],
+            state_operations=[
+                migrations.AddField(
+                    model_name="servicecategory",
+                    name="slug",
+                    field=models.SlugField(
+                        blank=True,
+                        max_length=150,
+                        null=True,
+                        unique=True,
+                    ),
+                ),
+            ],
         ),
         migrations.RunPython(populate_servicecategory_slug, noop_reverse),
         migrations.AlterField(
