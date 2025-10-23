@@ -44,6 +44,7 @@ from django.http import HttpResponse
 from django.shortcuts import render
 from .filters import *
 from .models import *
+from core.models import Notification
 from .forms import *
 from .validators import *
 from core.services.user_import import (
@@ -1930,6 +1931,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         intake_forms_overview: List[Dict[str, Any]] = []
         intake_required_ids: List[str] = []
+        notifications = []
         if obj:
             submissions_map = {
                 str(sub.form_id): sub
@@ -1960,6 +1962,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                     "submitted_at": submission.submitted_at if submission else None,
                     "manage_url": reverse("admin:core_appointment_manage_form", args=[obj.pk, intake_form.pk]),
                 })
+            notifications = (
+                Notification.objects
+                .filter(appointment=obj)
+                .select_related("user__user")
+                .order_by("-sent_at", "-id")
+            )
 
         ctx.update({
             "masters_data": masters,
@@ -1978,6 +1986,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "gst_enabled": getattr(settings, "GST_ENABLED", True),
             "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
         })
+        ctx["notifications"] = notifications
         return super().render_change_form(request, ctx, add=add, change=change, form_url=form_url, obj=obj)
 
     def manage_intake_form_view(self, request, appointment_id, form_id):

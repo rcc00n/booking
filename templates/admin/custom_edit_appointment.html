@@ -118,6 +118,7 @@
                 {% if product_sales_formset %}
                     <button type="button" class="tab" data-tab="product-sales">Product sales</button>
                 {% endif %}
+                <button type="button" class="tab" data-tab="messages">Messages</button>
             </nav>
 
             {# ───────── 1) DETAILS ───────── #}
@@ -596,6 +597,68 @@
                     </div>
                 </section>
             {% endif %}
+
+            <section class="tab-panel" data-tab-panel="messages">
+                <div class="ab-section ab-card">
+                    <h3 class="ab-h">Messages</h3>
+                    <p class="ab-sub">All notifications sent to the client regarding this appointment.</p>
+
+                    <div class="table-responsive">
+                        <table class="ab-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:160px">Sent at</th>
+                                    <th style="width:80px">Channel</th>
+                                    <th style="width:110px">Kind</th>
+                                    <th style="width:90px">Status</th>
+                                    <th style="width:110px">Provider</th>
+                                    <th style="width:160px">Provider Msg ID</th>
+                                    <th>Message</th>
+                                    <th style="width:140px">Error</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if notifications %}
+                                    {% for n in notifications %}
+                                        <tr>
+                                            <td>
+                                                {% if n.sent_at %}
+                                                    {{ n.sent_at|date:"Y-m-d H:i" }}
+                                                {% else %}
+                                                    <span class="ab-muted">—</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>{{ n.channel|default:"—" }}</td>
+                                            <td>{{ n.get_kind_display|default:n.kind|default:"—" }}</td>
+                                            <td>
+                                                {% if n.status %}
+                                                    <span class="status-pill {{ n.status|lower|cut:' ' }}">{{ n.status }}</span>
+                                                {% else %}
+                                                    <span class="ab-muted">—</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>{{ n.provider|default:"—" }}</td>
+                                            <td>{{ n.provider_message_id|default:"—" }}</td>
+                                            <td><pre style="white-space:pre-wrap;margin:0">{{ n.message|default:"" }}</pre></td>
+                                            <td>
+                                                {% if n.error %}
+                                                    <pre style="white-space:pre-wrap;margin:0">{{ n.error }}</pre>
+                                                {% else %}
+                                                    <span class="ab-muted">—</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="8"><span class="ab-muted">No messages for this appointment yet.</span></td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
 
             <div class="ab-r" style="margin-top:18px">
                 <button type="submit" class="ab-btn">Save</button>
