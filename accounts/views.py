@@ -45,6 +45,7 @@ from core.services.intake_assignments import ensure_universal_assignments_for_pr
 
 from .forms import (
     AccountPasswordResetForm,
+    AccountSetPasswordForm,
     ClientRegistrationForm,
     ClientProfileForm, HealthConditionsForm, ProductSaleForm,
 )
@@ -182,6 +183,7 @@ class AccountPasswordResetDoneView(SupportEmailContextMixin, auth_views.Password
 
 class AccountPasswordResetConfirmView(SupportEmailContextMixin, auth_views.PasswordResetConfirmView):
     template_name = "registration/password_reset_confirm.html"
+    form_class = AccountSetPasswordForm
 
 
 class AccountPasswordResetCompleteView(SupportEmailContextMixin, auth_views.PasswordResetCompleteView):

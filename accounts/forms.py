@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django import forms
 from decimal import Decimal
-from django.contrib.auth.forms import UserCreationForm, AuthenticationForm, PasswordResetForm
+from django.contrib.auth.forms import UserCreationForm, AuthenticationForm, PasswordResetForm, SetPasswordForm
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -219,6 +219,23 @@ class AccountPasswordResetForm(PasswordResetForm):
                 "autocomplete": "email",
             }
         )
+
+
+class AccountSetPasswordForm(SetPasswordForm):
+    """
+    Provides consistent styling for the password reset confirm step.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in ("new_password1", "new_password2"):
+            if field in self.fields:
+                self.fields[field].widget.attrs.update(
+                    {
+                        "class": "auth-input",
+                        "autocomplete": "new-password",
+                    }
+                )
 
 
 # ---------- Profile edit ----------
