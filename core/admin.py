@@ -1,4 +1,4 @@
-from bisect import bisect_left
+﻿from bisect import bisect_left
 from collections import defaultdict
 from decimal import Decimal
 from io import BytesIO
@@ -4341,7 +4341,8 @@ class UserProfileAdmin(admin.ModelAdmin):
         if profile and profile.user_id:
             return self._redirect_to_user_admin(request, "change", profile.user_id)
         return super().change_view(request, object_id, form_url, extra_context)
-
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser
     search_fields = (
         "user__first_name",
         "user__last_name",
