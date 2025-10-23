@@ -255,7 +255,9 @@
     .slot-free{color:var(--free);border-color:color-mix(in srgb, var(--free) 55%, #fff);background:var(--chip-bg);cursor:pointer}
     .slot-free:hover{filter:brightness(.98)}
     .slot-busy{color:#fff;background:var(--busy);opacity:.92}
+    .slot-cart{background:color-mix(in srgb, var(--busy) 92%, #fff 8%);color:#fff;border-color:color-mix(in srgb, var(--busy) 70%, #fff 30%);box-shadow:0 0 0 2px rgba(211,47,47,.18)}
     .slot-selected{background:var(--free)!important;color:#fff;border-color:var(--free)!important;box-shadow:0 0 0 2px color-mix(in srgb, var(--free) 20%, transparent)}
+    .slot-chip[disabled]{cursor:not-allowed;opacity:.85}
 
     .legend{display:flex;gap:.75rem;margin-top:.5rem;font-size:.85rem;color:#666}
     .legend > span{display:inline-flex;align-items:center;gap:.35rem}
@@ -274,7 +276,29 @@
     .book-mobile__time{padding:.7rem .8rem;border-radius:.75rem;border:1.5px solid #DAD3C1;background:#fff;font-weight:700;color:#204029;box-shadow:0 12px 26px rgba(32,64,41,.14);transition:.18s ease;text-align:center}
     .book-mobile__time:focus-visible{outline:2px solid color-mix(in srgb, var(--gold) 55%, transparent);outline-offset:2px}
     .book-mobile__time.is-selected{background:#204029;color:#fff;border-color:#204029;box-shadow:0 16px 32px rgba(32,64,41,.26)}
+    .book-mobile__time.is-in-cart{background:color-mix(in srgb, var(--busy) 92%, #fff 8%);color:#fff;border-color:color-mix(in srgb, var(--busy) 70%, #fff 30%);box-shadow:0 0 0 2px rgba(211,47,47,.18)}
     .book-mobile__empty{margin-top:1rem;font-size:.85rem;color:#6b7a6f;text-align:center;display:none}
+
+    .book-cart-preview{
+      display:flex;
+      flex-direction:column;
+      gap:.65rem;
+      border:1px solid var(--grid-border);
+      border-radius:.95rem;
+      padding:.9rem 1rem;
+      background:#fff;
+      box-shadow:0 14px 30px rgba(32,64,41,.12);
+      max-height:46vh;
+      overflow-y:auto;
+      scrollbar-width:thin;
+    }
+    .book-cart-preview::-webkit-scrollbar{width:6px}
+    .book-cart-preview::-webkit-scrollbar-thumb{background:rgba(32,64,41,.22);border-radius:999px}
+    .book-cart-preview__item{display:flex;flex-direction:column;gap:.2rem}
+    .book-cart-preview__item strong{font-weight:800;color:var(--green-dark);font-size:.95rem}
+    .book-cart-preview__meta{font-size:.82rem;color:var(--muted);line-height:1.35}
+    .book-cart-preview__empty{font-size:.88rem;color:var(--muted);text-align:center}
+    .book-cart-preview__totals{font-size:.85rem;color:var(--muted);border-top:1px solid var(--grid-border);padding-top:.65rem;margin-top:.25rem}
 
     /* Zoom-proof modal sizes */
     .modal__dialog{ width:min(940px, calc(100dvw - 2rem)); max-height:calc(100dvh - 2rem); }
@@ -579,6 +603,12 @@
           <div class="field">
             <label data-i18n="services.modal.summaryLabel">Summary</label>
             <div class="muted" id="bookSummary" data-i18n="services.modal.summaryPlaceholder">Pick a master and time.</div>
+          </div>
+          <div class="field" style="margin-top:.85rem">
+            <label data-i18n="services.modal.cartPreviewLabel">In your cart</label>
+            <div class="book-cart-preview" id="bookCartPreview" role="region" aria-live="polite">
+              <div class="book-cart-preview__empty" id="bookCartEmpty" data-i18n="services.modal.cartPreviewEmpty">Add services to your cart to see them here.</div>
+            </div>
           </div>
           <div class="error" id="bookError" style="display:none;"></div>
           <div class="success" id="bookSuccess" style="display:none;"></div>
@@ -1051,6 +1081,8 @@
       const elServiceName=document.getElementById('bookServiceName');
       const elMaster=document.getElementById('bookMaster');
       const elSummary=document.getElementById('bookSummary');
+      const bookCartPreview=document.getElementById('bookCartPreview');
+      const bookCartEmpty=document.getElementById('bookCartEmpty');
       const elError=document.getElementById('bookError');
       const elSuccess=document.getElementById('bookSuccess');
       const cartBtn=document.getElementById('cartButton');
@@ -1334,7 +1366,129 @@
         total_duration_min: 0,
         currency: 'cad'
       };
+      const cartSlotsByMaster = new Map();
+      const cartSlotsNoMaster = new Set();
+      let scheduleState = {
+        days: [],
+        dayData: [],
+        timeRows: [],
+        locale: getLocale(),
+        selectedDate: null,
+      };
       let lastCartOpener = null;
+
+      function rebuildCartSlotIndex(){
+        cartSlotsByMaster.clear();
+        cartSlotsNoMaster.clear();
+        const items = Array.isArray(cartState?.items) ? cartState.items : [];
+        items.forEach((item) => {
+          const iso = item?.start_time;
+          if (!iso) return;
+          const ts = Date.parse(iso);
+          if (!Number.isFinite(ts)) return;
+          const masterId = item?.master?.id;
+          if (masterId !== undefined && masterId !== null){
+            const key = String(masterId);
+            if (!cartSlotsByMaster.has(key)){
+              cartSlotsByMaster.set(key, new Set());
+            }
+            cartSlotsByMaster.get(key).add(ts);
+          }else{
+            cartSlotsNoMaster.add(ts);
+          }
+        });
+      }
+
+      function slotIsInCart(masterId, iso){
+        if (!iso) return false;
+        const ts = Date.parse(iso);
+        if (!Number.isFinite(ts)) return false;
+        if (masterId !== null && masterId !== undefined){
+          const key = String(masterId);
+          const slots = cartSlotsByMaster.get(key);
+          if (slots && slots.has(ts)) return true;
+        }
+        return cartSlotsNoMaster.has(ts);
+      }
+
+      function getSelectedMasterKey(){
+        if (elMaster && elMaster.value){
+          return elMaster.value;
+        }
+        if (current && current.masterId !== null && current.masterId !== undefined){
+          return String(current.masterId);
+        }
+        return null;
+      }
+
+      function updateBookCartPreview(){
+        if (!bookCartPreview) return;
+        const items = Array.isArray(cartState?.items) ? cartState.items : [];
+        bookCartPreview.innerHTML = '';
+
+        if (!items.length){
+          if (bookCartEmpty){
+            bookCartEmpty.style.display = 'block';
+            setTextKey(bookCartEmpty, 'services.modal.cartPreviewEmpty', null, 'Add services to your cart to see them here.');
+            bookCartPreview.appendChild(bookCartEmpty);
+          }
+          return;
+        }
+
+        const currency = cartState?.currency || 'cad';
+        if (bookCartEmpty){
+          bookCartEmpty.style.display = 'none';
+        }
+
+        items.forEach((item) => {
+          const card = document.createElement('div');
+          card.className = 'book-cart-preview__item';
+
+          const title = document.createElement('strong');
+          const rawName = item?.service?.name || item?.name || '';
+          title.textContent = translateServiceNameText(rawName) || rawName || translate('common.service', null, 'Service');
+          card.appendChild(title);
+
+          const meta = document.createElement('div');
+          meta.className = 'book-cart-preview__meta';
+          const masterName = item?.master?.name || translate('services.modal.cartPreviewUnknownMaster', null, 'Any master');
+          const timeLabel = item?.start_time ? fmtDateTime(item.start_time) : translate('common.noTime', null, 'No time');
+          const durationValue = Number.isFinite(item?.duration_min)
+            ? item.duration_min
+            : ((item?.service?.duration_min || 0) + (item?.service?.extra_time_min || 0));
+          const durationText = formatMinutes(durationValue);
+          meta.textContent = translate(
+            'services.modal.cartPreviewMeta',
+            { master: masterName, time: timeLabel, duration: durationText },
+            `${masterName} · ${timeLabel} · ${durationText}`
+          );
+          card.appendChild(meta);
+
+          const priceValue = item?.unit_price_display
+            || item?.service?.price_display
+            || (item?.unit_price_decimal ? formatCurrency(item.unit_price_decimal, currency) : '');
+          if (priceValue){
+            const price = document.createElement('div');
+            price.className = 'book-cart-preview__meta';
+            price.textContent = priceValue;
+            card.appendChild(price);
+          }
+
+          bookCartPreview.appendChild(card);
+        });
+
+        const totalDisplay = cartState?.total_display
+          || formatCurrency(cartState?.total_decimal || cartState?.total_price || '0', currency);
+        const durationText = formatMinutes(cartState?.total_duration_min || 0);
+        const totals = document.createElement('div');
+        totals.className = 'book-cart-preview__totals';
+        totals.textContent = translate(
+          'services.modal.cartPreviewTotals',
+          { total: totalDisplay, duration: durationText },
+          `Total: ${totalDisplay} • ${durationText}`
+        );
+        bookCartPreview.appendChild(totals);
+      }
 
       function fmtDateTime(iso){
         try{
@@ -1676,6 +1830,14 @@ function updateCartUI(data){
       `Total: ${totalDisplay} - ${durationText}`
     );
   }
+
+  rebuildCartSlotIndex();
+  updateBookCartPreview();
+  if (modal && modal.classList && modal.classList.contains('modal--open')){
+    const locale = scheduleState?.locale || getLocale();
+    renderDesktopSchedule(locale);
+    renderMobileSchedule(locale);
+  }
 }
 
       if (I18N && typeof I18N.onChange === 'function') {
@@ -1707,6 +1869,23 @@ function updateCartUI(data){
               floatingCartBtn.classList.remove('floating-cart--visible');
               floatingCartBtn.setAttribute('aria-hidden','true');
               floatingCartBtn.tabIndex = -1;
+            }
+            cartState = {
+              items: [],
+              count: 0,
+              total: 0,
+              total_price: '0.00',
+              total_decimal: '0.00',
+              total_display: formatCurrency(0, cartState?.currency || 'cad'),
+              total_duration_min: 0,
+              currency: cartState?.currency || 'cad'
+            };
+            rebuildCartSlotIndex();
+            updateBookCartPreview();
+            if (modal && modal.classList && modal.classList.contains('modal--open')){
+              const locale = scheduleState?.locale || getLocale();
+              renderDesktopSchedule(locale);
+              renderMobileSchedule(locale);
             }
             return;
           }
@@ -2092,7 +2271,7 @@ async function confirmPayment(){
       let current={ serviceId:null, serviceName:'', masterId:null, slot:null, mastersData:[] };
       let baseStart = new Date(); baseStart.setHours(0,0,0,0);
       let availabilityCache = new Map(); // dateStr -> { set:Set(HH:MM), iso:Map(HH:MM->ISO) }
-      let scheduleState = {
+      scheduleState = {
         days: [],
         dayData: [],
         timeRows: [],
@@ -2394,18 +2573,31 @@ async function confirmPayment(){
             const isFree = data?.set?.has(t);
             const chip=document.createElement('button');
             chip.type='button';
-            chip.className='slot-chip ' + (isFree?'slot-free':'slot-busy');
-            chip.textContent=fmtHM(fake);
-            chip.disabled = !isFree;
+            const displayLabel = fmtHM(fake);
+            chip.textContent=displayLabel;
+            const iso = isFree ? data?.iso?.get(t) : null;
+            const masterKey = getSelectedMasterKey();
+            const reservedByCart = isFree && iso ? slotIsInCart(masterKey, iso) : false;
 
-            if(isFree){
-              const iso = data.iso.get(t);
+            if (isFree && !reservedByCart){
+              chip.className='slot-chip slot-free';
+              chip.disabled = false;
               if (iso === current.slot){
                 chip.classList.add('slot-selected');
               }
               chip.addEventListener('click', ()=>{
                 selectSlot(d, iso, locale);
               });
+            }else{
+              chip.className='slot-chip slot-busy';
+              chip.disabled = true;
+              if (reservedByCart){
+                chip.classList.add('slot-cart');
+                const reason = translate('services.modal.slotInCart', null, 'Already in your cart');
+                chip.dataset.slotState = 'cart';
+                chip.setAttribute('aria-label', `${displayLabel} — ${reason}`);
+                chip.setAttribute('title', reason);
+              }
             }
             cell.appendChild(chip);
             olGrid.appendChild(cell);
@@ -2477,19 +2669,33 @@ async function confirmPayment(){
         }
 
         const times = Array.from(data.set).sort();
+        const masterKey = getSelectedMasterKey();
         times.forEach(timeKey => {
           const iso = data.iso.get(timeKey);
           if (!iso) return;
           const btn=document.createElement('button');
           btn.type='button';
           btn.className='book-mobile__time';
-          btn.textContent = fmtHM(new Date(iso));
-          if (iso === current.slot){
-            btn.classList.add('is-selected');
+          const displayTime = fmtHM(new Date(iso));
+          const reserved = slotIsInCart(masterKey, iso);
+          if (reserved){
+            btn.classList.add('is-in-cart');
+            const badge = translate('services.modal.inCartShort', null, 'In cart');
+            const reason = translate('services.modal.slotInCart', null, 'Already in your cart');
+            btn.textContent = `${displayTime} · ${badge}`;
+            btn.disabled = true;
+            btn.dataset.slotState = 'cart';
+            btn.setAttribute('aria-label', `${displayTime} — ${reason}`);
+            btn.setAttribute('title', reason);
+          }else{
+            btn.textContent = displayTime;
+            if (iso === current.slot){
+              btn.classList.add('is-selected');
+            }
+            btn.addEventListener('click', ()=>{
+              selectSlot(day, iso, locale);
+            });
           }
-          btn.addEventListener('click', ()=>{
-            selectSlot(day, iso, locale);
-          });
           mobileTimeList.appendChild(btn);
         });
 
