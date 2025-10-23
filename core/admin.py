@@ -3496,7 +3496,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
         original_params = request.GET.copy()
         search_term = (original_params.get("q") or "").strip()
 
-        categories = ServiceCategory.objects.all().order_by("name")
+        categories = ServiceCategory.objects.for_catalog()
         category_options = [{"value": "", "label": _("All Categories")}]
         category_options.append({"value": "none", "label": _("Uncategorised")})
         category_options.extend(
@@ -4164,10 +4164,30 @@ admin.site.register(AppointmentStatus)
 admin.site.register(PaymentMethod)
 admin.site.register(ClientSource)
 admin.site.register(MasterRoom)
-admin.site.register(ServiceCategory)
 admin.site.register(PrepaymentOption)
 admin.site.register(PaymentStatus)
 admin.site.register(CancellationReason)
+
+
+@admin.register(ServiceCategory)
+class ServiceCategoryAdmin(admin.ModelAdmin):
+    list_display = ("name", "featured_rank", "catalog_order", "catalog_position_preview")
+    list_editable = ("featured_rank", "catalog_order")
+    search_fields = ("name",)
+    ordering = ("name",)
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.for_catalog()
+
+    @admin.display(description="Catalog order")
+    def catalog_position_preview(self, obj):
+        if obj.featured_rank:
+            mapping = dict(FEATURED_CATEGORY_RANKS)
+            return mapping.get(obj.featured_rank, obj.featured_rank)
+        if obj.catalog_order is not None:
+            return obj.catalog_order
+        return "\u2014"
 
 @admin.register(AppointmentItemPromoCode)
 class AppointmentItemPromoCodeAdmin(admin.ModelAdmin):

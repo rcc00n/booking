@@ -10,7 +10,19 @@ from datetime import timedelta, time
 import os
 from importlib import import_module
 
-from django.db.models import OuterRef, Subquery, Sum, Prefetch, F, Q
+from django.db.models import (
+    OuterRef,
+    Subquery,
+    Sum,
+    Prefetch,
+    F,
+    Q,
+    Case,
+    When,
+    Value,
+    IntegerField,
+)
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.timezone import localtime
 from core.validators import clean_phone, clean_ab_postal_code, validate_service_is_active
@@ -233,14 +245,68 @@ class ClientSource(models.Model):
 
 # --- 2. SERVICES ---
 
+FEATURED_CATEGORY_RANKS = (
+    (1, "First"),
+    (2, "Second"),
+    (3, "Third"),
+)
+
+
+class ServiceCategoryQuerySet(models.QuerySet):
+    def for_catalog(self):
+        """
+        Deterministic ordering for the public catalog and related UIs.
+        """
+        return self.order_by(
+            Case(
+                When(featured_rank=1, then=Value(0)),
+                When(featured_rank=2, then=Value(1)),
+                When(featured_rank=3, then=Value(2)),
+                default=Value(3),
+                output_field=IntegerField(),
+            ),
+            Coalesce("featured_rank", Value(4)),
+            Coalesce("catalog_order", Value(1000)),
+            "name",
+        )
+
+
+class ServiceCategoryManager(models.Manager.from_queryset(ServiceCategoryQuerySet)):
+    def get_queryset(self):
+        # Keep alphabetical ordering for callsites that rely on implicit sorting.
+        return super().get_queryset().order_by("name")
+
+
 class ServiceCategory(models.Model):
     """
     Represents a service offered in the system (e.g., haircut, massage).
     """
     name = models.CharField(max_length=100)
+    featured_rank = models.PositiveSmallIntegerField(
+        choices=FEATURED_CATEGORY_RANKS,
+        blank=True,
+        null=True,
+        help_text="Optional position for highlighting this category first in the catalog.",
+    )
+    catalog_order = models.PositiveIntegerField(
+        blank=True,
+        null=True,
+        help_text="Lower numbers appear earlier for categories without a featured rank.",
+    )
+
+    objects = ServiceCategoryManager()
 
     def __str__(self):
         return self.name
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["featured_rank"],
+                condition=Q(featured_rank__isnull=False),
+                name="core_servicecategory_unique_featured_rank",
+            )
+        ]
 
 class PrepaymentOption(models.Model):
     """
@@ -2064,4 +2130,3 @@ def detect_discount_source(service, client, promocode):
     if s > 0:
         return "service"
     return ""
-

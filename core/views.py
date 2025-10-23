@@ -52,14 +52,13 @@ def _build_catalog_context(request):
     if cat:
         services_qs = services_qs.filter(category__id=cat)
 
-    categories_qs = (
-        ServiceCategory.objects.order_by("name")
-        .prefetch_related(Prefetch("service_set", queryset=services_qs))
+    categories_qs = ServiceCategory.objects.for_catalog().prefetch_related(
+        Prefetch("service_set", queryset=services_qs)
     )
 
     return {
         "categories": categories_qs,
-        "filter_categories": ServiceCategory.objects.order_by("name"),
+        "filter_categories": ServiceCategory.objects.for_catalog(),
         "q": q,
         "active_category": str(cat),
         "search_results": services_qs if q else None,
@@ -596,7 +595,6 @@ def service_promocodes_api(request, service_id: str):
         for pc in qs
     ]
     return JsonResponse(data, safe=False)
-
 
 
 
