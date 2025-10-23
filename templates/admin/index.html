@@ -13,6 +13,32 @@
     <div class="dashboard-container">
         <div class="dashboard-grid">
 
+            <div class="dashboard-card dashboard-card--exports">
+                <div class="exports-card">
+                    <div class="exports-card__header">
+                        <div class="exports-card__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M4 4h6l2 3h8a1 1 0 0 1 1 1v10a2 2 0 0 1-2 2H5a1 1 0 0 1-1-1V4Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M8 15h8M8 11h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </div>
+                        <div class="exports-card__titles">
+                            <p class="exports-card__eyebrow">Automation spotlight</p>
+                            <h3>Data exports</h3>
+                            <p class="exports-card__lead">Centralized access to every export endpoint plus the combined statistics workbook.</p>
+                        </div>
+                    </div>
+                    <div class="exports-card__body">
+                        <div class="exports-card__meta">
+                            <span class="exports-card__chip">1-click</span>
+                            <div class="exports-card__metric">Merged KPI workbook</div>
+                            <p class="exports-card__sub">Generate multi-sheet and flattened reports with the same date filters you use elsewhere.</p>
+                        </div>
+                        <a href="{% url 'admin:exports' %}" class="exports-card__cta">Open exports hub</a>
+                    </div>
+                </div>
+            </div>
+
             {% if not request.user|is_master_user %}
                 <!-- Block 1: Recent Sales (7d) -->
                 <div class="dashboard-card">

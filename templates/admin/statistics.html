@@ -101,7 +101,12 @@
             <button type="button" class="btn" id="todayBtn">Today</button>
             {% if export_xlsx_url %}
                 <button type="button" onclick='window.location.href="{{ export_xlsx_url }}"' class="btn" >
-                    Export XSLX
+                    Export XLSX
+                </button>
+            {% endif %}
+            {% if export_flat_xlsx_url %}
+                <button type="button" onclick='window.location.href="{{ export_flat_xlsx_url }}"' class="btn">
+                    Export Combined XLSX
                 </button>
             {% endif %}
         </form>

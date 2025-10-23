@@ -62,7 +62,7 @@
         {% endif %}
 
         <div class="card card--pad">
-            <form method="post" novalidate>
+            <form method="post" novalidate data-autofill-group="health">
                 {% csrf_token %}
                 {{ form.non_field_errors }}
                 <div class="grid">
@@ -108,11 +108,20 @@
     </div>
 
 
+    <script src="{% static 'js/autofill.js' %}"></script>
     <script>
         document.querySelectorAll('textarea').forEach(t => {
             const fit = el => { el.style.height='auto'; el.style.height = (el.scrollHeight+2)+'px'; };
             t.addEventListener('input', () => fit(t));
             fit(t);
+        });
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.MalvaAutofill) {
+                const form = document.querySelector('form[data-autofill-group="health"]');
+                if (form) {
+                    window.MalvaAutofill.attach(form, { userId: "{{ request.user.pk }}" });
+                }
+            }
         });
     </script>
 {% endblock %}

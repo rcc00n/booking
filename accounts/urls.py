@@ -16,6 +16,7 @@ from .views import (
     api_verification_begin,
     api_verification_confirm,
     api_verification_resend,
+    api_autofill_payment_contact,
 )
 from django.contrib.auth.views import LogoutView
 from core.views import (
@@ -79,12 +80,12 @@ urlpatterns = [
         name="api-payment-verify",
     ),
     path("api/stripe/webhook/", stripe_webhook, name="api-stripe-webhook"),
+    path("api/autofill/payment/", api_autofill_payment_contact, name="api-autofill-payment"),
     path("logout/", LogoutView.as_view(next_page="/accounts/"), name="logout"),
     
     path("api/appointment/<uuid:appt_id>/cancel/",     api_appointment_cancel,     name="api-appt-cancel"),
     path("api/appointment/<uuid:appt_id>/reschedule/", api_appointment_reschedule, name="api-appt-reschedule"),
 ]
-
 
 
 
