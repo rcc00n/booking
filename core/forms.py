@@ -1014,10 +1014,14 @@ class MasterCreateFullForm(forms.ModelForm):
             )
             self.initial["services"] = active_current
 
-        cats = ServiceCategory.objects.for_catalog().prefetch_related(
-            Prefetch(
-                "service_set",
-                queryset=_services_for_selection(),
+        cats = (
+            ServiceCategory.objects.for_catalog()
+            .filter(only_discounted_services=False)
+            .prefetch_related(
+                Prefetch(
+                    "service_set",
+                    queryset=_services_for_selection(),
+                )
             )
         )
         choices = []

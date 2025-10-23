@@ -442,7 +442,7 @@
       {% for c in categories %}
         <h3 style="margin:1.5rem 0 .75rem;color:var(--green);font-weight:800">{{ c.name }}</h3>
         <div class="services-grid">
-          {% for s in c.service_set.all %}
+          {% for s in c.catalog_services %}
             <article class="service-card">
               <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
                 {% if s.card_image_url %}

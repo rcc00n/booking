@@ -36,6 +36,9 @@ def _build_catalog_context(request):
     q = (request.GET.get("q") or "").strip()
     cat = request.GET.get("cat") or ""
 
+    today = timezone.now().date()
+    discount_window = Q(discounts__start_date__lte=today, discounts__end_date__gte=today)
+
     services_qs = (
         Service.objects.filter(is_active=True)
         .select_related("category")
@@ -49,15 +52,42 @@ def _build_catalog_context(request):
     )
     if q:
         services_qs = services_qs.filter(Q(name__icontains=q) | Q(description__icontains=q))
+
+    discounted_services_qs = services_qs.filter(discount_window).distinct()
+
+    selected_category = None
     if cat:
-        services_qs = services_qs.filter(category__id=cat)
+        selected_category = ServiceCategory.objects.filter(pk=cat).first()
+        if selected_category:
+            if selected_category.only_discounted_services:
+                services_qs = discounted_services_qs
+            else:
+                services_qs = services_qs.filter(category=selected_category)
+                discounted_services_qs = services_qs.filter(discount_window).distinct()
 
     categories_qs = ServiceCategory.objects.for_catalog().prefetch_related(
         Prefetch("service_set", queryset=services_qs)
     )
+    categories = []
+    discounted_services = None
+    for category in categories_qs:
+        if category.only_discounted_services:
+            if selected_category and not getattr(selected_category, "only_discounted_services", False):
+                category.catalog_services = []
+                categories.append(category)
+                continue
+            if discounted_services is None:
+                discounted_services = list(discounted_services_qs)
+            category.catalog_services = discounted_services
+        else:
+            if selected_category and getattr(selected_category, "only_discounted_services", False):
+                category.catalog_services = []
+            else:
+                category.catalog_services = list(category.service_set.all())
+        categories.append(category)
 
     return {
-        "categories": categories_qs,
+        "categories": categories,
         "filter_categories": ServiceCategory.objects.for_catalog(),
         "q": q,
         "active_category": str(cat),
@@ -595,9 +625,4 @@ def service_promocodes_api(request, service_id: str):
         for pc in qs
     ]
     return JsonResponse(data, safe=False)
-
-
-
-
-
 

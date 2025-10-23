@@ -283,6 +283,13 @@ class ServiceCategory(models.Model):
     """
     name = models.CharField(max_length=100)
     slug = models.SlugField(max_length=150, unique=True, db_index=True)
+    only_discounted_services = models.BooleanField(
+        default=False,
+        help_text=(
+            "Automatically list every active service that currently has an in-date discount. "
+            "When enabled the category ignores manual assignments."
+        ),
+    )
     featured_rank = models.PositiveSmallIntegerField(
         choices=FEATURED_CATEGORY_RANKS,
         blank=True,
@@ -339,7 +346,12 @@ class ServiceCategory(models.Model):
                 fields=["featured_rank"],
                 condition=Q(featured_rank__isnull=False),
                 name="core_servicecategory_unique_featured_rank",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["only_discounted_services"],
+                condition=Q(only_discounted_services=True),
+                name="core_servicecategory_single_discount_bucket",
+            ),
         ]
 
 class PrepaymentOption(models.Model):

@@ -4209,8 +4209,16 @@ admin.site.register(CancellationReason)
 
 @admin.register(ServiceCategory)
 class ServiceCategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "featured_rank", "catalog_order", "catalog_position_preview")
+    list_display = (
+        "name",
+        "slug",
+        "only_discounted_services",
+        "featured_rank",
+        "catalog_order",
+        "catalog_position_preview",
+    )
     list_editable = ("featured_rank", "catalog_order")
+    list_filter = ("only_discounted_services",)
     search_fields = ("name",)
     ordering = ("name",)
     readonly_fields = ("slug",)
