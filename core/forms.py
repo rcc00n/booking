@@ -969,6 +969,8 @@ class MasterCreateFullForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._original_phone_e164: str | None = None
+        self._phone_changed: bool = True
         current_ids = []
 
         # Если редактируем — заменяем пароли на read-only поле
@@ -996,6 +998,14 @@ class MasterCreateFullForm(forms.ModelForm):
             self.fields['phone'].initial = user_profile.phone
             self.fields['postal_code'].initial = getattr(user_profile, 'postal_code', "")
             self.fields['birth_date'].initial = user_profile.birth_date
+
+            current_phone = user_profile.phone
+            if current_phone:
+                try:
+                    self._original_phone_e164 = _normalize_phone(current_phone)
+                except ValidationError:
+                    # Stored phone might already be normalized or slightly off. Keep raw fallback.
+                    self._original_phone_e164 = current_phone.strip()
         services_qs = _services_for_selection()
         self.fields["services"].queryset = services_qs
         if current_ids:
@@ -1043,6 +1053,11 @@ class MasterCreateFullForm(forms.ModelForm):
         except ValidationError as exc:
             raise forms.ValidationError(exc.message)
 
+        self._phone_changed = True
+        if self._original_phone_e164 and phone == self._original_phone_e164:
+            self._phone_changed = False
+            return phone
+
         qs = UserProfile.objects.filter(phone=phone)
 
         if self.instance.pk and hasattr(self.instance, 'user'):
@@ -1072,12 +1087,10 @@ class MasterCreateFullForm(forms.ModelForm):
          - синхронизируем ServiceMaster: добавляем новые, удаляем снятые
        """
         selected_services = list(self.cleaned_data.get('services') or [])
-        phone_raw = self.cleaned_data.get('phone', "")
-        try:
-            phone = _normalize_phone(phone_raw)
-        except ValidationError as exc:
-            self.add_error('phone', exc.message)
-            raise forms.ValidationError(exc.message) from exc
+        phone = self.cleaned_data.get('phone')
+        if not phone:
+            raise forms.ValidationError('Phone number is required.')
+        phone_changed = getattr(self, "_phone_changed", True)
 
         if not self.instance.pk:
             # Создание нового пользователя
@@ -1129,7 +1142,8 @@ class MasterCreateFullForm(forms.ModelForm):
             user.email = self.cleaned_data['email']
             user.first_name = self.cleaned_data['first_name']
             user.last_name = self.cleaned_data['last_name']
-            user.username = phone
+            if phone_changed and user.username != phone:
+                user.username = phone
             try:
                 user.save()
             except IntegrityError as exc:
