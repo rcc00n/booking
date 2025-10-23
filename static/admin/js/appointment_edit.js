@@ -751,9 +751,6 @@ function recomputeAllTotals() {
         initExistingRows();
         initExistingSales();
         recomputeAllTotals();
-        if (salesContainer && !salesContainer.querySelector(".ps-item")) {
-            addProductSale();
-        }
         initTabs();
         stripDateTimeLabels(document);
         const btnAdd = $("#btn-add-item");
