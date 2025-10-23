@@ -110,6 +110,7 @@
     .services-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1.25rem}
     .service-card{
       background:#fff;border-radius:var(--radius-lg);padding:1.1rem;display:flex;flex-direction:column;gap:.75rem;
+      height:100%;
       box-shadow:var(--shadow);border:1px solid color-mix(in srgb, var(--green) 18%, transparent);transition:.18s ease;
     }
     .service-card:hover{transform:translateY(-3px);box-shadow:0 10px 22px color-mix(in srgb, var(--green) 18%, rgba(0,0,0,.16))}
@@ -117,7 +118,8 @@
     .service-card__img img{width:100%;height:100%;object-fit:cover;display:block}
     .service-card__img--empty{display:flex;align-items:center;justify-content:center;font-size:.9rem;color:#6f7a75}
     .service-card h3{font-size:1.06rem;font-weight:900;color:var(--ink)}
-    .service-meta{font-size:.92rem;color:var(--muted)}
+    .service-meta{font-size:.92rem;color:var(--muted);margin-top:auto}
+    .service-card .book-btn{margin-top:.75rem}
     .stub{font-style:italic;color:#667;padding:1rem}
     .muted{color:var(--muted);font-size:.92rem}
     .old{color:#9aa0a0;text-decoration:line-through}
@@ -414,7 +416,7 @@
               </div>
               <div class="muted">{{ s.category.name }}</div>
               <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
-              {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
+              {% if s.description %}<p class="muted">{{ s.description|truncatewords:10 }}</p>{% endif %}
               <div class="service-meta">
                 {% with disc=s.get_active_discount %}
                   {% if disc %}
@@ -450,7 +452,7 @@
                 {% endif %}
               </div>
               <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
-              {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
+              {% if s.description %}<p class="muted">{{ s.description|truncatewords:10 }}</p>{% endif %}
               <div class="service-meta">
                 {% with disc=s.get_active_discount %}
                   {% if disc %}
@@ -485,7 +487,7 @@
                 {% endif %}
               </div>
               <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
-              {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
+              {% if s.description %}<p class="muted">{{ s.description|truncatewords:10 }}</p>{% endif %}
               <div class="service-meta">
                 {% with disc=s.get_active_discount %}
                   {% if disc %}
@@ -2477,6 +2479,14 @@ async function confirmPayment(){
       let aborter = null;
 
       function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+      function truncateWords(text, limit=10){
+        if (text == null) return '';
+        const normalized = String(text).trim();
+        if (!normalized) return '';
+        const words = normalized.split(/\s+/);
+        if (words.length <= limit) return normalized;
+        return words.slice(0, limit).join(' ') + '...';
+      }
       function showLive(){ if(liveTitle) liveTitle.style.display='block'; if(liveGrid) liveGrid.style.display='grid'; if(serverContent) serverContent.style.display='none'; }
       function hideLive(){ if(liveTitle) liveTitle.style.display='none'; if(liveGrid) liveGrid.style.display='none'; if(serverContent) serverContent.style.display='block'; }
       function skeleton(n=8){
@@ -2526,7 +2536,8 @@ async function confirmPayment(){
              <strong>$${escapeHtml(s.price)}</strong>
              <span class="badge">-${escapeHtml(String(s.discount_percent))}%</span>`
           : `<strong>$${escapeHtml(s.price || s.base_price)}</strong>`;
-        const desc = s.description ? `<p class="muted">${escapeHtml(s.description)}</p>` : '';
+        const descText = truncateWords(s.description, 10);
+        const desc = descText ? `<p class="muted">${escapeHtml(descText)}</p>` : '';
         const cat  = s.category ? `<div class="muted">${escapeHtml(s.category)}</div>` : '';
         const durationLabel = escapeHtml(formatMinutes(s.duration_min || 0));
         return `
