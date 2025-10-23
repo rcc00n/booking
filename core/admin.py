@@ -3044,7 +3044,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         appointments = AppointmentItem.objects.select_related(
             'appointment__client', 'service', 'master'
-        ).prefetch_related('appointment__items__service')
+        ).prefetch_related('appointment__items__service', 'appointment__product_sales')
 
         start_of_day = make_aware(datetime.combine(selected_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(selected_date, datetime.max.time()))
@@ -5116,14 +5116,48 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         # Статус — по родительскому Appointment (последний из истории)
         last_status = item.appointment.appointmentstatushistory_set.order_by("-set_at").first()
         status_name = last_status.status.name if last_status else "Unknown"
-        items_count = len(list(item.appointment.items.all()))
-        # Цены: базовая для позиции (unit_price или base_price услуги),
-        # финальная — из item.final_price (если None, показываем базовую)
-        base_price = item.appointment.total_without_discounts(ignore_overrides=False)
-        final_price = item.appointment.final_price
+        appointment_obj = item.appointment
+        items = list(appointment_obj.items.all())
+        items_count = len(items)
+        base_price = appointment_obj.total_without_discounts(ignore_overrides=False)
+        base_price_decimal = Decimal(base_price or Decimal("0.00")).quantize(TWOPLACES)
 
+        service_discounted_subtotal = Decimal("0.00")
+        service_tax_total = Decimal("0.00")
+        for appt_item in items:
+            final_val = getattr(appt_item, "final_price", None)
+            if final_val is None:
+                if appt_item.unit_price is not None:
+                    final_val = appt_item.unit_price
+                else:
+                    final_val = getattr(appt_item.service, "base_price", Decimal("0.00"))
+            service_discounted_subtotal += Decimal(final_val or Decimal("0.00"))
+            service_tax_total += Decimal(getattr(appt_item, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+        service_discounted_subtotal = service_discounted_subtotal.quantize(TWOPLACES)
+        service_tax_total = service_tax_total.quantize(TWOPLACES)
+        service_total_with_tax = (service_discounted_subtotal + service_tax_total).quantize(TWOPLACES)
 
-        client = item.appointment.client
+        products_total_with_tax = Decimal("0.00")
+        product_sales_rel = getattr(appointment_obj, "product_sales", None)
+        if product_sales_rel is not None:
+            for sale in product_sales_rel.all():
+                subtotal = Decimal(getattr(sale, "total_amount", Decimal("0.00")) or Decimal("0.00"))
+                tax_amount = Decimal(getattr(sale, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+                products_total_with_tax += subtotal + tax_amount
+        products_total_with_tax = products_total_with_tax.quantize(TWOPLACES)
+
+        final_price = appointment_obj.final_price
+        grand_total = Decimal(final_price or Decimal("0.00"))
+        if final_price is None:
+            grand_total = service_total_with_tax + products_total_with_tax
+        grand_total = grand_total.quantize(TWOPLACES)
+
+        has_discount = bool(getattr(appointment_obj, "discount_source", ""))
+        if not has_discount and base_price_decimal > Decimal("0.00"):
+            if (base_price_decimal - service_discounted_subtotal) >= Decimal("0.01"):
+                has_discount = True
+
+        client = appointment_obj.client
         client_label = client.get_full_name() or client.user.username
 
         return {
@@ -5135,9 +5169,14 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "service_label": escape(item.service.name),
             "time_label": f"{s_local.strftime('%I:%M%p').lstrip('0')} - {e_local.strftime('%I:%M%p').lstrip('0')}",
             "duration_label": f"{total_min}min",
-            "base_price": f"${base_price}",
+            "base_price": f"${base_price_decimal}",
+            "base_price_raw": f"{base_price_decimal:.2f}",
             "items_count": items_count,
-            "final_price": f"${final_price}",
+            "final_price": f"${grand_total}",
+            "final_price_raw": f"{grand_total:.2f}",
+            "service_total_raw": f"{service_total_with_tax:.2f}",
+            "products_total_raw": f"{products_total_with_tax:.2f}",
+            "has_discount": has_discount,
             "phone": escape(getattr(client, "phone", "") or ""),
         }
 
@@ -5178,7 +5217,12 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "time_label": meta["time_label"],
             "duration": meta["duration_label"],
             "base_price": meta["base_price"],
+            "base_price_raw": meta.get("base_price_raw", "0.00"),
             "final_price": meta["final_price"],
+            "final_price_raw": meta.get("final_price_raw", "0.00"),
+            "service_total_raw": meta.get("service_total_raw", "0.00"),
+            "products_total_raw": meta.get("products_total_raw", "0.00"),
+            "has_discount": meta.get("has_discount", False),
             "items_count": meta["items_count"],
         }
 
