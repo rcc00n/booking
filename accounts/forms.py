@@ -18,6 +18,7 @@ from core.models import (
     ProductSale,
 )
 from core.forms import _normalize_phone
+from core.validators import clean_ab_postal_code
 
 
 # ---------- Registration ----------
@@ -251,6 +252,11 @@ class ClientProfileForm(forms.Form):
         required=False, label="Адрес",
         widget=forms.Textarea(attrs={"rows": 2})
     )
+    postal_code = forms.CharField(
+        required=False,
+        max_length=6,
+        label="Postal code",
+    )
     how_heard = forms.ChoiceField(
         required=False, label="How did you hear about us?",
         choices=[("", "— Select —")] + list(HowHeard.choices)
@@ -269,12 +275,37 @@ class ClientProfileForm(forms.Form):
             self.fields["phone"].initial = prof.phone
             self.fields["birth_date"].initial = prof.birth_date
             self.fields["address"].initial = prof.address
+            self.fields["postal_code"].initial = prof.postal_code
             self.fields["how_heard"].initial = prof.how_heard
             self.fields["email_marketing_consent"].initial = prof.email_marketing_consent
 
         self.fields["first_name"].initial = self.user.first_name
         self.fields["last_name"].initial = self.user.last_name
         self.fields["email"].initial = self.user.email
+
+        autocomplete_map = {
+            "first_name": "given-name",
+            "last_name": "family-name",
+            "email": "email",
+            "phone": "tel",
+            "birth_date": "bday",
+            "address": "street-address",
+            "postal_code": "postal-code",
+        }
+        placeholders = {
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "postal_code": "T2X1A1",
+        }
+        for field_name, field in self.fields.items():
+            widget = field.widget
+            if field_name in autocomplete_map:
+                widget.attrs["autocomplete"] = autocomplete_map[field_name]
+            if field_name in placeholders:
+                widget.attrs.setdefault("placeholder", placeholders[field_name])
+            widget.attrs.setdefault("data-autofill-key", field_name)
+        if "email_marketing_consent" in self.fields:
+            self.fields["email_marketing_consent"].widget.attrs.setdefault("data-track", "marketing-consent")
 
     def clean_email(self):
         email = (self.cleaned_data.get("email") or "").lower().strip()
@@ -318,6 +349,16 @@ class ClientProfileForm(forms.Form):
 
         return birth_date
 
+    def clean_postal_code(self):
+        postal_code = (self.cleaned_data.get("postal_code") or "").strip()
+        if not postal_code:
+            return ""
+        try:
+            return clean_ab_postal_code(postal_code)
+        except ValidationError as exc:
+            # clean_ab_postal_code уже возвращает ValidationError с корректным сообщением
+            raise ValidationError(exc.message if hasattr(exc, "message") else exc.messages[0])
+
     def save(self):
         self.user.first_name = self.cleaned_data.get("first_name", "") or ""
         self.user.last_name  = self.cleaned_data.get("last_name", "") or ""
@@ -329,6 +370,7 @@ class ClientProfileForm(forms.Form):
         prof.phone      = self.cleaned_data["phone"]              # уже E.164
         prof.birth_date = self.cleaned_data.get("birth_date") or None
         prof.address    = self.cleaned_data.get("address", "") or ""
+        prof.postal_code = self.cleaned_data.get("postal_code", "") or ""
         prof.how_heard  = self.cleaned_data.get("how_heard", "") or ""
 
         # согласие + timestamp через метод модели
@@ -336,7 +378,7 @@ class ClientProfileForm(forms.Form):
         prof.set_marketing_consent(consent)
 
         prof.save(update_fields=[
-            "phone", "birth_date", "address", "how_heard",
+            "phone", "birth_date", "address", "postal_code", "how_heard",
             "email_marketing_consent", "email_marketing_consented_at",
         ])
         return self.user
@@ -350,6 +392,16 @@ class HealthConditionsForm(forms.Form):
     chronic = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
     surgeries = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
     notes = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        autofill_fields = ("allergies", "medications", "contraindications", "chronic", "surgeries", "notes")
+        for name in autofill_fields:
+            field = self.fields.get(name)
+            if not field:
+                continue
+            field.widget.attrs.setdefault("data-autofill-key", name)
+            field.widget.attrs.setdefault("autocomplete", "off")
 
     def _split_csv(self, s: str):
         return [x.strip() for x in s.split(",") if x.strip()] if s else []

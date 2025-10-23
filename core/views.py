@@ -28,6 +28,7 @@ from core.services.booking import (
     _tz_aware,
     create_appointment_from_cart_items,
 )
+from accounts.utils import build_autofill_defaults
 from core.services import payments as payment_services
 from core.services.pricing import compute_cart_pricing
 
@@ -122,6 +123,7 @@ def public_mainmenu(request):
         ctx.setdefault("appointments", [])
 
     ctx["stripe_public_key"] = settings.STRIPE_PUBLIC_KEY
+    ctx["autofill_defaults"] = build_autofill_defaults(request.user)
 
     return render(request, "client/mainmenu.html", ctx)
 
@@ -625,4 +627,3 @@ def service_promocodes_api(request, service_id: str):
         for pc in qs
     ]
     return JsonResponse(data, safe=False)
-

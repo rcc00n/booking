@@ -12,6 +12,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
   <script src="{% static 'js/i18n.js' %}"></script>
+  <script src="{% static 'js/autofill.js' %}"></script>
 
   <!-- Мини-стили для горизонтального дейтпикера (в модалке) -->
   <style>
@@ -112,7 +113,7 @@
     }
   </style>
 </head>
-<body class="h-full bg-[#F7F6F1] text-[#4D4D4D]">
+<body class="h-full bg-[#F7F6F1] text-[#4D4D4D]" data-autofill-user="{{ request.user.pk }}">
 <div class="dashboard-backdrop" data-nav-backdrop></div>
 <div class="dashboard-shell">
 
@@ -155,6 +156,10 @@
         <a href="#" data-tab="profile"
            class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
           👤 <span data-i18n="dashboard.nav.profile">Profile</span>
+        </a>
+        <a href="#" data-tab="autofill"
+           class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
+          ✨ <span>Autofill</span>
         </a>
 
         <a href="/accounts/"
@@ -368,61 +373,264 @@
         {% for m in messages %}{{ m }}{% endfor %}
       </div>
     {% endif %}
-    {% if profile_form_errors %}
-      <div class="md:col-span-2 rounded-lg border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm">
-        <ul class="list-disc ms-5">
-          {% for field, errs in profile_form_errors.items %}
-            {% for e in errs %}
-              <li>{{ e }}</li>
-            {% endfor %}
-          {% endfor %}
-        </ul>
-      </div>
-    {% endif %}
-
     <section id="tab-profile" class="tab hidden">
       <h2 class="text-2xl font-semibold mb-6 text-[#204029]" data-i18n="dashboard.profileTitle">Profile</h2>
 
-      <form method="post" class="tab-card grid md:grid-cols-2 gap-6 bg-white shadow p-6 border border-[#DAD3C1]">
-        {% csrf_token %}
-        <div>
-          <label class="block text-sm font-medium" data-i18n="dashboard.form.firstName">First name</label>
-          <input type="text" name="first_name" value="{{ request.user.first_name }}"
-                 class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm">
+      {% if profile_form.errors %}
+        <div class="mb-4 rounded-lg border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm">
+          <ul class="list-disc ms-5">
+            {% for field, errs in profile_form.errors.items %}
+              {% for e in errs %}
+                <li>{{ e }}</li>
+              {% endfor %}
+            {% endfor %}
+          </ul>
         </div>
-        <div>
-          <label class="block text-sm font-medium" data-i18n="dashboard.form.lastName">Last name</label>
-          <input type="text" name="last_name" value="{{ request.user.last_name }}"
-                 class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="block text-sm font-medium" data-i18n="dashboard.form.phone">Phone</label>
-          <input type="text" name="phone" value="{{ profile.phone }}"
-                 class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="block text-sm font-medium" data-i18n="dashboard.form.email">E-mail</label>
-          <input type="email" name="email" value="{{ request.user.email }}"
-                 class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="block text-sm font-medium" data-i18n="dashboard.form.birthDate">Birth date</label>
-          <input type="date" name="birth_date" value="{{ profile.birth_date|date:'Y-m-d' }}"
-                 class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm">
-        </div>
+      {% endif %}
 
-        <div class="md:col-span-2 text-right">
-          <button type="submit" class="px-6 py-2 bg-[#204029] text-white rounded-lg hover:bg-[#1b3626]" data-i18n="dashboard.form.save">
-            Save changes
-          </button>
+      <form method="post" class="tab-card bg-white shadow p-6 border border-[#DAD3C1]" data-autofill-group="profile">
+        {% csrf_token %}
+        <div class="grid md:grid-cols-2 gap-6">
+          <div>
+            <label class="block text-sm font-medium" for="{{ profile_form.first_name.id_for_label }}" data-i18n="dashboard.form.firstName">First name</label>
+            <input type="text"
+                   name="{{ profile_form.first_name.html_name }}"
+                   id="{{ profile_form.first_name.id_for_label }}"
+                   value="{{ profile_form.first_name.value|default_if_none:'' }}"
+                   class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
+                   autocomplete="given-name"
+                   placeholder="Jane"
+                   data-autofill-key="first_name">
+            {% if profile_form.first_name.errors %}
+              <p class="mt-1 text-sm text-red-600">{{ profile_form.first_name.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium" for="{{ profile_form.last_name.id_for_label }}" data-i18n="dashboard.form.lastName">Last name</label>
+            <input type="text"
+                   name="{{ profile_form.last_name.html_name }}"
+                   id="{{ profile_form.last_name.id_for_label }}"
+                   value="{{ profile_form.last_name.value|default_if_none:'' }}"
+                   class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
+                   autocomplete="family-name"
+                   placeholder="Doe"
+                   data-autofill-key="last_name">
+            {% if profile_form.last_name.errors %}
+              <p class="mt-1 text-sm text-red-600">{{ profile_form.last_name.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium" for="{{ profile_form.phone.id_for_label }}" data-i18n="dashboard.form.phone">Phone</label>
+            <input type="tel"
+                   name="{{ profile_form.phone.html_name }}"
+                   id="{{ profile_form.phone.id_for_label }}"
+                   value="{{ profile_form.phone.value|default_if_none:'' }}"
+                   class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
+                   autocomplete="tel"
+                   data-autofill-key="phone">
+            {% if profile_form.phone.errors %}
+              <p class="mt-1 text-sm text-red-600">{{ profile_form.phone.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium" for="{{ profile_form.email.id_for_label }}" data-i18n="dashboard.form.email">E-mail</label>
+            <input type="email"
+                   name="{{ profile_form.email.html_name }}"
+                   id="{{ profile_form.email.id_for_label }}"
+                   value="{{ profile_form.email.value|default_if_none:'' }}"
+                   class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
+                   autocomplete="email"
+                   data-autofill-key="email">
+            {% if profile_form.email.errors %}
+              <p class="mt-1 text-sm text-red-600">{{ profile_form.email.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium" for="{{ profile_form.birth_date.id_for_label }}" data-i18n="dashboard.form.birthDate">Birth date</label>
+            {% with birth_val=profile_form.birth_date.value %}
+              <input type="date"
+                     name="{{ profile_form.birth_date.html_name }}"
+                     id="{{ profile_form.birth_date.id_for_label }}"
+                     value="{% if birth_val %}{{ birth_val|stringformat:'s' }}{% endif %}"
+                     class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
+                     autocomplete="bday"
+                     data-autofill-key="birth_date">
+            {% endwith %}
+            {% if profile_form.birth_date.errors %}
+              <p class="mt-1 text-sm text-red-600">{{ profile_form.birth_date.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium" for="{{ profile_form.postal_code.id_for_label }}">Postal code</label>
+            <input type="text"
+                   name="{{ profile_form.postal_code.html_name }}"
+                   id="{{ profile_form.postal_code.id_for_label }}"
+                   maxlength="6"
+                   value="{{ profile_form.postal_code.value|default_if_none:'' }}"
+                   class="w-full mt-1 uppercase tracking-wide rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
+                   autocomplete="postal-code"
+                   placeholder="T2X1A1"
+                   data-autofill-key="postal_code">
+            {% if profile_form.postal_code.errors %}
+              <p class="mt-1 text-sm text-red-600">{{ profile_form.postal_code.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div class="md:col-span-2">
+            <label class="block text-sm font-medium" for="{{ profile_form.address.id_for_label }}">Address</label>
+            <textarea
+                   name="{{ profile_form.address.html_name }}"
+                   id="{{ profile_form.address.id_for_label }}"
+                   rows="2"
+                   class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
+                   autocomplete="street-address"
+                   data-autofill-key="address">{% if profile_form.address.value %}{{ profile_form.address.value }}{% endif %}</textarea>
+            {% if profile_form.address.errors %}
+              <p class="mt-1 text-sm text-red-600">{{ profile_form.address.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium" for="{{ profile_form.how_heard.id_for_label }}">How did you hear about us?</label>
+            {% with current=profile_form.how_heard.value|default_if_none:'' %}
+              <select name="{{ profile_form.how_heard.html_name }}"
+                      id="{{ profile_form.how_heard.id_for_label }}"
+                      class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
+                      data-autofill-key="how_heard">
+                {% for value, label in profile_form.fields.how_heard.choices %}
+                  <option value="{{ value }}" {% if value == current %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            {% endwith %}
+            {% if profile_form.how_heard.errors %}
+              <p class="mt-1 text-sm text-red-600">{{ profile_form.how_heard.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div class="md:col-span-2">
+            <label class="flex items-start gap-3 text-sm">
+              <input type="checkbox"
+                     name="{{ profile_form.email_marketing_consent.html_name }}"
+                     id="{{ profile_form.email_marketing_consent.id_for_label }}"
+                     class="mt-1 h-4 w-4 rounded border-[#DEDEDE] text-[#204029] focus:ring-[#AF9525]"
+                     data-autofill-key="email_marketing_consent"
+                     {% if profile_form.email_marketing_consent.value %}checked{% endif %}>
+              <span class="text-[#4D4D4D]">
+                {{ profile_form.email_marketing_consent.label }}
+              </span>
+            </label>
+            {% if profile_form.email_marketing_consent.errors %}
+              <p class="mt-1 text-sm text-red-600">{{ profile_form.email_marketing_consent.errors.0 }}</p>
+            {% endif %}
+          </div>
+
+          <div class="md:col-span-2 flex justify-end">
+            <button type="submit" class="px-6 py-2 bg-[#204029] text-white rounded-lg hover:bg-[#1b3626]" data-i18n="dashboard.form.save">
+              Save changes
+            </button>
+          </div>
         </div>
       </form>
+    </section>
+
+    <section id="tab-autofill" class="tab hidden">
+      <h2 class="text-2xl font-semibold mb-3 text-[#204029]">Autofill</h2>
+      <p class="mb-6 text-sm text-[#4D4D4D]/70 max-w-3xl">
+        Keep your frequently used details synced between your account and this device. Your profile stays on our secure servers,
+        while device autofill uses local storage so you can complete forms in a couple of clicks.
+      </p>
+
+      <div class="grid gap-6 xl:grid-cols-2">
+        <article class="tab-card bg-white border border-[#DAD3C1] shadow-sm rounded-2xl p-6 flex flex-col gap-4">
+          <div>
+            <h3 class="text-lg font-semibold text-[#204029]">Account profile</h3>
+            <p class="text-sm text-[#4D4D4D]/70">This is the information saved in your Malva account.</p>
+          </div>
+          {% with defaults=autofill_defaults.profile %}
+            <dl class="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Name</dt>
+                <dd class="text-[#204029]">{{ defaults.first_name }} {{ defaults.last_name }}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Phone</dt>
+                <dd class="text-[#204029]">{{ defaults.phone|default:"—" }}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Email</dt>
+                <dd class="text-[#204029] break-words">{{ defaults.email|default:"—" }}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Birth date</dt>
+                <dd class="text-[#204029]">{{ defaults.birth_date|default:"—" }}</dd>
+              </div>
+              <div class="sm:col-span-2">
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Address</dt>
+                <dd class="text-[#204029] whitespace-pre-line">{{ defaults.address|default:"—" }}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Postal code</dt>
+                <dd class="text-[#204029]">{{ defaults.postal_code|default:"—" }}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">How heard</dt>
+                <dd class="text-[#204029]">{{ defaults.how_heard|default:"—" }}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Marketing consent</dt>
+                <dd class="text-[#204029]">
+                  {% if defaults.email_marketing_consent %}Subscribed{% else %}Not subscribed{% endif %}
+                </dd>
+              </div>
+            </dl>
+          {% endwith %}
+          <div class="flex flex-wrap gap-3 pt-2">
+            <button type="button"
+                    class="px-4 py-2 bg-[#204029] text-white rounded-lg hover:bg-[#1b3626] transition"
+                    data-autofill-sync="profile">
+              Sync profile to this device
+            </button>
+            <button type="button"
+                    class="px-4 py-2 border border-[#204029]/30 text-[#204029] rounded-lg hover:border-[#204029]"
+                    data-autofill-clear="profile">
+              Clear device copy
+            </button>
+          </div>
+        </article>
+
+        <article class="tab-card bg-white border border-[#DAD3C1] shadow-sm rounded-2xl p-6 flex flex-col gap-4">
+          <div>
+            <h3 class="text-lg font-semibold text-[#204029]">Device autofill</h3>
+            <p class="text-sm text-[#4D4D4D]/70">
+              Saved form data never leaves this browser. Clear it if you are on a shared computer.
+            </p>
+          </div>
+          <div class="rounded-xl border border-[#DAD3C1] bg-[#F7F6F1] p-4" data-autofill-device>
+            <div class="text-sm text-[#4D4D4D]/70" data-autofill-empty>No autofill data stored on this device yet.</div>
+            <div class="space-y-3 hidden" data-autofill-list></div>
+          </div>
+          <div class="flex flex-wrap gap-3 pt-2">
+            <button type="button"
+                    class="px-4 py-2 border border-[#AF9525] text-[#AF9525] rounded-lg hover:bg-[#AF9525] hover:text-white transition"
+                    data-autofill-clear-all>
+              Clear all device data
+            </button>
+          </div>
+        </article>
+      </div>
     </section>
 
     </div>
 
   </main>
 </div>
+
+{{ autofill_defaults|json_script:"autofill-defaults" }}
 
 <!-- ▸▸ MODAL: Reschedule ◂◂ -->
 <div id="resModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
@@ -579,7 +787,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* hash-навигация */
-  const allowed = ['dashboard','appointments','files','notifications','profile'];
+  const allowed = ['dashboard','appointments','files','notifications','profile','autofill'];
   const initial = allowed.includes(location.hash.replace('#','')) ? location.hash.replace('#','') : 'dashboard';
   activate(initial);
   links.forEach(link => link.addEventListener('click', e => {
@@ -588,6 +796,142 @@ document.addEventListener('DOMContentLoaded', () => {
     history.replaceState(null, '', '#'+link.dataset.tab);
     closeNav();
   }));
+
+  const autofillScript = document.getElementById('autofill-defaults');
+  let autofillDefaults = {};
+  if (autofillScript) {
+    try {
+      autofillDefaults = JSON.parse(autofillScript.textContent) || {};
+    } catch (err) {
+      console.warn('[dashboard] Failed to parse autofill defaults', err);
+      autofillDefaults = {};
+    }
+  }
+  const autofillApi = window.MalvaAutofill;
+  const resolvedUserId = (document.body?.dataset?.autofillUser) ? String(document.body.dataset.autofillUser) : 'guest';
+  const autofillGroups = ['profile', 'health', 'payment'];
+  const deviceListEl = document.querySelector('[data-autofill-list]');
+  const deviceEmptyEl = document.querySelector('[data-autofill-empty]');
+  const syncButtons = document.querySelectorAll('[data-autofill-sync]');
+  const clearButtons = document.querySelectorAll('[data-autofill-clear]');
+  const clearAllButton = document.querySelector('[data-autofill-clear-all]');
+  const groupLabels = {
+    profile: 'Profile form',
+    health: 'Health questionnaire',
+    payment: 'Payment details',
+  };
+  const formatAutofillTimestamp = (iso) => {
+    if (!iso) return '';
+    const dt = new Date(iso);
+    if (Number.isNaN(dt.getTime())) return '';
+    return `Updated ${dt.toLocaleString(getLocale(), { dateStyle: 'medium', timeStyle: 'short' })}`;
+  };
+  const renderAutofillDevice = () => {
+    if (!autofillApi || !deviceListEl || !deviceEmptyEl) {
+      return;
+    }
+    deviceListEl.innerHTML = '';
+    let hasData = false;
+    autofillGroups.forEach((group) => {
+      const state = autofillApi.load(group, { userId: resolvedUserId });
+      const values = state?.values || {};
+      const savedKeys = Object.keys(values).filter((key) => {
+        const value = values[key];
+        if (Array.isArray(value)) return value.length > 0;
+        return value !== undefined && value !== null && value !== '';
+      });
+      if (!savedKeys.length) {
+        return;
+      }
+      hasData = true;
+      const row = document.createElement('div');
+      row.className = 'flex flex-wrap items-center justify-between gap-3 rounded-lg bg-white border border-[#DAD3C1] px-4 py-3';
+      const info = document.createElement('div');
+      info.innerHTML = `
+        <div class="font-semibold text-[#204029]">${groupLabels[group] || (group.charAt(0).toUpperCase() + group.slice(1))}</div>
+        <div class="text-xs text-[#4D4D4D]/70">${savedKeys.length} field${savedKeys.length === 1 ? '' : 's'} saved${state?.updatedAt ? ' • ' + formatAutofillTimestamp(state.updatedAt) : ''}</div>
+      `;
+      const actions = document.createElement('div');
+      actions.className = 'flex items-center gap-2';
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'px-3 py-1 text-xs border border-[#204029]/40 rounded-lg text-[#204029] hover:border-[#204029] transition';
+      clearBtn.textContent = 'Clear';
+      clearBtn.addEventListener('click', () => autofillApi.clear(group, { userId: resolvedUserId }));
+      actions.appendChild(clearBtn);
+      row.append(info, actions);
+      deviceListEl.appendChild(row);
+    });
+    if (hasData) {
+      deviceEmptyEl.classList.add('hidden');
+      deviceListEl.classList.remove('hidden');
+    } else {
+      deviceListEl.classList.add('hidden');
+      deviceEmptyEl.classList.remove('hidden');
+    }
+  };
+  const flash = (el, message) => {
+    if (!el) return;
+    const original = el.dataset.originalText || el.textContent;
+    el.dataset.originalText = original;
+    el.textContent = message;
+    el.disabled = true;
+    el.classList.add('opacity-70');
+    window.setTimeout(() => {
+      el.textContent = el.dataset.originalText || original;
+      el.disabled = false;
+      el.classList.remove('opacity-70');
+    }, 1800);
+  };
+  if (!autofillApi || !autofillApi.storageAvailable()) {
+    if (deviceEmptyEl) {
+      deviceEmptyEl.textContent = 'Autofill requires local storage support. Enable cookies/local storage or switch to another browser.';
+      deviceEmptyEl.classList.remove('hidden');
+    }
+    document.querySelectorAll('[data-autofill-sync],[data-autofill-clear],[data-autofill-clear-all]').forEach((btn) => {
+      btn.disabled = true;
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+    });
+  } else {
+    autofillApi.attachAll('form[data-autofill-group]');
+    renderAutofillDevice();
+    autofillApi.subscribe(({ group, userId }) => {
+      if (String(userId || 'guest') !== resolvedUserId) return;
+      if (!autofillGroups.includes(group)) return;
+      renderAutofillDevice();
+    });
+    const profileKeys = ['first_name', 'last_name', 'email', 'phone', 'birth_date', 'address', 'postal_code', 'how_heard', 'email_marketing_consent'];
+    syncButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const group = btn.dataset.autofillSync;
+        if (!group) return;
+        let payload = autofillDefaults[group] || {};
+        if (group === 'profile') {
+          payload = {};
+          const defaults = autofillDefaults.profile || {};
+          profileKeys.forEach((key) => {
+            if (defaults[key] !== undefined && defaults[key] !== null && defaults[key] !== '') {
+              payload[key] = defaults[key];
+            }
+          });
+        }
+        autofillApi.save(group, payload, { userId: resolvedUserId });
+        flash(btn, 'Synced');
+      });
+    });
+    clearButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const group = btn.dataset.autofillClear;
+        if (!group) return;
+        autofillApi.clear(group, { userId: resolvedUserId });
+        flash(btn, 'Cleared');
+      });
+    });
+    clearAllButton?.addEventListener('click', () => {
+      autofillGroups.forEach((group) => autofillApi.clear(group, { userId: resolvedUserId }));
+      flash(clearAllButton, 'Cleared');
+    });
+  }
 
   /* chart */
   const el = document.getElementById('stats_chart');

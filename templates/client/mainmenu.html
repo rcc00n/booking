@@ -6,6 +6,7 @@
   <title data-i18n="services.meta.title">Malva Booking — Services</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="{% static 'js/i18n.js' %}"></script>
+  <script src="{% static 'js/autofill.js' %}"></script>
   <script src="https://js.stripe.com/v3/"></script>
 
   <style>
@@ -338,7 +339,7 @@
     }
   </style>
 </head>
-<body>
+<body data-autofill-user="{{ request.user.pk }}">
 
   <!-- header -->
   <header class="site-header">
@@ -629,16 +630,16 @@
               <div class="payment-badge">Stripe</div>
             </div>
           </aside>
-          <form class="payment-form" id="paymentForm" novalidate>
+          <form class="payment-form" id="paymentForm" novalidate data-autofill-group="payment">
             <p id="paymentSummary" class="text-base font-medium text-[#204029]">Complete your payment of $0.</p>
             <div class="payment-fieldset">
               <div class="field">
                 <label for="paymentName">Cardholder name</label>
-                <input type="text" id="paymentName" autocomplete="name" placeholder="Jane Doe" required>
+                <input type="text" id="paymentName" autocomplete="name" placeholder="Jane Doe" required data-autofill-key="name">
               </div>
               <div class="field">
                 <label for="paymentEmail">Email receipt</label>
-                <input type="email" id="paymentEmail" autocomplete="email" placeholder="you@example.com" required>
+                <input type="email" id="paymentEmail" autocomplete="email" placeholder="you@example.com" required data-autofill-key="email">
               </div>
             </div>
             <div class="field">
@@ -650,31 +651,31 @@
             <div class="payment-fieldset">
               <div class="field">
                 <label for="paymentAddress1">Billing address</label>
-                <input type="text" id="paymentAddress1" autocomplete="address-line1" placeholder="123 Main Street" required>
+                <input type="text" id="paymentAddress1" autocomplete="address-line1" placeholder="123 Main Street" required data-autofill-key="address_line1">
               </div>
               <div class="field">
                 <label for="paymentAddress2">Apartment/Suite (optional)</label>
-                <input type="text" id="paymentAddress2" autocomplete="address-line2" placeholder="Unit 4B">
+                <input type="text" id="paymentAddress2" autocomplete="address-line2" placeholder="Unit 4B" data-autofill-key="address_line2">
               </div>
             </div>
             <div class="payment-fieldset">
               <div class="field">
                 <label for="paymentCity">City</label>
-                <input type="text" id="paymentCity" autocomplete="address-level2" placeholder="Calgary" required>
+                <input type="text" id="paymentCity" autocomplete="address-level2" placeholder="Calgary" required data-autofill-key="city">
               </div>
               <div class="field">
                 <label for="paymentState">Province / State</label>
-                <input type="text" id="paymentState" autocomplete="address-level1" placeholder="Alberta" required>
+                <input type="text" id="paymentState" autocomplete="address-level1" placeholder="Alberta" required data-autofill-key="state">
               </div>
             </div>
             <div class="payment-fieldset">
               <div class="field">
                 <label for="paymentPostal">Postal / ZIP code</label>
-                <input type="text" id="paymentPostal" autocomplete="postal-code" placeholder="T2X 1A1" required>
+                <input type="text" id="paymentPostal" autocomplete="postal-code" placeholder="T2X 1A1" required data-autofill-key="postal_code">
               </div>
               <div class="field">
                 <label for="paymentCountry">Country</label>
-                <select id="paymentCountry" autocomplete="country" required>
+                <select id="paymentCountry" autocomplete="country" required data-autofill-key="country">
                   <option value="" disabled selected>Select country</option>
                   <option value="CA">Canada</option>
                   <option value="US">United States</option>
@@ -700,9 +701,94 @@
     </div>
   </div>
 
+  {{ autofill_defaults|json_script:"autofill-defaults" }}
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       const I18N = window.MalvaI18n;
+      const resolvedUserId = document.body?.dataset?.autofillUser ? String(document.body.dataset.autofillUser) : 'guest';
+      const autofillScriptNode = document.getElementById('autofill-defaults');
+      let autofillDefaults = {};
+      if (autofillScriptNode) {
+        try {
+          autofillDefaults = JSON.parse(autofillScriptNode.textContent) || {};
+        } catch (err) {
+          console.warn('[mainmenu] Failed to parse autofill defaults', err);
+          autofillDefaults = {};
+        }
+      }
+      const autofillApi = window.MalvaAutofill;
+      const profileDefaults = autofillDefaults.profile || {};
+      const paymentFormEl = document.getElementById('paymentForm');
+      const hydratePaymentFromProfile = (persistToStorage) => {
+        if (!profileDefaults || Object.keys(profileDefaults).length === 0) {
+          return;
+        }
+        const fields = {
+          name: document.getElementById('paymentName'),
+          email: document.getElementById('paymentEmail'),
+          address_line1: document.getElementById('paymentAddress1'),
+          address_line2: document.getElementById('paymentAddress2'),
+          city: document.getElementById('paymentCity'),
+          state: document.getElementById('paymentState'),
+          postal_code: document.getElementById('paymentPostal'),
+          country: document.getElementById('paymentCountry'),
+        };
+        const setIfEmpty = (element, value) => {
+          if (!element || !value || element.value) {
+            return false;
+          }
+          element.value = value;
+          if (element.tagName === 'SELECT') {
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          return true;
+        };
+        let hydrated = false;
+        const fullName = `${profileDefaults.first_name || ''} ${profileDefaults.last_name || ''}`.trim();
+        hydrated = setIfEmpty(fields.name, fullName) || hydrated;
+        hydrated = setIfEmpty(fields.email, profileDefaults.email) || hydrated;
+        if (profileDefaults.address) {
+          const addressParts = String(profileDefaults.address).split(/\n+/);
+          hydrated = setIfEmpty(fields.address_line1, addressParts[0]) || hydrated;
+          if (addressParts.length > 1) {
+            hydrated = setIfEmpty(fields.address_line2, addressParts[1]) || hydrated;
+          }
+        }
+        if (profileDefaults.postal_code) {
+          hydrated = setIfEmpty(fields.postal_code, profileDefaults.postal_code) || hydrated;
+          if (profileDefaults.postal_code.toUpperCase().startsWith('T')) {
+            hydrated = setIfEmpty(fields.state, 'Alberta') || hydrated;
+            if (fields.country && !fields.country.value) {
+              fields.country.value = 'CA';
+              fields.country.dispatchEvent(new Event('change', { bubbles: true }));
+              hydrated = true;
+            }
+          }
+        }
+        if (hydrated && persistToStorage && autofillApi) {
+          const payload = {};
+          Object.entries(fields).forEach(([key, element]) => {
+            if (element && element.value) {
+              payload[key] = element.value;
+            }
+          });
+          if (Object.keys(payload).length) {
+            autofillApi.save('payment', payload, { userId: resolvedUserId });
+          }
+        }
+      };
+      if (paymentFormEl) {
+        if (autofillApi) {
+          autofillApi.attach(paymentFormEl, { userId: resolvedUserId });
+          const storedPayment = autofillApi.load('payment', { userId: resolvedUserId });
+          const hasStoredPayment = storedPayment && Object.keys(storedPayment.values || {}).length > 0;
+          if (!hasStoredPayment) {
+            hydratePaymentFromProfile(true);
+          }
+        } else if (Object.keys(profileDefaults).length) {
+          hydratePaymentFromProfile(false);
+        }
+      }
       let refreshPending = false;
       const queueRefresh = () => {
         if (!I18N || typeof I18N.refresh !== 'function' || refreshPending) {

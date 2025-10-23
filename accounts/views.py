@@ -51,6 +51,7 @@ from .forms import (
 )
 
 from .emails import start_or_resend_verification, MAX_ATTEMPTS, ResendNotAllowed, RESEND_COOLDOWN_SEC
+from .utils import build_autofill_defaults
 
 User = get_user_model()
 
@@ -243,8 +244,12 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         now = timezone.now()
 
         # профиль может отсутствовать → None
-        ctx["profile"] = getattr(user, "userprofile", None)
+        profile = getattr(user, "userprofile", None)
+        ctx["profile"] = profile
         ctx["now"] = now
+        ctx["profile_form"] = ClientProfileForm(user=user)
+
+        ctx["autofill_defaults"] = _serialize_for_json(build_autofill_defaults(user))
 
         # быстрые действия — список услуг
         ctx["services"] = Service.objects.filter(is_active=True).order_by("name")
@@ -329,6 +334,7 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
             return redirect(reverse("dashboard") + "#profile")
 
         ctx = self.get_context_data()
+        ctx["profile_form"] = form
         ctx["profile_form_errors"] = form.errors
         return self.render_to_response(ctx, status=400)
 
