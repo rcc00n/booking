@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Dict, Any, List, Tuple
+import logging
+
 from .utils.sms import send_sms
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
@@ -24,6 +26,8 @@ from .models import (
 )
 from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
 
+logger = logging.getLogger(__name__)
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Email utility (локальная, чтобы избежать циклических импортов)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -43,7 +47,10 @@ def _send_email(to_email: str, subject: str, text: str, html: str, *, tag: str |
             msg.tags = [tag]   # поддерживает Anymail/Sendgrid, если есть
     except Exception:
         pass
-    msg.send()
+    try:
+        msg.send()
+    except Exception as exc:  # noqa: BLE001 - failing email must not block business flow
+        logger.warning("Failed to send transactional email (tag=%s, to=%s): %s", tag, to_email, exc, exc_info=exc)
 
 
 def _notify_once(appointment_id, user_profile, *, channel="email", message: str):
