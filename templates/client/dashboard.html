@@ -204,6 +204,20 @@
         <h1 class="dashboard-heading text-3xl sm:text-4xl font-extrabold mb-8 text-[#204029]" data-i18n="dashboard.greetingAnon" data-i18n-vars='{"username":"{{ request.user.username|escapejs }}"}'>Hello, {{ request.user.username }}!</h1>
       {% endif %}
 
+      {% if pending_intake_assignments %}
+        <div class="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-900 shadow-sm">
+          <div class="font-semibold">Action needed: we still need your intake form.</div>
+          <div class="text-sm text-amber-800/80">Complete {{ pending_intake_assignments }} form{{ pending_intake_assignments|pluralize }} before your next visit.</div>
+          <a href="{% url 'client-intake-forms' %}" class="inline-flex items-center gap-2 rounded-lg bg-[#AF9525] px-4 py-2 text-white shadow hover:bg-[#9b8521]">Complete now</a>
+        </div>
+      {% elif total_intake_assignments %}
+        <div class="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-emerald-900 shadow-sm">
+          <div class="font-semibold">All required forms are on file.</div>
+          <div class="text-sm text-emerald-800/80">Need to make changes? Update your answers anytime.</div>
+          <a href="{% url 'client-intake-forms' %}" class="inline-flex items-center gap-2 rounded-lg border border-emerald-300 px-4 py-2 text-emerald-900 hover:bg-emerald-100">Review forms</a>
+        </div>
+      {% endif %}
+
       <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         <!-- Upcoming appointments -->
         <div class="tab-card bg-white shadow p-6 border border-[#DAD3C1]">

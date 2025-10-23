@@ -23,8 +23,14 @@ from .models import (
     UserProfile,
     PaymentStatus,
     Payment,
+    ClientIntakeForm,
 )
 from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
+from core.services.intake_assignments import (
+    ensure_universal_assignments_for_form,
+    ensure_universal_assignments_for_profile,
+)
+from django.db import OperationalError, ProgrammingError
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +81,17 @@ def _notify_once(appointment_id, user_profile, *, channel="email", message: str)
         notif.sent_at = timezone.now()
         notif.user = user_profile or notif.user
         notif.save(update_fields=["message", "sent_at", "user"])
+
+
+def _safe_assignments_call(func, *args, **kwargs):
+    """
+    Guard assignment helpers so migrations do not fail when tables are missing.
+    """
+    try:
+        return func(*args, **kwargs)
+    except (OperationalError, ProgrammingError):
+        logger.debug("Skipping intake assignment sync; tables not ready yet.")
+        return 0
 
 # 4) Хелпер: список позиций (услуга + мастер + время)
 def _items_summary_lines(appt: Appointment) -> list[str]:
@@ -466,6 +483,43 @@ def on_appointment_status_changing(sender, instance: Appointment, **kwargs):
                 channel="email",
                 message="Appointment cancelled email queued (direct status change)",
             )
+
+
+@receiver(post_save, sender=UserProfile)
+def ensure_profile_universal_assignments(sender, instance: UserProfile, **kwargs):
+    """
+    Guarantee universal forms stay assigned whenever the profile is saved.
+    """
+    _safe_assignments_call(ensure_universal_assignments_for_profile, instance)
+
+
+@receiver(pre_save, sender=ClientIntakeForm)
+def snapshot_client_intake_form(sender, instance: ClientIntakeForm, **kwargs):
+    """
+    Remember prior universal flag to detect transitions in post_save.
+    """
+    if not instance.pk:
+        instance._previous_is_universal = False
+        return
+    previous = (
+        ClientIntakeForm.objects.filter(pk=instance.pk)
+        .values_list("is_universal", flat=True)
+        .first()
+    )
+    instance._previous_is_universal = bool(previous)
+
+
+@receiver(post_save, sender=ClientIntakeForm)
+def ensure_universal_assignments(sender, instance: ClientIntakeForm, created: bool, **kwargs):
+    """
+    When a form is created or toggled to be universal, auto-assign it to clients.
+    """
+    if not instance.is_universal:
+        return
+    was_universal = getattr(instance, "_previous_is_universal", False)
+    if not created and was_universal:
+        return
+    _safe_assignments_call(ensure_universal_assignments_for_form, instance)
 
 from django.apps import apps
 from django.db import transaction

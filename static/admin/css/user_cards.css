@@ -119,6 +119,11 @@
 .uc-name{ margin:0; font-size:16px; font-weight:500; line-height:1.2; color:#0f172a; }
 .uc-email{ font-size:14px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .uc-email a{ color:#64748b!important; text-decoration:none; }
+.uc-flag{
+  display:inline-flex;align-items:center;gap:6px;margin-top:4px;
+  padding:4px 10px;border-radius:999px;background:#fef3c7;color:#92400e;
+  font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+}
 
 /* Правые ячейки */
 .uc-cell{ text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

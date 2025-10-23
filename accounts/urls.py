@@ -4,6 +4,8 @@ from .views import (
     ClientDashboardView,
     MasterDashboardView,
     ClientAppointmentsListView,
+    ClientIntakeAssignmentsView,
+    ClientIntakeAssignmentDetailView,
     ClientRegisterView,
     MainMenuView,  # можно оставить, если где-то используется
     ProductSalesView,
@@ -42,6 +44,8 @@ urlpatterns = [
     path("master/",    MasterDashboardView.as_view(), name="master_dashboard"),
     path("master/sales/", ProductSalesView.as_view(), name="product-sales"),
     path("client/appointments/", ClientAppointmentsListView.as_view(), name="client_appointments"),
+    path("client/forms/", ClientIntakeAssignmentsView.as_view(), name="client-intake-forms"),
+    path("client/forms/<uuid:pk>/", ClientIntakeAssignmentDetailView.as_view(), name="client-intake-form-detail"),
 
     # API бронирования (требует логина)
     path("api/availability/", api_availability, name="api-availability"),
@@ -68,7 +72,6 @@ urlpatterns = [
     path("api/appointment/<uuid:appt_id>/cancel/",     api_appointment_cancel,     name="api-appt-cancel"),
     path("api/appointment/<uuid:appt_id>/reschedule/", api_appointment_reschedule, name="api-appt-reschedule"),
 ]
-
 
 
 

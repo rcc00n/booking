@@ -15,7 +15,7 @@ from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.conf import settings
 from django.contrib import admin, messages
-from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField, Prefetch, OuterRef, Subquery
+from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField, Prefetch, OuterRef, Subquery, Exists
 from itertools import cycle
 
 from django.utils.formats import number_format
@@ -959,9 +959,6 @@ class ExportXlsxMixin:
         return wb
 
 
-# -----------------------------
-# Customized User Admin
-# -----------------------------
 class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     """
     Custom admin interface for Django's User model, enhanced with roles and profile fields.
@@ -1025,7 +1022,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     # Fields shown in user list
     list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'source', 'client_status_col')
     list_filter = ('is_superuser', 'userprofile__how_heard', ClientStatusFilter)
-    search_fields = ()
+    search_fields = ('username', 'email', 'first_name', 'last_name')
     ordering = ('-date_joined',)
 
     # Field layout when editing a user
@@ -1064,6 +1061,14 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     def get_queryset(self, request):
         # Prefetch the attached profile to avoid N+1 lookups.
         qs = super().get_queryset(request).select_related('userprofile')
+
+        universal_pending_subquery = ClientIntakeAssignment.objects.filter(
+            client__user_id=OuterRef('pk'),
+            form__is_universal=True,
+            form__is_active=True,
+            completed_at__isnull=True,
+        )
+        qs = qs.annotate(universal_intake_pending=Exists(universal_pending_subquery))
 
         status_key = request.GET.get('client_status')
         if status_key:
@@ -3662,12 +3667,12 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
 @admin.register(ClientIntakeForm)
 class ClientIntakeFormAdmin(admin.ModelAdmin):
     form = ClientIntakeFormAdminForm
-    list_display = ("name", "slug", "is_active", "updated_at")
-    list_filter = ("is_active",)
+    list_display = ("name", "slug", "is_active", "is_universal", "updated_at")
+    list_filter = ("is_active", "is_universal")
     search_fields = ("name", "slug", "description")
     prepopulated_fields = {"slug": ("name",)}
     fieldsets = (
-        (None, {"fields": ("name", "slug", "description", "is_active")}),
+        (None, {"fields": ("name", "slug", "description", "is_active", "is_universal")}),
         (_("Builder"), {"fields": ("schema", "schema_version")} ),
         (_("Form class"), {"fields": ("form_class",), "classes": ("collapse",)}),
         (_("Timestamps"), {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
@@ -3677,8 +3682,8 @@ class ClientIntakeFormAdmin(admin.ModelAdmin):
 
 @admin.register(ClientIntakeFormSubmission)
 class ClientIntakeFormSubmissionAdmin(admin.ModelAdmin):
-    list_display = ("form", "client", "appointment", "submitted_by", "submitted_at")
-    list_filter = ("form", "submitted_at", "submitted_by")
+    list_display = ("form", "client", "appointment", "assignment", "submitted_by", "submitted_at")
+    list_filter = ("form", "submitted_at", "submitted_by", "assignment__form")
     search_fields = (
         "form__name",
         "client__user__first_name",
@@ -3689,6 +3694,7 @@ class ClientIntakeFormSubmissionAdmin(admin.ModelAdmin):
         "form",
         "client",
         "appointment",
+        "assignment",
         "submitted_by",
         "submitted_at",
         "data",
@@ -3697,6 +3703,29 @@ class ClientIntakeFormSubmissionAdmin(admin.ModelAdmin):
         "schema_version",
         "is_complete",
     )
+
+
+@admin.register(ClientIntakeAssignment)
+class ClientIntakeAssignmentAdmin(admin.ModelAdmin):
+    list_display = ("form", "client", "is_completed", "assigned_by", "assigned_at", "completed_at")
+    list_filter = ("form__is_universal", "form", "assigned_at", "completed_at")
+    search_fields = (
+        "client__user__first_name",
+        "client__user__last_name",
+        "client__user__email",
+        "form__name",
+    )
+    autocomplete_fields = ("form", "client", "completed_by")
+    readonly_fields = ("assigned_at", "assigned_by")
+
+    @admin.display(boolean=True, description="Completed")
+    def is_completed(self, obj):
+        return obj.is_completed
+
+    def save_model(self, request, obj, form, change):
+        if not obj.assigned_by_id:
+            obj.assigned_by = request.user
+        super().save_model(request, obj, form, change)
 # -----------------------------
 # Notification Admin
 # -----------------------------
@@ -4180,10 +4209,11 @@ admin.site.register(CancellationReason)
 
 @admin.register(ServiceCategory)
 class ServiceCategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "featured_rank", "catalog_order", "catalog_position_preview")
+    list_display = ("name", "slug", "featured_rank", "catalog_order", "catalog_position_preview")
     list_editable = ("featured_rank", "catalog_order")
     search_fields = ("name",)
     ordering = ("name",)
+    readonly_fields = ("slug",)
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)

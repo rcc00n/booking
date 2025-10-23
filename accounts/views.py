@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import hashlib
+import json
 import logging
 
 from django.conf import settings
@@ -12,19 +14,19 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import LoginView
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.cache import cache
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
-from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseRedirect
-from django.shortcuts import redirect, render
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseRedirect, Http404
+from django.shortcuts import redirect, render, get_object_or_404
 from django.urls import reverse, reverse_lazy
-from django.views.generic import TemplateView, ListView
+from django.views.generic import TemplateView, ListView, View
 from django.views.generic.edit import CreateView
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
 from django.utils import timezone
-from django.db.models import OuterRef, Subquery, Count, Prefetch, Sum, F
+from django.db.models import OuterRef, Subquery, Count, Prefetch, Sum, F, Q
 from django.db.models.functions import TruncMonth
-import hashlib
 
 from core.models import (
     Service,
@@ -35,7 +37,10 @@ from core.models import (
     Product,
     ProductSale,
     EmailVerification,
+    ClientIntakeAssignment,
+    ClientIntakeFormSubmission,
 )
+from core.services.intake_assignments import ensure_universal_assignments_for_profile
 
 from .forms import (
     ClientRegistrationForm,
@@ -53,6 +58,13 @@ RATE_LIMITS = {
 }
 RATE_LIMIT_PREFIX = "accounts:verify"
 logger = logging.getLogger(__name__)
+
+
+def _serialize_for_json(payload):
+    """
+    Normalize Python values (Decimals, dates) into JSON-friendly primitives.
+    """
+    return json.loads(json.dumps(payload, cls=DjangoJSONEncoder))
 
 
 def _client_ip(request) -> str:
@@ -135,7 +147,13 @@ class RoleRequiredMixin(LoginRequiredMixin):
     required_role: str | None = None
 
     def dispatch(self, request, *args, **kwargs):
-        if self.required_role and not request.user.userrole_set.filter(role__name=self.required_role).exists():
+        role_qs = getattr(request.user, "userrole_set", None)
+        if role_qs is None:
+            profile = getattr(request.user, "userprofile", None)
+            role_qs = getattr(profile, "userrole_set", None)
+        if self.required_role and (
+            role_qs is None or not role_qs.filter(role__name=self.required_role).exists()
+        ):
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
 
@@ -226,6 +244,24 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         )
         ctx["chart_labels"] = [m["month"].strftime("%b") for m in month_counts]
         ctx["chart_data"] = [m["cnt"] for m in month_counts]
+
+        pending_assignments = 0
+        total_assignments = 0
+        profile = ctx["profile"]
+        if profile:
+            ensure_universal_assignments_for_profile(profile)
+            assignment_stats = ClientIntakeAssignment.objects.filter(client=profile).aggregate(
+                total=Count("id"),
+                pending=Count(
+                    "id",
+                    filter=Q(form__is_active=True, completed_at__isnull=True),
+                ),
+            )
+            pending_assignments = assignment_stats.get("pending") or 0
+            total_assignments = assignment_stats.get("total") or 0
+
+        ctx["pending_intake_assignments"] = pending_assignments
+        ctx["total_intake_assignments"] = total_assignments
 
         ctx["stripe_public_key"] = settings.STRIPE_PUBLIC_KEY
 
@@ -369,6 +405,155 @@ class ClientAppointmentsListView(RoleRequiredMixin, ListView):
             .order_by("-start_time")
         )
 
+
+class ClientIntakeAssignmentsView(RoleRequiredMixin, TemplateView):
+    """
+    Lists all intake form assignments available to the authenticated client.
+    """
+
+    required_role = "Client"
+    template_name = "client/intake_assignments.html"
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        profile = getattr(self.request.user, "userprofile", None)
+        if profile is None:
+            raise Http404("Profile not found.")
+
+        ensure_universal_assignments_for_profile(profile)
+
+        submissions_prefetch = Prefetch(
+            "submissions",
+            queryset=ClientIntakeFormSubmission.objects.filter(
+                client=profile,
+                appointment__isnull=True,
+            ).order_by("-submitted_at", "-id"),
+            to_attr="prefetched_submissions",
+        )
+
+        assignments = list(
+            ClientIntakeAssignment.objects.filter(client=profile)
+            .select_related("form", "assigned_by")
+            .prefetch_related(submissions_prefetch)
+        )
+
+        def latest_submission_for(assignment):
+            subs = getattr(assignment, "prefetched_submissions", None)
+            return subs[0] if subs else None
+
+        entries = [
+            {
+                "assignment": assignment,
+                "form": assignment.form,
+                "latest_submission": latest_submission_for(assignment),
+                "status": "completed" if assignment.is_completed else "pending",
+                "fill_url": reverse("client-intake-form-detail", args=[assignment.pk]),
+            }
+            for assignment in assignments
+        ]
+
+        entries.sort(
+            key=lambda entry: (
+                entry["status"] == "completed",
+                entry["assignment"].assigned_at or timezone.now(),
+            )
+        )
+
+        ctx["profile"] = profile
+        ctx["assignments"] = entries
+        ctx["pending_count"] = sum(1 for entry in entries if entry["status"] == "pending")
+        ctx["has_assignments"] = bool(entries)
+        return ctx
+
+
+class ClientIntakeAssignmentDetailView(RoleRequiredMixin, View):
+    """
+    Display and handle submission for a single intake form assignment.
+    """
+
+    required_role = "Client"
+    template_name = "client/intake_assignment_detail.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.profile = getattr(request.user, "userprofile", None)
+        if self.profile is None:
+            raise Http404("Profile not found.")
+
+        ensure_universal_assignments_for_profile(self.profile)
+
+        submissions_prefetch = Prefetch(
+            "submissions",
+            queryset=ClientIntakeFormSubmission.objects.filter(
+                client=self.profile,
+                appointment__isnull=True,
+            ).order_by("-submitted_at", "-id"),
+            to_attr="prefetched_submissions",
+        )
+
+        self.assignment = get_object_or_404(
+            ClientIntakeAssignment.objects.select_related("form", "assigned_by").prefetch_related(submissions_prefetch),
+            pk=self.kwargs.get("pk"),
+            client=self.profile,
+        )
+        return super().dispatch(request, *args, **kwargs)
+
+    def _latest_submission(self):
+        subs = getattr(self.assignment, "prefetched_submissions", None)
+        return subs[0] if subs else None
+
+    def _build_form(self, *, data=None, files=None, initial=None):
+        return self.assignment.form.build_bound_form(
+            data=data,
+            files=files,
+            initial=initial,
+            client=self.profile,
+            prefix="intake",
+        )
+
+    def get(self, request, *args, **kwargs):
+        latest = self._latest_submission()
+        initial = {}
+        if latest:
+            initial = latest.data or latest.raw_payload or {}
+        bound_form = self._build_form(initial=initial)
+        context = self._build_context(bound_form, latest)
+        return render(request, self.template_name, context)
+
+    def post(self, request, *args, **kwargs):
+        latest = self._latest_submission()
+        initial = {}
+        if latest:
+            initial = latest.data or latest.raw_payload or {}
+        bound_form = self._build_form(data=request.POST, files=request.FILES, initial=initial)
+        if bound_form.is_valid():
+            cleaned_payload = _serialize_for_json(bound_form.cleaned_data)
+            ClientIntakeFormSubmission.objects.update_or_create(
+                assignment=self.assignment,
+                defaults={
+                    "form": self.assignment.form,
+                    "client": self.profile,
+                    "appointment": None,
+                    "submitted_by": request.user,
+                    "data": cleaned_payload,
+                    "raw_payload": cleaned_payload,
+                    "form_schema_snapshot": self.assignment.form.normalized_schema(),
+                    "schema_version": self.assignment.form.schema_version,
+                    "is_complete": True,
+                },
+            )
+            messages.success(request, "Form saved successfully.")
+            return redirect("client-intake-forms")
+
+        context = self._build_context(bound_form, latest)
+        return render(request, self.template_name, context, status=400)
+
+    def _build_context(self, bound_form, latest_submission):
+        return {
+            "assignment": self.assignment,
+            "form": self.assignment.form,
+            "bound_form": bound_form,
+            "latest_submission": latest_submission,
+        }
 
 # =========================
 # Регистрация клиента (AJAX-friendly)

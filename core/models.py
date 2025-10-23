@@ -282,6 +282,7 @@ class ServiceCategory(models.Model):
     Represents a service offered in the system (e.g., haircut, massage).
     """
     name = models.CharField(max_length=100)
+    slug = models.SlugField(max_length=150, unique=True, db_index=True)
     featured_rank = models.PositiveSmallIntegerField(
         choices=FEATURED_CATEGORY_RANKS,
         blank=True,
@@ -298,6 +299,39 @@ class ServiceCategory(models.Model):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = self._generate_unique_slug()
+        super().save(*args, **kwargs)
+
+    def _generate_unique_slug(self) -> str:
+        """
+        Derive a unique slug from the category name, preserving existing slugs on updates.
+        """
+        base = slugify(self.name or "") or "category"
+        max_length = self._meta.get_field("slug").max_length
+        base = base[:max_length].strip("-") or "category"
+
+        taken = set(
+            ServiceCategory.objects.exclude(pk=self.pk).values_list("slug", flat=True)
+        )
+
+        if base not in taken:
+            return base
+
+        for index in range(2, 5000):
+            suffix = f"-{index}"
+            trimmed_base = base[: max_length - len(suffix)]
+            candidate = f"{trimmed_base}{suffix}".strip("-")
+            if candidate and candidate not in taken:
+                return candidate
+
+        # Fallback: append a UUID chunk if everything else failed (extremely unlikely).
+        from uuid import uuid4
+
+        fallback = f"{base[: max_length - 9]}-{uuid4().hex[:8]}"
+        return fallback.strip("-") or uuid4().hex[:max_length]
 
     class Meta:
         constraints = [
@@ -334,6 +368,10 @@ class ClientIntakeForm(models.Model):
         help_text="Dotted path to a Django form class that handles rendering/validation.",
     )
     is_active = models.BooleanField(default=True)
+    is_universal = models.BooleanField(
+        default=False,
+        help_text="When enabled, every client must complete this form once.",
+    )
     schema = models.JSONField(default=dict, blank=True)
     schema_version = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -477,6 +515,96 @@ class Service(models.Model):
         return self.pre_appointment_forms.filter(is_active=True)
 
 
+class ClientIntakeAssignmentQuerySet(models.QuerySet):
+    def pending(self):
+        return self.filter(
+            form__is_active=True,
+            completed_at__isnull=True,
+        )
+
+    def for_client(self, profile: "UserProfile"):
+        return self.filter(client=profile).select_related("form", "assigned_by")
+
+
+class ClientIntakeAssignment(models.Model):
+    """
+    Tracks intake forms that a client must complete outside of a specific appointment.
+    Includes automatically enforced universal forms and manual staff assignments.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    form = models.ForeignKey(
+        ClientIntakeForm,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+    )
+    client = models.ForeignKey(
+        UserProfile,
+        on_delete=models.CASCADE,
+        related_name="intake_assignments",
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="intake_assignments_created",
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    due_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    completed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="intake_assignments_completed",
+    )
+    notes = models.TextField(blank=True)
+
+    objects = ClientIntakeAssignmentQuerySet.as_manager()
+
+    class Meta:
+        unique_together = ("form", "client")
+        indexes = [
+            models.Index(fields=["client", "form"]),
+            models.Index(fields=["form", "completed_at"]),
+            models.Index(fields=["client", "completed_at"]),
+        ]
+        verbose_name = "Client intake assignment"
+        verbose_name_plural = "Client intake assignments"
+
+    def __str__(self):
+        return f"{self.form} → {self.client}"
+
+    @property
+    def is_completed(self) -> bool:
+        return self.completed_at is not None
+
+    @property
+    def is_pending(self) -> bool:
+        return not self.is_completed
+
+    def mark_completed(self, *, timestamp=None, actor=None):
+        """
+        Mark the assignment as completed if not already done or if provided timestamp is newer.
+        """
+        ts = timestamp or timezone.now()
+        update_fields = []
+
+        if self.completed_at is None or ts >= self.completed_at:
+            self.completed_at = ts
+            update_fields.append("completed_at")
+
+        actor_id = getattr(actor, "pk", None)
+        if actor_id and self.completed_by_id != actor_id:
+            self.completed_by_id = actor_id
+            update_fields.append("completed_by")
+
+        if update_fields:
+            self.save(update_fields=update_fields)
+
+
 class ClientIntakeFormSubmission(models.Model):
     """
     Stores answers for a specific intake form, optionally linked to an appointment.
@@ -497,6 +625,13 @@ class ClientIntakeFormSubmission(models.Model):
         "core.Appointment",
         on_delete=models.CASCADE,
         related_name="intake_submissions",
+        null=True,
+        blank=True,
+    )
+    assignment = models.ForeignKey(
+        "core.ClientIntakeAssignment",
+        on_delete=models.SET_NULL,
+        related_name="submissions",
         null=True,
         blank=True,
     )
@@ -522,6 +657,35 @@ class ClientIntakeFormSubmission(models.Model):
         if self.appointment_id:
             return f"{base} ({self.appointment_id})"
         return base
+
+    def clean(self):
+        super().clean()
+        if self.assignment_id:
+            if self.assignment.client_id != self.client_id:
+                raise ValidationError({"assignment": "Assignment does not belong to this client."})
+            if self.assignment.form_id != self.form_id:
+                raise ValidationError({"assignment": "Assignment is for a different intake form."})
+
+    def save(self, *args, **kwargs):
+        # Normalize submitted_at on update to reflect most recent answers.
+        if not self._state.adding:
+            now = timezone.now()
+            update_fields = kwargs.get("update_fields")
+            if update_fields:
+                if "submitted_at" not in update_fields:
+                    if isinstance(update_fields, (list, tuple, set)):
+                        update_fields = list(update_fields)
+                    else:
+                        update_fields = [update_fields]
+                    update_fields.append("submitted_at")
+                    kwargs["update_fields"] = update_fields
+                self.submitted_at = now
+            else:
+                self.submitted_at = now
+        super().save(*args, **kwargs)
+        if self.assignment_id:
+            actor = getattr(self, "submitted_by", None)
+            self.assignment.mark_completed(timestamp=self.submitted_at, actor=actor)
 
 class MasterRoom(models.Model):
     """
