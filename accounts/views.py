@@ -44,6 +44,7 @@ from core.models import (
 from core.services.intake_assignments import ensure_universal_assignments_for_profile
 
 from .forms import (
+    AccountPasswordResetForm,
     ClientRegistrationForm,
     ClientProfileForm, HealthConditionsForm, ProductSaleForm,
 )
@@ -166,6 +167,7 @@ class AccountPasswordResetView(SupportEmailContextMixin, auth_views.PasswordRese
     email_template_name = "emails/account/password_reset_email.txt"
     html_email_template_name = "emails/account/password_reset_email.html"
     subject_template_name = "emails/account/password_reset_subject.txt"
+    form_class = AccountPasswordResetForm
 
     def get_email_context(self, context):
         context = super().get_email_context(context)

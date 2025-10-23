@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django import forms
 from decimal import Decimal
-from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
+from django.contrib.auth.forms import UserCreationForm, AuthenticationForm, PasswordResetForm
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -203,6 +203,22 @@ class ClientLoginForm(AuthenticationForm):
             raise forms.ValidationError("Неверные учётные данные.")
         self.confirm_login_allowed(self.user_cache)
         return self.cleaned_data
+
+
+class AccountPasswordResetForm(PasswordResetForm):
+    """
+    Customizes the password reset form widgets for branding and accessibility.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["email"].widget.attrs.update(
+            {
+                "class": "auth-input",
+                "placeholder": "you@example.com",
+                "autocomplete": "email",
+            }
+        )
 
 
 # ---------- Profile edit ----------
