@@ -316,7 +316,143 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
 .reg-form{
   display:flex;
   flex-direction:column;
-  gap:1.25rem;
+  gap:1.6rem;
+}
+.reg-shell{
+  display:flex;
+  flex-direction:column;
+  gap:1.8rem;
+}
+.reg-progress{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:1rem;
+  padding:.85rem 1.1rem;
+  border-radius:22px;
+  background:linear-gradient(135deg, rgba(255,255,255,.78), rgba(255,255,255,.58));
+  box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.35), 0 16px 40px rgba(32,64,41,.12);
+}
+.reg-progress__step{
+  display:flex;
+  align-items:center;
+  gap:.55rem;
+  position:relative;
+  flex:1;
+  color:rgba(32,64,41,.55);
+  font-size:.78rem;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  transition:color .25s ease, opacity .25s ease;
+}
+.reg-progress__step:not(:last-child)::after{
+  content:"";
+  position:absolute;
+  right:-50%;
+  top:calc(50% + 1px);
+  width:100%;
+  height:2px;
+  background:rgba(175,149,37,.26);
+  transform:translateY(-50%);
+}
+.reg-progress__badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:30px;
+  height:30px;
+  border-radius:50%;
+  background:rgba(32,64,41,.12);
+  color:var(--green);
+  box-shadow:inset 0 0 0 1px rgba(32,64,41,.12);
+  font-size:.88rem;
+  transition:all .25s ease;
+}
+.reg-progress__label{
+  line-height:1.1;
+  letter-spacing:.02em;
+}
+.reg-progress__step.is-active{
+  color:var(--green);
+}
+.reg-progress__step.is-active .reg-progress__badge{
+  background:var(--green);
+  color:#fff;
+  box-shadow:0 12px 20px rgba(32,64,41,.18);
+}
+.reg-progress__step.is-complete{
+  color:var(--primary);
+}
+.reg-progress__step.is-complete .reg-progress__badge{
+  background:var(--primary);
+  color:#fff;
+  box-shadow:0 12px 24px rgba(175,149,37,.28);
+}
+.reg-progress__step.is-complete:nth-child(odd)::after{
+  background:linear-gradient(90deg, rgba(175,149,37,.45) 0%, rgba(175,149,37,.1) 100%);
+}
+.reg-step{
+  display:none;
+  gap:1.3rem;
+}
+.reg-step.is-active{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+  gap:1.5rem 1.15rem;
+  animation:regStepIn .32s ease both;
+}
+.reg-step__heading{
+  grid-column:1 / -1;
+}
+.reg-step__heading h3{
+  margin:0;
+  font-size:1.45rem;
+  letter-spacing:-.015em;
+  color:var(--green);
+}
+.reg-step__heading p{
+  margin:.5rem 0 0;
+  font-size:.98rem;
+  line-height:1.5;
+  color:rgba(77,77,77,.78);
+}
+.reg-step__full{
+  grid-column:1 / -1;
+}
+@keyframes regStepIn{
+  from{opacity:0;transform:translateY(16px);}
+  to{opacity:1;transform:translateY(0);}
+}
+.reg-summary{
+  grid-column:1 / -1;
+  display:flex;
+  align-items:flex-start;
+  gap:1rem;
+  padding:1.05rem 1.2rem;
+  border-radius:18px;
+  background:linear-gradient(135deg, rgba(32,64,41,.06), rgba(175,149,37,.08));
+  box-shadow:inset 0 0 0 1px rgba(32,64,41,.08);
+  font-size:.92rem;
+  color:rgba(32,64,41,.78);
+  line-height:1.5;
+}
+.reg-summary svg{
+  flex:0 0 auto;
+  width:22px;
+  height:22px;
+  color:var(--green);
+}
+.reg-actions{
+  display:flex;
+  align-items:center;
+  gap:1.1rem;
+}
+.reg-actions .btn{
+  flex:1;
+}
+.reg-actions .btn[hidden]{
+  display:none;
 }
 .reg-form .field{
   --control-padding-y:18px;
@@ -333,28 +469,37 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
 .reg-form .field select{
   font-size:15px;
 }
-.reg-form .field textarea{
-  min-height:108px;
-  padding-top:calc(var(--control-padding-top) + 2px);
-  padding-bottom:calc(var(--control-padding-bottom) + 8px);
-  font-size:15px;
-}
-.reg-form .field textarea + label{
-  top:calc(var(--control-padding-top) - 8px);
-}
-.reg-form .field textarea:focus + label,
-.reg-form .field textarea:not(:placeholder-shown) + label{
-  top:calc(var(--control-padding-top) - 14px);
-}
 .reg-form .field select + label{
   left:var(--control-padding-left);
 }
-
-/* чекбокс согласия */
+.field__error{
+  display:none;
+  margin-top:.55rem;
+  padding:.45rem .65rem;
+  border-radius:12px;
+  font-size:.82rem;
+  line-height:1.35;
+  background:var(--error-bg);
+  color:var(--error-text);
+  box-shadow:inset 0 0 0 1px rgba(195,0,0,.12);
+}
+.field.field--error input:not([type="checkbox"]),
+.field.field--error select{
+  background:color-mix(in srgb, #fff 70%, rgba(255,92,92,.2));
+  box-shadow:var(--control-outline-active), 0 0 0 2px rgba(195,0,0,.08);
+}
+.field.field--error label{
+  color:var(--error-text);
+}
+.field.field--error .field__error{
+  display:block;
+}
+/* чекбоксы-согласия */
 .field.field--check{
+  position:relative;
   display:flex;
   align-items:flex-start;
-  gap:12px;
+  gap:14px;
   padding:0;
 }
 .field.field--check input{
@@ -367,6 +512,7 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
   box-shadow:none;
   background:#fff;
   accent-color:var(--primary);
+  transition:box-shadow .2s ease;
 }
 .field.field--check input:focus{
   outline:none;
@@ -377,9 +523,105 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
   transform:none;
   font-size:14px;
   letter-spacing:0;
-  opacity:1;
+  opacity:.95;
   color:var(--dgray);
-  line-height:1.45;
+  line-height:1.6;
+}
+.field.field--check .field__error{
+  margin-top:.5rem;
+}
+.reg-consents{
+  display:grid;
+  gap:1.1rem;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+}
+.consent-card{
+  position:relative;
+  border-radius:18px;
+  padding:1.05rem 1.2rem;
+  background:linear-gradient(135deg, rgba(255,255,255,.86), rgba(255,255,255,.72));
+  box-shadow:inset 0 0 0 1px rgba(32,64,41,.06), 0 12px 26px rgba(32,64,41,.08);
+  transition:box-shadow .25s ease, transform .25s ease;
+}
+.consent-card:hover{
+  transform:translateY(-2px);
+  box-shadow:inset 0 0 0 1px rgba(32,64,41,.12), 0 16px 32px rgba(32,64,41,.12);
+}
+.consent-card.has-error{
+  box-shadow:inset 0 0 0 1px rgba(195,0,0,.35), 0 0 0 3px rgba(195,0,0,.12);
+}
+.consent-card.has-error label{
+  color:var(--error-text);
+}
+.consent-card.has-error label a{
+  color:var(--error-text);
+  text-decoration-color:rgba(195,0,0,.45);
+}
+.consent-card--primary{
+  background:linear-gradient(135deg, rgba(175,149,37,.18), rgba(32,64,41,.08));
+  box-shadow:inset 0 0 0 1px rgba(175,149,37,.22), 0 14px 30px rgba(175,149,37,.18);
+}
+.consent-card.is-required::after{
+  content:"Required";
+  position:absolute;
+  top:12px;
+  right:14px;
+  font-size:.7rem;
+  font-weight:600;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:rgba(32,64,41,.66);
+}
+.consent-card__meta{
+  display:block;
+  margin-top:.65rem;
+  font-size:.82rem;
+  line-height:1.4;
+  color:rgba(32,64,41,.7);
+}
+.consent-card__meta strong{
+  color:var(--green);
+}
+.consent-card .field.field--check{
+  gap:12px;
+}
+.consent-card .field.field--check label a{
+  color:var(--green);
+  text-decoration:underline;
+  text-decoration-color:rgba(32,64,41,.4);
+  text-decoration-thickness:2px;
+  text-underline-offset:3px;
+  transition:color .2s ease, text-decoration-color .2s ease;
+}
+.consent-card .field.field--check label a:hover{
+  color:var(--primary-dark);
+  text-decoration-color:rgba(175,149,37,.65);
+}
+@media (max-width:540px){
+  .reg-progress{
+    flex-direction:column;
+    align-items:flex-start;
+    gap:.8rem;
+    padding:1rem 1.2rem;
+  }
+  .reg-progress__step{
+    width:100%;
+  }
+  .reg-progress__step:not(:last-child)::after{
+    position:relative;
+    right:auto;
+    top:auto;
+    width:100%;
+    height:1px;
+    margin-top:.6rem;
+  }
+  .reg-step.is-active{
+    grid-template-columns:1fr;
+  }
+  .reg-actions{
+    flex-direction:column;
+    align-items:stretch;
+  }
 }
 
 /* ===== Verify modal (email code) ===== */
@@ -533,82 +775,166 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
 </div>
 
 <!-- ===== R E G I S T R A T I O N  M O D A L ===== -->
-<div id="regModal" class="modal">
+<div id="regModal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
   <div class="modal__dialog">
     <button class="modal__close" id="regClose" aria-label="Close">&times;</button>
     <h2>Create account</h2>
     <form id="regForm" class="reg-form" method="post" action="{% url 'register' %}">
       {% csrf_token %}
-      <div class="field">
-        <input type="text" name="first_name" placeholder=" " required autocomplete="given-name">
-        <label>First name</label>
-      </div>
-      <div class="field">
-        <input type="text" name="last_name" placeholder=" " required autocomplete="family-name">
-        <label>Last name</label>
-      </div>
-      <div class="field">
-        <input type="email" name="email" placeholder=" " required autocomplete="email">
-        <label>E-mail</label>
-      </div>
-      <div class="field">
-        <input
-          type="tel"
-          id="regPhone"
-          name="phone"
-          placeholder="(555) 123‑4567"
-          value="+1 "
-          required
-          inputmode="tel"
-          autocomplete="tel"
-        >
-        <label for="regPhone">Phone</label>
-      </div>
-      <div class="field">
-        <input type="date" name="birth_date" placeholder=" " required autocomplete="bday">
-        <label>Date of birth</label>
-      </div>
-      <div class="field">
-        <input type="password" name="password1" placeholder=" " required autocomplete="new-password">
-        <label>Password</label>
-        <button type="button" class="toggle-eye" aria-label="Show password" title="Show password">
-          <svg class="eye-open" viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
-          <svg class="eye-off" viewBox="0 0 24 24" style="display:none"><path d="M2 3.27L3.28 2 22 20.72 20.73 22l-3.1-3.1A10.86 10.86 0 0112 19c-7 0-10-7-10-7a18.2 18.2 0 014.4-5.38L2 3.27zM12 7a5 5 0 015 5 5 5 0 01-.39 1.94l-6.55-6.55A4.9 4.9 0 0112 7zm0 10a8.86 8.86 0 005.22-1.72l-2.15-2.15A5 5 0 017 12a5 5 0 01.28-1.65L5.18 8.25A17.2 17.2 0 002 12s3 5 10 5z"/></svg>
-        </button>
-      </div>
-      <div class="field">
-        <input type="password" name="password2" placeholder=" " required autocomplete="new-password">
-        <label>Confirm password</label>
-        <button type="button" class="toggle-eye" aria-label="Show password" title="Show password">
-          <svg class="eye-open" viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
-          <svg class="eye-off" viewBox="0 0 24 24" style="display:none"><path d="M2 3.27L3.28 2 22 20.72 20.73 22l-3.1-3.1A10.86 10.86 0 0112 19c-7 0-10-7-10-7a18.2 18.2 0 014.4-5.38L2 3.27zM12 7a5 5 0 015 5 5 5 0 01-.39 1.94l-6.55-6.55A4.9 4.9 0 0112 7zm0 10a8.86 8.86 0 005.22-1.72l-2.15-2.15A5 5 0 017 12a5 5 0 01.28-1.65L5.18 8.25A17.2 17.2 0 002 12s3 5 10 5z"/></svg>
-        </button>
-      </div>
-      <div class="field">
-        <textarea name="address" placeholder=" " rows="2" autocomplete="street-address"></textarea>
-        <label>Address</label>
-      </div>
-      <div class="field">
-        <select name="how_heard" placeholder=" ">
-          <option value="">— Select —</option>
-          <option value="google">Google search</option>
-          <option value="instagram">Instagram</option>
-          <option value="tiktok">TikTok</option>
-          <option value="friend">Friends/Family</option>
-          <option value="other">Other</option>
-        </select>
-        <label>How did you hear about us?</label>
-      </div>
-      <div class="field field--check">
-        <input id="consentEmail" type="checkbox" name="email_marketing_consent">
-        <label for="consentEmail">
-          I agree to receive email updates and offers and consent to the processing of my personal data
-        </label>
-      </div>
+      <div class="reg-shell">
+        <div class="reg-progress" role="status" aria-live="polite">
+          <div class="reg-progress__step is-active" data-step-index="0">
+            <span class="reg-progress__badge">1</span>
+            <span class="reg-progress__label">About you</span>
+          </div>
+          <div class="reg-progress__step" data-step-index="1">
+            <span class="reg-progress__badge">2</span>
+            <span class="reg-progress__label">Contact</span>
+          </div>
+          <div class="reg-progress__step" data-step-index="2">
+            <span class="reg-progress__badge">3</span>
+            <span class="reg-progress__label">Security</span>
+          </div>
+        </div>
 
+        <section class="reg-step is-active" data-step-index="0" aria-labelledby="regStepHeading1">
+          <div class="reg-step__heading" id="regStepHeading1">
+            <h3>Tell us about you</h3>
+            <p>Use the name you'd like on your profile. Your birthday helps us tailor age-appropriate care.</p>
+          </div>
+          <div class="field" data-field="first_name">
+            <input id="regFirstName" type="text" name="first_name" placeholder=" " required autocomplete="given-name">
+            <label for="regFirstName">First name</label>
+            <span class="field__error" data-field-error="first_name"></span>
+          </div>
+          <div class="field" data-field="last_name">
+            <input id="regLastName" type="text" name="last_name" placeholder=" " required autocomplete="family-name">
+            <label for="regLastName">Last name</label>
+            <span class="field__error" data-field-error="last_name"></span>
+          </div>
+          <div class="field reg-step__full" data-field="birth_date">
+            <input id="regBirth" type="date" name="birth_date" placeholder=" " required autocomplete="bday">
+            <label for="regBirth">Date of birth</label>
+            <span class="field__error" data-field-error="birth_date"></span>
+          </div>
+        </section>
 
-      <ul class="errorlist" id="regErrors" style="display:none;"></ul>
-      <button type="submit" class="btn">Sign up</button>
+        <section class="reg-step" data-step-index="1" aria-labelledby="regStepHeading2">
+          <div class="reg-step__heading" id="regStepHeading2">
+            <h3>How we can reach you</h3>
+            <p>We'll send confirmations to your inbox and gentle reminders to your phone.</p>
+          </div>
+          <div class="field" data-field="email">
+            <input id="regEmail" type="email" name="email" placeholder=" " required autocomplete="email">
+            <label for="regEmail">E-mail</label>
+            <span class="field__error" data-field-error="email"></span>
+          </div>
+          <div class="field" data-field="phone">
+            <input
+              id="regPhone"
+              type="tel"
+              name="phone"
+              placeholder="(555) 123‑4567"
+              value="+1 "
+              required
+              inputmode="tel"
+              autocomplete="tel"
+            >
+            <label for="regPhone">Phone</label>
+            <span class="field__error" data-field-error="phone"></span>
+          </div>
+          <div class="field reg-step__full" data-field="how_heard">
+            <select id="regHowHeard" name="how_heard" placeholder=" ">
+              <option value="">— Select —</option>
+              <option value="google">Google search</option>
+              <option value="instagram">Instagram</option>
+              <option value="tiktok">TikTok</option>
+              <option value="friend">Friends/Family</option>
+              <option value="other">Other</option>
+            </select>
+            <label for="regHowHeard">How did you hear about us?</label>
+            <span class="field__error" data-field-error="how_heard"></span>
+          </div>
+          <div class="reg-consents reg-step__full" aria-label="Communication and privacy preferences">
+            <div class="consent-card" data-consent-card="email">
+              <div class="field field--check" data-field="email_marketing_consent">
+                <input id="consentEmail" type="checkbox" name="email_marketing_consent">
+                <label for="consentEmail">
+                  I'd like to receive email updates and limited-time offers.
+                  <a href="{% url 'legal-email-updates' %}" target="_blank" rel="noopener">See how we use marketing emails.</a>
+                </label>
+                <span class="field__error" data-field-error="email_marketing_consent"></span>
+              </div>
+              <span class="consent-card__meta">
+                Optional. You can unsubscribe anytime using the link in our emails.
+              </span>
+            </div>
+            <div class="consent-card consent-card--primary is-required" data-consent-card="privacy">
+              <div class="field field--check" data-field="data_processing_consent">
+                <input
+                  id="consentPrivacy"
+                  type="checkbox"
+                  name="data_processing_consent"
+                  required
+                  data-required-msg="You must consent to personal data processing to continue."
+                >
+                <label for="consentPrivacy">
+                  I consent to the processing of my personal data for account creation and booking management.
+                  <a href="{% url 'legal-data-processing' %}" target="_blank" rel="noopener">Review the full privacy notice.</a>
+                </label>
+                <span class="field__error" data-field-error="data_processing_consent"></span>
+              </div>
+              <span class="consent-card__meta">
+                <strong>Why we need this.</strong> We securely store your details to manage appointments, receipts, and support.
+              </span>
+            </div>
+          </div>
+          <div class="reg-summary" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.5 4h-17A1.5 1.5 0 002 5.5v13A1.5 1.5 0 003.5 20h17a1.5 1.5 0 001.5-1.5v-13A1.5 1.5 0 0020.5 4zm-.4 1.5L12 11.24 3.9 5.5h16.2zM20.5 18.5h-17V7.05l8.1 5.72a1 1 0 001.2 0l8.1-5.72v11.45z"/></svg>
+            <div>
+              <strong>We respect your inbox.</strong> You'll only receive booking updates and occasional offers you explicitly opt into.
+            </div>
+          </div>
+        </section>
+
+        <section class="reg-step" data-step-index="2" aria-labelledby="regStepHeading3">
+          <div class="reg-step__heading" id="regStepHeading3">
+            <h3>Secure your account</h3>
+            <p>Create a password you'll remember. You'll confirm it below before we create your profile.</p>
+          </div>
+          <div class="field" data-field="password1">
+            <input id="regPassword1" type="password" name="password1" placeholder=" " required autocomplete="new-password">
+            <label for="regPassword1">Password</label>
+            <button type="button" class="toggle-eye" aria-label="Show password" title="Show password">
+              <svg class="eye-open" viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
+              <svg class="eye-off" viewBox="0 0 24 24" style="display:none"><path d="M2 3.27L3.28 2 22 20.72 20.73 22l-3.1-3.1A10.86 10.86 0 0112 19c-7 0-10-7-10-7a18.2 18.2 0 014.4-5.38L2 3.27zM12 7a5 5 0 015 5 5 5 0 01-.39 1.94l-6.55-6.55A4.9 4.9 0 0112 7zm0 10a8.86 8.86 0 005.22-1.72l-2.15-2.15A5 5 0 017 12a5 5 0 01.28-1.65L5.18 8.25A17.2 17.2 0 002 12s3 5 10 5z"/></svg>
+            </button>
+            <span class="field__error" data-field-error="password1"></span>
+          </div>
+          <div class="field" data-field="password2">
+            <input id="regPassword2" type="password" name="password2" placeholder=" " required autocomplete="new-password">
+            <label for="regPassword2">Confirm password</label>
+            <button type="button" class="toggle-eye" aria-label="Show password" title="Show password">
+              <svg class="eye-open" viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>
+              <svg class="eye-off" viewBox="0 0 24 24" style="display:none"><path d="M2 3.27L3.28 2 22 20.72 20.73 22l-3.1-3.1A10.86 10.86 0 0112 19c-7 0-10-7-10-7a18.2 18.2 0 014.4-5.38L2 3.27zM12 7a5 5 0 015 5 5 5 0 01-.39 1.94l-6.55-6.55A4.9 4.9 0 0112 7zm0 10a8.86 8.86 0 005.22-1.72l-2.15-2.15A5 5 0 017 12a5 5 0 01.28-1.65L5.18 8.25A17.2 17.2 0 002 12s3 5 10 5z"/></svg>
+            </button>
+            <span class="field__error" data-field-error="password2"></span>
+          </div>
+          <div class="reg-summary" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17 8h-1V6a4 4 0 10-8 0v2H7a2 2 0 00-2 2v9a2 2 0 002 2h10a2 2 0 002-2v-9a2 2 0 00-2-2zm-5 9.73V19a1 1 0 002 0v-1.27a2 2 0 10-2 0zM9 6a3 3 0 016 0v2H9V6z"/></svg>
+            <div>
+              <strong>Pro tip:</strong> use at least 8 characters with a mix of letters and numbers for a stronger password.
+            </div>
+          </div>
+        </section>
+
+        <ul class="errorlist" id="regErrors" aria-live="assertive" style="display:none;"></ul>
+        <div class="reg-actions">
+          <button type="button" class="btn btn--ghost" data-step-prev hidden>Back</button>
+          <button type="button" class="btn" data-step-next>Next</button>
+          <button type="submit" class="btn" data-step-submit hidden>Create account</button>
+        </div>
+      </div>
     </form>
   </div>
 </div>
@@ -670,6 +996,357 @@ const modal=document.getElementById('regModal');
 const regForm=document.getElementById('regForm');
 const regErrors=document.getElementById('regErrors');
 const authFlash=document.getElementById('authFlash');
+const regSteps=modal ? Array.from(modal.querySelectorAll('.reg-step')) : [];
+const regProgressSteps=modal ? Array.from(modal.querySelectorAll('.reg-progress__step')) : [];
+const nextStepBtn=modal ? modal.querySelector('[data-step-next]') : null;
+const prevStepBtn=modal ? modal.querySelector('[data-step-prev]') : null;
+const submitStepBtn=modal ? modal.querySelector('[data-step-submit]') : null;
+const openRegBtn=document.getElementById('openReg');
+const regCloseBtn=document.getElementById('regClose');
+const phoneInputRef=document.getElementById('regPhone');
+
+let currentStep=0;
+
+function updateStepUI(){
+  if(!modal) return;
+  regSteps.forEach((step, idx)=>{
+    step.classList.toggle('is-active', idx===currentStep);
+  });
+  regProgressSteps.forEach((node, idx)=>{
+    node.classList.toggle('is-active', idx===currentStep);
+    node.classList.toggle('is-complete', idx<currentStep);
+  });
+  if(prevStepBtn){
+    prevStepBtn.hidden = currentStep===0;
+  }
+  if(nextStepBtn){
+    nextStepBtn.hidden = currentStep>=regSteps.length-1;
+  }
+  if(submitStepBtn){
+    submitStepBtn.hidden = currentStep<regSteps.length-1;
+  }
+}
+
+function focusInput(element){
+  if(!element) return;
+  requestAnimationFrame(()=>{
+    try{
+      element.focus({preventScroll:false});
+      if(element === phoneInputRef && typeof element.setSelectionRange==='function'){
+        const len=element.value.length;
+        element.setSelectionRange(len,len);
+      }
+    }catch(err){}
+  });
+}
+
+function focusStep(index){
+  const step=regSteps[index];
+  if(!step) return;
+  const target=step.querySelector('input:not([type="hidden"]):not([disabled]), select, textarea');
+  if(target){
+    focusInput(target);
+  }
+}
+
+function goToStep(index,{focus=true}={}){
+  if(!regSteps.length) return;
+  const clamped=Math.max(0, Math.min(index, regSteps.length-1));
+  currentStep=clamped;
+  updateStepUI();
+  if(focus){
+    focusStep(currentStep);
+  }
+}
+
+function clearFieldError(field){
+  if(!field) return;
+  field.classList.remove('field--error');
+  const msg=field.querySelector('.field__error');
+  if(msg) msg.textContent='';
+  const card=field.closest('.consent-card');
+  if(card) card.classList.remove('has-error');
+}
+
+function setFieldError(field,message){
+  if(!field) return;
+  field.classList.add('field--error');
+  const msg=field.querySelector('.field__error');
+  if(msg) msg.textContent=message;
+  const card=field.closest('.consent-card');
+  if(card) card.classList.add('has-error');
+}
+
+function setFieldErrorByName(name,message){
+  if(!modal) return;
+  const field=modal.querySelector(`.field[data-field="${name}"]`);
+  if(field){
+    setFieldError(field,message);
+  }
+}
+
+function clearAllFieldErrors(){
+  if(!modal) return;
+  modal.querySelectorAll('.field.field--error').forEach(clearFieldError);
+}
+
+function renderRegErrors(messages=[],fieldErrors=null){
+  clearAllFieldErrors();
+  if(authFlash){
+    authFlash.classList.remove('show');
+    authFlash.style.display='none';
+    authFlash.textContent='';
+  }
+  let general=Array.isArray(messages) ? messages.filter(Boolean) : [];
+  let firstErrorStep=null;
+  let firstErrorElement=null;
+  if(fieldErrors && typeof fieldErrors==='object'){
+    for(const [name, errs] of Object.entries(fieldErrors)){
+      if(!errs || !errs.length) continue;
+      if(name==='__all__' || name==='non_field_errors'){
+        general=general.concat(errs.map(String));
+        continue;
+      }
+      setFieldErrorByName(name,String(errs[0]));
+      if(firstErrorElement) continue;
+      if(!modal) continue;
+      const fieldEl=modal.querySelector(`.field[data-field="${name}"]`);
+      if(!fieldEl) continue;
+      firstErrorElement=fieldEl.querySelector('input, select, textarea');
+      const stepEl=fieldEl.closest('.reg-step');
+      const idx=regSteps.indexOf(stepEl);
+      if(idx>=0) firstErrorStep=idx;
+    }
+  }
+  if(regErrors){
+    regErrors.innerHTML='';
+    regErrors.style.display='none';
+    if(general.length){
+      const items=general.map(msg=>{
+        const li=document.createElement('li');
+        li.textContent=String(msg);
+        return li;
+      });
+      regErrors.append(...items);
+      regErrors.style.display='block';
+    }
+  }
+  if(firstErrorStep!==null){
+    goToStep(firstErrorStep,{focus:false});
+    if(firstErrorElement){
+      focusInput(firstErrorElement);
+    }
+  }
+}
+
+function openRegModal({resetValues=false}={}){
+  if(!modal) return;
+  if(resetValues && regForm && typeof regForm.reset==='function'){
+    regForm.reset();
+    if(phoneInputRef){
+      phoneInputRef.value='+1 ';
+    }
+  }
+  modal.classList.add('show');
+  modal.setAttribute('aria-hidden','false');
+  goToStep(0,{focus:true});
+  renderRegErrors([]);
+}
+
+function closeRegModal(restoreFocus=false){
+  if(!modal) return;
+  modal.classList.remove('show');
+  modal.setAttribute('aria-hidden','true');
+  if(restoreFocus && openRegBtn){
+    requestAnimationFrame(()=>openRegBtn.focus({preventScroll:true}));
+  }
+}
+
+function validateField(input){
+  if(!input) return true;
+  const field=input.closest('.field');
+  if(field) clearFieldError(field);
+  if(input.type==='checkbox'){
+    if(input.required && !input.checked){
+      const message=input.getAttribute('data-required-msg') || 'Please check this box to continue.';
+      if(field) setFieldError(field,message);
+      return false;
+    }
+    return true;
+  }
+  const name=input.name||'';
+  const raw=input.value ?? '';
+  const trimmed=(name.startsWith('password') ? raw : raw.trim());
+  let message='';
+  switch(name){
+    case 'first_name':
+      if(!trimmed){
+        message='First name is required.';
+      }else if(trimmed.length<2){
+        message='Please enter at least 2 characters.';
+      }
+      break;
+    case 'last_name':
+      if(!trimmed){
+        message='Last name is required.';
+      }else if(trimmed.length<2){
+        message='Please enter at least 2 characters.';
+      }
+      break;
+    case 'birth_date':
+      if(!trimmed){
+        message='Date of birth is required.';
+      }else{
+        const dob=new Date(trimmed);
+        if(Number.isNaN(dob.valueOf())){
+          message='Enter a valid date.';
+        }else{
+          const today=new Date();
+          const min=new Date(today.getFullYear()-18, today.getMonth(), today.getDate());
+          if(dob>min){
+            message='You must be at least 18 years old.';
+          }
+        }
+      }
+      break;
+    case 'email':
+      if(!trimmed){
+        message='E-mail is required.';
+      }else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)){
+        message='Enter a valid e-mail address.';
+      }
+      break;
+    case 'phone':{
+      const digits=raw.replace(/\D/g,'');
+      if(!digits){
+        message='Phone number is required.';
+      }else if(digits.length<11){
+        message='Enter a full 10-digit US phone number.';
+      }
+      break;
+    }
+    case 'password1':
+      if(!raw){
+        message='Password is required.';
+      }else if(raw.length<8){
+        message='Use at least 8 characters.';
+      }else if(!/[A-Za-z]/.test(raw) || !/\d/.test(raw)){
+        message='Add both letters and numbers for a stronger password.';
+      }
+      break;
+    case 'password2':{
+      if(!raw){
+        message='Please confirm your password.';
+      }else{
+        const base=regForm ? (regForm.querySelector('input[name="password1"]')?.value ?? '') : '';
+        if(raw!==base){
+          message='Passwords do not match.';
+        }
+      }
+      break;
+    }
+    default:
+      if(input.required && !trimmed){
+        message='This field is required.';
+      }
+  }
+  if(message){
+    if(field) setFieldError(field,message);
+    return false;
+  }
+  return true;
+}
+
+function validateStep(index){
+  const step=regSteps[index];
+  if(!step) return true;
+  let valid=true;
+  let firstInvalid=null;
+  const controls=step.querySelectorAll('input, select, textarea');
+  controls.forEach(control=>{
+    if(control.disabled) return;
+    if(!validateField(control)){
+      valid=false;
+      if(!firstInvalid) firstInvalid=control;
+    }
+  });
+  if(!valid && firstInvalid){
+    focusInput(firstInvalid);
+  }
+  return valid;
+}
+
+if(nextStepBtn){
+  nextStepBtn.addEventListener('click',()=>{
+    if(!validateStep(currentStep)) return;
+    if(currentStep<regSteps.length-1){
+      goToStep(currentStep+1);
+    }
+  });
+}
+
+if(prevStepBtn){
+  prevStepBtn.addEventListener('click',()=>{
+    if(currentStep>0){
+      goToStep(currentStep-1);
+    }
+  });
+}
+
+if(openRegBtn){
+  openRegBtn.addEventListener('click',()=>{
+    openRegModal();
+  });
+}
+
+if(regCloseBtn){
+  regCloseBtn.addEventListener('click',()=>closeRegModal(true));
+}
+
+if(regForm){
+  const inputs=regForm.querySelectorAll('input, select');
+  inputs.forEach(input=>{
+    if(input.type==='checkbox'){
+      input.addEventListener('change',()=>validateField(input));
+      return;
+    }
+    if(input.tagName==='SELECT'){
+      const handler=()=>validateField(input);
+      input.addEventListener('change',handler);
+      input.addEventListener('blur',handler);
+      return;
+    }
+    if(input.name==='password1'){
+      input.addEventListener('input',()=>{
+        validateField(input);
+        const confirm=regForm.querySelector('input[name="password2"]');
+        if(confirm && confirm.value){
+          validateField(confirm);
+        }
+      });
+      input.addEventListener('blur',()=>validateField(input));
+      return;
+    }
+    const handler=()=>validateField(input);
+    input.addEventListener('input',handler);
+    input.addEventListener('blur',handler);
+  });
+}
+
+addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  if(verifyModal && verifyModal.classList.contains('show')){
+    e.preventDefault();
+    closeVerifyModal();
+    return;
+  }
+  if(modal && modal.classList.contains('show')){
+    e.preventDefault();
+    closeRegModal(true);
+  }
+});
+
+updateStepUI();
 
 const verifyModal=document.getElementById('verifyModal');
 const verifyEmailInput=document.getElementById('verifyEmail');
@@ -680,48 +1357,6 @@ const verifySubmitBtn=verifyModal ? verifyModal.querySelector('[data-verify-subm
 const verifyResendBtn=verifyModal ? verifyModal.querySelector('[data-verify-resend]') : null;
 const verifyCloseBtn=verifyModal ? verifyModal.querySelector('[data-verify-close]') : null;
 let verifyEmailValue='';
-
-const openRegBtn=document.getElementById('openReg');
-if(openRegBtn){
-  openRegBtn.addEventListener('click',()=>{
-    if(modal) modal.classList.add('show');
-    renderRegErrors([]);
-  });
-}
-const regCloseBtn=document.getElementById('regClose');
-if(regCloseBtn){
-  regCloseBtn.addEventListener('click',()=>modal&&modal.classList.remove('show'));
-}
-addEventListener('keydown',e=>{
-  if(e.key!=='Escape') return;
-  if(verifyModal && verifyModal.classList.contains('show')){
-    e.preventDefault();
-    closeVerifyModal();
-    return;
-  }
-  if(modal){
-    modal.classList.remove('show');
-  }
-});
-
-function renderRegErrors(messages){
-  if(!regErrors) return;
-  regErrors.innerHTML='';
-  regErrors.style.display='none';
-  if(!messages || !messages.length) return;
-  const items=messages.map(msg=>{
-    const li=document.createElement('li');
-    li.textContent=String(msg);
-    return li;
-  });
-  regErrors.append(...items);
-  regErrors.style.display='block';
-  if(authFlash){
-    authFlash.classList.remove('show');
-    authFlash.style.display='none';
-    authFlash.textContent='';
-  }
-}
 
 function showAuthFlash(message){
   if(!authFlash) return;
@@ -763,6 +1398,9 @@ function openVerifyModal(email){
   resetVerifyMessages();
   verifyModal.classList.add('show');
   verifyModal.setAttribute('aria-hidden','false');
+  if(modal){
+    modal.setAttribute('aria-hidden','true');
+  }
   if(verifyCodeInput){
     requestAnimationFrame(()=>verifyCodeInput.focus({preventScroll:true}));
   }
@@ -773,6 +1411,9 @@ function closeVerifyModal(){
   verifyModal.classList.remove('show');
   verifyModal.setAttribute('aria-hidden','true');
   resetVerifyMessages();
+  if(modal && modal.classList.contains('show')){
+    modal.setAttribute('aria-hidden','false');
+  }
 }
 
 function formatRetryAfter(seconds){
@@ -883,9 +1524,7 @@ if(verifySubmitBtn){
       showVerifySuccess('Email verified! Redirecting…');
       setTimeout(()=>{
         closeVerifyModal();
-        if(modal){
-          modal.classList.remove('show');
-        }
+        closeRegModal();
         const next=(data && data.redirect) ? data.redirect : '/accounts/';
         window.location.href=next;
       },700);
@@ -901,7 +1540,34 @@ if(verifySubmitBtn){
   });
 }
 
-function extractMessages(payload){
+function extractFieldErrors(payload){
+  if(!payload || typeof payload!=='object' || Array.isArray(payload)) return {};
+  const result={};
+  for(const [key,value] of Object.entries(payload)){
+    if(key==='ok' || key==='status' || key==='redirect' || key==='username' || key==='verification' || key==='email' || key==='error'){
+      continue;
+    }
+    if(value==null) continue;
+    if(Array.isArray(value)){
+      if(value.length) result[key]=value.map(String);
+      continue;
+    }
+    if(typeof value==='object'){
+      const nested=extractFieldErrors(value);
+      if(Object.keys(nested).length){
+        result[key]=Object.values(nested).flat();
+      }
+      continue;
+    }
+    if(typeof value==='string' && !key){
+      continue;
+    }
+    result[key]=[String(value)];
+  }
+  return result;
+}
+
+function extractMessages(payload,ignoreKeys=new Set()){
   if(!payload) return [];
   const queue=[payload];
   const messages=[];
@@ -911,9 +1577,13 @@ function extractMessages(payload){
     if(Array.isArray(item)){
       queue.push(...item);
     }else if(typeof item==='object'){
-      queue.push(...Object.values(item));
+      for(const [key,val] of Object.entries(item)){
+        if(ignoreKeys.has(key)) continue;
+        queue.push(val);
+      }
     }else{
-      messages.push(String(item));
+      const txt=String(item);
+      if(txt) messages.push(txt);
     }
   }
   return messages;
@@ -931,7 +1601,19 @@ function extractMessages(payload){
 if(regForm){
   regForm.addEventListener('submit',async e=>{
     e.preventDefault();
+    if(!validateStep(currentStep)) return;
+    for(let i=0;i<regSteps.length;i++){
+      if(!validateStep(i)){
+        goToStep(i);
+        return;
+      }
+    }
+    renderRegErrors([]);
     const formData=new FormData(regForm);
+    if(submitStepBtn){
+      submitStepBtn.disabled=true;
+      submitStepBtn.classList.add('btn--loading');
+    }
     try{
       const response=await fetch(regForm.action,{method:'POST',body:formData,headers:{'X-Requested-With':'XMLHttpRequest'}});
       let payload=null;
@@ -950,10 +1632,14 @@ if(regForm){
         if(payload && payload.verification==='required'){
           openVerifyModal(registeredEmail);
           showVerifySuccess('We sent a 6-digit code to your email. Enter it below.');
+          if(submitStepBtn){
+            submitStepBtn.classList.remove('btn--loading');
+            submitStepBtn.disabled=false;
+          }
           return;
         }
 
-        if(modal) modal.classList.remove('show');
+        closeRegModal();
 
         const generatedUsername=payload.username || (formData.get('phone') || '').toString().trim();
         const loginUsername=document.querySelector('.login-form input[name="username"]');
@@ -965,6 +1651,7 @@ if(regForm){
           loginPwd.focus();
         }
 
+        goToStep(0,{focus:false});
         if(typeof regForm.reset==='function'){
           regForm.reset();
         }
@@ -976,16 +1663,27 @@ if(regForm){
 
         showAuthFlash('Account created! You can use your phone number or your e-mail to sign in.');
       }else{
-        const messages=extractMessages(payload);
+        const fieldErrors=typeof payload==='object' ? extractFieldErrors(payload) : {};
+        const ignoreKeys=new Set(['ok','status','redirect','username','verification','email']);
+        Object.keys(fieldErrors).forEach(key=>ignoreKeys.add(key));
+        ignoreKeys.add('__all__');
+        ignoreKeys.add('non_field_errors');
+        const messages=extractMessages(payload,ignoreKeys);
+        const fallback=response.ok ? ['Unexpected response from server.'] : ['Could not create account. Please check the form and try again.'];
         if(response.ok){
-          renderRegErrors(messages.length ? messages : ['Unexpected response from server.']);
+          renderRegErrors(messages.length ? messages : fallback,fieldErrors);
         }else{
-          renderRegErrors(messages.length ? messages : ['Could not create account. Please check the form and try again.']);
+          renderRegErrors(messages.length ? messages : fallback,fieldErrors);
         }
       }
     }catch(err){
       console.error(err);
       renderRegErrors(['Network error. Please try again later.']);
+    }finally{
+      if(submitStepBtn){
+        submitStepBtn.classList.remove('btn--loading');
+        submitStepBtn.disabled=false;
+      }
     }
   });
 }

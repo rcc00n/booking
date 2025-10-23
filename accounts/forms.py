@@ -26,7 +26,7 @@ class ClientRegistrationForm(UserCreationForm):
     Регистрация клиента: e-mail, телефон + пароль.
     Username берётся из нормализованного номера телефона (как в админке).
     После save():
-        • создаёт UserProfile (включая address / how_heard / email_marketing_consent),
+        • создаёт UserProfile (включая how_heard / email_marketing_consent),
         • назначает роль «Client».
     """
 
@@ -63,12 +63,6 @@ class ClientRegistrationForm(UserCreationForm):
         error_messages={"required": "Date of birth is required."},
     )
 
-    # --- NEW: дополнительные поля регистрации ---
-    address = forms.CharField(
-        required=False, label="Address",
-        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Street, Apt, City, ZIP"})
-    )
-
     how_heard = forms.ChoiceField(
         required=False, label="How did you hear about us?",
         choices=[("", "— Select —")] + list(HowHeard.choices)
@@ -79,11 +73,17 @@ class ClientRegistrationForm(UserCreationForm):
         label="I agree to receive e-mail updates and offers and consent to the processing of my personal data",
     )
 
+    data_processing_consent = forms.BooleanField(
+        required=True,
+        label="I consent to the processing of my personal data according to the Privacy Notice.",
+        error_messages={"required": "You must consent to the processing of personal data to continue."},
+    )
+
     class Meta(UserCreationForm.Meta):
         model = CustomUserDisplay
         fields = (
             "first_name", "last_name", "email", "phone", "birth_date",
-            "address", "how_heard", "email_marketing_consent",
+            "how_heard", "email_marketing_consent",
             "password1", "password2"
         )
 
@@ -147,7 +147,6 @@ class ClientRegistrationForm(UserCreationForm):
             user.save()
 
             birth_date = self.cleaned_data.get("birth_date")
-            address = self.cleaned_data.get("address") or ""
             how_heard = self.cleaned_data.get("how_heard") or ""
 
             profile, created = UserProfile.objects.get_or_create(
@@ -155,27 +154,33 @@ class ClientRegistrationForm(UserCreationForm):
                 defaults={
                     "phone": phone,
                     "birth_date": birth_date,
-                    "address": address,
                     "how_heard": how_heard,
                 },
             )
             if not created:
                 profile.phone = phone
                 profile.birth_date = birth_date
-                profile.address = address
                 profile.how_heard = how_heard
 
             consent = bool(self.cleaned_data.get("email_marketing_consent"))
             profile.set_marketing_consent(consent)
-            profile.save(update_fields=[
-                "phone", "birth_date", "address", "how_heard",
-                "email_marketing_consent", "email_marketing_consented_at",
-            ])
+        profile.save(update_fields=[
+            "phone", "birth_date", "how_heard",
+            "email_marketing_consent", "email_marketing_consented_at",
+        ])
 
-            client_role, _ = Role.objects.get_or_create(name="Client")
-            profile.userrole_set.get_or_create(role=client_role)
+        client_role, _ = Role.objects.get_or_create(name="Client")
+        profile.userrole_set.get_or_create(role=client_role)
 
         return user
+
+    def clean_data_processing_consent(self):
+        consent = self.cleaned_data.get("data_processing_consent")
+        if not consent:
+            raise forms.ValidationError(
+                "You must consent to the processing of personal data to create an account."
+            )
+        return consent
 
 
 # ---------- Login ----------

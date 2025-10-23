@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Privacy Notice • Malva{% endblock %}
+
+{% block content %}
+<main style="max-width:780px;margin:4rem auto;padding:0 1.5rem;font-family:'Poppins',Arial,sans-serif;color:#204029;">
+  <header style="margin-bottom:2.4rem;">
+    <h1 style="font-size:2rem;margin:0 0 1rem;">How we process your personal data</h1>
+    <p style="margin:0;font-size:1.05rem;line-height:1.6;color:rgba(32,64,41,.78);">
+      This summary explains the information we collect when you create a Malva account and how we keep it safe.
+    </p>
+  </header>
+
+  <section style="margin-bottom:2.2rem;">
+    <h2 style="font-size:1.35rem;margin:0 0 .8rem;">Personal data we collect</h2>
+    <ul style="margin:0;padding-left:1.1rem;line-height:1.6;">
+      <li>Identity details such as your full name and preferred contact information.</li>
+      <li>Contact details including email address and phone number for confirmations.</li>
+      <li>Booking metadata like appointment history, receipts, and requested services.</li>
+    </ul>
+  </section>
+
+  <section style="margin-bottom:2.2rem;">
+    <h2 style="font-size:1.35rem;margin:0 0 .8rem;">Why we store this information</h2>
+    <p style="margin:0 0 .9rem;line-height:1.6;">
+      We use your data to manage appointments, issue confirmations, process payments, and provide follow-up support.
+      Without this information we cannot provide the service you request.
+    </p>
+    <p style="margin:0;line-height:1.6;">
+      We rely on your consent and the performance of our service contract as legal bases for processing.
+    </p>
+  </section>
+
+  <section style="margin-bottom:2.2rem;">
+    <h2 style="font-size:1.35rem;margin:0 0 .8rem;">How we protect your data</h2>
+    <ul style="margin:0;padding-left:1.1rem;line-height:1.6;">
+      <li>Data is encrypted in transit and stored using trusted, access-controlled providers.</li>
+      <li>Only authorised team members who need the information to assist you can access it.</li>
+      <li>We retain booking records for regulatory and financial purposes, then securely archive or delete them.</li>
+    </ul>
+  </section>
+
+  <section style="margin-bottom:2.2rem;">
+    <h2 style="font-size:1.35rem;margin:0 0 .8rem;">Your rights</h2>
+    <p style="margin:0 0 .9rem;line-height:1.6;">
+      You can request a copy of your data, ask for corrections, or withdraw consent by contacting
+      <a href="mailto:privacy@malva.example" style="color:#AF9525;">privacy@malva.example</a>.
+    </p>
+    <p style="margin:0;line-height:1.6;">
+      If you choose to withdraw consent, we will deactivate your account and remove non-essential information,
+      keeping only the records we must retain by law.
+    </p>
+  </section>
+
+  <footer style="padding-top:1.6rem;border-top:1px solid rgba(32,64,41,.15);font-size:.92rem;color:rgba(32,64,41,.65);">
+    Updated March 2025.
+  </footer>
+</main>
+{% endblock %}

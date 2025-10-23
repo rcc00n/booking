@@ -11,7 +11,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from core.autocomplete import ServiceAutocomplete
-from django.views.generic import RedirectView
+from django.views.generic import RedirectView, TemplateView
 from core.views import service_search, service_price, service_promocodes_api
 from core.payments.stripe_api import stripe_webhook
 from core.admin import stats_view
@@ -38,9 +38,18 @@ urlpatterns = [
     path("health/edit/", health_edit, name="health-edit"),
     path("health/", health_view, name="health-view"),
     path("stripe/webhook/", stripe_webhook, name="stripe-webhook"),
+    path(
+        "legal/email-updates/",
+        TemplateView.as_view(template_name="legal/email_updates.html"),
+        name="legal-email-updates",
+    ),
+    path(
+        "legal/data-processing/",
+        TemplateView.as_view(template_name="legal/data_processing.html"),
+        name="legal-data-processing",
+    ),
 ]
 
 if settings.MEDIA_URL.startswith("/") and settings.MEDIA_ROOT:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-
 
