@@ -5,9 +5,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.core import mail
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 
 from core.forms import CustomUserCreationForm, CustomUserChangeForm
 from core.models import (
@@ -82,6 +86,69 @@ class RegistrationTests(TestCase):
 
         self.assertEqual(self.User.objects.count(), 1)
         self.assertEqual(UserProfile.objects.count(), 1)
+
+
+class PasswordResetFlowTests(TestCase):
+    def setUp(self):
+        self.User = get_user_model()
+        self.password = "StrongPass123!"
+        self.user = self.User.objects.create_user(
+            username="clientuser",
+            email="client@example.com",
+            password=self.password,
+        )
+        self.login_url = reverse("login")
+        self.reset_url = reverse("password_reset")
+
+    def test_login_failure_prompts_password_reset_link(self):
+        response = self.client.post(
+            self.login_url,
+            {"username": self.user.email, "password": "wrong-password"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Forgot password?")
+        self.assertContains(response, self.reset_url)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_password_reset_request_sends_email(self):
+        response = self.client.post(self.reset_url, {"email": self.user.email})
+        self.assertRedirects(response, reverse("password_reset_done"))
+
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertIn(self.user.email, email.to)
+        self.assertTrue(email.subject.startswith("Reset your"))
+        uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
+        token = default_token_generator.make_token(self.user)
+        expected_path = reverse("password_reset_confirm", kwargs={"uidb64": uidb64, "token": token})
+        full_url = f"http://testserver{expected_path}"
+        self.assertIn(full_url, email.body)
+        self.assertTrue(email.alternatives)
+        self.assertIn(full_url, email.alternatives[0][0])
+        mail.outbox.clear()
+
+    def test_password_reset_confirm_updates_password(self):
+        uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
+        token = default_token_generator.make_token(self.user)
+        url = reverse("password_reset_confirm", kwargs={"uidb64": uidb64, "token": token})
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Save new password")
+
+        new_password = "NewSecurePass!456"
+        response = self.client.post(
+            url,
+            {
+                "new_password1": new_password,
+                "new_password2": new_password,
+            },
+        )
+        self.assertRedirects(response, reverse("password_reset_complete"))
+
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(new_password))
+        self.assertTrue(self.client.login(username=self.user.username, password=new_password))
 
 
 @override_settings(STRIPE_SECRET_KEY='sk_test_dummy', STRIPE_PUBLIC_KEY='pk_test_dummy')

@@ -12,6 +12,7 @@ from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import LoginView
+from django.contrib.auth import views as auth_views
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.cache import cache
 from django.core.serializers.json import DjangoJSONEncoder
@@ -138,6 +139,51 @@ class RoleBasedLoginView(LoginView):
             return reverse("mainmenu")
 
         return super().get_success_url()
+
+
+class SupportEmailContextMixin:
+    """
+    Adds support contact details and business name into template contexts.
+    """
+
+    @staticmethod
+    def _support_email() -> str:
+        return getattr(settings, "BUSINESS_SUPPORT_EMAIL", getattr(settings, "DEFAULT_FROM_EMAIL", ""))
+
+    @staticmethod
+    def _business_name() -> str:
+        return getattr(settings, "BUSINESS_NAME", "Malva Booking")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.setdefault("support_email", self._support_email())
+        context.setdefault("business_name", self._business_name())
+        return context
+
+
+class AccountPasswordResetView(SupportEmailContextMixin, auth_views.PasswordResetView):
+    template_name = "registration/password_reset_form.html"
+    email_template_name = "emails/account/password_reset_email.txt"
+    html_email_template_name = "emails/account/password_reset_email.html"
+    subject_template_name = "emails/account/password_reset_subject.txt"
+
+    def get_email_context(self, context):
+        context = super().get_email_context(context)
+        context.setdefault("business_name", self._business_name())
+        context.setdefault("support_email", self._support_email())
+        return context
+
+
+class AccountPasswordResetDoneView(SupportEmailContextMixin, auth_views.PasswordResetDoneView):
+    template_name = "registration/password_reset_done.html"
+
+
+class AccountPasswordResetConfirmView(SupportEmailContextMixin, auth_views.PasswordResetConfirmView):
+    template_name = "registration/password_reset_confirm.html"
+
+
+class AccountPasswordResetCompleteView(SupportEmailContextMixin, auth_views.PasswordResetCompleteView):
+    template_name = "registration/password_reset_complete.html"
 
 
 class RoleRequiredMixin(LoginRequiredMixin):

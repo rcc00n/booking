@@ -1,5 +1,9 @@
 from django.urls import path
 from .views import (
+    AccountPasswordResetCompleteView,
+    AccountPasswordResetConfirmView,
+    AccountPasswordResetDoneView,
+    AccountPasswordResetView,
     RoleBasedLoginView,
     ClientDashboardView,
     MasterDashboardView,
@@ -38,6 +42,14 @@ urlpatterns = [
     # Аутентификация
     path("login/",    RoleBasedLoginView.as_view(),   name="login"),
     path("register/", ClientRegisterView.as_view(),   name="register"),
+    path("password/reset/", AccountPasswordResetView.as_view(), name="password_reset"),
+    path("password/reset/done/", AccountPasswordResetDoneView.as_view(), name="password_reset_done"),
+    path(
+        "password/reset/<uidb64>/<token>/",
+        AccountPasswordResetConfirmView.as_view(),
+        name="password_reset_confirm",
+    ),
+    path("password/reset/complete/", AccountPasswordResetCompleteView.as_view(), name="password_reset_complete"),
 
     # Личные кабинеты (как у тебя уже реализовано)
     path("dashboard/", ClientDashboardView.as_view(), name="dashboard"),
@@ -72,7 +84,6 @@ urlpatterns = [
     path("api/appointment/<uuid:appt_id>/cancel/",     api_appointment_cancel,     name="api-appt-cancel"),
     path("api/appointment/<uuid:appt_id>/reschedule/", api_appointment_reschedule, name="api-appt-reschedule"),
 ]
-
 
 
 
