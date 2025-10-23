@@ -6,6 +6,7 @@ from django.utils import timezone
 from core.models import (
     Appointment,
     AppointmentItem,
+    ClientIntakeAssignment,
     ClientIntakeForm,
     ClientIntakeFormSubmission,
     MasterProfile,
@@ -13,6 +14,9 @@ from core.models import (
     ServiceMaster,
     UserProfile,
 )
+from core.admin import CustomUserAdmin
+from django.contrib.admin.sites import AdminSite
+from django.test import RequestFactory
 
 
 class IntakeFormBuilderTests(TestCase):
@@ -166,3 +170,126 @@ class IntakeFormManageViewTests(TestCase):
         )
         self.assertEqual(submission.data["full_name"], "Jane Example")
         self.assertTrue(submission.data["consent"])
+
+
+class IntakeAssignmentSignalTests(TestCase):
+    def setUp(self):
+        self.form = ClientIntakeForm.objects.create(
+            name="Universal Form",
+            slug="universal-form",
+            is_universal=True,
+            schema={
+                "meta": {},
+                "sections": [
+                    {
+                        "id": "sec",
+                        "title": "Basics",
+                        "fields": [
+                            {
+                                "id": "f1",
+                                "key": "full_name",
+                                "label": "Full name",
+                                "type": "text",
+                                "required": True,
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+        self.user = get_user_model().objects.create_user(
+            username="client",
+            email="client@example.com",
+            password="pass123",
+        )
+        self.profile, _ = UserProfile.objects.get_or_create(user=self.user)
+
+    def test_universal_assignment_created_for_profile(self):
+        self.assertTrue(
+            ClientIntakeAssignment.objects.filter(client=self.profile, form=self.form).exists()
+        )
+
+    def test_submission_marks_assignment_completed(self):
+        assignment = ClientIntakeAssignment.objects.get(client=self.profile, form=self.form)
+        form = assignment.form
+        ClientIntakeFormSubmission.objects.create(
+            assignment=assignment,
+            form=form,
+            client=self.profile,
+            submitted_by=self.user,
+            data={"full_name": "Alice Example"},
+            raw_payload={"full_name": "Alice Example"},
+            form_schema_snapshot=form.normalized_schema(),
+            schema_version=form.schema_version,
+            is_complete=True,
+        )
+        assignment.refresh_from_db()
+        self.assertTrue(assignment.is_completed)
+
+
+class IntakeAdminAnnotationTests(TestCase):
+    def setUp(self):
+        self.admin_site = AdminSite()
+        self.admin_instance = CustomUserAdmin(get_user_model(), self.admin_site)
+        self.request_factory = RequestFactory()
+
+        self.form = ClientIntakeForm.objects.create(
+            name="General Intake",
+            slug="general-intake",
+            is_universal=True,
+            schema={
+                "meta": {},
+                "sections": [
+                    {
+                        "id": "sec",
+                        "title": "Basics",
+                        "fields": [
+                            {
+                                "id": "f1",
+                                "key": "full_name",
+                                "label": "Full name",
+                                "type": "text",
+                                "required": True,
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+        self.user = get_user_model().objects.create_user(
+            username="client-admin",
+            email="client-admin@example.com",
+            password="pass123",
+        )
+        self.profile, _ = UserProfile.objects.get_or_create(user=self.user)
+        self.assignment = ClientIntakeAssignment.objects.get(client=self.profile, form=self.form)
+        self.staff = get_user_model().objects.create_superuser(
+            username="staff",
+            email="staff@example.com",
+            password="pass123",
+        )
+
+    def _get_queryset_row(self):
+        request = self.request_factory.get("/admin/core/user/")
+        request.user = self.staff
+        return self.admin_instance.get_queryset(request).get(pk=self.user.pk)
+
+    def test_queryset_exposes_pending_flag(self):
+        row = self._get_queryset_row()
+        self.assertTrue(row.universal_intake_pending)
+
+    def test_queryset_flag_clears_after_submission(self):
+        form = self.assignment.form
+        ClientIntakeFormSubmission.objects.create(
+            assignment=self.assignment,
+            form=form,
+            client=self.profile,
+            submitted_by=self.user,
+            data={"full_name": "Done"},
+            raw_payload={"full_name": "Done"},
+            form_schema_snapshot=form.normalized_schema(),
+            schema_version=form.schema_version,
+            is_complete=True,
+        )
+        row = self._get_queryset_row()
+        self.assertFalse(row.universal_intake_pending)

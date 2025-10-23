@@ -159,6 +159,21 @@ document.addEventListener("click", function (e) {
 
 const tooltip = document.getElementById("apptTooltip");
 
+function parseCurrencyValue(raw) {
+    if (raw === undefined || raw === null || raw === "") {
+        return null;
+    }
+    const numeric = parseFloat(String(raw).replace(/[^0-9.\-]+/g, ""));
+    return Number.isNaN(numeric) ? null : numeric;
+}
+
+function formatCurrencyValue(amount) {
+    if (amount === null || amount === undefined || Number.isNaN(amount)) {
+        return "";
+    }
+    return `$${amount.toFixed(2)}`;
+}
+
 function attachTooltipHandlers() {
     document.querySelectorAll(".event").forEach(box => {
         box.addEventListener("mouseenter", function () {
@@ -184,6 +199,7 @@ function attachTooltipHandlers() {
 
 attachTooltipHandlers();
 
+
 function showTooltip(box) {
     const rect = box.getBoundingClientRect();
     const client = box.dataset.client || "";
@@ -196,15 +212,74 @@ function showTooltip(box) {
     const final = box.dataset.final || "";
     const master = box.dataset.master || "";
 
-
     const firstLetter = client.trim().charAt(0).toUpperCase();
-    if (price === final) {
-        // let floatNumber = parseFloat(price.replace(/[^0-9.]/g, '')); // 150.00
-        // let intNumber = Math.round(floatNumber); // 150
+    const baseRawValue = parseCurrencyValue(box.dataset.baseRaw);
+    const finalRawSource = box.dataset.finalRaw;
+    const finalRawValue = parseCurrencyValue(
+        finalRawSource !== undefined && finalRawSource !== null && finalRawSource !== "" ? finalRawSource : final
+    );
+    const serviceTotalValueRaw = parseCurrencyValue(box.dataset.serviceTotal);
+    const productTotalValueRaw = parseCurrencyValue(box.dataset.productTotal);
+    const hasDiscount = box.dataset.hasDiscount === "true";
+    const hasProducts = productTotalValueRaw !== null && productTotalValueRaw > 0.009;
 
+    const priceDisplay = price || (baseRawValue !== null ? formatCurrencyValue(baseRawValue) : "");
+    const finalDisplay = final || (finalRawValue !== null ? formatCurrencyValue(finalRawValue) : "");
 
+    let serviceDisplayValue = serviceTotalValueRaw;
+    if (serviceDisplayValue === null) {
+        if (finalRawValue !== null && productTotalValueRaw !== null) {
+            serviceDisplayValue = Number((finalRawValue - productTotalValueRaw).toFixed(2));
+        } else {
+            serviceDisplayValue = finalRawValue;
+        }
+    }
+    const serviceDisplay = serviceDisplayValue !== null ? formatCurrencyValue(serviceDisplayValue) : "";
+    const productDisplay = productTotalValueRaw !== null ? formatCurrencyValue(productTotalValueRaw) : "";
 
-        tooltip.innerHTML = `
+    const priceLines = [];
+    const hasBasePrice = baseRawValue !== null && baseRawValue > 0.009;
+    const serviceLineValue = serviceDisplay || (!hasProducts ? finalDisplay || priceDisplay : "");
+    if (serviceLineValue) {
+        priceLines.push({
+            label: (hasProducts || hasDiscount) ? "Service" : "Total",
+            current: serviceLineValue,
+            original: hasDiscount && hasBasePrice ? formatCurrencyValue(baseRawValue) : null
+        });
+    }
+    if (hasProducts && productDisplay) {
+        priceLines.push({
+            label: "Products",
+            current: productDisplay,
+            original: null
+        });
+    }
+    if (hasProducts && finalDisplay) {
+        priceLines.push({
+            label: "Total",
+            current: finalDisplay,
+            original: null
+        });
+    }
+    if (!priceLines.length && finalDisplay) {
+        priceLines.push({
+            label: "Total",
+            current: finalDisplay,
+            original: hasDiscount && hasBasePrice ? formatCurrencyValue(baseRawValue) : null
+        });
+    }
+
+    const priceLinesHtml = priceLines.map(line => {
+        const labelHtml = `<span class="tooltip-price-label">${line.label}</span>`;
+        const originalHtml = line.original ? `<span class="tooltip-price-old">${line.original}</span>` : "";
+        const arrowHtml = line.original ? `<span class="tooltip-price-arrow">→</span>` : "";
+        const currentHtml = line.current ? `<span class="tooltip-price-current">${line.current}</span>` : "";
+        return `<div class="tooltip-price-line">${labelHtml}<span class="tooltip-price-value">${originalHtml}${arrowHtml}${currentHtml}</span></div>`;
+    }).join("");
+
+    const priceBlockHtml = priceLinesHtml ? `<div class="tooltip-price-block">${priceLinesHtml}</div>` : "";
+
+    tooltip.innerHTML = `
         <div class="tooltip-card">
             <div class="tooltip-header">
                 <span>${time}</span>
@@ -218,55 +293,24 @@ function showTooltip(box) {
                         <div class="tooltip-client-phone">${phone}</div>
                     </div>
                 </div>
-
-                <div class="tooltip-footer">
-                    <div class="tooltip-service">${service}</div>
-                    <div class="tooltip-price">${price}</div>
+                <div class="tooltip-footer-row">
+                    <div class="tooltip-details">
+                        ${service ? `<div class="tooltip-service-name">${service}</div>` : ""}
+                        <div class="tooltip-meta">${master} · ${duration}</div>
+                    </div>
+                    ${priceBlockHtml}
                 </div>
-                <div class="tooltip-meta">${master} · ${duration}</div>
             </div>
         </div>
     `;
-    }
-    else {
-        // let floatNumber = parseFloat(price_discounted.replace(/[^0-9.]/g, ''));
-        // let intNumber = Math.round(floatNumber);
 
-        tooltip.innerHTML = `
-        <div class="tooltip-card">
-            <div class="tooltip-header">
-                <span>${time}</span>
-                <span>${status}</span>
-            </div>
-            <div class="tooltip-body">
-                <div class="tooltip-client">
-                    <div class="tooltip-avatar">${firstLetter}</div>
-                    <div class="tooltip-client-info">
-                        <div class="tooltip-client-name">${client}</div>
-                        <div class="tooltip-client-phone">${phone}</div>
-                    </div>
-                </div>
-
-                <div class="tooltip-footer">
-                    <div class="tooltip-service">${service}</div>
-                    <div>
-                    <div class="tooltip-price" style="opacity: 0.5; text-decoration: line-through;">${price}</div>
-                    <div class="tooltip-price">${final}</div>
-                    </div>
-                </div>
-                <div class="tooltip-meta">${master} · ${duration}</div>
-            </div>
-        </div>
-    `;
-    }
     const tooltipWidth = 375;
-    const tooltipHeight = 210;
+    const tooltipCardEl = tooltip.querySelector(".tooltip-card");
+    const tooltipHeight = tooltipCardEl ? tooltipCardEl.offsetHeight : 210;
 
     let top = rect.top + window.scrollY;
     let left = rect.left + window.scrollX - tooltipWidth - 10;
 
-
-    // Чтобы не вышел за верхний край экрана
     if (top + tooltipHeight > window.scrollY + window.innerHeight) {
         top = window.scrollY + window.innerHeight - tooltipHeight - 20;
     }

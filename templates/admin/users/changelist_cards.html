@@ -1,0 +1,413 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static admin_urls admin_list filters %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'admin/css/master_profile.css' %}">
+    <link rel="stylesheet" href="{% static 'admin/css/user_cards.css' %}">
+{% endblock %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script>
+document.addEventListener('DOMContentLoaded', function () {
+    const dropdowns = document.querySelectorAll('[data-dropdown]');
+    const form = document.querySelector('.tm-searchbox__form');
+    const statusInput = document.getElementById('client-status-input');
+    const orderInput = document.getElementById('user-order-input');
+    const fragmentRoot = document.querySelector('[data-user-fragment]');
+
+    if (!form || !fragmentRoot) {
+        return;
+    }
+
+    const searchInput = form.querySelector('input[name="{{ cl.search_var }}"]');
+    const SEARCH_PARAM = 'q';
+    const actualSearchFieldName = (searchInput && searchInput.name) || SEARCH_PARAM;
+    const statusDropdownEl = document.querySelector('[data-dropdown="status"]');
+    const orderDropdownEl = document.querySelector('[data-dropdown="sort"]');
+    const badgeEl = document.querySelector('.tm-badge');
+    const supportsAbort = typeof AbortController !== 'undefined';
+    let activeController = null;
+
+    const setLoadingState = (isLoading) => {
+        if (!fragmentRoot) {
+            return;
+        }
+        if (isLoading) {
+            fragmentRoot.setAttribute('aria-busy', 'true');
+            fragmentRoot.classList.add('is-loading');
+        } else {
+            fragmentRoot.removeAttribute('aria-busy');
+            fragmentRoot.classList.remove('is-loading');
+        }
+    };
+
+    const closeAll = (except) => {
+        dropdowns.forEach((dropdown) => {
+            if (dropdown !== except) {
+                dropdown.classList.remove('is-open');
+            }
+        });
+    };
+
+    const buildUrl = () => {
+        const formData = new FormData(form);
+        if (searchInput) {
+            const value = searchInput.value.trim();
+            formData.delete(actualSearchFieldName);
+            if (value) {
+                formData.set(SEARCH_PARAM, value);
+            } else {
+                formData.delete(SEARCH_PARAM);
+            }
+        }
+        formData.delete('csrfmiddlewaretoken');
+        formData.delete('p');
+        formData.delete('');
+        const params = new URLSearchParams();
+        formData.forEach((value, key) => {
+            if (!key) {
+                return;
+            }
+            params.set(key, value);
+        });
+        const qs = params.toString();
+        return qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    };
+
+    const updateMeta = (meta = {}) => {
+        if (badgeEl && typeof meta.result_count !== 'undefined') {
+            badgeEl.textContent = meta.result_count;
+        }
+        if (statusInput) {
+            statusInput.value = meta.status_current || '';
+        }
+        if (orderInput) {
+            orderInput.value = meta.order_current || 'newest';
+        }
+        if (statusDropdownEl) {
+            statusDropdownEl.classList.toggle('is-active', Boolean(meta.status_current));
+            const statusChip = statusDropdownEl.querySelector('[data-dropdown-trigger]');
+            if (statusChip) {
+                statusChip.classList.toggle('is-active', Boolean(meta.status_current));
+            }
+            const summary = statusDropdownEl.querySelector('[data-filter-summary]');
+            if (summary) {
+                if (meta.status_label) {
+                    summary.textContent = meta.status_label;
+                    summary.classList.remove('is-hidden');
+                } else {
+                    summary.textContent = '';
+                    summary.classList.add('is-hidden');
+                }
+            }
+            statusDropdownEl.querySelectorAll('[data-status-value]').forEach((btn) => {
+                const isActive = (btn.getAttribute('data-status-value') || '') === (meta.status_current || '');
+                btn.classList.toggle('is-active', isActive);
+            });
+        }
+        if (orderDropdownEl) {
+            const orderChip = orderDropdownEl.querySelector('[data-dropdown-trigger]');
+            if (orderChip) {
+                orderChip.classList.toggle('is-active', (meta.order_current || 'newest') !== 'newest');
+            }
+            orderDropdownEl.querySelectorAll('[data-order-value]').forEach((btn) => {
+                const isActive = (btn.getAttribute('data-order-value') || 'newest') === (meta.order_current || 'newest');
+                btn.classList.toggle('is-active', isActive);
+            });
+        }
+        if (fragmentRoot) {
+            if (typeof meta.page !== 'undefined') {
+                fragmentRoot.dataset.page = String(meta.page || 1);
+            }
+            if (typeof meta.total_pages !== 'undefined') {
+                fragmentRoot.dataset.totalPages = String(meta.total_pages || '');
+            }
+        }
+    };
+
+    const requestUpdate = (url) => {
+        if (!url) {
+            return;
+        }
+        if (supportsAbort && activeController) {
+            activeController.abort();
+        }
+        const controller = supportsAbort ? new AbortController() : null;
+        if (supportsAbort) {
+            activeController = controller;
+        }
+        const targetUrl = new URL(url, window.location.origin);
+        setLoadingState(true);
+        fetch(targetUrl.toString(), {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json',
+            },
+            credentials: 'same-origin',
+            cache: 'no-store',
+            signal: controller ? controller.signal : undefined,
+        })
+            .then((res) => {
+                if (!res.ok) {
+                    throw new Error(res.statusText || 'Network error');
+                }
+                return res.json();
+            })
+            .then((data) => {
+                if (supportsAbort && controller && controller.signal.aborted) {
+                    return;
+                }
+                fragmentRoot.innerHTML = data.html || '';
+                history.replaceState(null, '', `${targetUrl.pathname}${targetUrl.search}`);
+                if (data.meta) {
+                    updateMeta(data.meta);
+                }
+            })
+            .catch((error) => {
+                if (supportsAbort && error && error.name === 'AbortError') {
+                    return;
+                }
+                if (form && typeof HTMLFormElement !== 'undefined') {
+                    HTMLFormElement.prototype.submit.call(form);
+                }
+            })
+            .finally(() => {
+                const isActiveRequest = !supportsAbort || activeController === controller;
+                if (supportsAbort && activeController === controller) {
+                    activeController = null;
+                }
+                if (isActiveRequest) {
+                    setLoadingState(false);
+                }
+            });
+    };
+
+    dropdowns.forEach((dropdown) => {
+        const trigger = dropdown.querySelector('[data-dropdown-trigger]');
+        const panel = dropdown.querySelector('[data-dropdown-panel]');
+        if (!trigger || !panel) {
+            return;
+        }
+        trigger.addEventListener('click', (event) => {
+            event.preventDefault();
+            const alreadyOpen = dropdown.classList.contains('is-open');
+            closeAll();
+            if (!alreadyOpen) {
+                dropdown.classList.add('is-open');
+            }
+        });
+
+        panel.querySelectorAll('[data-status-value]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                if (statusInput) {
+                    statusInput.value = button.getAttribute('data-status-value') || '';
+                }
+                closeAll();
+                requestUpdate(buildUrl());
+            });
+        });
+
+        panel.querySelectorAll('[data-order-value]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                if (orderInput) {
+                    orderInput.value = button.getAttribute('data-order-value') || '';
+                }
+                closeAll();
+                requestUpdate(buildUrl());
+            });
+        });
+
+        panel.querySelectorAll('[data-action="clear-status"]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                if (statusInput) {
+                    statusInput.value = '';
+                }
+                closeAll();
+                requestUpdate(buildUrl());
+            });
+        });
+    });
+
+    document.addEventListener('click', function (event) {
+        dropdowns.forEach(function (dropdown) {
+            if (!dropdown.contains(event.target)) {
+                dropdown.classList.remove('is-open');
+            }
+        });
+    });
+
+    let debounceId = null;
+    if (searchInput) {
+        searchInput.dataset.lastValue = searchInput.value.trim();
+        searchInput.addEventListener('input', function () {
+            if (debounceId) {
+                clearTimeout(debounceId);
+            }
+            debounceId = setTimeout(function () {
+                searchInput.dataset.lastValue = searchInput.value.trim();
+                requestUpdate(buildUrl());
+            }, 350);
+        });
+    }
+
+    form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        if (debounceId) {
+            clearTimeout(debounceId);
+        }
+        if (searchInput) {
+            searchInput.dataset.lastValue = searchInput.value.trim();
+        }
+        requestUpdate(buildUrl());
+    });
+
+    fragmentRoot.addEventListener('click', function (event) {
+        const link = event.target.closest('[data-user-page]');
+        if (!link || link.classList.contains('disabled')) {
+            return;
+        }
+        event.preventDefault();
+        requestUpdate(link.getAttribute('href'));
+    });
+});
+</script>
+
+{% endblock %}
+
+{% block content %}
+    <div class="tm-container">
+        <div class="tm-header tm-header--left">
+            <div class="tm-header__spacer"></div>
+
+            <div class="tm-header__title">
+                <h1 class="tm-title">{% trans "Users" %}</h1>
+                <span class="tm-badge">{{ cl.paginator.count }}</span>
+            </div>
+
+            <div class="tm-header__actions">
+                {% if import_url %}
+                    <a class="tm-btn tm-btn--import" href="{{ import_url }}">
+                        <i class="fas fa-upload" aria-hidden="true"></i>
+                        {% if import_label %}
+                            {{ import_label }}
+                        {% else %}
+                            {% trans "Import Users" %}
+                        {% endif %}
+                    </a>
+                {% endif %}
+                {% if export_url %}
+                    <a class="tm-btn tm-btn--ghost" href="{{ export_url }}">
+                        <i class="fas fa-download" aria-hidden="true"></i> {% trans "Export XSLX" %}
+                    </a>
+                {% endif %}
+                <a class="tm-btn tm-btn--success" href="{% url cl.opts|admin_urlname:'add' %}">
+                    <i class="fas fa-plus" aria-hidden="true"></i> {% trans "Add User" %}
+                </a>
+                <button type="button" class="tm-btn tm-btn--icon" aria-label="{% trans 'More actions' %}">
+                    <i class="fas fa-ellipsis-h" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="tm-searchbox">
+            <form method="get" class="tm-searchbox__form">
+                <i class="fas fa-search tm-searchbox__icon" aria-hidden="true"></i>
+                <input
+                        class="tm-searchbox__input"
+                        type="search"
+                        name="{{ cl.search_var }}"
+                        placeholder="{% trans 'Search users...' %}"
+                        value="{{ request.GET.q|default:'' }}"
+                        autocomplete="off"
+                />
+                {% for key, val in request.GET.items %}
+                    {% if key and key != cl.search_var and key != 'p' and key != 'o' and key != 'client_status' and key != 'user_order' and key != 'e' %}
+                        <input type="hidden" name="{{ key }}" value="{{ val }}">
+                    {% endif %}
+                {% endfor %}
+                <input type="hidden" id="client-status-input" name="client_status" value="{{ client_status_current }}">
+                <input type="hidden" id="user-order-input" name="user_order" value="{{ user_order_current }}">
+                <div class="tm-searchbox__actions">
+                    <div class="tm-dropdown{% if client_status_current %} is-active{% endif %}" data-dropdown="status">
+                        <button type="button" class="tm-chip{% if client_status_current %} is-active{% endif %}" data-dropdown-trigger>
+                            <i class="fas fa-filter" aria-hidden="true"></i> {% trans "Filters" %}
+                        </button>
+                        <div class="tm-filter-summary{% if not client_status_current_label %} is-hidden{% endif %}" data-filter-summary>
+                            {% if client_status_current_label %}{{ client_status_current_label }}{% endif %}
+                        </div>
+                        <div class="tm-dropdown__panel" data-dropdown-panel>
+                            <div class="tm-dropdown__section">
+                                <div class="tm-dropdown__title">{% trans "Client Status" %}</div>
+                                <div class="tm-dropdown__actions">
+                                    <button type="button" class="tm-action--clear" data-action="clear-status">
+                                        {% trans "Clear" %}
+                                    </button>
+                                </div>
+                                <ul class="tm-dropdown__list">
+                                    <li>
+                                        <button type="button"
+                                                class="tm-dropdown__option{% if not client_status_current %} is-active{% endif %}"
+                                                data-status-value=""
+                                                data-status-label="">
+                                            {% trans "All statuses" %}
+                                            <span class="tm-option-check" aria-hidden="true">&check;</span>
+                                        </button>
+                                    </li>
+                                    {% for option in client_status_options %}
+                                        <li>
+                                            <button type="button"
+                                                    class="tm-dropdown__option{% if option.value == client_status_current %} is-active{% endif %}"
+                                                    data-status-value="{{ option.value }}"
+                                                    data-status-label="{{ option.label }}">
+                                                {{ option.label }}
+                                                <span class="tm-option-check" aria-hidden="true">&check;</span>
+                                            </button>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tm-dropdown" data-dropdown="sort">
+                        <button type="button" class="tm-chip{% if user_order_current != 'newest' %} is-active{% endif %}" data-dropdown-trigger>
+                            <i class="fas fa-sort-amount-down" aria-hidden="true"></i> {% trans "Sort" %}
+                        </button>
+                        <div class="tm-dropdown__panel" data-dropdown-panel>
+                            <div class="tm-dropdown__section">
+                                <div class="tm-dropdown__title">{% trans "Sort by" %}</div>
+                                <ul class="tm-dropdown__list">
+                                    <li>
+                                        <button type="button"
+                                                class="tm-dropdown__option{% if user_order_current == 'newest' %} is-active{% endif %}"
+                                                data-order-value="newest">
+                                            {% trans "Date added (newest first)" %}
+                                            <span class="tm-option-check" aria-hidden="true">&check;</span>
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button type="button"
+                                                class="tm-dropdown__option{% if user_order_current == 'oldest' %} is-active{% endif %}"
+                                                data-order-value="oldest">
+                                            {% trans "Date added (oldest first)" %}
+                                            <span class="tm-option-check" aria-hidden="true">&check;</span>
+                                        </button>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <div data-user-fragment>
+            {% include "admin/users/includes/user_list_fragment.html" %}
+        </div>
+    </div>
+{% endblock %}

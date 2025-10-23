@@ -13,6 +13,7 @@ from core.models import (
     MasterAvailability, AppointmentStatus, AppointmentStatusHistory,
     PaymentStatus, MasterProfile,
 )
+from core.validators import validate_service_is_active
 from django.db import transaction
 
 Slot = Tuple[datetime, datetime]
@@ -114,7 +115,9 @@ def _appointment_intervals(master: MasterProfile, day: datetime) -> List[Slot]:
         base_start = item.start_time or getattr(item.appointment, "start_time", None)
         if not base_start:
             continue
-        duration_min = (item.service.duration_min or 0) + (item.service.extra_time_min or 0)
+        duration_min = int(getattr(item, "duration_min", 0) or 0)
+        if not duration_min:
+            duration_min = (item.service.duration_min or 0) + (item.service.extra_time_min or 0)
         dur = timedelta(minutes=duration_min)
         blocks.append((base_start, base_start + dur))
     return blocks
@@ -197,6 +200,11 @@ def create_appointment_from_cart_items(
     items = list(items)
     if not items:
         raise ValueError("Cart is empty")
+    for cart_item in items:
+        service = getattr(cart_item, "service", None)
+        if service is None and getattr(cart_item, "service_id", None):
+            service = Service.objects.filter(pk=cart_item.service_id).only("is_active").first()
+        validate_service_is_active(service)
 
     starts = [it.start_time for it in items if it.start_time]
     primary_start = min(starts) if starts else None

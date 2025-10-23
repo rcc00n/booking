@@ -10,16 +10,31 @@ from datetime import timedelta, time
 import os
 from importlib import import_module
 
-from django.db.models import OuterRef, Subquery, Sum, Prefetch, F, Q
+from django.db.models import (
+    OuterRef,
+    Subquery,
+    Sum,
+    Prefetch,
+    F,
+    Q,
+    Case,
+    When,
+    Value,
+    IntegerField,
+)
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.timezone import localtime
-from core.validators import clean_phone, clean_ab_postal_code
+from core.validators import clean_phone, clean_ab_postal_code, validate_service_is_active
 from django.conf import settings
-
 
 from storages.backends.s3boto3 import S3Boto3Storage
 from django.utils.text import slugify
 
+from core.utils.tax import compute_tax
+
+
+TWOPLACES = Decimal("0.01")
 
 def service_image_upload_to(instance, filename: str) -> str:
     """
@@ -66,6 +81,32 @@ class HowHeard(models.TextChoices):
     FRIEND = "friend", "Friends/Family"
     OTHER = "other", "Other"
 
+class UserProfileQuerySet(models.QuerySet):
+    def create(self, **kwargs):
+        """
+        Ensure uniqueness on user by updating the existing profile when callers
+        attempt to create a second one for the same auth user (signals/tests).
+        """
+        user = kwargs.get("user")
+        if user is None:
+            return super().create(**kwargs)
+
+        existing = self.filter(user=user).first()
+        if existing:
+            for field, value in kwargs.items():
+                if field == "user":
+                    continue
+                setattr(existing, field, value)
+            existing.save(using=self.db)
+            return existing
+
+        return super().create(**kwargs)
+
+
+class UserProfileManager(models.Manager.from_queryset(UserProfileQuerySet)):
+    pass
+
+
 class UserProfile(models.Model):
     SOURCE_CHOICES = [
         ("online", "Online"),
@@ -97,12 +138,25 @@ class UserProfile(models.Model):
         default="online",   # по умолчанию считаем, что онлайн
         editable=False,
     )
+    stripe_customer_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Stripe Customer ID for billing integrations.",
+        db_index=True,
+    )
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+
+    objects = UserProfileManager()
+
     def save(self, *args, **kwargs):
         # Нормализуем индекс (uppercase, без пробелов). Пустое — ок.
         if self.phone == "":
             self.phone = None
         if self.postal_code:
             self.postal_code = clean_ab_postal_code(self.postal_code)
+        if self.stripe_customer_id:
+            self.stripe_customer_id = self.stripe_customer_id.strip()
         super().save(*args, **kwargs)
 
     def health_summary(self) -> str:
@@ -191,14 +245,114 @@ class ClientSource(models.Model):
 
 # --- 2. SERVICES ---
 
+FEATURED_CATEGORY_RANKS = (
+    (1, "First"),
+    (2, "Second"),
+    (3, "Third"),
+)
+
+
+class ServiceCategoryQuerySet(models.QuerySet):
+    def for_catalog(self):
+        """
+        Deterministic ordering for the public catalog and related UIs.
+        """
+        return self.order_by(
+            Case(
+                When(featured_rank=1, then=Value(0)),
+                When(featured_rank=2, then=Value(1)),
+                When(featured_rank=3, then=Value(2)),
+                default=Value(3),
+                output_field=IntegerField(),
+            ),
+            Coalesce("featured_rank", Value(4)),
+            Coalesce("catalog_order", Value(1000)),
+            "name",
+        )
+
+
+class ServiceCategoryManager(models.Manager.from_queryset(ServiceCategoryQuerySet)):
+    def get_queryset(self):
+        # Keep alphabetical ordering for callsites that rely on implicit sorting.
+        return super().get_queryset().order_by("name")
+
+
 class ServiceCategory(models.Model):
     """
     Represents a service offered in the system (e.g., haircut, massage).
     """
     name = models.CharField(max_length=100)
+    slug = models.SlugField(max_length=150, unique=True, db_index=True)
+    only_discounted_services = models.BooleanField(
+        default=False,
+        help_text=(
+            "Automatically list every active service that currently has an in-date discount. "
+            "When enabled the category ignores manual assignments."
+        ),
+    )
+    featured_rank = models.PositiveSmallIntegerField(
+        choices=FEATURED_CATEGORY_RANKS,
+        blank=True,
+        null=True,
+        help_text="Optional position for highlighting this category first in the catalog.",
+    )
+    catalog_order = models.PositiveIntegerField(
+        blank=True,
+        null=True,
+        help_text="Lower numbers appear earlier for categories without a featured rank.",
+    )
+
+    objects = ServiceCategoryManager()
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = self._generate_unique_slug()
+        super().save(*args, **kwargs)
+
+    def _generate_unique_slug(self) -> str:
+        """
+        Derive a unique slug from the category name, preserving existing slugs on updates.
+        """
+        base = slugify(self.name or "") or "category"
+        max_length = self._meta.get_field("slug").max_length
+        base = base[:max_length].strip("-") or "category"
+
+        taken = set(
+            ServiceCategory.objects.exclude(pk=self.pk).values_list("slug", flat=True)
+        )
+
+        if base not in taken:
+            return base
+
+        for index in range(2, 5000):
+            suffix = f"-{index}"
+            trimmed_base = base[: max_length - len(suffix)]
+            candidate = f"{trimmed_base}{suffix}".strip("-")
+            if candidate and candidate not in taken:
+                return candidate
+
+        # Fallback: append a UUID chunk if everything else failed (extremely unlikely).
+        from uuid import uuid4
+
+        fallback = f"{base[: max_length - 9]}-{uuid4().hex[:8]}"
+        return fallback.strip("-") or uuid4().hex[:max_length]
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["featured_rank"],
+                condition=Q(featured_rank__isnull=False),
+                name="core_servicecategory_unique_featured_rank",
+            ),
+            models.UniqueConstraint(
+                fields=["only_discounted_services"],
+                condition=Q(only_discounted_services=True),
+                name="core_servicecategory_single_discount_bucket",
+            ),
+        ]
 
 class PrepaymentOption(models.Model):
     """
@@ -226,6 +380,10 @@ class ClientIntakeForm(models.Model):
         help_text="Dotted path to a Django form class that handles rendering/validation.",
     )
     is_active = models.BooleanField(default=True)
+    is_universal = models.BooleanField(
+        default=False,
+        help_text="When enabled, every client must complete this form once.",
+    )
     schema = models.JSONField(default=dict, blank=True)
     schema_version = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -294,6 +452,13 @@ class Service(models.Model):
         help_text="Accessible text for the service image; defaults to the service name."
     )
     category = models.ForeignKey(ServiceCategory, on_delete=models.CASCADE, blank=True, null=True)
+    room = models.ForeignKey(
+        "core.MasterRoom",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="services",
+    )
     # prepayment_option = models.ForeignKey(PrepaymentOption, on_delete=models.CASCADE, blank=True, null=True)
     base_price = models.DecimalField(max_digits=10, decimal_places=2)
     duration_min = models.IntegerField()
@@ -303,6 +468,12 @@ class Service(models.Model):
         blank=True,
         related_name="services",
         help_text="Forms the client must complete before attending this service.",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    is_taxable = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Charge 5% GST when true.",
     )
 
     def __str__(self):
@@ -356,6 +527,96 @@ class Service(models.Model):
         return self.pre_appointment_forms.filter(is_active=True)
 
 
+class ClientIntakeAssignmentQuerySet(models.QuerySet):
+    def pending(self):
+        return self.filter(
+            form__is_active=True,
+            completed_at__isnull=True,
+        )
+
+    def for_client(self, profile: "UserProfile"):
+        return self.filter(client=profile).select_related("form", "assigned_by")
+
+
+class ClientIntakeAssignment(models.Model):
+    """
+    Tracks intake forms that a client must complete outside of a specific appointment.
+    Includes automatically enforced universal forms and manual staff assignments.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    form = models.ForeignKey(
+        ClientIntakeForm,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+    )
+    client = models.ForeignKey(
+        UserProfile,
+        on_delete=models.CASCADE,
+        related_name="intake_assignments",
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="intake_assignments_created",
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    due_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    completed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="intake_assignments_completed",
+    )
+    notes = models.TextField(blank=True)
+
+    objects = ClientIntakeAssignmentQuerySet.as_manager()
+
+    class Meta:
+        unique_together = ("form", "client")
+        indexes = [
+            models.Index(fields=["client", "form"]),
+            models.Index(fields=["form", "completed_at"]),
+            models.Index(fields=["client", "completed_at"]),
+        ]
+        verbose_name = "Client intake assignment"
+        verbose_name_plural = "Client intake assignments"
+
+    def __str__(self):
+        return f"{self.form} → {self.client}"
+
+    @property
+    def is_completed(self) -> bool:
+        return self.completed_at is not None
+
+    @property
+    def is_pending(self) -> bool:
+        return not self.is_completed
+
+    def mark_completed(self, *, timestamp=None, actor=None):
+        """
+        Mark the assignment as completed if not already done or if provided timestamp is newer.
+        """
+        ts = timestamp or timezone.now()
+        update_fields = []
+
+        if self.completed_at is None or ts >= self.completed_at:
+            self.completed_at = ts
+            update_fields.append("completed_at")
+
+        actor_id = getattr(actor, "pk", None)
+        if actor_id and self.completed_by_id != actor_id:
+            self.completed_by_id = actor_id
+            update_fields.append("completed_by")
+
+        if update_fields:
+            self.save(update_fields=update_fields)
+
+
 class ClientIntakeFormSubmission(models.Model):
     """
     Stores answers for a specific intake form, optionally linked to an appointment.
@@ -376,6 +637,13 @@ class ClientIntakeFormSubmission(models.Model):
         "core.Appointment",
         on_delete=models.CASCADE,
         related_name="intake_submissions",
+        null=True,
+        blank=True,
+    )
+    assignment = models.ForeignKey(
+        "core.ClientIntakeAssignment",
+        on_delete=models.SET_NULL,
+        related_name="submissions",
         null=True,
         blank=True,
     )
@@ -402,6 +670,35 @@ class ClientIntakeFormSubmission(models.Model):
             return f"{base} ({self.appointment_id})"
         return base
 
+    def clean(self):
+        super().clean()
+        if self.assignment_id:
+            if self.assignment.client_id != self.client_id:
+                raise ValidationError({"assignment": "Assignment does not belong to this client."})
+            if self.assignment.form_id != self.form_id:
+                raise ValidationError({"assignment": "Assignment is for a different intake form."})
+
+    def save(self, *args, **kwargs):
+        # Normalize submitted_at on update to reflect most recent answers.
+        if not self._state.adding:
+            now = timezone.now()
+            update_fields = kwargs.get("update_fields")
+            if update_fields:
+                if "submitted_at" not in update_fields:
+                    if isinstance(update_fields, (list, tuple, set)):
+                        update_fields = list(update_fields)
+                    else:
+                        update_fields = [update_fields]
+                    update_fields.append("submitted_at")
+                    kwargs["update_fields"] = update_fields
+                self.submitted_at = now
+            else:
+                self.submitted_at = now
+        super().save(*args, **kwargs)
+        if self.assignment_id:
+            actor = getattr(self, "submitted_by", None)
+            self.assignment.mark_completed(timestamp=self.submitted_at, actor=actor)
+
 class MasterRoom(models.Model):
     """
     Rooms where Master will operate
@@ -411,6 +708,35 @@ class MasterRoom(models.Model):
     def __str__(self):
         return self.room
 
+class EmailVerification(models.Model):
+    """
+    Tracks email verification codes for a specific user and purpose.
+    Only one active (unused) verification should exist per user/purpose pair.
+    """
+    PURPOSE_REGISTER = "register"
+    PURPOSES = [(PURPOSE_REGISTER, "Register")]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="email_verifications")
+    purpose = models.CharField(max_length=32, choices=PURPOSES, default=PURPOSE_REGISTER, db_index=True)
+    code = models.CharField(max_length=6)
+    sent_to = models.EmailField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    last_sent_at = models.DateTimeField(auto_now=True)
+    is_used = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "purpose", "is_used"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+
 class MasterProfile(models.Model):
     """
     Дополнительная информация о мастере: профессия, график работы, цвет и т.д.
@@ -418,7 +744,6 @@ class MasterProfile(models.Model):
     user = models.OneToOneField(UserProfile, on_delete=models.CASCADE, related_name="master_profile")
     profession = models.CharField(max_length=100, blank=True)
     bio = models.TextField(blank=True)
-    room = models.ForeignKey(MasterRoom, on_delete=models.CASCADE, blank=True, null=True)
 
     def __str__(self):
         return f"{self.user.get_full_name()}"
@@ -428,6 +753,35 @@ class MasterProfile(models.Model):
         if len(parts) >= 2:
             return parts[0][0] + parts[1][0]
         return self.user.get_full_name()[:2]
+
+class MasterMonthlySalesTarget(models.Model):
+    """
+    Stores a monthly sales target for a master so progress can be surfaced in the admin dashboard.
+    """
+    master = models.ForeignKey(MasterProfile, on_delete=models.CASCADE, related_name="monthly_sales_targets")
+    month = models.DateField(help_text="Use the first day of the month for tracking")
+    target_amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))])
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("master", "month")
+        ordering = ["-month", "master__user__user__first_name", "master__user__user__last_name"]
+        verbose_name = "Master sales target"
+        verbose_name_plural = "Master sales targets"
+
+    def __str__(self):
+        return f"{self.master} - {self.month:%B %Y}: {self.target_amount}"
+
+    def clean(self):
+        super().clean()
+        if self.month:
+            self.month = self.month.replace(day=1)
+
+    def save(self, *args, **kwargs):
+        if self.month:
+            self.month = self.month.replace(day=1)
+        super().save(*args, **kwargs)
 
 class MasterWorkDay(models.Model):
     WEEKDAYS = [
@@ -514,6 +868,11 @@ class BookingCartItem(models.Model):
         if self.start_time and not timezone.is_aware(self.start_time):
             self.start_time = timezone.make_aware(self.start_time, timezone.get_current_timezone())
 
+        service_obj = getattr(self, "service", None)
+        if service_obj is None and self.service_id:
+            service_obj = Service.objects.only("is_active").filter(pk=self.service_id).first()
+        validate_service_is_active(service_obj)
+
         if not ServiceMaster.objects.filter(service=self.service, master=self.master).exists():
             raise ValidationError({"master": "Selected master cannot perform this service."})
 
@@ -572,6 +931,7 @@ class Appointment(models.Model):
     start_time = models.DateTimeField(null=True, blank=True)
     # payment_status = models.ForeignKey(PaymentStatus, on_delete=models.CASCADE, default=PaymentStatus.objects.get(name="Not Paid").id)
     final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
+    tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"), editable=False)
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -623,6 +983,29 @@ class Appointment(models.Model):
     def price(self):
         return self.final_price
 
+    def _subtotal_for_tax(self) -> Decimal:
+        """
+        Return the appointment subtotal after discounts (without tax).
+        """
+        subtotal = Decimal("0.00")
+        for item in self._prefetched_items():
+            subtotal += Decimal(getattr(item, "final_price", Decimal("0.00")) or Decimal("0.00"))
+        if hasattr(self, "product_sales"):
+            for sale in self.product_sales.all():
+                subtotal += Decimal(getattr(sale, "total_amount", Decimal("0.00")) or Decimal("0.00"))
+        return subtotal.quantize(TWOPLACES)
+
+    @property
+    def total_with_tax(self) -> Decimal:
+        """
+        Appointment grand total including GST.
+        """
+        if self.final_price is not None:
+            return Decimal(self.final_price).quantize(TWOPLACES)
+        subtotal = self._subtotal_for_tax()
+        tax_total = Decimal(getattr(self, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+        return (subtotal + tax_total).quantize(TWOPLACES)
+
 
 
     def items_qs(self):
@@ -646,6 +1029,7 @@ class Appointment(models.Model):
         from decimal import Decimal
         changed = []
         subtotal = Decimal("0.00")
+        tax_total = Decimal("0.00")
         item_sources = set()
         item_sources.add("")
         for it in self.items_qs():
@@ -657,21 +1041,29 @@ class Appointment(models.Model):
             if after != before:
                 changed.append(it)
             subtotal += it.final_price
+            tax_total += getattr(it, "tax_amount", Decimal("0.00"))
             # собираем ТОЛЬКО позиционные источники
             if it.discount_source:
                 item_sources.add(it.discount_source)
         # агрегированный источник
 
+        product_sales_rel = getattr(self, "product_sales", None)
+        if product_sales_rel is not None:
+            for sale in product_sales_rel.all():
+                subtotal += Decimal(getattr(sale, "total_amount", Decimal("0.00")) or Decimal("0.00"))
+                tax_total += Decimal(getattr(sale, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+
         self.sync_start_time_from_items(save=True)
-        self.final_price = subtotal
         self.discount_source = max(item_sources)
         with transaction.atomic():
             if persist_items and changed:
                 type(self).items.rel.related_model.objects.bulk_update(
-                    changed, ["final_price", "discount_source", "unit_price"]
-        )
+                    changed, ["final_price", "tax_amount", "discount_source", "unit_price"]
+                )
+        self.tax_amount = tax_total.quantize(TWOPLACES)
+        self.final_price = (subtotal + tax_total).quantize(TWOPLACES)
         if save:
-            super().save(update_fields=["final_price", "discount_source", "start_time"])
+            super().save(update_fields=["final_price", "tax_amount", "discount_source", "start_time"])
 
     def sync_start_time_from_items(self, *, save: bool = True) -> None:
         """
@@ -740,8 +1132,7 @@ class Appointment(models.Model):
             if not it.master or not it.service or not start_dt:
                 return  # пропускаем неполные строки
 
-            extra_min = it.service.extra_time_min or 0
-            total_min = (it.service.duration_min or 0) + extra_min
+            total_min = it.duration_min if hasattr(it, "duration_min") else 0
             this_end = start_dt + timedelta(minutes=total_min)
 
             # Поиск пересечений с чужими AppointmentItem этого же мастера
@@ -764,8 +1155,7 @@ class Appointment(models.Model):
                 other_start = other.appointment.start_time if other.appointment else None
                 if not other_start:
                     continue
-                other_extra = (other.service.extra_time_min or 0) if other.service else 0
-                other_total = (other.service.duration_min or 0) + other_extra
+                other_total = other.duration_min if hasattr(other, "duration_min") else 0
                 other_end = other_start + timedelta(minutes=other_total)
 
                 if start_dt < other_end and this_end > other_start:
@@ -859,22 +1249,44 @@ class AppointmentItem(models.Model):
     # Базовая цена позиции на момент записи (может быть вручную переопределена в админке)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))], null=True, blank=True)
     unit_price_overridden = models.BooleanField(default=False, help_text="Manually set in admin")
-
+    duration_override_min = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1)],
+        help_text="Custom duration in minutes for this appointment only"
+    )
+    manual_discount_percent = models.PositiveSmallIntegerField(
+        default=0,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Additional per-appointment discount in percent"
+    )
     # Итог позиции после позиционных скидок (service/promocode). Персональная НЕ учитывается!
     final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
+    tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"), editable=False)
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)  # '', 'service', 'promocode'
 
     class Meta:
-        indexes = [models.Index(fields=["master", "start_time"])]
+        indexes = [
+            models.Index(fields=["master", "start_time"]),
+            models.Index(fields=["service", "start_time"]),
+        ]
     def __str__(self):
         return f"{self.appointment.client} for {self.service} at {self.start_time}"
     @property
     def duration_min(self) -> int:
-        extra = self.service.extra_time_min or 0
-        return (self.service.duration_min or 0) + extra
+        if self.duration_override_min:
+            return int(self.duration_override_min)
+        service = getattr(self, "service", None)
+        if not service:
+            return 0
+        extra = service.extra_time_min or 0
+        return int((service.duration_min or 0) + extra)
 
     @property
     def end_time(self):
+        if not self.start_time:
+            return None
         return self.start_time + timedelta(minutes=self.duration_min)
 
     @staticmethod
@@ -924,31 +1336,63 @@ class AppointmentItem(models.Model):
         # сначала применяем скидку услуги/промокода
         price = base * (Decimal(100) - Decimal(promo_disc)) / Decimal(100)
         price = price * (Decimal(100) - Decimal(service_disc)) / Decimal(100)
-        # потом — персональную скидку клиента
+        manual_disc = int(getattr(self, "manual_discount_percent", 0) or 0)
+        if manual_disc:
+            price = price * (Decimal(100) - Decimal(manual_disc)) / Decimal(100)
+        # Apply personal discount snapshot at booking time
         personal_pct = 0
         if self.appointment and self.appointment.client:
             personal_pct = int(self.appointment.client.personal_discount_percent or 0)
 
         if personal_pct:
             price = price * (Decimal(100) - Decimal(personal_pct)) / Decimal(100)
-        # финальная цена
+        # Finalize computed price
         self.final_price = price.quantize(Decimal("0.01"))
-        # источник скидки
+        # Track discount source flags
         if service_disc == 0 and personal_pct == 0 and promo_disc == 0:
-            self.discount_source = ""
+            discount_source = ""
         elif promo_disc > 0 and personal_pct > 0 and service_disc:
-            self.discount_source = "promocode+personal+service"
+            discount_source = "promocode+personal+service"
         elif service_disc > 0 and personal_pct > 0:
-            self.discount_source = "service+personal"
+            discount_source = "service+personal"
         elif promo_disc > 0 and personal_pct > 0:
-            self.discount_source = "promocode+personal"
+            discount_source = "promocode+personal"
         elif service_disc > 0:
-            self.discount_source = "service"
+            discount_source = "service"
         elif promo_disc > 0:
-            self.discount_source = "promocode"
+            discount_source = "promocode"
         else:
-            self.discount_source = "personal"
+            discount_source = "personal"
 
+        if manual_disc > 0:
+            discount_source = f"{discount_source}+manual" if discount_source else "manual"
+        self.discount_source = discount_source
+
+        taxable_service = getattr(self.service, "is_taxable", False)
+        if taxable_service:
+            self.tax_amount = compute_tax(self.final_price)
+        else:
+            self.tax_amount = Decimal("0.00")
+
+    def _final_price_for_tax(self) -> Decimal:
+        """
+        Determine the effective final price (post-discount) for tax calculations.
+        """
+        price = getattr(self, "final_price", None)
+        if price is not None:
+            return Decimal(price).quantize(TWOPLACES)
+
+        original_final = getattr(self, "final_price", None)
+        original_source = getattr(self, "discount_source", "")
+        self._compute_item_pricing()
+        computed = getattr(self, "final_price", None)
+        if computed is None:
+            computed = self._effective_unit_price()
+        computed_decimal = Decimal(computed).quantize(TWOPLACES)
+        # Restore initial state to avoid mutating unsaved instances.
+        self.final_price = original_final
+        self.discount_source = original_source
+        return computed_decimal
 
     # Удобный хелпер: берём реальный старт из self.start_time (или из appointment.start_time, если нет)
     def _resolve_start_dt(self):
@@ -961,6 +1405,13 @@ class AppointmentItem(models.Model):
         # === 0) Базовые вычисления: старт/длительность/конец ===
         start_dt = self._resolve_start_dt()
 
+        service_obj = getattr(self, "service", None)
+        if service_obj is None and self.service_id:
+            service_obj = Service.objects.filter(pk=self.service_id).select_related("category").first()
+            if service_obj is not None:
+                self.service = service_obj
+        validate_service_is_active(service_obj)
+
         # Хард-стоп по времени суток
         if start_dt and start_dt.time() > time(23, 59):
             raise ValidationError({"start_time": "Время начала не может быть позже 23:59."})
@@ -969,8 +1420,7 @@ class AppointmentItem(models.Model):
         if not self.master or not self.service or not start_dt:
             return
 
-        extra_min = self.service.extra_time_min or 0
-        total_min = (self.service.duration_min or 0) + extra_min
+        total_min = self.duration_min
         this_end = start_dt + timedelta(minutes=total_min)
 
         # === 1) Пересечения для этого мастера по предметному времени (AppointmentItem.start_time) ===
@@ -993,8 +1443,7 @@ class AppointmentItem(models.Model):
         for other in overlapping_qs.select_related("service", "appointment"):
             if not other.start_time:
                 continue
-            other_extra = (other.service.extra_time_min or 0) if other.service else 0
-            other_total = (other.service.duration_min or 0) + other_extra
+            other_total = other.duration_min if hasattr(other, "duration_min") else 0
             other_end = other.start_time + timedelta(minutes=other_total)
 
             if start_dt < other_end and this_end > other.start_time:
@@ -1006,8 +1455,9 @@ class AppointmentItem(models.Model):
         # master может быть либо MasterProfile, либо User с related master_profile
         master_profile = getattr(self.master, "master_profile", None) or self.master
         workdays_qs = getattr(master_profile, "workdays", None)
+        has_workdays = bool(workdays_qs and workdays_qs.exists())
 
-        if workdays_qs is not None:
+        if has_workdays:
             local_start_dt = localtime(start_dt)
             local_end_dt = local_start_dt + timedelta(minutes=total_min)
 
@@ -1046,64 +1496,38 @@ class AppointmentItem(models.Model):
                         f"({work_end_dt.strftime('%H:%M')})."
                     )
                 })
+        # === 3) Ensure a room is not double-booked when both services use the same room ===
+        room_id = None
+        service = getattr(self, "service", None)
+        if service is not None:
+            room_id = getattr(service, "room_id", None)
+        elif self.service_id:
+            room_id = Service.objects.filter(pk=self.service_id).values_list("room_id", flat=True).first()
 
-        # === 3) Кабинет: два мастера не могут работать в одном кабинете одновременно ===
-        # Ищем «room» на master_profile или прямо на item/appointment (под разные схемы)
-        room = getattr(master_profile, "room", None)
-        if room is None:
-            room = getattr(self, "room", None)
-        if room is None:
-            room = getattr(getattr(self, "appointment", None), "room", None)
-
-        if room is not None:
+        if room_id:
             room_overlap_qs = type(self).objects.filter(
-                # любой мастер, но тот же кабинет
+                service__room_id=room_id,
                 start_time__lt=this_end,
                 start_time__gt=start_dt - timedelta(hours=24),
             )
-            # фильтрация по «room» — где бы он ни лежал
-            # 1) room на item:
-            try:
-                room_overlap_qs = room_overlap_qs.filter(room=room)
-                room_on_item = True
-            except Exception:
-                room_on_item = False
+            if self.pk:
+                room_overlap_qs = room_overlap_qs.exclude(pk=self.pk)
+            if cancelled_status:
+                room_overlap_qs = room_overlap_qs.exclude(
+                    appointment__appointmentstatushistory__status=cancelled_status
+                )
 
-            # 2) room на master_profile:
-            if not room_on_item:
-                try:
-                    room_overlap_qs = room_overlap_qs.filter(master__master_profile__room=room)
-                except Exception:
-                    # 3) room прямо на master:
-                    try:
-                        room_overlap_qs = room_overlap_qs.filter(master__room=room)
-                    except Exception:
-                        # 4) room на appointment:
-                        try:
-                            room_overlap_qs = room_overlap_qs.filter(appointment__room=room)
-                        except Exception:
-                            room_overlap_qs = None  # поле не найдено — пропустим проверку
+            for other in room_overlap_qs.select_related("service", "appointment", "master"):
+                if not other.start_time:
+                    continue
+                other_total = other.duration_min if hasattr(other, "duration_min") else 0
+                other_end = other.start_time + timedelta(minutes=other_total)
+                if start_dt < other_end and this_end > other.start_time:
+                    raise ValidationError({
+                        "start_time": "This room is currently used by another service for the selected time."
+                    })
 
-            if room_overlap_qs is not None:
-                if self.pk:
-                    room_overlap_qs = room_overlap_qs.exclude(pk=self.pk)
-                if cancelled_status:
-                    room_overlap_qs = room_overlap_qs.exclude(
-                        appointment__appointmentstatushistory__status=cancelled_status
-                    )
-
-                for other in room_overlap_qs.select_related("service", "appointment", "master"):
-                    if not other.start_time:
-                        continue
-                    other_extra = (other.service.extra_time_min or 0) if other.service else 0
-                    other_total = (other.service.duration_min or 0) + other_extra
-                    other_end = other.start_time + timedelta(minutes=other_total)
-                    if start_dt < other_end and this_end > other.start_time:
-                        raise ValidationError({
-                            "start_time": "В этом кабинете уже есть запись на это время."
-                        })
-
-        # === 4) Недоступность мастера (time off / vacation / blocked) ===
+# === 4) Недоступность мастера (time off / vacation / blocked) ===
         # Поддержим несколько возможных имён модели и полей, чтобы не «падать», если схема немного отличается.
         timeoff_model = None
         for model_name in ("MasterAvailability", "MasterTimeOff", "MasterBlock", "MasterAbsence"):
@@ -1287,6 +1711,13 @@ class ProductSale(models.Model):
         editable=False,
         help_text="Computed total for reporting.",
     )
+    tax_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        editable=False,
+        help_text="Tax collected for this sale.",
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1327,6 +1758,7 @@ class ProductSale(models.Model):
             self.unit_price = self.product.price
 
         self.total_amount = self._compute_total_amount()
+        self.tax_amount = compute_tax(self.total_amount)
 
         update_fields = kwargs.get("update_fields")
         restrict_update = update_fields is not None
@@ -1352,7 +1784,7 @@ class ProductSale(models.Model):
 
                 if restrict_update:
                     # ensure total_amount stays in sync even with update_fields
-                    kwargs["update_fields"] = list(set(update_fields) | {"total_amount", "updated_at"})
+                    kwargs["update_fields"] = list(set(update_fields) | {"total_amount", "tax_amount", "updated_at"})
 
             super().save(*args, **kwargs)
 
@@ -1368,6 +1800,41 @@ class ProductSale(models.Model):
 
 
 # --- 5. PAYMENTS ---
+
+class ClientCard(models.Model):
+    """Snapshot of a client card saved in Stripe (non-sensitive)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    client = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='cards')
+    stripe_customer_id = models.CharField(max_length=255, db_index=True)
+    stripe_payment_method_id = models.CharField(max_length=255, unique=True)
+    brand = models.CharField(max_length=32)
+    last4 = models.CharField(max_length=4)
+    exp_month = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(12)])
+    exp_year = models.PositiveSmallIntegerField(validators=[MinValueValidator(2000), MaxValueValidator(2100)])
+    funding = models.CharField(max_length=16)
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['client', 'stripe_payment_method_id'],
+                name='uniq_client_card_by_method',
+            )
+        ]
+        indexes = [
+            models.Index(fields=['client', 'is_default'], name='clientcard_default_idx'),
+        ]
+
+    def __str__(self) -> str:
+        return self.label()
+
+    def label(self) -> str:
+        dots = '\u2022' * 4
+        return f"{self.brand} {dots} {self.last4} ({self.exp_month}/{self.exp_year})"
+
 
 class PaymentMethod(models.Model):
     """
@@ -1392,7 +1859,13 @@ class Payment(models.Model):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    appointment = models.ForeignKey(Appointment, on_delete=models.CASCADE, related_name="payments")
+    appointment = models.ForeignKey(
+        Appointment,
+        on_delete=models.CASCADE,
+        related_name="payments",
+        null=True,
+        blank=True,
+    )
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=10, default="cad")
     method = models.ForeignKey(PaymentMethod, on_delete=models.CASCADE)
@@ -1407,9 +1880,16 @@ class Payment(models.Model):
         null=True,
         blank=True,
     )
-    stripe_payment_method_id = models.CharField(max_length=255, blank=True, default="")
-    stripe_charge_id = models.CharField(max_length=255, blank=True, default="")
-    receipt_url = models.URLField(blank=True, default="")
+    stripe_payment_method_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    stripe_charge_id = models.CharField(max_length=255, null=True, blank=True)
+    receipt_url = models.URLField(blank=True)
+    receipt_pdf = models.FileField(
+        upload_to="receipts/%Y/%m/",
+        blank=True,
+        null=True,
+        storage=S3Boto3Storage()
+    )
+    receipt_sent_at = models.DateTimeField(blank=True, null=True)
     livemode = models.BooleanField(default=False)
     metadata = models.JSONField(default=dict, blank=True)
     raw_response = models.JSONField(default=dict, blank=True)
@@ -1431,10 +1911,12 @@ class Payment(models.Model):
         indexes = [
             models.Index(fields=["stripe_payment_intent_id"], name="payment_intent_idx"),
             models.Index(fields=["status"], name="payment_status_idx"),
+            models.Index(fields=["stripe_payment_method_id"], name="payment_method_idx"),
         ]
 
     def __str__(self):
-        return f"Payment {self.amount} {self.currency} for {self.appointment_id}"
+        target = self.appointment_id or "unlinked"
+        return f"Payment {self.amount} {self.currency} for {target}"
 
 # --- 6. PREPAYMENTS ---
 

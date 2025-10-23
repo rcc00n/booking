@@ -30,6 +30,64 @@
                 <canvas id="upcomingChart" height="150"></canvas>
             </div>
 
+            {% if request.user|is_master_user %}
+                <div class="dashboard-card">
+                    <h3>My Sales Target ({{ master_target_month_label }})</h3>
+                    {% with entry=master_target_for_current_user %}
+                        {% if entry and entry.target_amount %}
+                            <p>Monthly target: <strong>CA$ {{ entry.target_amount|floatformat:2 }}</strong></p>
+                            <p>Achieved so far: CA$ {{ entry.achieved_amount|floatformat:2 }}</p>
+                            <p>Remaining: <strong>CA$ {{ entry.remaining_amount|floatformat:2 }}</strong></p>
+                        {% elif entry %}
+                            <p>No sales target set for this month.</p>
+                            <p>Sales recorded so far: CA$ {{ entry.achieved_amount|floatformat:2 }}</p>
+                        {% else %}
+                            <p>No sales data available for this month yet.</p>
+                        {% endif %}
+                    {% endwith %}
+                </div>
+            {% else %}
+                <div class="dashboard-card">
+                    <h3>Monthly Sales Targets ({{ master_target_month_label }})</h3>
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Master</th>
+                            <th>Target</th>
+                            <th>Achieved</th>
+                            <th>Remaining</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in master_target_rows %}
+                            <tr>
+                                <td>{{ row.master.user.get_full_name }}</td>
+                                <td>
+                                    {% if row.target_amount %}
+                                        CA$ {{ row.target_amount|floatformat:2 }}
+                                    {% else %}
+                                        <span style="color:#777">Not set</span>
+                                    {% endif %}
+                                </td>
+                                <td>CA$ {{ row.achieved_amount|floatformat:2 }}</td>
+                                <td>
+                                    {% if row.target_amount %}
+                                        CA$ {{ row.remaining_amount|floatformat:2 }}
+                                    {% else %}
+                                        <span style="color:#777">—</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="4" style="color:#777">No masters found.</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+
             {% if not request.user|is_master_user %}
                 <!-- Block 3: Appointment activity (recent) -->
                 <div class="dashboard-card">

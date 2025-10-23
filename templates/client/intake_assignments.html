@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% load static tz %}
+{% block content %}
+<style>
+  :root {
+    --bg:#f4f5f7; --card:#ffffff; --muted:#64748b; --ink:#1e293b;
+    --brand:#1F5C3A; --brand-600:#184a2f; --brand-200:#dbece3;
+    --warn:#b45309; --success:#15803d; --ring:#cbd5e1;
+  }
+  body{background:var(--bg);}
+  .page{max-width:960px;margin:32px auto;padding:0 16px;}
+  .hdr{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px;}
+  .title{font-size:2rem;font-weight:800;color:var(--ink);margin:0;}
+  .meta{color:var(--muted);font-size:.95rem;}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:12px;font-weight:700;text-decoration:none;border:1px solid transparent;cursor:pointer;transition:.2s;}
+  .btn--primary{background:var(--brand);color:#fff;}
+  .btn--primary:hover{background:var(--brand-600);}
+  .btn--ghost{border-color:var(--ring);color:var(--ink);background:#fff;}
+  .btn--ghost:hover{background:#f8fafc;}
+  .badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;}
+  .badge--warn{background:#fef3c7;color:var(--warn);}
+  .badge--brand{background:var(--brand-200);color:var(--brand-600);}
+  .list{display:flex;flex-direction:column;gap:16px;margin:0;padding:0;list-style:none;}
+  .card{background:var(--card);border:1px solid var(--ring);border-radius:20px;padding:20px 24px;display:flex;gap:20px;align-items:flex-start;justify-content:space-between;box-shadow:0 12px 28px rgba(15,23,42,.08);}
+  .card--completed{opacity:.85;}
+  .card__head{display:flex;flex-direction:column;gap:8px;flex:1;}
+  .card__title{font-size:1.15rem;font-weight:700;color:var(--ink);margin:0;}
+  .card__desc{color:var(--muted);font-size:.95rem;}
+  .card__meta{display:flex;flex-wrap:wrap;gap:12px;font-size:.85rem;color:var(--muted);}
+  .state{display:inline-flex;align-items:center;gap:6px;font-weight:700;}
+  .state svg{width:18px;height:18px;}
+  .empty{background:var(--card);border:1px dashed var(--ring);border-radius:18px;padding:32px;text-align:center;color:var(--muted);}
+  @media (max-width:720px){
+    .card{flex-direction:column;align-items:stretch;}
+    .hdr{align-items:flex-start;}
+    .btn{width:100%;justify-content:center;}
+  }
+</style>
+
+<div class="page">
+  <div class="hdr">
+    <div>
+      <p class="meta">Client Portal</p>
+      <h1 class="title">Intake forms</h1>
+      {% if pending_count %}
+        <div class="badge badge--warn" role="status">
+          ⚠️ {{ pending_count }} form{{ pending_count|pluralize }} awaiting completion
+        </div>
+      {% endif %}
+    </div>
+    <div class="actions">
+      <a class="btn btn--ghost" href="{% url 'dashboard' %}">Back to dashboard</a>
+    </div>
+  </div>
+
+  {% if assignments %}
+    <ul class="list">
+      {% for entry in assignments %}
+        {% with assignment=entry.assignment form=entry.form latest=entry.latest_submission %}
+          <li class="card{% if assignment.is_completed %} card--completed{% endif %}">
+            <div class="card__head">
+              <div class="card__labels">
+                {% if form.is_universal %}
+                  <span class="badge badge--brand">Required for all clients</span>
+                {% endif %}
+                {% if not form.is_active %}
+                  <span class="badge badge--warn">Inactive</span>
+                {% endif %}
+              </div>
+              <h2 class="card__title">{{ form.name }}</h2>
+              {% if form.description %}
+                <p class="card__desc">{{ form.description }}</p>
+              {% endif %}
+              <div class="card__meta">
+                <span class="state">
+                  {% if assignment.is_completed %}
+                    ✅ Completed {{ assignment.completed_at|localtime|date:"M d, Y H:i" }}
+                  {% else %}
+                    ⏳ Awaiting submission{% if assignment.due_at %} · due {{ assignment.due_at|localtime|date:"M d, Y" }}{% endif %}
+                  {% endif %}
+                </span>
+                <span>Assigned {{ assignment.assigned_at|localtime|date:"M d, Y H:i" }}</span>
+                {% if latest %}
+                  <span>Last submitted {{ latest.submitted_at|localtime|date:"M d, Y H:i" }}</span>
+                {% endif %}
+                {% if assignment.assigned_by %}
+                  <span>Assigned by {{ assignment.assigned_by.get_full_name|default:assignment.assigned_by.username }}</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="card__actions">
+              {% if assignment.is_completed %}
+                <a class="btn btn--ghost" href="{{ entry.fill_url }}">Review answers</a>
+              {% else %}
+                <a class="btn btn--primary" href="{{ entry.fill_url }}">Fill now</a>
+              {% endif %}
+            </div>
+          </li>
+        {% endwith %}
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="empty">
+      <p>No intake forms assigned yet. Your team will let you know when something needs your attention.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

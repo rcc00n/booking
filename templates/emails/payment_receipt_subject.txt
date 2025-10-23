@@ -1,0 +1,1 @@
+Your receipt for payment {{ payment.public_id|default:payment.id }}

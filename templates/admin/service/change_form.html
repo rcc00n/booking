@@ -1,0 +1,23 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block submit_buttons_top %}
+  {{ block.super }}
+  <button type="submit"
+          name="_duplicate"
+          class="btn btn-info form-control"
+          style="margin-top:10px">
+    {% trans "Duplicate" %}
+  </button>
+{% endblock %}
+
+{% block submit_buttons_bottom %}
+  {{ block.super }}
+  <button type="submit"
+          name="_duplicate"
+          class="btn btn-block btn-outline-secondary btn-sm"
+          style="margin-top:16px;"
+          >
+    {% trans "Duplicate" %}
+  </button>
+{% endblock %}

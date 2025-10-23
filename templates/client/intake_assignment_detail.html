@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% load static tz filters %}
+{% block content %}
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --muted:#64748b; --ink:#102a43;
+    --brand:#1F5C3A; --brand-600:#184a2f; --brand-200:#e1f2ea;
+    --ring:#cbd5e1; --danger:#b91c1c;
+  }
+  body{background:var(--bg);}
+  .page{max-width:840px;margin:32px auto;padding:0 16px;}
+  .hdr{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap;}
+  .title{font-size:2rem;font-weight:800;color:var(--ink);margin:0;}
+  .meta{color:var(--muted);}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;}
+  .badge--brand{background:var(--brand-200);color:var(--brand-600);}
+  .badge--warn{background:#fef3c7;color:#b45309;}
+  .card{background:var(--card);border:1px solid var(--ring);border-radius:20px;box-shadow:0 12px 30px rgba(15,23,42,.08);padding:24px;}
+  .form-grid{display:grid;gap:20px;}
+  .field{display:flex;flex-direction:column;gap:8px;}
+  .label{font-weight:700;color:var(--ink);}
+  .input,.textarea,.select{border:1px solid var(--ring);border-radius:12px;padding:12px 14px;font:inherit;color:var(--ink);background:#fff;transition:.15s;border-left:3px solid transparent;}
+  .input:focus,.textarea:focus,.select:focus{outline:none;border-color:var(--brand);border-left-color:var(--brand);box-shadow:0 0 0 4px rgba(31,92,58,.12);}
+  .help{font-size:.85rem;color:var(--muted);}
+  .checkbox{display:flex;align-items:center;gap:10px;font-weight:600;color:var(--ink);}
+  .checkbox input{width:20px;height:20px;}
+  .required{color:var(--danger);margin-left:4px;}
+  .actions{display:flex;gap:12px;justify-content:flex-end;margin-top:24px;flex-wrap:wrap;}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:12px;font-weight:700;border:1px solid transparent;cursor:pointer;transition:.2s;}
+  .btn--ghost{border-color:var(--ring);background:#fff;color:var(--ink);}
+  .btn--ghost:hover{background:#f8fafc;}
+  .btn--primary{background:var(--brand);color:#fff;}
+  .btn--primary:hover{background:var(--brand-600);}
+  .alert{border:1px solid var(--ring);border-left:4px solid var(--brand);border-radius:14px;padding:16px 18px;margin-bottom:18px;background:#f8fafc;color:var(--ink);}
+  .alert--warn{border-left-color:#b45309;background:#fef3c7;color:#78350f;}
+  .alert strong{display:block;font-weight:800;margin-bottom:6px;}
+  @media(max-width:640px){
+    .actions{flex-direction:column;align-items:stretch;}
+    .btn{width:100%;}
+  }
+</style>
+
+<div class="page">
+  <div class="hdr">
+    <div>
+      <div class="meta">Client Portal · Intake form</div>
+      <h1 class="title">{{ form.name }}</h1>
+      <div class="meta">
+        {% if assignment.form.is_universal %}
+          <span class="badge badge--brand">Required for all clients</span>
+        {% endif %}
+        {% if not assignment.form.is_active %}
+          <span class="badge badge--warn">Inactive</span>
+        {% endif %}
+      </div>
+    </div>
+    <a class="btn btn--ghost" href="{% url 'client-intake-forms' %}">Back to forms</a>
+  </div>
+
+  {% if latest_submission %}
+    <div class="alert">
+      <strong>Last submitted {{ latest_submission.submitted_at|localtime|date:"M d, Y H:i" }}</strong>
+      You can update your answers if something has changed.
+    </div>
+  {% endif %}
+  {% if assignment.is_completed and not latest_submission %}
+    <div class="alert">
+      <strong>Saved</strong>
+      We received your answers. You can review or update them below.
+    </div>
+  {% endif %}
+  {% if not assignment.is_completed %}
+    <div class="alert alert--warn">
+      <strong>Action needed</strong>
+      Submit this form before your next visit so our team can prepare properly.
+    </div>
+  {% endif %}
+
+  <div class="card">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if bound_form.non_field_errors %}
+        <div class="alert alert--warn">
+          <strong>Fix the highlighted fields:</strong>
+          <ul>
+            {% for err in bound_form.non_field_errors %}
+              <li>{{ err }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+
+      {% for field in bound_form %}
+        <div class="field field--{{ field.widget_type }}">
+          {% if field.widget_type == "checkbox" %}
+            {% if field.errors %}
+              <div class="alert alert--warn">
+                {% for err in field.errors %}<div>{{ err }}</div>{% endfor %}
+              </div>
+            {% endif %}
+            <label class="checkbox" for="{{ field.id_for_label }}">
+              {{ field|add_class:"checkbox-input" }}
+              <span>{{ field.label }}{% if field.field.required %}<span class="required">*</span>{% endif %}</span>
+            </label>
+          {% else %}
+            <label class="label" for="{{ field.id_for_label }}">
+              {{ field.label }}{% if field.field.required %}<span class="required">*</span>{% endif %}
+            </label>
+            {% if field.errors %}
+              <div class="alert alert--warn">
+                {% for err in field.errors %}<div>{{ err }}</div>{% endfor %}
+              </div>
+            {% endif %}
+            {% if field.widget_type == "textarea" %}
+              {{ field|add_class:"textarea" }}
+            {% elif field.widget_type == "select" or field.widget_type == "selectmultiple" %}
+              {{ field|add_class:"select" }}
+            {% else %}
+              {{ field|add_class:"input" }}
+            {% endif %}
+          {% endif %}
+          {% if field.help_text %}
+            <div class="help">{{ field.help_text }}</div>
+          {% endif %}
+        </div>
+      {% endfor %}
+
+      <div class="actions">
+        <a class="btn btn--ghost" href="{% url 'client-intake-forms' %}">Cancel</a>
+        <button type="submit" class="btn btn--primary">Save answers</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('textarea').forEach(function(textarea){
+    const autoSize = (el) => { el.style.height='auto'; el.style.height=(el.scrollHeight+2)+'px'; };
+    textarea.addEventListener('input', () => autoSize(textarea));
+    autoSize(textarea);
+  });
+</script>
+{% endblock %}

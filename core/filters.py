@@ -54,3 +54,29 @@ class MasterRoleFilter(SimpleListFilter):
         return queryset
 
 
+class StaffSetByFilter(SimpleListFilter):
+    title = _("Set by")
+    parameter_name = "set_by"
+
+    def lookups(self, request, model_admin):
+        staff_profiles = (
+            UserProfile.objects
+            .filter(user__is_staff=True)
+            .select_related("user")
+            .order_by("user__first_name", "user__last_name", "user__username")
+            .distinct()
+        )
+        options = []
+        for profile in staff_profiles:
+            full_name = (profile.get_full_name() or "").strip()
+            label = full_name or profile.user.get_username()
+            options.append((str(profile.pk), label))
+        return options
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if not value:
+            return queryset
+        return queryset.filter(set_by_id=value)
+
+

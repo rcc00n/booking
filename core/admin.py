@@ -2,18 +2,20 @@ from bisect import bisect_left
 from collections import defaultdict
 from decimal import Decimal
 from io import BytesIO
-from typing import Dict, Any, List, Sequence, Iterable
+from typing import Dict, Any, List, Sequence, Iterable, Tuple, Optional
 from urllib.parse import urlencode
 
 from django.contrib.admin import DateFieldListFilter
-
+from django.contrib.admin.options import IS_POPUP_VAR, TO_FIELD_VAR
+from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.core.exceptions import FieldError, PermissionDenied
 from django.db import transaction, IntegrityError
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
+from django.conf import settings
 from django.contrib import admin, messages
-from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField, Prefetch
+from django.db.models import Sum, Count, Q, F, ExpressionWrapper, IntegerField, Prefetch, OuterRef, Subquery, Exists
 from itertools import cycle
 
 from django.utils.formats import number_format
@@ -25,7 +27,7 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 from datetime import date, timedelta, time as time_cls
 from django.contrib.admin.views.decorators import staff_member_required
-from django.http import HttpRequest, HttpResponse, Http404
+from django.http import HttpRequest, HttpResponse, Http404, HttpResponseRedirect
 from django.contrib.auth.models import Permission
 from django.db.models.functions import Coalesce, Concat, Greatest
 from django.db.models import DecimalField, Value
@@ -34,14 +36,15 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 import json
+import re
 from django.utils.dateparse import parse_date
-import csv
 from django.utils.translation import gettext_lazy as _
 from django.urls import path, reverse, NoReverseMatch, re_path
 from django.http import HttpResponse
 from django.shortcuts import render
 from .filters import *
 from .models import *
+from core.models import Notification
 from .forms import *
 from .validators import *
 from core.services.user_import import (
@@ -49,6 +52,7 @@ from core.services.user_import import (
     UserImportError,
     UserImportSchemaError,
 )
+from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
 
 # -----------------------------
 # Custom filter for filtering users by Role
@@ -68,6 +72,118 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, numbers
 
 
+def _autosize_columns(ws):
+    """Resize worksheet columns based on content length with sane bounds."""
+    if ws.max_column == 0:
+        return
+
+    for col_idx in range(1, ws.max_column + 1):
+        max_len = 0
+        for column_cells in ws.iter_cols(
+            min_col=col_idx,
+            max_col=col_idx,
+            min_row=1,
+            max_row=ws.max_row or 1,
+        ):
+            for cell in column_cells:
+                value = cell.value
+                text_length = 0 if value is None else len(str(value))
+                if text_length > max_len:
+                    max_len = text_length
+        adjusted_width = min(60, max(10, max_len + 2))
+        ws.column_dimensions[get_column_letter(col_idx)].width = adjusted_width
+
+
+def _write_xlsx(headers, rows, *, filename="export.xlsx", sheet_name="Export"):
+    """Build an XLSX response preserving header order and basic formatting."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = (sheet_name or "Export")[:31]
+
+    if headers:
+        ws.append(list(headers))
+
+    for row in rows:
+        if isinstance(row, dict):
+            ordered = [row.get(h) for h in headers] if headers else list(row.values())
+        elif isinstance(row, (list, tuple)):
+            ordered = list(row)
+        else:
+            try:
+                ordered = list(row)
+            except TypeError:
+                ordered = [row]
+
+        current = []
+        for value in ordered:
+            if value is None:
+                current.append(None)
+                continue
+
+            if isinstance(value, datetime):
+                processed = value
+                if is_aware(processed):
+                    try:
+                        processed = localtime(processed)
+                    except Exception:
+                        pass
+                processed = processed.replace(tzinfo=None)
+                current.append(processed)
+                continue
+
+            if isinstance(value, date):
+                current.append(value)
+                continue
+
+            if isinstance(value, time_cls):
+                current.append(value)
+                continue
+
+            if isinstance(value, (int, float, bool, Decimal)):
+                current.append(value)
+                continue
+
+            if isinstance(value, str):
+                current.append(value)
+                continue
+
+            current.append(str(value))
+
+        ws.append(current)
+
+    if headers:
+        for col_idx, header in enumerate(headers, start=1):
+            key = (header or "").lower()
+            if "date" in key or "time" in key or key.endswith("_at") or key == "at":
+                for column_cells in ws.iter_cols(
+                    min_col=col_idx,
+                    max_col=col_idx,
+                    min_row=2,
+                    max_row=ws.max_row,
+                ):
+                    for cell in column_cells:
+                        value = cell.value
+                        if value is None:
+                            continue
+                        if isinstance(value, datetime):
+                            cell.number_format = "YYYY-MM-DD HH:MM"
+                        elif isinstance(value, date):
+                            cell.number_format = "YYYY-MM-DD"
+
+    _autosize_columns(ws)
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
 def _coerce_json(value):
     if isinstance(value, dict):
         return {k: _coerce_json(v) for k, v in value.items()}
@@ -82,6 +198,92 @@ def _coerce_json(value):
     if isinstance(value, Decimal):
         return str(value)
     return value
+
+# --- Preset Date Range Filter (factory) ---
+def _start_of_week(d: date) -> date:
+    """Return Monday for the given date."""
+    return d - timedelta(days=d.weekday())
+
+
+def _start_of_month(d: date) -> date:
+    return d.replace(day=1)
+
+
+def _month_bounds_for_last_month(d: date) -> Tuple[date, date]:
+    first_this_month = _start_of_month(d)
+    last_month_end = first_this_month - timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    return last_month_start, last_month_end
+
+
+def make_preset_date_filter(
+    *, date_field: str, title: str = _("Period"), param: str = "period"
+):
+    """
+    Factory returning a SimpleListFilter bound to a given date/datetime field.
+    Usage: list_filter += [make_preset_date_filter(date_field="created_at")]
+    """
+
+    filter_title = title
+    filter_param = param
+    filter_date_field = date_field
+
+    class PresetDateRangeFilter(admin.SimpleListFilter):
+        title = filter_title
+        parameter_name = filter_param
+
+        def lookups(self, request, model_admin):
+            return [
+                ("today", _("Сегодня")),
+                ("week_to_date", _("С начала недели")),
+                ("month_to_date", _("С начала месяца")),
+                ("last_week", _("Прошлая неделя (Пн–Вс)")),
+                ("last_month", _("Прошлый календарный месяц")),
+            ]
+
+        def queryset(self, request, queryset):
+            value = self.value()
+            if not value:
+                return queryset
+
+            today = timezone.localdate()
+            start: Optional[date] = None
+            end: Optional[date] = None
+
+            if value == "today":
+                start = end = today
+            elif value == "week_to_date":
+                start = _start_of_week(today)
+                end = today
+            elif value == "month_to_date":
+                start = _start_of_month(today)
+                end = today
+            elif value == "last_week":
+                start = _start_of_week(today) - timedelta(days=7)
+                end = start + timedelta(days=6)
+            elif value == "last_month":
+                start, end = _month_bounds_for_last_month(today)
+
+            if start is None or end is None:
+                return queryset
+
+            # Prefer __date lookup for DateTime fields; fallback to plain lookup for DateField.
+            try:
+                return queryset.filter(
+                    **{
+                        f"{filter_date_field}__date__gte": start,
+                        f"{filter_date_field}__date__lte": end,
+                    }
+                )
+            except FieldError:
+                return queryset.filter(
+                    **{
+                        f"{filter_date_field}__gte": start,
+                        f"{filter_date_field}__lte": end,
+                    }
+                )
+
+    return PresetDateRangeFilter
 
 from core.models import (
     Appointment, AppointmentItem, Payment,
@@ -180,10 +382,9 @@ def custom_index(request):
         .values_list("appointment_id", "total")
     )
 
-    if not paid_by_appt:
-        top_masters = []
-    else:
-    # 3) Сумма final_price по мастеру в каждом визите из оплаченных
+    master_month_totals = {}
+    top_masters = []
+    if paid_by_appt:
         rows = (
             AppointmentItem.objects
             .filter(appointment_id__in=paid_by_appt.keys())
@@ -191,13 +392,11 @@ def custom_index(request):
             .annotate(msum=Coalesce(Sum("final_price"), Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))))
         )
 
-        # 4) Сумма final_price по визиту (для нормализации долей мастеров)
         appt_total = {}
         for r in rows:
             aid = r["appointment_id"]
             appt_total[aid] = (appt_total.get(aid, 0) or 0) + (r["msum"] or 0)
 
-        # 5) Распределяем деньги визита пропорционально долям мастеров
         master_totals = {}
         for r in rows:
             aid = r["appointment_id"]
@@ -209,15 +408,46 @@ def custom_index(request):
                 part = paid * (msum / total)
                 master_totals[mid] = (master_totals.get(mid, 0) or 0) + part
 
-        # 6) Топ-10 мастеров по начисленной сумме
-        top_ids = sorted(master_totals.keys(), key=lambda k: master_totals[k], reverse=True)[:10]
+        master_month_totals = master_totals
+        top_ids = sorted(master_month_totals.keys(), key=lambda k: master_month_totals[k], reverse=True)[:10]
         top_masters_qs = MasterProfile.objects.filter(pk__in=top_ids).select_related("user")
         top_masters = list(top_masters_qs)
         for m in top_masters:
-            m.total = master_totals.get(m.pk, 0)
+            m.total = master_month_totals.get(m.pk, Decimal("0"))
 
-        # Сохранить порядок по total
         top_masters = sorted(top_masters, key=lambda m: m.total or 0, reverse=True)[:10]
+
+    current_month_label = first_day.strftime("%B %Y")
+    month_targets = (
+        MasterMonthlySalesTarget.objects
+        .filter(month__year=first_day.year, month__month=first_day.month)
+        .select_related("master__user__user")
+    )
+    targets_by_master = {t.master_id: t for t in month_targets}
+    master_target_rows = []
+    master_target_for_current_user = None
+    masters_qs = MasterProfile.objects.select_related("user__user").order_by(
+        "user__user__first_name", "user__user__last_name"
+    )
+    for master in masters_qs:
+        target_obj = targets_by_master.get(master.id)
+        achieved_amount = master_month_totals.get(master.id) or Decimal("0")
+        target_amount = getattr(target_obj, "target_amount", None)
+        remaining_amount = None
+        if target_amount is not None:
+            remaining_amount = target_amount - achieved_amount
+            if remaining_amount < Decimal("0"):
+                remaining_amount = Decimal("0")
+        entry = {
+            "master": master,
+            "target": target_obj,
+            "target_amount": target_amount,
+            "achieved_amount": achieved_amount,
+            "remaining_amount": remaining_amount,
+        }
+        master_target_rows.append(entry)
+        if master_profile and master.id == master_profile.id:
+            master_target_for_current_user = entry
 
     # Недавние встречи (20) с префетчем позиций
     recent_appointments = (
@@ -258,6 +488,9 @@ def custom_index(request):
         "today": today,
         "recent_appointments": recent_appointments,
         "today_appointments": today_appointments,
+        "master_target_rows": master_target_rows,
+        "master_target_month_label": current_month_label,
+        "master_target_for_current_user": master_target_for_current_user,
     })
     return TemplateResponse(request, "admin/index.html", context)
 
@@ -279,21 +512,24 @@ class ExportCsvMixin:
     def export_all_csv(self, request):
         queryset = self.get_queryset(request)
 
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename={self.model._meta.model_name}.csv'
-
         fields = self.export_fields or [field.name for field in self.model._meta.fields]
-        writer = csv.writer(response)
-        writer.writerow(fields)
+        filename = f"{self.model._meta.model_name}.xlsx"
 
-        for obj in queryset:
-            if hasattr(self, 'get_export_row'):
-                row = self.get_export_row(obj)
-            else:
-                row = [getattr(obj, field) for field in fields]
-            writer.writerow(row)
+        def iter_rows():
+            for obj in queryset:
+                if hasattr(self, "get_export_row"):
+                    row = self.get_export_row(obj)
+                else:
+                    row = [getattr(obj, field) for field in fields]
 
-        return response
+                if isinstance(row, dict):
+                    yield [row.get(field) for field in fields]
+                elif isinstance(row, (list, tuple)):
+                    yield list(row)
+                else:
+                    yield [row]
+
+        return _write_xlsx(fields, iter_rows(), filename=filename)
 
     def changelist_view(self, request, extra_context=None):
         # Попробуем reverse без краша
@@ -723,22 +959,22 @@ class ExportXlsxMixin:
         return wb
 
 
-# -----------------------------
-# Customized User Admin
-# -----------------------------
 class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     """
     Custom admin interface for Django's User model, enhanced with roles and profile fields.
     """
     add_form = CustomUserCreationForm
     form = CustomUserChangeForm
+    change_list_template = "admin/users/changelist_cards.html"
     export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
+    list_per_page = 10
+    readonly_fields = getattr(BaseUserAdmin, "readonly_fields", tuple()) + ("password_change_link",)
 
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
             'fields': (
-                'username', 'usable_password', 'password1', 'password2',
+                'usable_password', 'password1', 'password2',
                 'email', 'first_name', 'last_name',
                 'phone', 'birth_date', 'address', 'postal_code',
                 'personal_discount_percent', 'how_heard', 'email_marketing_consent',
@@ -786,11 +1022,12 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     # Fields shown in user list
     list_display = ('username', 'email', 'first_name', 'last_name', 'staff_status', 'phone', 'birth_date', 'source', 'client_status_col')
     list_filter = ('is_superuser', 'userprofile__how_heard', ClientStatusFilter)
-    search_fields = ('username', 'email', 'first_name', 'last_name', 'userprofile__phone')
+    search_fields = ('username', 'email', 'first_name', 'last_name')
+    ordering = ('-date_joined',)
 
     # Field layout when editing a user
     fieldsets = (
-        (None, {'fields': ('username', 'email', 'password', 'personal_discount_percent')}),
+        (None, {'fields': ('email', 'password_change_link', 'personal_discount_percent')}),
         ('Personal Info', {'fields': (
             'first_name', 'last_name', 'phone', 'birth_date', 'address',
             'postal_code', 'how_heard', 'email_marketing_consent'
@@ -810,9 +1047,155 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         }),
     )
 
+    def password_change_link(self, obj):
+        if not obj or not getattr(obj, "pk", None):
+            return _("Change password after saving the user.")
+        try:
+            url = reverse("admin:auth_user_password_change", args=[obj.pk])
+        except NoReverseMatch:
+            return _("Change password")
+        return mark_safe(f'<a href="{url}">{_("Change password")}</a>')
+
+    password_change_link.short_description = _("Password")
+
     def get_queryset(self, request):
-        # чтобы не ловить N+1
-        return super().get_queryset(request).select_related('userprofile')
+        # Prefetch the attached profile to avoid N+1 lookups.
+        qs = super().get_queryset(request).select_related('userprofile')
+
+        universal_pending_subquery = ClientIntakeAssignment.objects.filter(
+            client__user_id=OuterRef('pk'),
+            form__is_universal=True,
+            form__is_active=True,
+            completed_at__isnull=True,
+        )
+        qs = qs.annotate(universal_intake_pending=Exists(universal_pending_subquery))
+
+        status_key = request.GET.get('client_status')
+        if status_key:
+            status_label = ClientStatusFilter.LOOKUP_TO_LABEL.get(status_key)
+            if status_label:
+                user_ids = list(qs.values_list('id', flat=True))
+                if user_ids:
+                    profiles = (
+                        UserProfile.objects.select_related('user')
+                        .filter(user_id__in=user_ids)
+                    )
+                    matching_ids = [
+                        profile.user_id
+                        for profile in profiles
+                        if profile.client_status == status_label
+                    ]
+                    qs = qs.filter(id__in=matching_ids) if matching_ids else qs.none()
+                else:
+                    qs = qs.none()
+
+        user_order = request.GET.get('user_order')
+        if user_order == 'oldest':
+            qs = qs.order_by('date_joined')
+        else:
+            qs = qs.order_by('-date_joined')
+
+        # Stash the choice and drop the param before default admin validation runs.
+        request._user_order_choice = user_order or 'newest'
+        if "user_order" in request.GET:
+            mutable_get = request.GET.copy()
+            mutable_get.pop("user_order", None)
+            request.GET = mutable_get
+
+        return qs
+
+    def history_view(self, request, object_id, extra_context=None):
+        if request.GET.get("mode") == "log":
+            return super().history_view(request, object_id, extra_context)
+
+        user_model = get_user_model()
+        user_obj = get_object_or_404(user_model, pk=object_id)
+        profile = getattr(user_obj, "userprofile", None)
+
+        from core.models import Appointment, AppointmentItem, AppointmentStatusHistory
+
+        current_status_sq = (
+            AppointmentStatusHistory.objects
+            .filter(appointment_id=OuterRef("pk"))
+            .order_by("-set_at")
+            .values("status__name")[:1]
+        )
+
+        if profile is None:
+            visits_qs = Appointment.objects.none()
+        else:
+            visits_qs = (
+                Appointment.objects.filter(client=profile)
+                .annotate(current_status=Subquery(current_status_sq))
+                .select_related("client__user", "payment_status")
+                .prefetch_related(
+                    Prefetch(
+                        "items",
+                        queryset=AppointmentItem.objects.select_related(
+                            "service",
+                            "master__user",
+                        ).order_by("start_time"),
+                    )
+                )
+                .order_by("-start_time")
+            )
+
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "original": user_obj,
+            "title": _("History"),
+            "user_obj": user_obj,
+            "visits": list(visits_qs[:200]),
+            "change_url_name": "admin:core_appointment_change",
+        }
+
+        if extra_context:
+            context.update(extra_context)
+
+        return TemplateResponse(request, "admin/users/history_visits.html", context)
+
+    @staticmethod
+    def _normalize_phone_digits(value: str) -> str:
+        return re.sub(r"\D+", "", value or "")
+
+    @classmethod
+    def _phone_regex_for_digits(cls, digits: str) -> str:
+        if not digits:
+            return ""
+        # Allow any number of non-digit separators between the input digits.
+        return r"\D*".join(re.escape(d) for d in digits)
+
+    def get_search_results(self, request, queryset, search_term):
+        search_term = (search_term or "").strip()
+        if not search_term:
+            return queryset, False
+
+        text_q = (
+            Q(first_name__icontains=search_term)
+            | Q(last_name__icontains=search_term)
+            | Q(email__icontains=search_term)
+            | Q(username__icontains=search_term)
+        )
+        digits = self._normalize_phone_digits(search_term)
+        if digits:
+            regex_pattern = self._phone_regex_for_digits(digits)
+            text_q |= Q(userprofile__phone__iregex=regex_pattern)
+
+        return queryset.filter(text_q), False
+
+    def get_ordering(self, request):
+        user_order = getattr(request, "_user_order_choice", None) or request.GET.get("user_order")
+        if user_order == "oldest":
+            return ("date_joined",)
+        if user_order == "newest" or not user_order:
+            return ("-date_joined",)
+        return super().get_ordering(request)
+
+    def lookup_allowed(self, lookup, value):
+        if lookup == "user_order":
+            return True
+        return super().lookup_allowed(lookup, value)
 
     @admin.display(description="Status")
     def client_status_col(self, obj):
@@ -832,9 +1215,37 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         # Return different form on add vs change
         return self.add_form if obj is None else self.form
 
+
+
     def save_model(self, request, obj, form, change):
-        # Save user and assign roles
-        super().save_model(request, obj, form, change)
+        # Persist the user first using the parent logic
+        with transaction.atomic():
+            super().save_model(request, obj, form, change)
+
+            if not hasattr(form, "cleaned_data"):
+                return
+
+            profile_data = {}
+            for form_field, profile_field in (
+                ("phone", "phone"),
+                ("birth_date", "birth_date"),
+                ("address", "address"),
+                ("postal_code", "postal_code"),
+            ):
+                if form_field in form.cleaned_data:
+                    profile_data[profile_field] = form.cleaned_data.get(form_field)
+
+            if not profile_data:
+                return
+
+            profile, _ = UserProfile.objects.select_for_update().get_or_create(user=obj)
+
+            phone_value = profile_data.get("phone")
+            profile.phone = phone_value or profile.phone
+            profile.birth_date = profile_data.get("birth_date", profile.birth_date)
+            profile.address = profile_data.get("address", profile.address) or ""
+            profile.postal_code = profile_data.get("postal_code", profile.postal_code) or ""
+            profile.save()
 
     # Custom display methods for user profile fields
     def phone(self, instance):
@@ -842,6 +1253,36 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 
     def birth_date(self, instance):
         return instance.userprofile.birth_date if hasattr(instance, 'userprofile') else '-'
+
+    def _is_popup(self, request):
+        return IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET
+
+    def _profile_popup_response(self, request, profile, *, action):
+        if profile is None:
+            return None
+        to_field = request.POST.get(TO_FIELD_VAR) or request.GET.get(TO_FIELD_VAR)
+        if to_field:
+            try:
+                field = profile._meta.get_field(to_field)
+            except Exception:
+                value = getattr(profile, to_field, profile.pk)
+            else:
+                value = field.value_from_object(profile)
+        else:
+            value = profile.pk
+        popup_response_data = {
+            "action": action,
+            "value": str(value),
+            "obj": str(profile),
+        }
+        return TemplateResponse(
+            request,
+            self.popup_response_template,
+            {
+                **self.admin_site.each_context(request),
+                "popup_response_data": json.dumps(popup_response_data),
+            },
+        )
 
     def _maybe_redirect_back(self, request, response):
         """
@@ -854,10 +1295,20 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         return response
 
     def response_add(self, request, obj, post_url_continue=None):
+        if self._is_popup(request):
+            profile = getattr(obj, "userprofile", None)
+            popup_resp = self._profile_popup_response(request, profile, action="add")
+            if popup_resp is not None:
+                return popup_resp
         resp = super().response_add(request, obj, post_url_continue)
         return self._maybe_redirect_back(request, resp)
 
     def response_change(self, request, obj):
+        if self._is_popup(request):
+            profile = getattr(obj, "userprofile", None)
+            popup_resp = self._profile_popup_response(request, profile, action="change")
+            if popup_resp is not None:
+                return popup_resp
         resp = super().response_change(request, obj)
         return self._maybe_redirect_back(request, resp)
 
@@ -893,10 +1344,98 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
                 'import_url',
                 reverse(f'admin:{opts.app_label}_{opts.model_name}_import'),
             )
-            extra_context.setdefault('import_label', 'Import users')
+            extra_context.setdefault('import_label', 'Import Users')
         except NoReverseMatch:
             pass
-        return super().changelist_view(request, extra_context=extra_context)
+        extra_context['client_status_options'] = [
+            {'value': key, 'label': label}
+            for key, label in ClientStatusFilter.LOOKUP_TO_LABEL.items()
+        ]
+        current_status = request.GET.get('client_status', '')
+        extra_context['client_status_current'] = current_status
+        extra_context['client_status_current_label'] = (
+            ClientStatusFilter.LOOKUP_TO_LABEL.get(current_status, '') if current_status else ''
+        )
+        user_order = request.GET.get('user_order') or 'newest'
+        if user_order not in ('newest', 'oldest'):
+            user_order = 'newest'
+        extra_context['user_order_current'] = user_order
+        extra_context.setdefault(
+            "user_pagination",
+            {
+                "has_previous": False,
+                "has_next": False,
+                "previous_page": None,
+                "next_page": None,
+                "current_page": 1,
+                "total_pages": 1,
+            },
+        )
+        response = super().changelist_view(request, extra_context=extra_context)
+        if hasattr(response, "context_data"):
+            context = response.context_data
+            cl = context.get("cl")
+            pagination = {
+                "has_previous": False,
+                "has_next": False,
+                "previous_page": None,
+                "next_page": None,
+                "current_page": 1,
+                "total_pages": 1,
+                "start_index": 0,
+                "end_index": 0,
+            }
+            if cl is not None:
+                paginator = getattr(cl, "paginator", None)
+                total_pages = getattr(paginator, "num_pages", 1) or 1
+                current_page = getattr(cl, "page_num", 1) or 1
+                has_previous = current_page > 1
+                has_next = total_pages and current_page < total_pages
+                per_page = getattr(cl, "list_per_page", self.list_per_page)
+                result_count = getattr(getattr(cl, "paginator", None), "count", 0) or 0
+                start_index = 0
+                end_index = 0
+                if result_count:
+                    start_index = ((current_page - 1) * per_page) + 1
+                    end_index = min(start_index + per_page - 1, result_count)
+                pagination.update(
+                    {
+                        "has_previous": has_previous,
+                        "has_next": has_next,
+                        "previous_page": current_page - 1 if has_previous else None,
+                        "next_page": current_page + 1 if has_next else None,
+                        "current_page": current_page,
+                        "total_pages": total_pages,
+                        "start_index": start_index,
+                        "end_index": end_index,
+                    }
+                )
+            context["user_pagination"] = pagination
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest" and hasattr(response, "context_data"):
+            fragment_html = render_to_string(
+                "admin/users/includes/user_list_fragment.html",
+                response.context_data,
+                request=request,
+            )
+            cl = response.context_data.get("cl")
+            pagination = response.context_data.get("user_pagination", {})
+            result_count = getattr(getattr(cl, "paginator", None), "count", 0) or 0
+            meta = {
+                "result_count": result_count,
+                "status_current": request.GET.get("client_status", "") or "",
+                "status_label": ClientStatusFilter.LOOKUP_TO_LABEL.get(request.GET.get("client_status", ""), ""),
+                "order_current": getattr(request, "_user_order_choice", "newest"),
+                "page": pagination.get("current_page", 1),
+                "has_next": pagination.get("has_next", False),
+                "has_previous": pagination.get("has_previous", False),
+                "next_page": pagination.get("next_page"),
+                "previous_page": pagination.get("previous_page"),
+                "start_index": pagination.get("start_index", 0),
+                "end_index": pagination.get("end_index", 0),
+                "total_pages": pagination.get("total_pages", 1),
+            }
+            return JsonResponse({"html": fragment_html, "meta": meta})
+        return response
 
     def import_users_view(self, request):
         opts = self.model._meta
@@ -1364,13 +1903,22 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         # карта мастер → [услуги]
         ms_map = defaultdict(list)
-        for sm in ServiceMaster.objects.select_related("service", "master").order_by("service__name"):
+        for sm in ServiceMaster.objects.select_related("service", "service__category", "master").order_by("service__name"):
             sid = str(sm.service_id)
+            service = sm.service
+            duration_min = service.duration_min or 0
+            extra_min = service.extra_time_min or 0
+            total_duration = duration_min + extra_min
             ms_map[str(sm.master_id)].append({
                 "id": str(sm.service_id),
-                "name": sm.service.name,
-                "base_price": str(sm.service.base_price),
+                "name": service.name,
+                "base_price": str(service.base_price),
+                "duration_min": duration_min,
+                "extra_time_min": extra_min,
+                "total_duration_min": total_duration,
                 "svc_disc": svc_discounts.get(sid, 0),  # %
+                "is_taxable": bool(service.is_taxable),
+                "category": service.category.name if service.category_id else "Other",
             })
 
         # промокоды
@@ -1388,6 +1936,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         intake_forms_overview: List[Dict[str, Any]] = []
         intake_required_ids: List[str] = []
+        notifications = []
         if obj:
             submissions_map = {
                 str(sub.form_id): sub
@@ -1418,6 +1967,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                     "submitted_at": submission.submitted_at if submission else None,
                     "manage_url": reverse("admin:core_appointment_manage_form", args=[obj.pk, intake_form.pk]),
                 })
+            notifications = (
+                Notification.objects
+                .filter(appointment=obj)
+                .select_related("user__user")
+                .order_by("-sent_at", "-id")
+            )
 
         ctx.update({
             "masters_data": masters,
@@ -1432,7 +1987,11 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             # === важные флаги для шаблонов/JS ===
             "is_master": is_master(request.user),
             "current_master_id": mp.id if mp else None,
+            "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+            "gst_enabled": getattr(settings, "GST_ENABLED", True),
+            "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
         })
+        ctx["notifications"] = notifications
         return super().render_change_form(request, ctx, add=add, change=change, form_url=form_url, obj=obj)
 
     def manage_intake_form_view(self, request, appointment_id, form_id):
@@ -1502,6 +2061,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "back_url": reverse("admin:core_appointment_change", args=[appointment.pk]),
         }
         return TemplateResponse(request, "admin/appointment_manage_form.html", context)
+
+
 
     def save_model(self, request, obj, form, change):
         # Админка валидирует формы, но мы дополнительно страхуемся:
@@ -1595,17 +2156,53 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         return custom + urls
 
 
+    def _calendar_date_for_obj(self, obj) -> str | None:
+        start = getattr(obj, "start_time", None)
+        if not start:
+            return None
+        try:
+            localized = localtime(start)
+        except Exception:
+            localized = start
+        try:
+            return localized.date().isoformat()
+        except Exception:
+            return None
+
+    def _redirect_to_calendar(self, request, *, date: str | None = None) -> HttpResponseRedirect:
+        url = reverse("admin:core_appointment_changelist")
+        passthrough: dict[str, str] = {}
+        if date:
+            passthrough["date"] = date
+        else:
+            existing = request.GET.get("date") or request.POST.get("date")
+            if existing:
+                passthrough["date"] = existing
+        if passthrough:
+            url = f"{url}?{urlencode(passthrough)}"
+        return redirect(url)
+
     def _default_payment_status_id(self):
         obj, _ = PaymentStatus.objects.get_or_create(name="Not Paid")
         return obj.id
 
     def _context_lists(self):
-        clients = (
+        clients_raw = (
             UserProfile.objects.select_related("user")
-            .annotate(label=Concat("user__first_name", Value(" "), "user__last_name"))
-            .values("id", "label")
-            .order_by("label")
+            .annotate(
+                first_name=Coalesce("user__first_name", Value("")),
+                last_name=Coalesce("user__last_name", Value("")),
+                username=Coalesce("user__username", Value("")),
+            )
+            .values("id", "first_name", "last_name", "username")
+            .order_by("user__first_name", "user__last_name", "user__username")
         )
+        clients = []
+        for row in clients_raw:
+            label = f"{row['first_name']} {row['last_name']}".strip()
+            if not label:
+                label = row["username"] or str(row["id"])
+            clients.append({"id": row["id"], "label": label})
         masters = (
             MasterProfile.objects.select_related("user")
             .annotate(label=Concat("user__user__first_name", Value(" "), "user__user__last_name"))
@@ -1618,7 +2215,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         services_info: Dict[str, Dict[str, Any]] = {}
 
         services_qs = (
-            Service.objects
+            Service.objects.filter(is_active=True)
             .select_related("category")
             .prefetch_related(
                 Prefetch(
@@ -1631,13 +2228,18 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             sid = str(svc.pk)
             active_forms = list(svc.active_forms())
             form_ids = [str(form.pk) for form in active_forms]
+            category_name = svc.category.name if svc.category_id else "Other"
             service_forms_map[sid] = form_ids
             services_info[sid] = {
                 "id": sid,
                 "name": svc.name,
                 "base_price": str(svc.base_price),
                 "duration_min": svc.duration_min,
+                "extra_time_min": svc.extra_time_min,
+                "total_duration_min": (svc.duration_min or 0) + (svc.extra_time_min or 0),
                 "forms": form_ids,
+                "category": category_name,
+                "is_taxable": bool(svc.is_taxable),
             }
             for form in active_forms:
                 intake_forms_map[str(form.pk)] = form
@@ -1645,13 +2247,18 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         services_by_master: Dict[str, List[Dict[str, Any]]] = {}
         qs = (
             ServiceMaster.objects
-            .select_related("service", "master")
+            .filter(service__is_active=True)
+            .select_related("service", "service__category", "master")
             .values(
                 "master_id",
                 "service__id",
                 "service__name",
                 "service__base_price",
                 "service__duration_min",
+                "service__extra_time_min",
+                "service__is_taxable",
+                "service__category__name",
+                "service__category_id",
             )
         )
         for r in qs:
@@ -1659,12 +2266,17 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             base = services_info.get(sid)
             if not base:
                 forms = service_forms_map.get(sid, [])
+                category_name = r["service__category__name"] if r["service__category_id"] else "Other"
                 base = {
                     "id": sid,
                     "name": r["service__name"],
                     "base_price": str(r["service__base_price"]),
                     "duration_min": r["service__duration_min"],
+                    "extra_time_min": r["service__extra_time_min"],
+                    "total_duration_min": (r["service__duration_min"] or 0) + (r["service__extra_time_min"] or 0),
                     "forms": forms,
+                    "category": category_name,
+                    "is_taxable": bool(r.get("service__is_taxable")),
                 }
                 services_info[sid] = base
             payload = {
@@ -1672,7 +2284,11 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "name": base["name"],
                 "base_price": base["base_price"],
                 "duration_min": base["duration_min"],
+                "extra_time_min": base.get("extra_time_min", 0),
+                "total_duration_min": base.get("total_duration_min", (base.get("duration_min") or 0)),
                 "forms": list(base.get("forms", [])),
+                "category": base.get("category", "Other"),
+                "is_taxable": bool(base.get("is_taxable", False)),
             }
             services_by_master.setdefault(str(r["master_id"]), []).append(payload)
 
@@ -1804,49 +2420,106 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             availability_url = ""
 
         mp = MasterProfile.objects.filter(user=UserProfile.objects.filter(user=request.user).first()).first()
-        if request.method == "GET" and request.GET.get("master") != 'undefined':
-            clients, masters, services_by_master, service_forms_map, intake_forms_map = _context_lists()
-            intake_forms_catalog = _build_forms_catalog(intake_forms_map)
-            posted_intake_payload = {"forms": []}
+        clients, masters, services_by_master, service_forms_map, intake_forms_map = _context_lists()
+        intake_forms_catalog = _build_forms_catalog(intake_forms_map)
 
-            q_date   = request.GET.get("date")
-            q_time   = request.GET.get("time")
-            q_master = request.GET.get("master")
+        if request.method == "GET":
+
+            q_date = (request.GET.get("date") or "").strip()
+
+            q_time = (request.GET.get("time") or "").strip()
+
+            q_master = (request.GET.get("master") or "").strip()
+
+            if q_master == "undefined":
+
+                q_master = ""
+
+
 
             if is_master(request.user):
-                q_master = str(mp.pk)
-                masters = [m for m in masters if str(m["id"]) == str(mp.pk)]
+
+                q_master = str(mp.pk) if mp else ""
+
+                masters = [m for m in masters if mp and str(m["id"]) == str(mp.pk)]
+
+
 
             initial_first_item = {}
 
             if q_master and MasterProfile.objects.filter(pk=q_master).exists():
+
                 initial_first_item["master"] = str(q_master)
 
-            dt = _parse_dt(q_date, q_time)
+
+
+            dt = _parse_dt(q_date or None, q_time or None)
+
             if dt:
+
                 initial_first_item["start_time_date"] = dt.strftime("%Y-%m-%d")
+
                 initial_first_item["start_time_time"] = dt.strftime("%H:%M:%S" if dt.second else "%H:%M")
+            else:
+
+                if q_date:
+
+                    initial_first_item.setdefault("start_time_date", q_date)
+
+                if q_time:
+
+                    initial_first_item.setdefault("start_time_time", q_time[:5])
+
+
 
             ctx = {
+
                 **self.admin_site.each_context(request),
-                "clients": clients,
+
+                "clients": list(clients),
+
                 "masters": masters,
+
                 "services_by_master": services_by_master,
+
                 "initial_first_item": initial_first_item,
-                "prefill_query": {"date": q_date, "time": q_time, "master": str(q_master) if q_master else None},
+
+                "prefill_query": {"date": q_date or None, "time": q_time or None, "master": str(q_master) if q_master else None},
+
                 "service_forms_map": service_forms_map,
+
                 "intake_forms_catalog": intake_forms_catalog,
-                "posted_intake_payload": posted_intake_payload,
+
+                "posted_intake_payload": {"forms": []},
+
                 "intake_error_map": {},
 
+                "form_errors": [],
+
+                "field_errors": {},
+
+                "item_errors": {},
+
+                "posted_items": [],
+
+                "posted_client": "",
+
                 "is_master": is_master(request.user),
+
                 "current_master_id": mp.id if mp else None,
+
                 "availability_url": availability_url,
+                "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+                "gst_enabled": getattr(settings, "GST_ENABLED", True),
+                "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
+
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
 
-        # ---------------- POST: создаём запись ----------------
+
+        # ---------------- POST: ??????? ?????? ----------------
+
         clients, masters, services_by_master, service_forms_map, intake_forms_map = _context_lists()
         intake_forms_catalog = _build_forms_catalog(intake_forms_map)
 
@@ -1934,6 +2607,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "start_time_1": (request.POST.get(pref + "start_time_1") or "").strip(),  # time
                 "unit_price":  (request.POST.get(pref + "unit_price") or "").strip(),
                 "promocode":   (request.POST.get(pref + "promocode") or "").strip(),
+                "duration_override_min": (request.POST.get(pref + "duration_override_min") or "").strip(),
+                "manual_discount_percent": (request.POST.get(pref + "manual_discount_percent") or "").strip(),
             })
 
         # обязательные поля верхнего уровня
@@ -1973,6 +2648,32 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             if date_str and time_str and not dt:
                 bag["items"][idx]["start_time_1"].append("Invalid date/time.")
 
+            duration_raw = row.get("duration_override_min", "").strip()
+            duration_override = None
+            if duration_raw:
+                try:
+                    duration_override = int(duration_raw)
+                    if duration_override < 1:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    bag["items"][idx]["duration_override_min"].append("Enter a positive duration (minutes).")
+                    duration_override = None
+
+            manual_raw = row.get("manual_discount_percent", "").strip()
+            manual_discount = None
+            if manual_raw:
+                try:
+                    manual_discount = int(manual_raw)
+                except (TypeError, ValueError):
+                    bag["items"][idx]["manual_discount_percent"].append("Enter discount between 0 and 100.")
+                    manual_discount = None
+                else:
+                    if manual_discount < 0 or manual_discount > 100:
+                        bag["items"][idx]["manual_discount_percent"].append("Enter discount between 0 and 100.")
+                        manual_discount = None
+            else:
+                manual_discount = 0
+
             valid_rows.append({
                 "idx": idx,
                 "master_id": master_id or None,
@@ -1980,6 +2681,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "dt": dt,
                 "unit_price": (row["unit_price"] or None),
                 "promocode_id": (row["promocode"] or None),
+                "duration_override": duration_override,
+                "manual_discount": manual_discount,
             })
 
         required_form_ids: set[str] = set()
@@ -2023,7 +2726,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         if has_errors:
             ctx = {
                 **self.admin_site.each_context(request),
-                "clients": clients,
+                "clients": list(clients),
                 "masters": masters,
                 "services_by_master": services_by_master,
                 "promos_by_service_json": json.dumps(promos_by_service),
@@ -2041,6 +2744,9 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
                 "availability_url": availability_url,
+                "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+                "gst_enabled": getattr(settings, "GST_ENABLED", True),
+                "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -2078,6 +2784,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                         service_id=row["service_id"],
                         start_time=row["dt"],
                         unit_price=row["unit_price"] or None,
+                        duration_override_min=row.get("duration_override"),
+                        manual_discount_percent=row.get("manual_discount", 0) or 0,
                     )
                     try:
                         item.full_clean()
@@ -2156,7 +2864,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                         )
 
             messages.success(request, "Appointment created.")
-            return redirect("admin:core_appointment_change", appt.pk)
+            target_date = self._calendar_date_for_obj(appt)
+            return self._redirect_to_calendar(request, date=target_date)
 
         except ValidationError as ve:
             # Переносим ошибки из моделей в наш мешок и показываем в той же форме
@@ -2180,6 +2889,9 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
                 "availability_url": availability_url,
+                "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+                "gst_enabled": getattr(settings, "GST_ENABLED", True),
+                "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
@@ -2204,12 +2916,16 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
                 "availability_url": availability_url,
+                "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+                "gst_enabled": getattr(settings, "GST_ENABLED", True),
+                "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
-        except Exception:
+        except Exception as e:
             # На проде — лог, а пользователю безопасно
             bag["__all__"].append("Unexpected error while creating appointment.")
+            print("Error" + str(e))
             ctx = {
                 **self.admin_site.each_context(request),
                 "clients": clients,
@@ -2228,8 +2944,31 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "is_master": is_master(request.user),
                 "current_master_id": mp.id if mp else None,
                 "availability_url": availability_url,
+                "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
+                "gst_enabled": getattr(settings, "GST_ENABLED", True),
+                "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
+
+    def response_add(self, request, obj, post_url_continue=None):
+        response = super().response_add(request, obj, post_url_continue)
+        if IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET:
+            return response
+        return self._redirect_to_calendar(request, date=self._calendar_date_for_obj(obj))
+
+    def response_post_save_add(self, request, obj):
+        response = super().response_post_save_add(request, obj)
+        if IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET:
+            return response
+        return self._redirect_to_calendar(request, date=self._calendar_date_for_obj(obj))
+
+    def response_change(self, request, obj):
+        response = super().response_change(request, obj)
+        if IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET:
+            return response
+        if "_saveasnew" in request.POST:
+            return self._redirect_to_calendar(request, date=self._calendar_date_for_obj(obj))
+        return response
 
     @admin.display(description=_("Позиций"), ordering="_items_count")
     def items_count_display(self, obj):
@@ -2251,7 +2990,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     def items_preview(self, obj):
         items_mgr = getattr(obj, "appointmentitem_set", None) or getattr(obj, "items", None)
         if not items_mgr:
-            return "—"
+            return "-"
         parts = []
         for it in items_mgr.all()[:6]:
             s_name = getattr(it.service, "name", str(it.service))
@@ -2319,11 +3058,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         appointments = AppointmentItem.objects.select_related(
             'appointment__client', 'service', 'master'
-        ).prefetch_related('appointment__items__service')
-
-        masters = MasterProfile.objects.filter(
-            id__in=appointments.values_list('master_id', flat=True)
-        ).distinct()
+        ).prefetch_related('appointment__items__service', 'appointment__product_sales')
 
         start_of_day = make_aware(datetime.combine(selected_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(selected_date, datetime.max.time()))
@@ -2343,6 +3078,13 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             appointments = appointments.filter(
                 appointment__payment_status_id__in=request.GET.getlist("payment_status")
             )
+        master_ids = request.GET.getlist("master")
+        if master_ids:
+            appointments = appointments.filter(master_id__in=master_ids)
+
+        masters = MasterProfile.objects.filter(
+            id__in=appointments.values_list('master_id', flat=True)
+        ).distinct()
 
         # Слоты по 15 минут
         start_hour = 8
@@ -2361,6 +3103,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 html = render_to_string('admin/appointments_calendar_partial.html', {
                     "calendar_table": calendar_table,
                     'masters': masters,
+                    'selected_masters': master_ids,
                 })
                 return JsonResponse({"html": html})
 
@@ -2368,6 +3111,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 html = render_to_string('admin/appointments_calendar_partial.html', {
                     'calendar_table': calendar_table,
                     'masters': masters,
+                    'selected_masters': master_ids,
                 }, request=request)
                 return JsonResponse({'html': html})
 
@@ -2393,6 +3137,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             context.update({
                 "calendar_table": calendar_table,
                 "masters": masters,
+                "selected_masters": master_ids,
                 "selected_date": selected_date,
                 "prev_date": (selected_date - timedelta(days=1)).strftime("%Y-%m-%d"),
                 "next_date": (selected_date + timedelta(days=1)).strftime("%Y-%m-%d"),
@@ -2416,7 +3161,7 @@ class AppointmentStatusHistoryAdmin(ExportCsvMixin,admin.ModelAdmin):
     """
     exclude = ('set_by',)
     list_display = ('appointment', 'status', 'set_by', 'set_at')
-    list_filter = ('appointment','set_by')
+    list_filter = ('appointment', StaffSetByFilter)
     export_fields = ['appointment', 'status', 'set_by', 'set_at']
     def has_delete_permission(self, request, obj=None):
         # Суперадмин может всегда
@@ -2426,6 +3171,8 @@ class AppointmentStatusHistoryAdmin(ExportCsvMixin,admin.ModelAdmin):
         if hasattr(request.user, "master_profile"):
             return True
         return False
+
+
     def save_model(self, request, obj, form, change):
         if not obj.set_by_id:
             profile = getattr(request.user, "userprofile", None)
@@ -2446,31 +3193,119 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
     list_display = (
         'appointment',
         'amount',
-        'currency',
         'status',
-        'amount_received',
         'method',
+        'receipt_column',
+        'email_sent_column',
         'livemode',
         'created_at',
     )
-    list_filter = ('method', 'status', 'livemode')
+    list_filter = (
+        "method",
+        "status",
+        "livemode",
+        make_preset_date_filter(date_field="created_at", title=_("Period")),
+    )
     search_fields = (
-        'appointment__client__user__first_name', 'appointment__client__user__last_name',
+        'appointment__client__user__first_name',
+        'appointment__client__user__last_name',
         'appointment__client__user__email',
-        'appointment__master__user__first_name', 'appointment__master__user__last_name',
-        'appointment__service__name',
-        'stripe_payment_intent_id', 'stripe_charge_id',
+        'appointment__items__master__user__user__first_name',
+        'appointment__items__master__user__user__last_name',
+        'appointment__items__service__name',
+        'stripe_payment_intent_id',
+        'stripe_charge_id',
     )
     readonly_fields = (
         'created_at', 'updated_at', 'stripe_payment_intent_id', 'stripe_charge_id',
         'stripe_payment_method_id', 'receipt_url', 'raw_response', 'metadata',
         'amount_received', 'amount_refunded', 'captured_at', 'livemode',
+        'receipt_pdf', 'receipt_sent_at', 'resend_receipt_action',
     )
     export_fields = [
         'appointment', 'amount', 'currency', 'status', 'amount_received',
         'amount_refunded', 'method', 'livemode', 'stripe_payment_intent_id',
         'stripe_charge_id', 'created_at',
     ]
+    actions = ["action_generate_receipts", "action_send_receipts"]
+
+    def get_fields(self, request, obj=None):
+        fields = list(super().get_fields(request, obj))
+        if "resend_receipt_action" not in fields:
+            fields.append("resend_receipt_action")
+        return fields
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "<uuid:payment_id>/resend-receipt/",
+                self.admin_site.admin_view(self.resend_receipt_view),
+                name="core_payment_resend_receipt",
+            ),
+        ]
+        return custom_urls + urls
+
+    def resend_receipt_view(self, request, payment_id):
+        payment = self.get_object(request, str(payment_id))
+        if not payment:
+            self.message_user(request, "Payment not found.", level=messages.ERROR)
+            return redirect("admin:core_payment_changelist")
+        if not self.has_change_permission(request, payment):
+            raise PermissionDenied
+        email_payment_receipt_task.delay(str(payment.pk), force=True)
+        self.message_user(request, "Receipt email queued for delivery.", level=messages.SUCCESS)
+        return redirect("admin:core_payment_change", payment.pk)
+
+    @admin.display(description="Receipt")
+    def receipt_column(self, obj):
+        if getattr(obj, "receipt_pdf", None):
+            try:
+                url = obj.receipt_pdf.url
+            except Exception:
+                url = None
+            if url:
+                return format_html('<a href="{}" target="_blank">Download</a>', url)
+        if obj.receipt_url:
+            return format_html('<a href="{}" target="_blank">Stripe</a>', obj.receipt_url)
+        return "—"
+
+    @admin.display(description="Email sent", ordering="receipt_sent_at")
+    def email_sent_column(self, obj):
+        if obj.receipt_sent_at:
+            return localtime(obj.receipt_sent_at).strftime("%Y-%m-%d %H:%M")
+        return "—"
+
+    @admin.display(description="Resend receipt")
+    def resend_receipt_action(self, obj):
+        if not obj or not obj.pk or obj.status != "succeeded":
+            return "—"
+        url = reverse("admin:core_payment_resend_receipt", args=[obj.pk])
+        return format_html('<a class="button" href="{}">Send again</a>', url)
+
+    @admin.action(description="Generate PDF receipts")
+    def action_generate_receipts(self, request, queryset):
+        succeeded = queryset.filter(status="succeeded")
+        count = 0
+        for payment in succeeded:
+            generate_payment_receipt_task.delay(str(payment.pk))
+            count += 1
+        if count:
+            self.message_user(request, f"Queued receipt generation for {count} payments.")
+        else:
+            self.message_user(request, "No succeeded payments selected.", level=messages.WARNING)
+
+    @admin.action(description="Send/Resend receipt emails")
+    def action_send_receipts(self, request, queryset):
+        succeeded = queryset.filter(status="succeeded")
+        count = 0
+        for payment in succeeded:
+            email_payment_receipt_task.delay(str(payment.pk), force=True)
+            count += 1
+        if count:
+            self.message_user(request, f"Queued receipt emails for {count} payments.")
+        else:
+            self.message_user(request, "No succeeded payments selected.", level=messages.WARNING)
 
 
 # -----------------------------
@@ -2524,8 +3359,9 @@ class ServiceMasterAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     Admin interface to assign masters to services.
     """
+    form = ServiceMasterAdminForm
     list_display = ('master', 'service')
-    search_fields = ('master__user__first_name', 'master__user__last_name', 'service__name')
+    search_fields = ('master__user__user__first_name', 'master__user__user__last_name', 'service__name')
     export_fields = ['master', 'service']
 
 # -----------------------------
@@ -2536,17 +3372,23 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     Admin interface for services.
     """
-    list_display = ('name', 'base_price', 'category', 'duration_min', 'image_admin_thumb')
+    change_list_template = "admin/service/changelist_table.html"
+    change_form_template = "admin/service/change_form.html"
+    list_display = ('name', 'base_price', 'category', 'room', 'duration_min', 'is_taxable', 'is_active', 'image_admin_thumb')
     search_fields = ('name',)
-    list_filter = ('category',)
+    list_filter = ('is_active', 'is_taxable', 'category', 'room')
     filter_horizontal = ("pre_appointment_forms",)
     readonly_fields = ("image_preview",)
+    list_per_page = 10
     fieldsets = (
         (None, {
             "fields": (
                 "name",
                 "description",
                 "category",
+                "room",
+                "is_active",
+                "is_taxable",
                 "base_price",
                 "duration_min",
                 "extra_time_min",
@@ -2563,7 +3405,247 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
             "fields": ("pre_appointment_forms",),
         }),
     )
-    export_fields = ['name', 'description','base_price', 'category', 'duration_min', 'extra_time_min']
+    actions = ["mark_active", "mark_inactive"]
+    export_fields = ['name', 'description','base_price', 'category', 'room', 'duration_min', 'extra_time_min', 'is_taxable']
+
+    @admin.action(description="Mark selected services as active")
+    def mark_active(self, request, queryset):
+        queryset.update(is_active=True)
+
+    @admin.action(description="Mark selected services as inactive")
+    def mark_inactive(self, request, queryset):
+        queryset.update(is_active=False)
+
+    def get_queryset(self, request):
+        qs = (
+            super()
+            .get_queryset(request)
+            .select_related("category")
+        )
+
+        category_value = getattr(request, "_svc_category_filter", None)
+        if category_value is None:
+            category_value = request.GET.get("svc_category")
+        if category_value:
+            if category_value == "none":
+                qs = qs.filter(category__isnull=True)
+            else:
+                try:
+                    qs = qs.filter(category_id=int(category_value))
+                except (TypeError, ValueError):
+                    qs = qs.none()
+
+        return qs.order_by("name", "pk")
+
+    def get_search_results(self, request, queryset, search_term):
+        """
+        Apply a broader search across service name, description, and category.
+        """
+        term = (request.GET.get("q") or search_term or "").strip()
+        if not term:
+            return queryset, False
+        filters = (
+            Q(name__icontains=term)
+            | Q(description__icontains=term)
+            | Q(category__name__icontains=term)
+        )
+        return queryset.filter(filters), False
+
+    def get_ordering(self, request):
+        return ("name", "pk")
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        if request.method == "POST" and "_duplicate" in request.POST:
+            original = self.get_object(request, object_id)
+            if original is None:
+                raise Http404(_("Service not found."))
+
+            if not self.has_change_permission(request, original) or not self.has_add_permission(request):
+                raise PermissionDenied
+
+            clone = None
+            try:
+                with transaction.atomic():
+                    service_model = self.model
+                    base_name = original.name
+                    new_name = base_name
+
+                    manager = service_model._default_manager
+                    if manager.filter(name=new_name).exclude(pk=original.pk).exists():
+                        suffix_index = 1
+                        while True:
+                            suffix = " (copy)" if suffix_index == 1 else f" (copy {suffix_index})"
+                            candidate = f"{base_name}{suffix}"
+                            if not manager.filter(name=candidate).exists():
+                                new_name = candidate
+                                break
+                            suffix_index += 1
+
+                    clone = service_model(
+                        name=new_name,
+                        description=original.description,
+                        base_price=original.base_price,
+                        duration_min=original.duration_min,
+                        extra_time_min=original.extra_time_min,
+                        category=original.category,
+                        room=original.room,
+                        image=original.image,
+                        image_alt_text=original.image_alt_text,
+                        is_active=getattr(original, "is_active", True),
+                    )
+                    clone.save()
+                    clone.pre_appointment_forms.set(original.pre_appointment_forms.all())
+            except Exception:
+                messages.error(request, _("Could not duplicate service."))
+            else:
+                if clone is not None:
+                    self.log_addition(request, clone, f"Duplicated from Service {original.pk}.")
+                messages.success(request, _("Service duplicated."))
+                return redirect(reverse("admin:core_service_changelist"))
+
+        return super().change_view(request, object_id, form_url=form_url, extra_context=extra_context)
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        original_params = request.GET.copy()
+        search_term = (original_params.get("q") or "").strip()
+
+        categories = ServiceCategory.objects.for_catalog()
+        category_options = [{"value": "", "label": _("All Categories")}]
+        category_options.append({"value": "none", "label": _("Uncategorised")})
+        category_options.extend(
+            {"value": str(cat.pk), "label": cat.name}
+            for cat in categories
+        )
+
+        current_category = original_params.get("svc_category", "")
+        if current_category:
+            request._svc_category_filter = current_category
+        else:
+            request._svc_category_filter = None
+
+        currency_code = (getattr(settings, "STRIPE_CURRENCY", "USD") or "USD").upper()
+        currency_symbol = {
+            "CAD": "CA$",
+            "USD": "$",
+            "EUR": "\u20AC",
+            "GBP": "\u00A3",
+        }.get(currency_code, f"{currency_code} $")
+
+        extra_context.update(
+            {
+                "category_options": category_options,
+                "current_category": current_category,
+                "currency_symbol": currency_symbol,
+                "current_search": search_term,
+            }
+        )
+        extra_context.setdefault(
+            "svc_pagination",
+            {
+                "has_previous": False,
+                "has_next": False,
+                "previous_page": None,
+                "next_page": None,
+                "current_page": 1,
+                "total_pages": 1,
+            },
+        )
+
+        cleaned_params = original_params.copy()
+        cleaned_params.pop("svc_category", None)
+        request.GET = cleaned_params
+        try:
+            response = super().changelist_view(request, extra_context=extra_context)
+        finally:
+            request.GET = original_params
+
+        try:
+            opts = self.model._meta
+            export_url = reverse(f'admin:{opts.app_label}_{opts.model_name}_export_csv')
+            if original_params:
+                export_url += f"?{original_params.urlencode()}"
+        except NoReverseMatch:
+            export_url = None
+
+        if hasattr(response, "context_data"):
+            context = response.context_data
+            context["export_url"] = export_url
+            context["category_options"] = category_options
+            context["current_category"] = current_category
+            context["currency_symbol"] = currency_symbol
+            cl = context.get("cl")
+            pagination = {
+                "has_previous": False,
+                "has_next": False,
+                "previous_page": None,
+                "next_page": None,
+                "current_page": 1,
+                "total_pages": 1,
+                "start_index": 0,
+                "end_index": 0,
+            }
+            if cl is not None:
+                paginator = getattr(cl, "paginator", None)
+                total_pages = getattr(paginator, "num_pages", 1) or 1
+                current_page = getattr(cl, "page_num", 1) or 1
+                has_previous = current_page > 1
+                has_next = total_pages and current_page < total_pages
+                per_page = getattr(cl, "list_per_page", self.list_per_page)
+                result_count = getattr(getattr(cl, "paginator", None), "count", 0) or 0
+                start_index = 0
+                end_index = 0
+                if result_count:
+                    start_index = ((current_page - 1) * per_page) + 1
+                    end_index = min(start_index + per_page - 1, result_count)
+                pagination.update(
+                    {
+                        "has_previous": has_previous,
+                        "has_next": has_next,
+                        "previous_page": current_page - 1 if has_previous else None,
+                        "next_page": current_page + 1 if has_next else None,
+                        "current_page": current_page,
+                        "total_pages": total_pages,
+                        "start_index": start_index,
+                        "end_index": end_index,
+                    }
+                )
+            context["svc_pagination"] = pagination
+
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest" and hasattr(response, "context_data"):
+            fragment_html = render_to_string(
+                "admin/service/includes/service_list_fragment.html",
+                response.context_data,
+                request=request,
+            )
+            cl = response.context_data.get("cl")
+            pagination = response.context_data.get("svc_pagination", {})
+            result_count = getattr(getattr(cl, "paginator", None), "count", 0) or 0
+            category_label = ""
+            for option in category_options:
+                if option["value"] == current_category:
+                    category_label = option["label"]
+                    break
+
+            meta = {
+                "result_count": getattr(cl, "result_count", result_count),
+                "page": getattr(cl, "page_num", 0),
+                "current_page": pagination.get("current_page", 1),
+                "total_pages": pagination.get("total_pages", 1),
+                "has_previous": pagination.get("has_previous", False),
+                "has_next": pagination.get("has_next", False),
+                "previous_page": pagination.get("previous_page"),
+                "next_page": pagination.get("next_page"),
+                "start_index": pagination.get("start_index", 0),
+                "end_index": pagination.get("end_index", 0),
+                "current_category": current_category,
+                "current_category_label": category_label,
+                "currency_symbol": currency_symbol,
+                "search_term": search_term,
+            }
+            return JsonResponse({"html": fragment_html, "meta": meta})
+
+        return response
 
     @admin.display(description="Preview", ordering=False)
     def image_admin_thumb(self, obj):
@@ -2571,7 +3653,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
             return format_html('<img src="{}" style="height:48px;width:85px;object-fit:cover;border-radius:6px;" alt="{}"/>',
                                obj.image.url,
                                obj.card_image_alt)
-        return "—"
+        return "-"
 
     @admin.display(description="Current preview")
     def image_preview(self, obj):
@@ -2579,18 +3661,18 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
             return format_html('<img src="{}" style="max-width:320px;border-radius:10px;" alt="{}"/>',
                                obj.image.url,
                                obj.card_image_alt)
-        return "—"
+        return "-"
 
 
 @admin.register(ClientIntakeForm)
 class ClientIntakeFormAdmin(admin.ModelAdmin):
     form = ClientIntakeFormAdminForm
-    list_display = ("name", "slug", "is_active", "updated_at")
-    list_filter = ("is_active",)
+    list_display = ("name", "slug", "is_active", "is_universal", "updated_at")
+    list_filter = ("is_active", "is_universal")
     search_fields = ("name", "slug", "description")
     prepopulated_fields = {"slug": ("name",)}
     fieldsets = (
-        (None, {"fields": ("name", "slug", "description", "is_active")}),
+        (None, {"fields": ("name", "slug", "description", "is_active", "is_universal")}),
         (_("Builder"), {"fields": ("schema", "schema_version")} ),
         (_("Form class"), {"fields": ("form_class",), "classes": ("collapse",)}),
         (_("Timestamps"), {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
@@ -2600,8 +3682,8 @@ class ClientIntakeFormAdmin(admin.ModelAdmin):
 
 @admin.register(ClientIntakeFormSubmission)
 class ClientIntakeFormSubmissionAdmin(admin.ModelAdmin):
-    list_display = ("form", "client", "appointment", "submitted_by", "submitted_at")
-    list_filter = ("form", "submitted_at", "submitted_by")
+    list_display = ("form", "client", "appointment", "assignment", "submitted_by", "submitted_at")
+    list_filter = ("form", "submitted_at", "submitted_by", "assignment__form")
     search_fields = (
         "form__name",
         "client__user__first_name",
@@ -2612,6 +3694,7 @@ class ClientIntakeFormSubmissionAdmin(admin.ModelAdmin):
         "form",
         "client",
         "appointment",
+        "assignment",
         "submitted_by",
         "submitted_at",
         "data",
@@ -2620,6 +3703,29 @@ class ClientIntakeFormSubmissionAdmin(admin.ModelAdmin):
         "schema_version",
         "is_complete",
     )
+
+
+@admin.register(ClientIntakeAssignment)
+class ClientIntakeAssignmentAdmin(admin.ModelAdmin):
+    list_display = ("form", "client", "is_completed", "assigned_by", "assigned_at", "completed_at")
+    list_filter = ("form__is_universal", "form", "assigned_at", "completed_at")
+    search_fields = (
+        "client__user__first_name",
+        "client__user__last_name",
+        "client__user__email",
+        "form__name",
+    )
+    autocomplete_fields = ("form", "client", "completed_by")
+    readonly_fields = ("assigned_at", "assigned_by")
+
+    @admin.display(boolean=True, description="Completed")
+    def is_completed(self, obj):
+        return obj.is_completed
+
+    def save_model(self, request, obj, form, change):
+        if not obj.assigned_by_id:
+            obj.assigned_by = request.user
+        super().save_model(request, obj, form, change)
 # -----------------------------
 # Notification Admin
 # -----------------------------
@@ -2630,7 +3736,7 @@ class NotificationAdmin(admin.ModelAdmin):
     """
     list_display = ('user', 'appointment', 'channel', 'short_message')
     list_filter = (('sent_at', DateFieldListFilter), 'channel')
-    search_fields = ('user__user__first_name', 'user__user__last_name', 'appointment__service__name')
+    search_fields = ('user__user__first_name', 'user__user__last_name', 'appointment__items__service__name')
     ordering = ['-sent_at']
 
     @admin.display(description="message")
@@ -2644,9 +3750,9 @@ class NotificationAdmin(admin.ModelAdmin):
 
 @admin.register(ReminderSchedule)
 class ReminderScheduleAdmin(admin.ModelAdmin):
-    list_display = ("name", "is_active", "offset_amount", "offset_unit", "email_template", "email_subject", "slug")
+    list_display = ("name", "is_active", "offset_amount", "offset_unit", "email_subject", "slug")
     list_filter  = ("is_active", "offset_unit")
-    search_fields = ("name", "slug", "email_subject", "email_template")
+    # search_fields = ("name", "slug", "email_subject", "email_template")
     fields = (
         "name", "slug", "is_active",
         "offset_amount", "offset_unit",
@@ -2697,7 +3803,8 @@ class ServiceDiscountAdmin(ExportCsvMixin ,admin.ModelAdmin):
     list_display = ('service', 'discount_percent', 'start_date', 'end_date', 'is_active')
     list_filter = ('start_date', 'end_date', 'service')
     search_fields = ('service__name',)
-    export_fields = ['service', 'discount_percent', 'start_date', 'end_date', 'is_active']
+    form = ServiceDiscountAdminForm
+    export_fields = ['service', 'discount_percent', 'start_date', 'end_date']
     @admin.display(boolean=True)
     def is_active(self, obj):
         return obj.is_active()
@@ -2709,8 +3816,28 @@ class ServiceDiscountAdmin(ExportCsvMixin ,admin.ModelAdmin):
 class PromoCodeAdmin(ExportCsvMixin ,admin.ModelAdmin):
     list_display = ('code', 'discount_percent', 'start_date', 'end_date',)
     list_filter = ('start_date', 'end_date')
+    form = PromoCodeAdminForm
 
     export_fields = ['code', 'applicable_services', 'discount_percent', 'start_date', 'end_date']
+
+    def get_export_row(self, obj):
+        services_manager = getattr(obj, "applicable_services", None)
+        services_display = ""
+        if services_manager is not None:
+            if hasattr(services_manager, "all"):
+                services_display = ", ".join(
+                    str(service) for service in services_manager.all() if service is not None
+                )
+            else:
+                services_display = str(services_manager)
+
+        return [
+            getattr(obj, "code", ""),
+            services_display,
+            getattr(obj, "discount_percent", None),
+            getattr(obj, "start_date", None),
+            getattr(obj, "end_date", None),
+        ]
 
     @admin.display(boolean=True)
     def is_active(self, obj):
@@ -2759,7 +3886,7 @@ class ProductCategoryAdmin(admin.ModelAdmin):
     )
 
 
-class ProductAdmin(admin.ModelAdmin):
+class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
     list_display = (
         "name",
         "category",
@@ -2783,10 +3910,63 @@ class ProductAdmin(admin.ModelAdmin):
     def low_stock_indicator(self, obj):
         return obj.is_low_on_stock
 
+    def _export_all_xlsx_view(self, request):
+        queryset = self.get_queryset(request).select_related("category")
+        headers = [
+            "ID",
+            "Name",
+            "SKU",
+            "Category",
+            "Description",
+            "Price",
+            "Quantity In Stock",
+            "Low Stock Threshold",
+            "Low Stock?",
+            "Active",
+            "Created At",
+            "Updated At",
+        ]
+        rows = [
+            [
+                product.pk,
+                product.name,
+                product.sku or "",
+                product.category.name if product.category else "",
+                product.description,
+                product.price,
+                product.quantity_in_stock,
+                product.low_stock_threshold,
+                product.is_low_on_stock,
+                product.is_active,
+                product.created_at,
+                product.updated_at,
+            ]
+            for product in queryset
+        ]
+        return self._xlsx_response(
+            "products.xlsx",
+            "Products",
+            headers,
+            rows,
+            money_cols={6},
+            datetime_cols={11, 12},
+        )
 
-class ProductSaleAdmin(admin.ModelAdmin):
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        try:
+            opts = self.model._meta
+            query_string = f"?{request.GET.urlencode()}" if request.GET else ""
+            export_url = reverse(f"admin:{opts.app_label}_{opts.model_name}_export_xlsx") + query_string
+            extra_context["export_url"] = export_url
+            extra_context["export_label"] = "📤 Export XLSX"
+        except NoReverseMatch:
+            extra_context.setdefault("export_url", None)
+        return super().changelist_view(request, extra_context=extra_context)
+
+
+class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
     form = ProductSaleAdminForm
-    date_hierarchy = "sold_at"
     list_display = (
         "sold_at",
         "product",
@@ -2801,7 +3981,7 @@ class ProductSaleAdmin(admin.ModelAdmin):
         "product__category",
         "product",
         "sold_by",
-        ("sold_at", DateFieldListFilter),
+        make_preset_date_filter(date_field="sold_at", title=_("Sold period")),
     )
     search_fields = (
         "product__name",
@@ -2921,6 +4101,87 @@ class ProductSaleAdmin(admin.ModelAdmin):
             return JsonResponse({"error": "Product not found"}, status=404)
         return JsonResponse({"unit_price": str(product.price)})
 
+    def _export_all_xlsx_view(self, request):
+        queryset = (
+            self.get_queryset(request)
+            .select_related(
+                "product__category",
+                "sold_by__user",
+                "client__user",
+                "appointment",
+            )
+        )
+        headers = [
+            "ID",
+            "Sold At",
+            "Product",
+            "Product SKU",
+            "Category",
+            "Quantity",
+            "Unit Price",
+            "Total Amount",
+            "Sold By",
+            "Client",
+            "Appointment ID",
+            "Notes",
+            "Created At",
+            "Updated At",
+        ]
+        rows = []
+        for sale in queryset:
+            product = getattr(sale, "product", None)
+            product_category = getattr(product, "category", None)
+            sold_by_profile = getattr(sale, "sold_by", None)
+            sold_by_user = getattr(sold_by_profile, "user", None)
+            client_profile = getattr(sale, "client", None)
+            client_user = getattr(client_profile, "user", None)
+            sold_by_display = ""
+            if sold_by_user:
+                sold_by_display = sold_by_user.get_full_name() or sold_by_user.username
+            client_display = ""
+            if client_user:
+                client_display = client_user.get_full_name() or client_user.username
+            rows.append(
+                [
+                    sale.pk,
+                    sale.sold_at,
+                    product.name if product else "",
+                    product.sku if product and product.sku else "",
+                    product_category.name if product_category else "",
+                    sale.quantity,
+                    sale.unit_price,
+                    sale.total_amount,
+                    sold_by_display,
+                    client_display,
+                    sale.appointment.pk if sale.appointment else "",
+                    sale.notes or "",
+                    sale.created_at,
+                    sale.updated_at,
+                ]
+            )
+        return self._xlsx_response(
+            "product_sales.xlsx",
+            "Product Sales",
+            headers,
+            rows,
+            money_cols={7, 8},
+            datetime_cols={2, 13, 14},
+        )
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        try:
+            opts = self.model._meta
+            query_string = f"?{request.GET.urlencode()}" if request.GET else ""
+            export_url = reverse(f"admin:{opts.app_label}_{opts.model_name}_export_xlsx") + query_string
+            extra_context["export_url"] = export_url
+            extra_context["export_label"] = "📤 Export XLSX"
+        except NoReverseMatch:
+            extra_context.setdefault("export_url", None)
+        return super().changelist_view(request, extra_context=extra_context)
+
+
+
     def save_model(self, request, obj, form, change):
         if not obj.sold_by_id:
             profile = getattr(request.user, "userprofile", None)
@@ -2941,10 +4202,39 @@ admin.site.register(AppointmentStatus)
 admin.site.register(PaymentMethod)
 admin.site.register(ClientSource)
 admin.site.register(MasterRoom)
-admin.site.register(ServiceCategory)
 admin.site.register(PrepaymentOption)
 admin.site.register(PaymentStatus)
 admin.site.register(CancellationReason)
+
+
+@admin.register(ServiceCategory)
+class ServiceCategoryAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "slug",
+        "only_discounted_services",
+        "featured_rank",
+        "catalog_order",
+        "catalog_position_preview",
+    )
+    list_editable = ("featured_rank", "catalog_order")
+    list_filter = ("only_discounted_services",)
+    search_fields = ("name",)
+    ordering = ("name",)
+    readonly_fields = ("slug",)
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.for_catalog()
+
+    @admin.display(description="Catalog order")
+    def catalog_position_preview(self, obj):
+        if obj.featured_rank:
+            mapping = dict(FEATURED_CATEGORY_RANKS)
+            return mapping.get(obj.featured_rank, obj.featured_rank)
+        if obj.catalog_order is not None:
+            return obj.catalog_order
+        return "\u2014"
 
 @admin.register(AppointmentItemPromoCode)
 class AppointmentItemPromoCodeAdmin(admin.ModelAdmin):
@@ -2955,6 +4245,27 @@ class AppointmentItemPromoCodeAdmin(admin.ModelAdmin):
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
     form = UserProfileChangeForm
+
+    def _user_admin_url(self, suffix, *args):
+        user_model = get_user_model()
+        return reverse(f"admin:{user_model._meta.app_label}_{user_model._meta.model_name}_{suffix}", args=args)
+
+    def _redirect_to_user_admin(self, request, suffix, *args):
+        base_url = self._user_admin_url(suffix, *args)
+        query_string = request.META.get("QUERY_STRING")
+        if query_string:
+            base_url = f"{base_url}?{query_string}"
+        return redirect(base_url)
+
+    def add_view(self, request, form_url="", extra_context=None):
+        return self._redirect_to_user_admin(request, "add")
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        profile = self.get_object(request, object_id)
+        if profile and profile.user_id:
+            return self._redirect_to_user_admin(request, "change", profile.user_id)
+        return super().change_view(request, object_id, form_url, extra_context)
+
     search_fields = (
         "user__first_name",
         "user__last_name",
@@ -3054,51 +4365,204 @@ class UserProfileAdmin(admin.ModelAdmin):
             return False
         return super().has_delete_permission(request, obj)
 
+
+@admin.register(EmailVerification)
+class EmailVerificationAdmin(admin.ModelAdmin):
+    list_display = ("user", "purpose", "sent_to", "created_at", "expires_at", "last_sent_at", "attempts", "is_used")
+    list_filter = ("purpose", "is_used", "created_at")
+    search_fields = ("user__username", "user__email", "sent_to", "code")
+    readonly_fields = ("user", "purpose", "code", "sent_to", "created_at", "expires_at", "attempts", "last_sent_at", "is_used")
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 class MasterWorkDayInline(admin.TabularInline):
     model = MasterWorkDay
     extra = 7  # сразу 7 строк для всех дней
 
 
+
+
+class MasterMonthlySalesTargetInline(admin.TabularInline):
+    model = MasterMonthlySalesTarget
+    extra = 0
+    fields = ("month", "target_amount")
+    ordering = ("-month",)
+
+
+@admin.register(MasterMonthlySalesTarget)
+class MasterMonthlySalesTargetAdmin(admin.ModelAdmin):
+    list_display = ("master", "month", "target_amount", "updated_at")
+    list_filter = ("month",)
+    search_fields = ("master__user__user__first_name", "master__user__user__last_name")
+    autocomplete_fields = ("master",)
+    ordering = ("-month", "master__user__user__first_name")
+
+
 @admin.register(MasterProfile)
 class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
-    inlines = [MasterWorkDayInline]
+    inlines = [MasterWorkDayInline, MasterMonthlySalesTargetInline]
     add_form = MasterCreateFullForm
-    change_list_template = "admin/master/changelist_cards.html"
+    change_list_template = "admin/masters/changelist_cards.html"
     list_per_page = 24
 
     readonly_fields = ['password_display']
-    export_fields = ["first_name","last_name","email","username" ,"phone","birth_date","postal_code", "profession", 'bio', "room", "is_staff", "is_superuser", 'is_active']
-    search_fields = ("user__user__username", "user__user__first_name", "user__user__last_name")
-    def get_export_row(self, obj):
-        phone = obj.user.userprofile.phone if hasattr(obj, 'user') else ''
-        birth_date = obj.user.userprofile.birth_date if hasattr(obj, 'user') else ''
-        postal_code = obj.user.userprofile.postal_code if hasattr(obj, 'user') else ''
+    export_fields = [
+        "first_name",
+        "last_name",
+        "email",
+        "username",
+        "phone",
+        "birth_date",
+        "postal_code",
+        "profession",
+        "bio",
+        "work_start",
+        "work_end",
+        "is_staff",
+        "is_superuser",
+        "is_active",
+    ]
+    search_fields = (
+        "user__user__username",
+        "user__user__first_name",
+        "user__user__last_name",
+        "user__user__email",
+        "user__phone",
+    )
 
+    def get_queryset(self, request):
+        # Prefetch related auth user to minimize queries in cards template.
+        qs = super().get_queryset(request).select_related("user__user")
+
+        name_order = getattr(request, "_master_order_choice", request.GET.get("name_order"))
+        if name_order not in {"az", "za"}:
+            cached_order = getattr(request, "_master_order_choice", None)
+            if cached_order in {"az", "za"}:
+                name_order = cached_order
+            else:
+                name_order = "az"
+        request._master_order_choice = name_order
+
+        if name_order == "za":
+            qs = qs.order_by("-user__user__first_name", "-user__user__last_name", "-pk")
+        else:
+            qs = qs.order_by("user__user__first_name", "user__user__last_name", "pk")
+
+        return qs
+
+    def get_ordering(self, request):
+        name_order = getattr(request, "_master_order_choice", None) or request.GET.get("name_order")
+        if name_order == "za":
+            return ("-user__user__first_name", "-user__user__last_name", "-pk")
+        return ("user__user__first_name", "user__user__last_name", "pk")
+
+    def lookup_allowed(self, lookup, value):
+        if lookup in {"name_order"}:
+            return True
+        return super().lookup_allowed(lookup, value)
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+
+        professions = (
+            self.model.objects.exclude(profession__isnull=True)
+            .exclude(profession__exact="")
+            .values_list("profession", flat=True)
+            .distinct()
+            .order_by("profession")
+        )
+        profession_options = [{"value": "", "label": _("All professions")}]
+        profession_options.extend({"value": prof, "label": prof} for prof in professions)
+        profession_current = request.GET.get("profession", "")
+        profession_current_label = profession_current if profession_current else ""
+
+        name_order = request.GET.get("name_order") or "az"
+        if name_order not in {"az", "za"}:
+            name_order = "az"
+
+        request._master_profession_filter = profession_current
+        request._master_order_choice = name_order
+
+        extra_context.update(
+            {
+                "profession_options": profession_options,
+                "profession_current": profession_current,
+                "profession_current_label": profession_current_label,
+                "name_order_current": name_order,
+            }
+        )
+
+        try:
+            opts = self.model._meta
+            export_url = reverse(f'admin:{opts.app_label}_{opts.model_name}_export_csv')
+            export_url += f"?{request.GET.urlencode()}"
+        except NoReverseMatch:
+            export_url = None
+        extra_context["export_url"] = export_url
+
+        original_get = request.GET
+        cleaned_get = original_get.copy()
+        if profession_current:
+            cleaned_get.pop("profession", None)
+            cleaned_get["profession__iexact"] = profession_current
+        else:
+            cleaned_get.pop("profession", None)
+        cleaned_get.pop("name_order", None)
+        request.GET = cleaned_get
+        try:
+            return super(ExportCsvMixin, self).changelist_view(request, extra_context=extra_context)
+        finally:
+            request.GET = original_get
+
+    def get_export_row(self, obj):
+        user_profile = getattr(obj, "user", None)
+        auth_user = None
+
+        if user_profile and hasattr(user_profile, "user"):
+            auth_user = user_profile.user
+        else:
+            auth_user = user_profile
+            if auth_user and hasattr(auth_user, "userprofile"):
+                user_profile = auth_user.userprofile
+
+        if not auth_user:
+            auth_user = getattr(obj, "user", None)
+
+        phone = getattr(user_profile, "phone", "")
+        birth_date = getattr(user_profile, "birth_date", "")
+        postal_code = getattr(user_profile, "postal_code", "")
 
         return [
-            obj.user.first_name,
-            obj.user.last_name,
-            obj.user.email,
-            obj.user.username,
+            getattr(auth_user, "first_name", ""),
+            getattr(auth_user, "last_name", ""),
+            getattr(auth_user, "email", ""),
+            getattr(auth_user, "username", ""),
             phone,
             birth_date,
             postal_code,
-            obj.profession,
-            obj.bio,
-            obj.work_start,
-            obj.work_end,
-            obj.room,
-            obj.user.is_staff,
-            obj.user.is_superuser,
-            obj.user.is_active,
+            getattr(obj, "profession", ""),
+            getattr(obj, "bio", ""),
+            getattr(obj, "work_start", ""),
+            getattr(obj, "work_end", ""),
+            getattr(auth_user, "is_staff", ""),
+            getattr(auth_user, "is_superuser", ""),
+            getattr(auth_user, "is_active", ""),
         ]
     form = MasterCreateFullForm  # на редактирование тоже можно оставить ту же
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related("user__user", "room")
+        return qs.select_related("user__user")
 
-    list_display = ("get_name", "room", "profession")
+    list_display = ("get_name", "profession")
 
     def get_fieldsets(self, request, obj=None):
         form = self.form(instance=obj if obj else None)
@@ -3119,15 +4583,19 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
 
     def password_display(self, obj):
         from django.utils.html import format_html
-        reset_url = f"/admin/auth/user/{obj.user.id}/password/"
+
+        if not obj or not getattr(obj, "user", None) or not getattr(obj.user, "id", None):
+            return _("Save the master to manage password.")
+
+        try:
+            url = reverse("admin:auth_user_password_change", args=[obj.user.id])
+        except NoReverseMatch:
+            return _("Change password")
+
         return format_html(
-            '<div style="word-break: break-all;">'
-            '<strong>algorithm:</strong> pbkdf2_sha256<br>'
-            '<strong>hash:</strong> {}<br><br>'
-            '<a href="{}" class="button" style="color: #fff; background: #007bff; padding: 4px 8px; text-decoration: none; border-radius: 4px;">Reset password</a>'
-            '</div>',
-            obj.user.password,
-            reset_url
+            '<a href="{}" class="button" style="color: #fff; background: #007bff; padding: 4px 8px; text-decoration: none; border-radius: 4px;">{}</a>',
+            url,
+            _("Change password"),
         )
     password_display.short_description = "Password"
 
@@ -3143,6 +4611,30 @@ class MasterProfileAdmin(ExportCsvMixin,admin.ModelAdmin):
 
     def get_name(self, obj):
         return obj.user.get_full_name() or obj.user.username
+
+
+
+    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
+        obj = self.get_object(request, object_id) if object_id else None
+        if request.method == "POST":
+            post = request.POST
+            if hasattr(post, "_mutable"):
+                mutable = post._mutable
+                post._mutable = True
+                for inline in self.get_inline_instances(request, obj):
+                    formset_class = inline.get_formset(request, obj)
+                    prefix = formset_class.get_default_prefix()
+                    total_key = f"{prefix}-TOTAL_FORMS"
+                    if total_key not in post:
+                        post[total_key] = "0"
+                        post[f"{prefix}-INITIAL_FORMS"] = "0"
+                        post.setdefault(f"{prefix}-MIN_NUM_FORMS", "0")
+                        max_num = getattr(formset_class, "max_num", None)
+                        if max_num in (None, 0):
+                            max_num = getattr(formset_class, "DEFAULT_MAX_NUM", "1000")
+                        post.setdefault(f"{prefix}-MAX_NUM_FORMS", str(max_num))
+                post._mutable = mutable
+        return super().changeform_view(request, object_id, form_url, extra_context)
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
@@ -3691,14 +5183,48 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         # Статус — по родительскому Appointment (последний из истории)
         last_status = item.appointment.appointmentstatushistory_set.order_by("-set_at").first()
         status_name = last_status.status.name if last_status else "Unknown"
-        items_count = len(list(item.appointment.items.all()))
-        # Цены: базовая для позиции (unit_price или base_price услуги),
-        # финальная — из item.final_price (если None, показываем базовую)
-        base_price = item.appointment.total_without_discounts(ignore_overrides=False)
-        final_price = item.appointment.final_price
+        appointment_obj = item.appointment
+        items = list(appointment_obj.items.all())
+        items_count = len(items)
+        base_price = appointment_obj.total_without_discounts(ignore_overrides=False)
+        base_price_decimal = Decimal(base_price or Decimal("0.00")).quantize(TWOPLACES)
 
+        service_discounted_subtotal = Decimal("0.00")
+        service_tax_total = Decimal("0.00")
+        for appt_item in items:
+            final_val = getattr(appt_item, "final_price", None)
+            if final_val is None:
+                if appt_item.unit_price is not None:
+                    final_val = appt_item.unit_price
+                else:
+                    final_val = getattr(appt_item.service, "base_price", Decimal("0.00"))
+            service_discounted_subtotal += Decimal(final_val or Decimal("0.00"))
+            service_tax_total += Decimal(getattr(appt_item, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+        service_discounted_subtotal = service_discounted_subtotal.quantize(TWOPLACES)
+        service_tax_total = service_tax_total.quantize(TWOPLACES)
+        service_total_with_tax = (service_discounted_subtotal + service_tax_total).quantize(TWOPLACES)
 
-        client = item.appointment.client
+        products_total_with_tax = Decimal("0.00")
+        product_sales_rel = getattr(appointment_obj, "product_sales", None)
+        if product_sales_rel is not None:
+            for sale in product_sales_rel.all():
+                subtotal = Decimal(getattr(sale, "total_amount", Decimal("0.00")) or Decimal("0.00"))
+                tax_amount = Decimal(getattr(sale, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+                products_total_with_tax += subtotal + tax_amount
+        products_total_with_tax = products_total_with_tax.quantize(TWOPLACES)
+
+        final_price = appointment_obj.final_price
+        grand_total = Decimal(final_price or Decimal("0.00"))
+        if final_price is None:
+            grand_total = service_total_with_tax + products_total_with_tax
+        grand_total = grand_total.quantize(TWOPLACES)
+
+        has_discount = bool(getattr(appointment_obj, "discount_source", ""))
+        if not has_discount and base_price_decimal > Decimal("0.00"):
+            if (base_price_decimal - service_discounted_subtotal) >= Decimal("0.01"):
+                has_discount = True
+
+        client = appointment_obj.client
         client_label = client.get_full_name() or client.user.username
 
         return {
@@ -3710,9 +5236,14 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "service_label": escape(item.service.name),
             "time_label": f"{s_local.strftime('%I:%M%p').lstrip('0')} - {e_local.strftime('%I:%M%p').lstrip('0')}",
             "duration_label": f"{total_min}min",
-            "base_price": f"${base_price}",
+            "base_price": f"${base_price_decimal}",
+            "base_price_raw": f"{base_price_decimal:.2f}",
             "items_count": items_count,
-            "final_price": f"${final_price}",
+            "final_price": f"${grand_total}",
+            "final_price_raw": f"{grand_total:.2f}",
+            "service_total_raw": f"{service_total_with_tax:.2f}",
+            "products_total_raw": f"{products_total_with_tax:.2f}",
+            "has_discount": has_discount,
             "phone": escape(getattr(client, "phone", "") or ""),
         }
 
@@ -3753,7 +5284,12 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "time_label": meta["time_label"],
             "duration": meta["duration_label"],
             "base_price": meta["base_price"],
+            "base_price_raw": meta.get("base_price_raw", "0.00"),
             "final_price": meta["final_price"],
+            "final_price_raw": meta.get("final_price_raw", "0.00"),
+            "service_total_raw": meta.get("service_total_raw", "0.00"),
+            "products_total_raw": meta.get("products_total_raw", "0.00"),
+            "has_discount": meta.get("has_discount", False),
             "items_count": meta["items_count"],
         }
 

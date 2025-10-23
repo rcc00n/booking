@@ -21,19 +21,26 @@ from core.models import (
     AppointmentItem, BookingCart, BookingCartItem, Payment, ClientIntakeForm,
 )
 from core.services.booking import (
-    get_available_slots, get_service_masters,
-    get_or_create_status, get_default_payment_status, _tz_aware,
+    get_available_slots,
+    get_service_masters,
+    get_or_create_status,
+    get_default_payment_status,
+    _tz_aware,
     create_appointment_from_cart_items,
 )
 from core.services import payments as payment_services
+from core.services.pricing import compute_cart_pricing
 
 def _build_catalog_context(request):
     """Общий конструктор контекста каталога."""
     q = (request.GET.get("q") or "").strip()
     cat = request.GET.get("cat") or ""
 
+    today = timezone.now().date()
+    discount_window = Q(discounts__start_date__lte=today, discounts__end_date__gte=today)
+
     services_qs = (
-        Service.objects
+        Service.objects.filter(is_active=True)
         .select_related("category")
         .prefetch_related(
             Prefetch(
@@ -45,17 +52,43 @@ def _build_catalog_context(request):
     )
     if q:
         services_qs = services_qs.filter(Q(name__icontains=q) | Q(description__icontains=q))
-    if cat:
-        services_qs = services_qs.filter(category__id=cat)
 
-    categories_qs = (
-        ServiceCategory.objects.order_by("name")
-        .prefetch_related(Prefetch("service_set", queryset=services_qs))
+    discounted_services_qs = services_qs.filter(discount_window).distinct()
+
+    selected_category = None
+    if cat:
+        selected_category = ServiceCategory.objects.filter(pk=cat).first()
+        if selected_category:
+            if selected_category.only_discounted_services:
+                services_qs = discounted_services_qs
+            else:
+                services_qs = services_qs.filter(category=selected_category)
+                discounted_services_qs = services_qs.filter(discount_window).distinct()
+
+    categories_qs = ServiceCategory.objects.for_catalog().prefetch_related(
+        Prefetch("service_set", queryset=services_qs)
     )
+    categories = []
+    discounted_services = None
+    for category in categories_qs:
+        if category.only_discounted_services:
+            if selected_category and not getattr(selected_category, "only_discounted_services", False):
+                category.catalog_services = []
+                categories.append(category)
+                continue
+            if discounted_services is None:
+                discounted_services = list(discounted_services_qs)
+            category.catalog_services = discounted_services
+        else:
+            if selected_category and getattr(selected_category, "only_discounted_services", False):
+                category.catalog_services = []
+            else:
+                category.catalog_services = list(category.service_set.all())
+        categories.append(category)
 
     return {
-        "categories": categories_qs,
-        "filter_categories": ServiceCategory.objects.order_by("name"),
+        "categories": categories,
+        "filter_categories": ServiceCategory.objects.for_catalog(),
         "q": q,
         "active_category": str(cat),
         "search_results": services_qs if q else None,
@@ -105,6 +138,9 @@ def api_availability(request):
         return HttpResponseBadRequest("service and date required")
 
     service = get_object_or_404(Service.objects.select_related("category"), pk=service_id)
+    if not service.is_active:
+        from django.http import HttpResponseBadRequest
+        return HttpResponseBadRequest("service is inactive")
     day = parse_date(date_str)
     if not day:
         from django.http import HttpResponseBadRequest
@@ -148,6 +184,8 @@ def api_book(request):
         return HttpResponseBadRequest("service, master, start_time required")
 
     service = get_object_or_404(Service, pk=service_id)
+    if not service.is_active:
+        return JsonResponse({"error": "service is inactive"}, status=400)
     master  = get_object_or_404(MasterProfile, pk=master_id)
 
     if not get_service_masters(service).filter(pk=master.pk).exists():
@@ -222,56 +260,13 @@ def _ensure_profile(user):
         profile = UserProfile.objects.create(user=user)
     return profile
 
-
-def _master_display(master: MasterProfile) -> str:
-    if not master:
-        return ""
-    profile = getattr(master, "user", None)
-    name = ""
-    if profile and hasattr(profile, "get_full_name"):
-        name = profile.get_full_name() or ""
-    if not name:
-        linked_user = getattr(profile, "user", None)
-        if linked_user:
-            name = linked_user.get_full_name() or linked_user.username
-    return name
-
-
-def _cart_payload(item: BookingCartItem) -> dict:
-    master_label = _master_display(item.master)
-    return {
-        "id": item.id,
-        "service": {
-            "id": item.service.id,
-            "name": item.service.name,
-            "duration_min": item.service.duration_min,
-            "extra_time_min": item.service.extra_time_min,
-            "price": str(item.service.base_price),
-        },
-        "master": {
-            "id": item.master.id,
-            "name": master_label,
-        } if item.master else None,
-        "start_time": item.start_time.isoformat() if item.start_time else None,
-    }
-
-
 @login_required
 @require_GET
 def api_cart_summary(request):
     profile = _ensure_profile(request.user)
     cart = BookingCart.for_user(profile)
-    items = list(cart.items.select_related("service", "master__user"))
-
-    total_price = sum((it.service.base_price or 0) for it in items)
-    total_duration = sum(((it.service.duration_min or 0) + (it.service.extra_time_min or 0)) for it in items)
-
-    return JsonResponse({
-        "items": [_cart_payload(it) for it in items],
-        "count": len(items),
-        "total_price": str(total_price),
-        "total_duration_min": total_duration,
-    })
+    pricing = compute_cart_pricing(profile, cart=cart)
+    return JsonResponse(pricing)
 
 
 @login_required
@@ -292,6 +287,8 @@ def api_cart_add(request):
         return JsonResponse({"error": "service, master and start_time required"}, status=400)
 
     service = get_object_or_404(Service, pk=service_id)
+    if not service.is_active:
+        return JsonResponse({"error": "service is inactive"}, status=400)
     master = get_object_or_404(MasterProfile, pk=master_id)
 
     if not get_service_masters(service).filter(pk=master.pk).exists():
@@ -343,7 +340,11 @@ def api_cart_add(request):
             messages.extend(getattr(exc, "messages", [str(exc)]))
         return JsonResponse({"error": messages[0] if messages else "Invalid data"}, status=400)
 
-    return JsonResponse({"ok": True, "item": _cart_payload(item)}, status=201)
+    pricing = compute_cart_pricing(profile, cart=cart)
+    return JsonResponse(
+        {"ok": True, "item_id": str(item.pk), "cart": pricing},
+        status=201,
+    )
 
 
 @login_required
@@ -357,70 +358,6 @@ def api_cart_remove(request, item_id):
         return JsonResponse({"error": "item not found"}, status=404)
     item.delete()
     return JsonResponse({"ok": True})
-
-
-@login_required
-@require_POST
-@csrf_protect
-def api_cart_checkout(request):
-    profile = _ensure_profile(request.user)
-    cart = BookingCart.for_user(profile)
-    items = list(cart.items.select_related("service", "master__user"))
-
-    if not items:
-        return JsonResponse({"error": "cart is empty"}, status=400)
-
-    try:
-        appt = create_appointment_from_cart_items(profile=profile, items=items)
-    except ValidationError as exc:
-        messages = []
-        if hasattr(exc, "message_dict"):
-            for vals in exc.message_dict.values():
-                if isinstance(vals, (list, tuple)):
-                    messages.extend(vals)
-                else:
-                    messages.append(str(vals))
-        else:
-            messages.extend(getattr(exc, "messages", [str(exc)]))
-        return JsonResponse({"error": messages[0] if messages else "Invalid data"}, status=400)
-
-    try:
-        bundle = payment_services.create_or_update_payment_intent(appt)
-    except ImproperlyConfigured as cfg_err:
-        return JsonResponse({"error": str(cfg_err)}, status=500)
-    except stripe.error.StripeError as err:
-        return JsonResponse({"error": getattr(err, "user_message", str(err))}, status=502)
-
-    cart.clear()
-
-    payment_payload = {
-        "id": str(bundle.payment.id),
-        "status": bundle.payment.status,
-        "amount": str(bundle.payment.amount),
-        "amount_received": str(bundle.payment.amount_received),
-        "currency": bundle.payment.currency,
-        "livemode": bundle.payment.livemode,
-        "client_secret": getattr(bundle.intent, "client_secret", None) if bundle.intent else None,
-        "payment_intent_id": getattr(bundle.intent, "id", None) if bundle.intent else bundle.payment.stripe_payment_intent_id,
-        "publishable_key": settings.STRIPE_PUBLIC_KEY,
-    }
-
-    return JsonResponse({
-        "ok": True,
-        "appointment": {
-            "id": str(appt.pk),
-            "start_time": appt.start_time.isoformat() if appt.start_time else None,
-            "items": [
-                {
-                    "service": it.service.name,
-                    "master": _master_display(it.master),
-                    "start_time": it.start_time.isoformat() if it.start_time else None,
-                }
-                for it in appt.items.select_related("service", "master__user")
-            ],
-        },
-        "payment": payment_payload,
-    }, status=201)
 
 
 @login_required
@@ -474,31 +411,7 @@ def api_payment_verify(request, appt_id):
     })
 
 
-@csrf_exempt
-@require_POST
-def stripe_webhook(request):
-    payload = request.body
-    sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
 
-    if not settings.STRIPE_WEBHOOK_SECRET:
-        return HttpResponse(status=503)
-
-    if not sig_header:
-        return HttpResponse(status=400)
-
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-        )
-    except (ValueError, stripe.error.SignatureVerificationError):
-        return HttpResponse(status=400)
-
-    try:
-        payment_services.handle_webhook_event(event)
-    except (Payment.DoesNotExist, ValueError):
-        return HttpResponse(status=202)
-
-    return HttpResponse(status=200)
 # --- API: отмена/перенос записи ---
 from django.views.decorators.http import require_POST
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden, HttpResponse, Http404
@@ -633,7 +546,7 @@ def service_search(request):
     q = (request.GET.get('q') or '').strip()
     cat = request.GET.get('cat') or ''
     qs = (
-        Service.objects
+        Service.objects.filter(is_active=True)
         .select_related('category')
         .prefetch_related(
             Prefetch(
@@ -712,3 +625,4 @@ def service_promocodes_api(request, service_id: str):
         for pc in qs
     ]
     return JsonResponse(data, safe=False)
+

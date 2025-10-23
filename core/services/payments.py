@@ -93,7 +93,14 @@ def create_or_update_payment_intent(
 ) -> PaymentIntentBundle:
     """Create or update a Stripe PaymentIntent for the appointment."""
 
-    total = Decimal(amount if amount is not None else appointment.final_price or 0)
+    if amount is not None:
+        total = Decimal(amount)
+    else:
+        if hasattr(appointment, "total_with_tax"):
+            total = Decimal(appointment.total_with_tax or Decimal("0.00"))
+        else:
+            total = Decimal(appointment.final_price or Decimal("0.00"))
+    total = total.quantize(Decimal("0.01"))
     currency = (currency or settings.STRIPE_CURRENCY or "cad").lower()
     pm_types = list(payment_method_types or settings.STRIPE_PAYMENT_METHOD_TYPES)
 
@@ -189,7 +196,7 @@ def _apply_intent(
     payment.amount = amount_decimal if amount_decimal is not None else _from_minor_units(intent.amount)
     payment.status = intent.status
     payment.livemode = bool(intent.livemode)
-    payment.stripe_payment_method_id = getattr(intent, "payment_method", "") or ""
+    payment.stripe_payment_method_id = getattr(intent, "payment_method", None)
     payment.amount_received = _from_minor_units(getattr(intent, "amount_received", None))
     if charge:
         payment.amount_refunded = _from_minor_units(charge.get("amount_refunded"))
@@ -200,7 +207,7 @@ def _apply_intent(
     payment.captured_at = capture_ts
 
     if charge:
-        payment.stripe_charge_id = charge.get("id", "")
+        payment.stripe_charge_id = charge.get("id")
         payment.receipt_url = charge.get("receipt_url", "") or ""
 
     payment.save()

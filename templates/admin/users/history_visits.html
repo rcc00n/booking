@@ -1,0 +1,432 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    .history-wrapper {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    .history-title {
+      font-size: 1.4rem;
+      margin-bottom: 1.5rem;
+    }
+    .history-timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+    }
+    .timeline-item {
+      display: flex;
+      gap: 1.5rem;
+    }
+    .timeline-decor {
+      width: 54px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .timeline-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: #6b4dff;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      box-shadow: 0 8px 20px rgba(107, 77, 255, 0.35);
+    }
+    .timeline-icon span {
+      font-size: 0.75rem;
+    }
+    .timeline-line {
+      flex: 1;
+      width: 2px;
+      background: linear-gradient(180deg, rgba(107, 77, 255, 0.4) 0%, rgba(107, 77, 255, 0.15) 100%);
+      margin-top: 0.75rem;
+    }
+    .timeline-line.timeline-line--hidden {
+      display: none;
+    }
+    .visit-card {
+      background: #ffffff;
+      border-radius: 18px;
+      border: 1px solid #e4e6ef;
+      box-shadow: 0 12px 28px rgba(32, 39, 56, 0.08);
+      padding: 1.6rem 1.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.75rem;
+    }
+    .visit-card__content {
+      display: flex;
+      flex-direction: column;
+      gap: 1.75rem;
+      flex: 1;
+    }
+    .visit-card__aside {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      min-width: 220px;
+    }
+    .visit-card__header {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .visit-card__title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #23293b;
+    }
+    .visit-card__subtitle {
+      font-size: 0.9rem;
+      color: #5f6c85;
+    }
+    .visit-card__status {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      align-items: flex-end;
+      text-align: right;
+    }
+    .visit-status-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.35rem 0.8rem;
+      border-radius: 999px;
+      background: #ebe7ff;
+      color: #4736d2;
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .visit-status-badge.visit-status-badge--muted {
+      background: #f1f3f8;
+      color: #6d778c;
+    }
+    .visit-payment,
+    .visit-total {
+      font-size: 0.9rem;
+      color: #37415c;
+    }
+    .visit-payment__label,
+    .visit-total__label {
+      display: block;
+      font-size: 0.75rem;
+      color: #7e889f;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.15rem;
+    }
+    .visit-total__value {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #20253a;
+    }
+    .visit-items {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+    .visit-items__header {
+      display: grid;
+      grid-template-columns: 2.1fr 1.2fr 1fr 1.4fr 1fr 1.3fr;
+      gap: 1rem;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #7e889f;
+      border-bottom: 1px solid #edf0f5;
+      padding-bottom: 0.35rem;
+    }
+    .visit-item {
+      display: grid;
+      grid-template-columns: 2.1fr 1.2fr 1fr 1.4fr 1fr 1.3fr;
+      gap: 1rem;
+      align-items: center;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid #f0f2f8;
+    }
+    .visit-item:last-child {
+      border-bottom: none;
+    }
+    .visit-item__cell {
+      font-size: 0.9rem;
+      color: #37415c;
+    }
+    .visit-item__cell--service {
+      font-weight: 600;
+      color: #23293b;
+    }
+    .visit-item__cell--price {
+      text-align: right;
+    }
+    .visit-item__price {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.45rem;
+    }
+    .visit-item__price-original {
+      text-decoration: line-through;
+      color: #9aa2b6;
+      font-weight: 500;
+    }
+    .visit-item__price-final {
+      font-weight: 600;
+      color: #23293b;
+    }
+    .visit-item__empty {
+      font-size: 0.9rem;
+      color: #5f6c85;
+      padding: 0.5rem 0;
+    }
+    .visit-card__actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.75rem;
+    }
+    .visit-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.55rem 1.35rem;
+      border-radius: 999px;
+      border: 1px solid #6b4dff;
+      color: #6b4dff;
+      background: #ffffff;
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-decoration: none;
+      transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .visit-action:hover {
+      background: #6b4dff;
+      color: #ffffff;
+      box-shadow: 0 6px 16px rgba(107, 77, 255, 0.35);
+    }
+    .history-empty {
+      margin-top: 1rem;
+      color: #5f6c85;
+    }
+    .history-log-link {
+      margin-top: 1.75rem;
+      font-size: 0.9rem;
+    }
+    @media (min-width: 960px) {
+      .visit-card {
+        flex-direction: row;
+        align-items: stretch;
+      }
+      .visit-card__aside {
+        align-items: flex-end;
+      }
+      .visit-card__actions {
+        margin-top: auto;
+      }
+    }
+    @media (max-width: 720px) {
+      .history-wrapper {
+        margin: 0 0.75rem;
+      }
+      .timeline-item {
+        flex-direction: column;
+      }
+      .timeline-decor {
+        flex-direction: row;
+        width: auto;
+        justify-content: flex-start;
+        gap: 0.75rem;
+      }
+      .timeline-line {
+        display: none;
+      }
+      .visit-card {
+        padding: 1.35rem;
+      }
+      .visit-card__aside {
+        min-width: 0;
+        align-items: flex-start;
+      }
+      .visit-card__status {
+        align-items: flex-start;
+        text-align: left;
+      }
+      .visit-card__actions {
+        justify-content: flex-start;
+      }
+      .visit-items__header {
+        display: none;
+      }
+      .visit-item {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        row-gap: 0.35rem;
+        align-items: flex-start;
+      }
+      .visit-item__cell--price {
+        grid-column: span 2;
+      }
+      .visit-item__price {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="history-wrapper">
+    <h1 class="history-title">
+      {% trans "History" %}: {{ user_obj.get_full_name }}
+    </h1>
+
+    {% if not visits %}
+      <p class="history-empty">{% trans "No visits yet." %}</p>
+    {% else %}
+      <div class="history-timeline">
+        {% for appt in visits %}
+          <div class="timeline-item">
+            <div class="timeline-decor">
+              <div class="timeline-icon" aria-hidden="true">
+                <span>{% trans "AP" %}</span>
+              </div>
+              <div class="timeline-line{% if forloop.last %} timeline-line--hidden{% endif %}"></div>
+            </div>
+            <div class="visit-card">
+              <div class="visit-card__content">
+                <div class="visit-card__header">
+                  <div class="visit-card__title">{% trans "Appointment" %}</div>
+                  <div class="visit-card__subtitle">
+                    {% if appt.start_time %}
+                      {{ appt.start_time|date:"D d M Y • H:i" }}
+                    {% else %}
+                      {% trans "Start time not set" %}
+                    {% endif %}
+                  </div>
+                </div>
+
+                <div class="visit-items">
+                  <div class="visit-items__header">
+                    <span>{% trans "Service" %}</span>
+                    <span>{% trans "Date" %}</span>
+                    <span>{% trans "Time" %}</span>
+                    <span>{% trans "Master" %}</span>
+                    <span>{% trans "Duration" %}</span>
+                    <span>{% trans "Total price" %}</span>
+                  </div>
+
+                  {% with items=appt.items.all %}
+                    {% if items %}
+                      {% for item in items %}
+                        <div class="visit-item">
+                          <div class="visit-item__cell visit-item__cell--service">
+                            {% if item.service %}
+                              {{ item.service.name }}
+                            {% else %}
+                              {% trans "Service" %} --
+                            {% endif %}
+                          </div>
+                          <div class="visit-item__cell">
+                            {% if item.start_time %}
+                              {{ item.start_time|date:"Y-m-d" }}
+                            {% else %}
+                              --
+                            {% endif %}
+                          </div>
+                          <div class="visit-item__cell">
+                            {% if item.start_time %}
+                              {{ item.start_time|date:"H:i" }}
+                            {% else %}
+                              --
+                            {% endif %}
+                          </div>
+                          <div class="visit-item__cell">
+                            {% if item.master and item.master.user %}
+                              {{ item.master.user.get_full_name }}
+                            {% elif item.master %}
+                              {{ item.master }}
+                            {% else %}
+                              --
+                            {% endif %}
+                          </div>
+                          <div class="visit-item__cell">
+                            {% if item.duration_min %}
+                              {{ item.duration_min }} {% trans "min" %}
+                            {% else %}
+                              --
+                            {% endif %}
+                          </div>
+                          <div class="visit-item__cell visit-item__cell--price">
+                            <div class="visit-item__price">
+                              {% with orig=item.unit_price|default_if_none:item.service.base_price %}
+                                {% with final=item.final_price|default_if_none:orig %}
+                                  {% if final and orig and final != orig %}
+                                    <span class="visit-item__price-original">{{ orig|floatformat:2 }}</span>
+                                    <span class="visit-item__price-final">{{ final|floatformat:2 }}</span>
+                                  {% elif final %}
+                                    <span class="visit-item__price-final">{{ final|floatformat:2 }}</span>
+                                  {% elif orig %}
+                                    <span class="visit-item__price-final">{{ orig|floatformat:2 }}</span>
+                                  {% else %}
+                                    <span class="visit-item__price-final">--</span>
+                                  {% endif %}
+                                {% endwith %}
+                              {% endwith %}
+                            </div>
+                          </div>
+                        </div>
+                      {% endfor %}
+                    {% else %}
+                      <div class="visit-item">
+                        <div class="visit-item__cell visit-item__empty" style="grid-column: 1 / -1;">
+                          {% trans "No items recorded for this appointment." %}
+                        </div>
+                      </div>
+                    {% endif %}
+                  {% endwith %}
+                </div>
+              </div>
+
+              <div class="visit-card__aside">
+                <div class="visit-card__status">
+                  {% if appt.current_status %}
+                    <span class="visit-status-badge">{{ appt.current_status }}</span>
+                  {% else %}
+                    <span class="visit-status-badge visit-status-badge--muted">--</span>
+                  {% endif %}
+                  <div class="visit-payment">
+                    <span class="visit-payment__label">{% trans "Payment" %}</span>
+                    <span>{{ appt.payment_status.name|default:"--" }}</span>
+                  </div>
+                  <div class="visit-total">
+                    <span class="visit-total__label">{% trans "Appointment total" %}</span>
+                    <span class="visit-total__value">
+                      {% if appt.final_price %}
+                        {{ appt.final_price|floatformat:2 }}
+                      {% else %}
+                        --
+                      {% endif %}
+                    </span>
+                  </div>
+                </div>
+                <div class="visit-card__actions">
+                  <a class="visit-action" href="{% url change_url_name appt.pk %}">{% trans "Open appointment" %}</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <p class="history-log-link">
+      {% trans "Need the default object change log?" %} <a href="?mode=log">{% trans "Open Django log view" %}</a>.
+    </p>
+  </div>
+{% endblock %}

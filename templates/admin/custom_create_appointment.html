@@ -189,8 +189,30 @@
             border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.08);display:none
         }
         .combo-open .combo-list{display:block}
-        .combo-item{padding:10px 12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        .combo-item:hover,.combo-item[aria-selected="true"]{background:#f3f4f6}
+        .combo-group{padding:8px 0;border-bottom:1px solid var(--ab-border)}
+        .combo-group:first-child{padding-top:10px}
+        .combo-group:last-child{border-bottom:0;padding-bottom:10px}
+        .combo-group__title{
+            margin:0 10px 6px;
+            padding:8px 12px;
+            font-weight:600;
+            color:#1f2937;
+            background:#f7f6f1;
+            border-radius:10px;
+        }
+        .combo-group__items{display:flex;flex-direction:column;gap:4px}
+        .combo-item{
+            padding:8px 14px 8px 20px;
+            margin:0 10px;
+            cursor:pointer;
+            border-radius:8px;
+            white-space:normal;
+            line-height:1.35;
+        }
+        .combo-item:hover,
+        .combo-item[aria-selected="true"]{
+            background:#f3f4f6;
+        }
         .combo-empty{padding:10px 12px;color:var(--ab-muted)}
         .ab-hidden{display:none !important}
 
@@ -283,12 +305,55 @@
         .btn-success:hover{background:var(--ab-green-600)}
 
         .ab-total{
-
-            border-radius:14px;padding:12px 18px;display:flex;align-items:center;justify-content:space-between;
-
+            border:1px solid var(--ab-border);
+            border-radius:14px;
+            padding:16px;
+            background:#fff;
+            display:flex;
+            flex-direction:column;
+            gap:8px;
         }
-        .ab-total::before{content:"Total";font-size:16px;font-weight:400;color:#1f2937}
-        #grand-total{font-size:28px;font-weight:500;color:#0f172a}
+        .ab-total-line{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            font-size:16px;
+            color:#1f2937;
+        }
+        .ab-total-line strong{
+            font-size:18px;
+            font-weight:600;
+            color:#0f172a;
+        }
+        .ab-total-line--grand{
+            border-top:1px solid var(--ab-border);
+            padding-top:8px;
+            margin-top:4px;
+            font-weight:600;
+        }
+        .ab-total-line--grand strong{
+            font-size:24px;
+        }
+        .ab-summary{
+            display:flex;
+            flex-direction:column;
+            gap:4px;
+            align-items:flex-end;
+        }
+        .ab-summary-line{
+            display:flex;
+            justify-content:space-between;
+            gap:16px;
+            font-size:14px;
+            color:#1f2937;
+        }
+        .ab-summary-line strong{
+            font-weight:600;
+            color:#0f172a;
+        }
+        .ab-summary-line--total strong{
+            font-size:16px;
+        }
 
         @media (prefers-reduced-motion: reduce){
             .ab-btn,.btn{transition:none}
@@ -298,6 +363,7 @@
 {% endblock %}
 
 {% block content %}
+    <script src="{% static 'admin/js/admin/RelatedObjectLookups.js' %}"></script>
     <div class="ab-wrap">
         <form method="post" action="" id="appt-form" class="ab-card">
             {% csrf_token %}
@@ -333,6 +399,17 @@
                             {% endfor %}
                         </select>
                     </div>  {# ←ВАЖНО: закрываем .combo #}
+                    {% url 'admin:auth_user_add' as raw_add_client_url %}
+                    {% with raw_add_client_url|add:'?_to_field=id&_popup=1' as add_client_url %}
+                        <a
+                            href="{{ add_client_url }}"
+                            class="related-widget-wrapper-link add-related"
+                            id="add_id_client"
+                            title="Add client"
+                            onclick="return showAddAnotherPopup(this);"
+                            style="margin-left:8px"
+                        >＋ Add client</a>
+                    {% endwith %}
 
                     {% if field_errors.client %}
                         {% for e in field_errors.client %}<div class="ab-field-error">{{ e }}</div>{% endfor %}
@@ -342,7 +419,7 @@
             </div>
 
             <!-- STEP 2: ITEMS -->
-            <div id="items-section" class="ab-hidden" style="margin-top:20px">
+            <div id="items-section" style="margin-top:20px">
                 <div class="ab-actions" style="margin-bottom:10px">
                     <button type="button" class="ab-btn success" id="btn-add-item">
                         <!-- плюс -->
@@ -361,8 +438,19 @@
 
             <div class="ab-items" id="items-container"></div>
 
-            <div class="ab-total">
-                <strong id="grand-total">$0.00</strong>
+            <div class="ab-total" id="appt-totals">
+                <div class="ab-total-line">
+                    <span>Subtotal</span>
+                    <strong id="appt-subtotal">CA$0.00</strong>
+                </div>
+                <div class="ab-total-line" id="appt-tax-row">
+                    <span id="gst-label">GST</span>
+                    <strong id="appt-tax">CA$0.00</strong>
+                </div>
+                <div class="ab-total-line ab-total-line--grand">
+                    <span>Total</span>
+                    <strong id="appt-total">CA$0.00</strong>
+                </div>
             </div>
         </div>
 
@@ -395,12 +483,17 @@
     </div>
 
     {# ---- Данные из контекста (как и раньше) ---- #}
+    {{ clients|json_script:"ab-clients" }}
     {{ masters|json_script:"ab-masters" }}
     {{ services_by_master|json_script:"ab-services-by-master" }}
     {{ initial_first_item|json_script:"ab-initial-first" }}
     {{ service_forms_map|json_script:"ab-service-forms" }}
     {{ intake_forms_catalog|json_script:"ab-intake-forms" }}
     {{ availability_url|json_script:"ab-availability-url" }}
+
+    {{ gst_percent|json_script:"ab-gst-percent" }}
+    {{ gst_enabled|json_script:"ab-gst-enabled" }}
+    {{ currency_code|json_script:"ab-currency-code" }}
 
     {{ posted_items|default:'[]'|json_script:"ab-posted-items" }}
     {{ item_errors|default:'{}'|json_script:"ab-item-errors" }}
@@ -419,11 +512,25 @@
     <script>
         (function(){
             // ---- Data from backend
+            const CLIENTS = JSON.parse(document.getElementById('ab-clients').textContent || '[]');
             const MASTERS = JSON.parse(document.getElementById('ab-masters').textContent || '[]');
             const SERVICES_BY_MASTER = JSON.parse(document.getElementById('ab-services-by-master').textContent || '{}');
             const INITIAL_FIRST = JSON.parse(document.getElementById('ab-initial-first').textContent || '{}');
             const SERVICE_FORMS = JSON.parse(document.getElementById('ab-service-forms').textContent || '{}');
             const INTAKE_FORMS = JSON.parse(document.getElementById('ab-intake-forms').textContent || '{}');
+            const GST_PERCENT = Number(JSON.parse(document.getElementById('ab-gst-percent').textContent || '"5.0"')) || 5;
+            const GST_ENABLED = Boolean(JSON.parse(document.getElementById('ab-gst-enabled').textContent || 'true'));
+            const CURRENCY_CODE = (JSON.parse(document.getElementById('ab-currency-code').textContent || '"CAD"') || "CAD").toLowerCase();
+            const CURRENCY_SYMBOL = (function(code){
+                switch(code){
+                    case "cad":
+                        return "CA$";
+                    case "usd":
+                        return "$";
+                    default:
+                        return code ? code.toUpperCase() + " " : "CA$";
+                }
+            })(CURRENCY_CODE);
 
             const POSTED_ITEMS = JSON.parse(document.getElementById('ab-posted-items').textContent || '[]');
             const ITEM_ERRORS  = JSON.parse(document.getElementById('ab-item-errors').textContent || '{}');
@@ -439,10 +546,16 @@
 
             // ---- Elements
             const clientEl    = document.getElementById('id_client');
-            const itemsSection= document.getElementById('items-section');
             const container   = document.getElementById('items-container');
             const totalForms  = document.getElementById('id_items-TOTAL_FORMS');
-            const grandTotal  = document.getElementById('grand-total');
+            const subtotalDisplay = document.getElementById('appt-subtotal');
+            const taxDisplay = document.getElementById('appt-tax');
+            const totalDisplay = document.getElementById('appt-total');
+            const taxRowDisplay = document.getElementById('appt-tax-row');
+            const gstLabelDisplay = document.getElementById('gst-label');
+            if (taxRowDisplay && !GST_ENABLED) {
+                taxRowDisplay.classList.add('ab-hidden');
+            }
             const intakeSection = document.getElementById('intake-section');
             const intakeContainer = document.getElementById('intake-forms-container');
             const intakePayloadInput = document.getElementById('id_intake_payload');
@@ -460,6 +573,20 @@
             });
 
             /* ────────────── Client combobox ────────────── */
+            if (clientEl && CLIENTS.length) {
+                const hasRealOptions = Array.from(clientEl.options).some(o => o.value);
+                if (!hasRealOptions) {
+                    const frag = document.createDocumentFragment();
+                    CLIENTS.forEach(c => {
+                        const opt = document.createElement('option');
+                        opt.value = String(c.id);
+                        opt.textContent = c.label || String(c.id);
+                        frag.appendChild(opt);
+                    });
+                    clientEl.appendChild(frag);
+                }
+            }
+
             (function clientComboBox(){
                 const input     = document.getElementById('client_combo_input');
                 const listEl    = document.getElementById('client_combo_list');
@@ -499,7 +626,6 @@
                     input.value = item.label;
                     clientEl.value = item.id;
                     clientEl.dispatchEvent(new Event('change', { bubbles:true }));
-                    itemsSection.classList.toggle('ab-hidden', !clientEl.value);
                     close();
                 }
 
@@ -507,8 +633,6 @@
                     const found = ALL.find(x => String(x.id) === String(POSTED_CLIENT));
                     if (found){ clientEl.value = found.id; input.value = found.label; }
                 }
-                itemsSection.classList.toggle('ab-hidden', !clientEl.value);
-
                 input.addEventListener('focus', () => { filter(input.value); open(); });
                 input.addEventListener('click',  () => { filter(input.value); open(); });
                 input.addEventListener('input', () => { filter(input.value); open(); clientEl.value = ''; });
@@ -524,7 +648,25 @@
             })();
 
             /* ────────────── Items helpers ────────────── */
-            function money(n){ n = Number(n||0); return '$' + n.toFixed(2); }
+            function money(n){
+                const amount = Number(n || 0);
+                return `${CURRENCY_SYMBOL}${amount.toFixed(2)}`;
+            }
+
+            function roundCurrency(value){
+                return Math.round((Number(value) || 0) * 100) / 100;
+            }
+
+            function formatPercent(value){
+                const num = Number(value);
+                if (!Number.isFinite(num)) {
+                    return "";
+                }
+                const fixed = num % 1 === 0 ? num.toFixed(0) : num.toFixed(2);
+                return fixed.replace(/\.0+$/, "").replace(/0+$/, "").replace(/\.$/, "");
+            }
+
+            const GST_LABEL = `GST ${formatPercent(GST_PERCENT)}%`;
             function buildOption(v, t){ const o = document.createElement('option'); o.value=v; o.textContent=t; return o; }
 
             const PROMO_ENDPOINT_ROOT = '/accounts/api/services/';
@@ -668,16 +810,45 @@
             }
             function populateServices(select, masterId, options){
                 const opts = options || {};
+                const previous = opts.resetSelection ? '' : select.value;
+
                 select.innerHTML = '';
                 select.appendChild(buildOption('', '---------'));
+
                 const mid = IS_MASTER && CURRENT_MASTER_ID ? CURRENT_MASTER_ID : String(masterId || '');
                 const list = SERVICES_BY_MASTER[String(mid)] || [];
-                list.forEach(s => {
-                    const o = buildOption(String(s.id), s.name);
-                    o.dataset.price    = s.base_price;
-                    o.dataset.duration = s.duration_min;
-                    select.appendChild(o);
+                const grouped = new Map();
+                list.forEach(svc => {
+                    const cat = ((svc.category || '') + '').trim() || 'Other';
+                    if (!grouped.has(cat)){
+                        grouped.set(cat, []);
+                    }
+                    grouped.get(cat).push(svc);
                 });
+
+                Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b)).forEach(cat => {
+                    const grp = document.createElement('optgroup');
+                    grp.label = cat;
+                    grouped.get(cat).forEach(svc => {
+                        const o = buildOption(String(svc.id), svc.name);
+                        o.dataset.price = svc.base_price;
+                        o.dataset.duration = svc.duration_min;
+                        if (svc.total_duration_min != null) {
+                            o.dataset.totalDuration = svc.total_duration_min;
+                        }
+                        o.dataset.isTaxable = svc.is_taxable ? "1" : "0";
+                        o.dataset.category = cat;
+                        grp.appendChild(o);
+                    });
+                    select.appendChild(grp);
+                });
+
+                if (!opts.resetSelection && previous){
+                    select.value = previous;
+                } else if (opts.resetSelection){
+                    select.value = '';
+                }
+
                 select.disabled = list.length === 0;
 
                 const combo = opts.combo;
@@ -685,6 +856,8 @@
                     combo.rebuildFromSelect();
                     if (opts.resetSelection && typeof combo.clear === 'function'){
                         combo.clear();
+                    } else if (!opts.resetSelection && typeof combo.syncFromSelect === 'function'){
+                        combo.syncFromSelect();
                     }
                 } else if (opts.resetSelection){
                     select.value = '';
@@ -699,13 +872,51 @@
                     }
                 }
             }
+            function updateRowSummary(row){
+                const priceInput = row.querySelector('.js-price');
+                const rawValue = priceInput && priceInput.value !== '' ? Number(priceInput.value) : NaN;
+                const datasetValue = row.dataset.finalPrice ? Number(row.dataset.finalPrice) : 0;
+                const subtotal = roundCurrency(Number.isFinite(rawValue) ? rawValue : datasetValue);
+                row.dataset.finalPrice = String(subtotal.toFixed(2));
+                const taxable = GST_ENABLED && row.dataset.taxable === "1";
+                const tax = taxable ? roundCurrency(subtotal * GST_PERCENT / 100) : 0;
+                const total = roundCurrency(subtotal + tax);
+
+                const subtotalEl = row.querySelector('.js-item-subtotal');
+                if (subtotalEl) subtotalEl.textContent = money(subtotal);
+
+                const taxRowEl = row.querySelector('.js-item-tax-row');
+                if (taxRowEl) taxRowEl.classList.toggle('ab-hidden', !taxable);
+
+                const taxLabelEl = row.querySelector('.js-item-tax-label');
+                if (taxLabelEl) taxLabelEl.textContent = GST_LABEL;
+
+                const taxEl = row.querySelector('.js-item-tax');
+                if (taxEl) taxEl.textContent = money(tax);
+
+                const totalEl = row.querySelector('.js-item-total');
+                if (totalEl) totalEl.textContent = money(total);
+
+                return { subtotal, tax, total };
+            }
+
             function recalcGrandTotal(){
-                let sum = 0;
-                container.querySelectorAll('.js-price').forEach(inp => {
-                    const v = parseFloat(inp.value);
-                    if (!isNaN(v)) sum += v;
+                let subtotalSum = 0;
+                let taxSum = 0;
+                container.querySelectorAll('.ab-item').forEach(row => {
+                    const { subtotal, tax } = updateRowSummary(row);
+                    subtotalSum += subtotal;
+                    taxSum += tax;
                 });
-                grandTotal.textContent = money(sum);
+                subtotalSum = roundCurrency(subtotalSum);
+                taxSum = roundCurrency(taxSum);
+                const totalSum = roundCurrency(subtotalSum + taxSum);
+
+                if (subtotalDisplay) subtotalDisplay.textContent = money(subtotalSum);
+                if (taxDisplay) taxDisplay.textContent = money(taxSum);
+                if (totalDisplay) totalDisplay.textContent = money(totalSum);
+                if (taxRowDisplay) taxRowDisplay.classList.toggle('ab-hidden', !GST_ENABLED);
+                if (gstLabelDisplay) gstLabelDisplay.textContent = GST_LABEL;
             }
 
             function formatSlotLabel(dateObj){
@@ -718,6 +929,17 @@
                 if (!iso) return null;
                 const dt = new Date(iso);
                 return Number.isNaN(dt.getTime()) ? null : dt;
+            }
+
+            function syncTimeControl(timeInput){
+                if (!timeInput) return;
+                const picker = timeInput.nextElementSibling;
+                const val = timeInput.value || '';
+                if (picker && picker.classList && picker.classList.contains('js-quarter-picker')){
+                    picker.value = val;
+                }
+                timeInput.dispatchEvent(new Event('input', { bubbles:true }));
+                timeInput.dispatchEvent(new Event('change', { bubbles:true }));
             }
 
             function availabilityUrlFor(serviceId, masterId, dateStr){
@@ -886,13 +1108,27 @@
                     const serviceId = serviceEl.value;
                     const dateStr = dateEl.value;
                     const seq = ++requestSeq;
-                    setStatus('loading', 'Loading available slots…');
+                    setStatus('loading', 'Loading available slots...');
                     fetchAvailability(serviceId, masterId, dateStr)
                         .then(payload => {
                             if (seq !== requestSeq) return;
-                            const masters = payload && Array.isArray(payload.masters) ? payload.masters : [];
-                            const entry = masters.find(m => String(m.id) === String(masterId));
-                            const slots = entry ? entry.slots || [] : [];
+                            const masters = (payload && Array.isArray(payload.masters)) ? payload.masters : [];
+                            let slots = [];
+                            if (masters.length){
+                                let entry = null;
+                                if (masterId){
+                                    entry = masters.find(m => String(m.id) === String(masterId)) || null;
+                                }
+                                if (!entry){
+                                    entry = masters[0] || null;
+                                }
+                                if (entry && Array.isArray(entry.slots)){
+                                    slots = entry.slots.slice();
+                                }
+                            }
+                            if (!slots.length && payload && Array.isArray(payload.slots)){
+                                slots = payload.slots.slice();
+                            }
                             renderSlots(slots);
                         })
                         .catch(err => {
@@ -1298,98 +1534,292 @@
             // generic "combo" поверх <select>
             function makeComboFromSelect(selectEl, placeholder) {
                 if (!selectEl) return null;
-                const existingWrap = selectEl.closest('.combo');
-                if (existingWrap){
-                    const input = existingWrap.querySelector('.combo-input');
-                    const list  = existingWrap.querySelector('.combo-list');
-                    function optionsToItems() {
-                        return Array.from(selectEl.options).filter(o=>o.value!=='')
-                            .map(o => ({ id:o.value, label:o.textContent, opt:o }));
-                    }
-                    let ALL = optionsToItems();
-                    let filtered = ALL.slice();
-                    let activeIdx = -1;
 
-                    function render() {
-                        if (!list) return;
-                        list.innerHTML = '';
-                        if (!filtered.length){ const em = document.createElement('div'); em.className='combo-empty'; em.textContent='No matches'; list.appendChild(em); return; }
-                        filtered.forEach((it, idx) => {
-                            const div = document.createElement('div'); div.className='combo-item'; div.setAttribute('role','option');
-                            if (idx===activeIdx) div.setAttribute('aria-selected','true');
-                            div.textContent = it.label;
-                            div.addEventListener('mousedown', (e) => {
-                                e.preventDefault(); selectEl.value = it.id; selectEl.dispatchEvent(new Event('change', { bubbles:true }));
-                                if (input) input.value = it.label; existingWrap.classList.remove('combo-open');
-                            });
-                            list.appendChild(div);
-                        });
-                    }
-                    function filter(term){
-                        const t = (term||'').trim().toLowerCase();
-                        filtered = t ? ALL.filter(x => x.label.toLowerCase().includes(t)) : ALL.slice();
-                        activeIdx = filtered.length ? 0 : -1; render();
-                    }
-                    return {
-                        rebuildFromSelect(){ ALL = optionsToItems(); filter(input ? input.value : ''); },
-                        clear(){ selectEl.value=''; if (input) input.value=''; filter(''); },
-                        syncFromSelect(){
-                            const cur = Array.from(selectEl.options).find(o => o.value === selectEl.value);
-                            if (input) input.value = cur ? cur.textContent : ''; filter(input ? input.value : '');
-                        }
-                    };
+                const existingWrap = selectEl.closest('.combo');
+                if (existingWrap && existingWrap.__comboInstance){
+                    return existingWrap.__comboInstance;
                 }
 
-                // строим с нуля
-                const wrap = document.createElement('div'); wrap.className='combo';
-                selectEl.parentNode.insertBefore(wrap, selectEl); wrap.appendChild(selectEl);
-                const input = document.createElement('input');
-                input.type='text'; input.className='combo-input'; input.placeholder = placeholder || 'Type to search…'; input.autocomplete='off';
-                wrap.insertBefore(input, selectEl);
-                const list = document.createElement('div'); list.className='combo-list'; wrap.appendChild(list);
+                let wrap = existingWrap;
+                let input = wrap ? wrap.querySelector('.combo-input') : null;
+                let list = wrap ? wrap.querySelector('.combo-list') : null;
+
+                if (!wrap){
+                    wrap = document.createElement('div');
+                    wrap.className = 'combo';
+                    selectEl.parentNode.insertBefore(wrap, selectEl);
+                    wrap.appendChild(selectEl);
+                }
+                if (!input){
+                    input = document.createElement('input');
+                    input.type = 'text';
+                    input.className = 'combo-input';
+                    input.placeholder = placeholder || 'Type to search...';
+                    input.autocomplete = 'off';
+                    wrap.insertBefore(input, selectEl);
+                }
+                if (!list){
+                    list = document.createElement('div');
+                    list.className = 'combo-list';
+                    wrap.appendChild(list);
+                }
                 selectEl.classList.add('ab-hidden');
 
-                function optionsToItems() {
-                    return Array.from(selectEl.options).filter(o=>o.value!=='')
-                        .map(o => ({ id:o.value, label:o.textContent, opt:o }));
+                function collectGroups(){
+                    const groups = [];
+                    Array.from(selectEl.children || []).forEach(node => {
+                        if (!node || node.nodeType !== 1) return;
+                        const tag = (node.tagName || '').toUpperCase();
+                        if (tag === 'OPTGROUP'){
+                            const groupLabel = (node.label || '').trim() || 'Other';
+                            const options = Array.from(node.children || [])
+                                .filter(child => child && child.nodeType === 1 && (child.tagName || '').toUpperCase() === 'OPTION' && child.value !== '')
+                                .map(opt => {
+                                    const text = (opt.textContent || '').trim();
+                                    return {
+                                        id: opt.value,
+                                        label: text,
+                                        displayLabel: `${groupLabel} - ${text}`,
+                                        groupLabel,
+                                        searchValue: `${groupLabel} ${text}`.toLowerCase(),
+                                        opt,
+                                    };
+                                });
+                            if (options.length){
+                                groups.push({ label: groupLabel, items: options });
+                            }
+                        } else if (tag === 'OPTION' && node.value !== ''){
+                            const text = (node.textContent || '').trim();
+                            const option = {
+                                id: node.value,
+                                label: text,
+                                displayLabel: text,
+                                groupLabel: '',
+                                searchValue: text.toLowerCase(),
+                                opt: node,
+                            };
+                            let base = groups.find(g => g.label === '');
+                            if (!base){
+                                base = { label: '', items: [] };
+                                groups.push(base);
+                            }
+                            base.items.push(option);
+                        }
+                    });
+                    return groups;
                 }
-                let ALL = optionsToItems(); let filtered = ALL.slice(); let activeIdx = -1;
 
-                function render(){
-                    list.innerHTML = '';
-                    if (!filtered.length){ const em = document.createElement('div'); em.className='combo-empty'; em.textContent='No matches'; list.appendChild(em); return; }
-                    filtered.forEach((it, idx) => {
-                        const div = document.createElement('div'); div.className='combo-item'; div.setAttribute('role','option');
-                        if (idx===activeIdx) div.setAttribute('aria-selected','true');
-                        div.textContent = it.label;
-                        div.addEventListener('mousedown', (e) => {
-                            e.preventDefault(); selectEl.value = it.id; selectEl.dispatchEvent(new Event('change', { bubbles:true }));
-                            input.value = it.label; wrap.classList.remove('combo-open');
-                        });
-                        list.appendChild(div);
+                function cloneGroups(source){
+                    return source.map(group => ({
+                        label: group.label,
+                        items: group.items.slice(),
+                    }));
+                }
+
+                let allGroups = collectGroups();
+                let visibleGroups = cloneGroups(allGroups);
+                let flatItems = [];
+                let activeIdx = -1;
+
+                function updateActiveStyles(){
+                    flatItems.forEach((entry, idx) => {
+                        if (idx === activeIdx){
+                            entry.node.setAttribute('aria-selected', 'true');
+                        } else {
+                            entry.node.removeAttribute('aria-selected');
+                        }
                     });
                 }
-                function open(){ wrap.classList.add('combo-open'); input.setAttribute('aria-expanded','true'); }
-                function close(){ wrap.classList.remove('combo-open'); input.setAttribute('aria-expanded','false'); activeIdx=-1; }
-                function filter(term){ const t=(term||'').trim().toLowerCase(); filtered=t?ALL.filter(x=>x.label.toLowerCase().includes(t)):ALL.slice(); activeIdx=filtered.length?0:-1; render(); }
 
-                input.addEventListener('focus', ()=>{ filter(input.value); open(); });
-                input.addEventListener('click', ()=>{ filter(input.value); open(); });
-                input.addEventListener('input', ()=>{ filter(input.value); open(); selectEl.value=''; });
-                input.addEventListener('keydown', (e)=>{
-                    if (!wrap.classList.contains('combo-open') && (e.key==='ArrowDown'||e.key==='ArrowUp')){ open(); render(); return; }
-                    if (e.key==='ArrowDown'){ e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx+1)%filtered.length; render(); } }
-                    if (e.key==='ArrowUp'){   e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx-1+filtered.length)%filtered.length; render(); } }
-                    if (e.key==='Enter'){ if (wrap.classList.contains('combo-open') && filtered[activeIdx]){ e.preventDefault(); selectEl.value=filtered[activeIdx].id; selectEl.dispatchEvent(new Event('change',{bubbles:true})); input.value=filtered[activeIdx].label; close(); } }
-                    if (e.key==='Escape'){ close(); }
-                });
-                document.addEventListener('click', (e)=>{ if (!wrap.contains(e.target)) close(); });
+                function renderList(){
+                    if (!list) return;
+                    list.innerHTML = '';
+                    flatItems = [];
+                    if (!visibleGroups.length){
+                        const empty = document.createElement('div');
+                        empty.className = 'combo-empty';
+                        empty.textContent = 'No matches';
+                        list.appendChild(empty);
+                        return;
+                    }
+                    visibleGroups.forEach(group => {
+                        if (!group.items.length) return;
+                        const groupBox = document.createElement('div');
+                        groupBox.className = 'combo-group';
+                        if (group.label){
+                            const title = document.createElement('div');
+                            title.className = 'combo-group__title';
+                            title.textContent = group.label;
+                            groupBox.appendChild(title);
+                        }
+                        const itemsWrap = document.createElement('div');
+                        itemsWrap.className = 'combo-group__items';
+                        group.items.forEach(item => {
+                            const optionEl = document.createElement('div');
+                            optionEl.className = 'combo-item';
+                            optionEl.setAttribute('role', 'option');
+                            optionEl.textContent = item.displayLabel;
+                            optionEl.dataset.value = item.id;
+                            optionEl.addEventListener('mousedown', (evt) => {
+                                evt.preventDefault();
+                                chooseItem(item);
+                            });
+                            flatItems.push({ item, node: optionEl });
+                            itemsWrap.appendChild(optionEl);
+                        });
+                        groupBox.appendChild(itemsWrap);
+                        list.appendChild(groupBox);
+                    });
+                    updateActiveStyles();
+                }
 
-                return {
-                    rebuildFromSelect(){ ALL = optionsToItems(); filter(input.value); },
-                    clear(){ selectEl.value=''; input.value=''; filter(''); },
-                    syncFromSelect(){ const cur = Array.from(selectEl.options).find(o=>o.value===selectEl.value); input.value = cur ? cur.textContent : ''; filter(''); }
+                function filterList(term, opts){
+                    const t = (term || '').trim().toLowerCase();
+                    const selectedId = opts && opts.selectedId ? String(opts.selectedId) : null;
+                    const preserveActive = !!(opts && opts.preserveActive);
+                    const prevActiveId = preserveActive && activeIdx >= 0 && flatItems[activeIdx] ? flatItems[activeIdx].item.id : null;
+
+                    if (!t){
+                        visibleGroups = cloneGroups(allGroups);
+                    } else {
+                        visibleGroups = [];
+                        allGroups.forEach(group => {
+                            const groupMatch = group.label && group.label.toLowerCase().includes(t);
+                            const seen = new Set();
+                            const matched = [];
+                            group.items.forEach(item => {
+                                if (groupMatch || item.searchValue.includes(t)){
+                                    if (!seen.has(item.id)){
+                                        seen.add(item.id);
+                                        matched.push(item);
+                                    }
+                                }
+                            });
+                            if (matched.length){
+                                visibleGroups.push({ label: group.label, items: matched });
+                            }
+                        });
+                    }
+
+                    activeIdx = -1;
+                    renderList();
+
+                    if (selectedId){
+                        activeIdx = flatItems.findIndex(entry => entry.item.id === selectedId);
+                    } else if (preserveActive && prevActiveId){
+                        activeIdx = flatItems.findIndex(entry => entry.item.id === prevActiveId);
+                    }
+                    if (activeIdx === -1 && flatItems.length){
+                        activeIdx = 0;
+                    }
+                    updateActiveStyles();
+                }
+
+                function chooseItem(item){
+                    selectEl.value = item.id;
+                    selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+                    if (input){
+                        input.value = item.displayLabel;
+                    }
+                    filterList('', { selectedId: item.id });
+                    closeCombo();
+                }
+
+                function openCombo(){
+                    wrap.classList.add('combo-open');
+                    if (input) input.setAttribute('aria-expanded', 'true');
+                }
+
+                function closeCombo(){
+                    wrap.classList.remove('combo-open');
+                    if (input) input.setAttribute('aria-expanded', 'false');
+                }
+
+                if (input){
+                    input.addEventListener('focus', () => {
+                        const selectedId = selectEl.value || '';
+                        filterList('', { selectedId });
+                        openCombo();
+                    });
+                    input.addEventListener('click', () => {
+                        const selectedId = selectEl.value || '';
+                        filterList('', { selectedId });
+                        openCombo();
+                    });
+                    input.addEventListener('input', () => {
+                        filterList(input.value);
+                        openCombo();
+                        selectEl.value = '';
+                    });
+                    input.addEventListener('keydown', (evt) => {
+                        if (!wrap.classList.contains('combo-open') && (evt.key === 'ArrowDown' || evt.key === 'ArrowUp')){
+                            const selectedId = selectEl.value || '';
+                            filterList('', { selectedId });
+                            openCombo();
+                            return;
+                        }
+                        if (evt.key === 'ArrowDown'){
+                            if (!flatItems.length) return;
+                            evt.preventDefault();
+                            activeIdx = (activeIdx + 1) % flatItems.length;
+                            updateActiveStyles();
+                        } else if (evt.key === 'ArrowUp'){
+                            if (!flatItems.length) return;
+                            evt.preventDefault();
+                            activeIdx = (activeIdx - 1 + flatItems.length) % flatItems.length;
+                            updateActiveStyles();
+                        } else if (evt.key === 'Enter'){
+                            if (wrap.classList.contains('combo-open') && flatItems[activeIdx]){
+                                evt.preventDefault();
+                                chooseItem(flatItems[activeIdx].item);
+                            }
+                        } else if (evt.key === 'Escape'){
+                            closeCombo();
+                        }
+                    });
+                    document.addEventListener('click', (evt) => {
+                        if (!wrap.contains(evt.target)){
+                            closeCombo();
+                        }
+                    });
+                }
+
+                renderList();
+
+                const api = {
+                    rebuildFromSelect(){
+                        allGroups = collectGroups();
+                        const selectedId = selectEl.value || '';
+                        filterList(input ? input.value : '', { selectedId, preserveActive: true });
+                    },
+                    clear(){
+                        selectEl.value = '';
+                        if (input) input.value = '';
+                        filterList('');
+                    },
+                    syncFromSelect(){
+                        const currentId = selectEl.value;
+                        if (!currentId){
+                            if (input) input.value = '';
+                            filterList('');
+                            return;
+                        }
+                        let matchItem = null;
+                        allGroups.forEach(group => {
+                            const found = group.items.find(item => item.id === currentId);
+                            if (found){
+                                matchItem = found;
+                            }
+                        });
+                        if (input){
+                            input.value = matchItem ? matchItem.displayLabel : '';
+                        }
+                        filterList('', { selectedId: currentId });
+                    }
                 };
+
+                wrap.__comboInstance = api;
+                return api;
             }
 
             /* ────────────── Row factory ────────────── */
@@ -1451,15 +1881,50 @@
     </div>
 
     <!-- Кнопка Remove: красная пилюля в углу -->
+    <div class="ab-row">
+      <div class="ab-field" data-field="duration_override_min">
+        <label>Duration (minutes)</label>
+        <input type="number" class="js-duration" min="1" placeholder="Auto">
+        <div class="ab-field-error js-err-duration"></div>
+      </div>
+      <div class="ab-field" data-field="manual_discount_percent">
+        <label>Manual discount (%)</label>
+        <input type="number" class="js-discount" min="0" max="100" step="1" placeholder="0">
+        <div class="ab-field-error js-err-discount"></div>
+      </div>
+    </div>
+
+    <div class="ab-foot">
+      <div class="ab-summary">
+        <div class="ab-summary-line">
+          <span>Subtotal</span>
+          <strong class="js-item-subtotal">CA$0.00</strong>
+        </div>
+        <div class="ab-summary-line js-item-tax-row">
+          <span class="js-item-tax-label">GST</span>
+          <strong class="js-item-tax">CA$0.00</strong>
+        </div>
+        <div class="ab-summary-line ab-summary-line--total">
+          <span>Total</span>
+          <strong class="js-item-total">CA$0.00</strong>
+        </div>
+      </div>
+    </div>
+
     <button type="button" class="ab-remove js-remove" title="Remove">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        <path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        <path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-      </svg>
+    <img
+        src="{% static 'admin/icons/delete-item.svg' %}"
+        alt=""
+        width="18"
+        height="18"
+        class="icon icon--trash"
+        decoding="async"
+        loading="lazy"
+    >
       Remove
     </button>
   `;
+                wrap.dataset.finalPrice = "0.00";
                 return wrap;
             }
 
@@ -1471,7 +1936,17 @@
                 const timeInp   = row.querySelector('.js-time');
                 const priceInp  = row.querySelector('.js-price');
                 const promoSel  = row.querySelector('.js-promo');
+                const durationInp = row.querySelector('.js-duration');
+                const discountInp = row.querySelector('.js-discount');
                 const hint      = row.querySelector('.js-service-hint');
+                row.dataset.taxable = "0";
+
+                const syncTaxableMeta = () => {
+                    const opt = serviceSel.selectedOptions && serviceSel.selectedOptions[0];
+                    const taxable = !!(opt && opt.dataset && opt.dataset.isTaxable === "1");
+                    row.dataset.taxable = taxable ? "1" : "0";
+                    return taxable;
+                };
 
                 resetPromoSelect(promoSel, { disabled: true });
                 const refreshPromos = (opts = {}) => {
@@ -1497,6 +1972,26 @@
                 timeInp.name   = name('start_time_1'); timeInp.id   = `id_items-${idx}-start_time_1`;
                 priceInp.name  = name('unit_price');   priceInp.id  = `id_items-${idx}-unit_price`;
                 promoSel.name  = name('promocode');    promoSel.id  = `id_items-${idx}-promocode`;
+                if (durationInp) {
+                    durationInp.name = name('duration_override_min');
+                    durationInp.id = `id_items-${idx}-duration_override_min`;
+                    if (!durationInp.value) {
+                        durationInp.dataset.auto = '1';
+                    }
+                    durationInp.addEventListener('input', () => {
+                        durationInp.dataset.auto = '0';
+                    });
+                }
+                if (discountInp) {
+                    discountInp.name = name('manual_discount_percent');
+                    discountInp.id = `id_items-${idx}-manual_discount_percent`;
+                    discountInp.addEventListener('change', () => {
+                        const val = parseInt(discountInp.value, 10);
+                        if (Number.isNaN(val)) return;
+                        if (val < 0) discountInp.value = '0';
+                        if (val > 100) discountInp.value = '100';
+                    });
+                }
 
                 populateMasters(masterSel);
                 const availability = initTimeslotPicker({
@@ -1507,7 +2002,7 @@
                     timeEl: timeInp,
                 });
 
-                let serviceCombo = makeComboFromSelect(serviceSel, 'Type to search service…');
+                let serviceCombo = makeComboFromSelect(serviceSel, 'Type to search service...');
 
                 // режим мастера: фиксируем мастера
                 if (IS_MASTER && CURRENT_MASTER_ID){
@@ -1518,12 +2013,23 @@
                 } else {
                     populateServices(serviceSel, masterSel.value, { combo: serviceCombo });
                 }
+                syncTaxableMeta();
 
                 masterSel.addEventListener('change', () => {
                     populateServices(serviceSel, masterSel.value, { combo: serviceCombo, resetSelection: true });
-                    hint.textContent = ''; priceInp.value = ''; recalcGrandTotal();
+                    hint.textContent = ''; priceInp.value = '';
+                    if (durationInp) {
+                        durationInp.value = '';
+                        durationInp.dataset.auto = '1';
+                    }
+                    if (discountInp) {
+                        discountInp.value = '';
+                    }
+                    syncTaxableMeta();
+                    recalcGrandTotal();
                     renderIntakeForms();
-                    if (availability) availability.refresh();
+                    const preserveTime = !!(timeInp && timeInp.value);
+                    if (availability) availability.refresh({ preserveSelection: preserveTime });
                     refreshPromos({ selected: '' });
                 });
 
@@ -1531,11 +2037,25 @@
                     const opt = serviceSel.selectedOptions[0];
                     const price = opt && opt.dataset ? opt.dataset.price : '';
                     const dur   = opt && opt.dataset ? opt.dataset.duration : '';
+                    const totalDur = opt && opt.dataset ? (opt.dataset.totalDuration || dur) : '';
                     priceInp.value = price || '';
-                    hint.textContent = dur ? (`Duration: ${dur} min`) : '';
+                    if (durationInp) {
+                        const autoMode = durationInp.dataset.auto !== '0';
+                        if (autoMode) {
+                            durationInp.value = totalDur || '';
+                            if (totalDur) {
+                                durationInp.dataset.auto = '1';
+                            } else {
+                                delete durationInp.dataset.auto;
+                            }
+                        }
+                    }
+                    hint.textContent = totalDur ? (`Duration: ${totalDur} min`) : '';
+                    syncTaxableMeta();
                     recalcGrandTotal();
                     renderIntakeForms();
-                    if (availability) availability.refresh();
+                    const preserveTime = !!(timeInp && timeInp.value);
+                    if (availability) availability.refresh({ preserveSelection: preserveTime });
                     refreshPromos({ selected: '' });
                 });
 
@@ -1548,7 +2068,7 @@
                 refreshPromos({ preserve: true });
 
                 // вернём наружу, чтобы синхронизировать при префилле
-                return { serviceCombo, availability, refreshPromos };
+                return { serviceCombo, availability, refreshPromos, syncTaxableMeta };
             }
 
             function addRow(prefill){
@@ -1561,7 +2081,9 @@
                 const dateInp   = row.querySelector('.js-date');
                 const timeInp   = row.querySelector('.js-time');
                 const priceInp  = row.querySelector('.js-price');
-
+                const durationInp = row.querySelector('.js-duration');
+                const discountInp = row.querySelector('.js-discount');
+                
                 const comboRef = ref && ref.serviceCombo ? ref.serviceCombo : null;
                 let resolvedMaster = masterSel.value;
                 if (IS_MASTER && CURRENT_MASTER_ID){
@@ -1580,16 +2102,46 @@
                     const opt = serviceSel.selectedOptions[0];
                     if (opt){ priceInp.value = opt.dataset.price || '';
                         const hint = row.querySelector('.js-service-hint');
-                        hint.textContent = opt.dataset.duration ? (`Duration: ${opt.dataset.duration} min`) : '';
+                        const totalDur = opt.dataset.totalDuration || opt.dataset.duration || '';
+                        hint.textContent = totalDur ? (`Duration: ${totalDur} min`) : '';
+                        if (durationInp){
+                            if (prefill.duration_override_min){
+                                durationInp.value = prefill.duration_override_min;
+                                durationInp.dataset.auto = '0';
+                            } else if (!durationInp.value){
+                                durationInp.value = totalDur || '';
+                                if (totalDur){
+                                    durationInp.dataset.auto = '1';
+                                }
+                            }
+                        }
                     }
                 }
+                if (ref && typeof ref.syncTaxableMeta === "function") {
+                    ref.syncTaxableMeta();
+                }
+                row.dataset.finalPrice = prefill && prefill.final_price
+                    ? String(prefill.final_price)
+                    : (priceInp.value && priceInp.value !== '' ? priceInp.value : (row.dataset.finalPrice || '0.00'));
                 if (ref && ref.serviceCombo && serviceSel.value){ ref.serviceCombo.syncFromSelect(); }
 
                 if (prefill && prefill.start_time_0) dateInp.value = prefill.start_time_0;
                 if (prefill && prefill.start_time_1){
                     timeInp.value = prefill.start_time_1.length===5 ? prefill.start_time_1 : prefill.start_time_1.slice(0,5);
+                    syncTimeControl(timeInp);
                 }
                 if (prefill && prefill.unit_price) priceInp.value = prefill.unit_price;
+                if (durationInp){
+                    if (prefill && prefill.duration_override_min){
+                        durationInp.value = prefill.duration_override_min;
+                        durationInp.dataset.auto = '0';
+                    } else if (!durationInp.value){
+                        durationInp.dataset.auto = durationInp.dataset.auto || '1';
+                    }
+                }
+                if (discountInp && prefill && prefill.manual_discount_percent !== undefined && prefill.manual_discount_percent !== null && prefill.manual_discount_percent !== ''){
+                    discountInp.value = prefill.manual_discount_percent;
+                }
                 if (ref && typeof ref.refreshPromos === 'function'){
                     const promoOpts = {};
                     if (prefill && prefill.promocode){
@@ -1651,6 +2203,8 @@
                     const timeMsgs = [...(errs.start_time || []), ...(errs.start_time_1 || [])];
                     if (timeMsgs.length){ const fld = row.querySelector('[data-field="start_time_1"]'); fld.classList.add('errors'); row.querySelector('.js-err-time').textContent = timeMsgs.join(' '); }
                     if (errs.unit_price?.length){ const fld = row.querySelector('[data-field="unit_price"]'); fld.classList.add('errors'); const box = fld.querySelector('.ab-field-error') || document.createElement('div'); box.className='ab-field-error'; box.textContent = errs.unit_price.join(' '); fld.appendChild(box); }
+                    if (errs.duration_override_min?.length){ const fld = row.querySelector('[data-field="duration_override_min"]'); if (fld){ fld.classList.add('errors'); const box = fld.querySelector('.js-err-duration'); if (box) box.textContent = errs.duration_override_min.join(' '); } }
+                    if (errs.manual_discount_percent?.length){ const fld = row.querySelector('[data-field="manual_discount_percent"]'); if (fld){ fld.classList.add('errors'); const box = fld.querySelector('.js-err-discount'); if (box) box.textContent = errs.manual_discount_percent.join(' '); } }
                     if (errs.promocode?.length){ const fld = row.querySelector('[data-field="promocode"]'); fld.classList.add('errors'); const box = row.querySelector('.js-err-promocode'); if (box) box.textContent = errs.promocode.join(' '); }
                     if (errs.__all__?.length){ const note = document.createElement('div'); note.className='ab-errornote'; note.innerHTML = errs.__all__.map(String).join('<br>'); row.prepend(note); }
                 });
@@ -1659,7 +2213,6 @@
             // init
             (function init(){
                 if (POSTED_CLIENT){ clientEl.value = POSTED_CLIENT; }
-                itemsSection.classList.toggle('ab-hidden', !clientEl.value);
 
                 if (IS_MASTER && CURRENT_MASTER_ID){
                     if (!INITIAL_FIRST || typeof INITIAL_FIRST !== 'object') window.INITIAL_FIRST = {};
@@ -1674,7 +2227,9 @@
                             start_time_0: it.start_time_0,
                             start_time_1: it.start_time_1,
                             unit_price: it.unit_price,
-                            promocode: it.promocode
+                            promocode: it.promocode,
+                            duration_override_min: it.duration_override_min,
+                            manual_discount_percent: it.manual_discount_percent
                         });
                     });
                 } else {
@@ -1693,10 +2248,6 @@
                 paintItemErrors();
                 renderIntakeForms();
             })();
-
-            clientEl.addEventListener('change', () => {
-                itemsSection.classList.toggle('ab-hidden', !clientEl.value);
-            });
 
             document.getElementById('btn-add-item')
                 .addEventListener('click', () => addRow({ master: (IS_MASTER && CURRENT_MASTER_ID) ? CURRENT_MASTER_ID : '' }));

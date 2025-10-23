@@ -20,6 +20,10 @@
     function buildSelect() {
         const sel = document.createElement("select");
         sel.className = "ab-select js-quarter-picker";
+        const blank = document.createElement("option");
+        blank.value = "";
+        blank.textContent = "Select time";
+        sel.appendChild(blank);
         for (let h = 0; h < 24; h++) {
             for (const m of [0, 15, 30, 45]) {
                 const v = pad2(h) + ":" + pad2(m);
@@ -42,23 +46,53 @@
         const sel = buildSelect();
         timeInput.insertAdjacentElement("afterend", sel);
 
+        let isSyncing = false;
+
         // ---- ИНИЦИАЛЬНАЯ СИНХРОНИЗАЦИЯ ✅ ----
-        // берём текущее значение инпута (если оно было), иначе первый слот селекта
+        // берём текущее значение инпута (если оно было), иначе оставляем пустым
         const current = snapToQuarter(toHHMM(timeInput.value));
-        const initial = current && [...sel.options].some(o => o.value === current)
-            ? current
-            : sel.options[0].value;    // "00:00"
-        sel.value = initial;
-        timeInput.value = initial;   // ← ключевая строка
+        if (current && [...sel.options].some(o => o.value === current)) {
+            sel.value = current;
+            timeInput.value = current;
+        } else {
+            sel.value = "";
+            timeInput.value = "";
+        }
         timeInput.dispatchEvent(new Event("input", { bubbles: true }));
         timeInput.dispatchEvent(new Event("change", { bubbles: true }));
 
         // ---- ДВУСТОРОННЯЯ СВЯЗЬ ----
         sel.addEventListener("change", () => {
+            if (isSyncing) return;
+            isSyncing = true;
             timeInput.value = sel.value;
             timeInput.dispatchEvent(new Event("input", { bubbles: true }));
             timeInput.dispatchEvent(new Event("change", { bubbles: true }));
+            isSyncing = false;
         });
+
+        const syncFromInput = () => {
+            if (isSyncing) return;
+            isSyncing = true;
+            const snapped = snapToQuarter(toHHMM(timeInput.value));
+            if (snapped && [...sel.options].some(o => o.value === snapped)) {
+                sel.value = snapped;
+                if (timeInput.value !== snapped) {
+                    timeInput.value = snapped;
+                }
+            } else {
+                sel.value = "";
+            }
+            isSyncing = false;
+        };
+
+        timeInput.addEventListener("change", syncFromInput);
+        timeInput.addEventListener("input", syncFromInput);
+        timeInput.addEventListener("blur", syncFromInput);
+        syncFromInput();
+        if (!timeInput.value) {
+            sel.value = "";
+        }
     }
 
     function enhanceAll() {
@@ -72,7 +106,7 @@
         form.querySelectorAll("select.js-quarter-picker").forEach(sel => {
             const input = sel.previousElementSibling;
             if (input && input.matches('input[type="time"]') && !input.disabled) {
-                input.value = sel.value || input.value || "00:00";
+                input.value = sel.value || "";
             }
         });
     }, true);

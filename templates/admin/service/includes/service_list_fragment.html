@@ -1,0 +1,98 @@
+{% load i18n admin_urls filters static %}
+<div class="svc-table__wrapper">
+    <table class="svc-table">
+        <thead>
+        <tr>
+            <th scope="col">{% trans "Service Name" %}</th>
+            <th scope="col">{% trans "Category" %}</th>
+            <th scope="col">{% trans "Duration" %}</th>
+            <th scope="col">{% trans "Price" %}</th>
+            <th scope="col">{% trans "Active" %}</th>
+            <th scope="col" class="svc-actions">{% trans "Actions" %}</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for obj in cl.result_list %}
+            <tr>
+                <td class="svc-name">
+                    <a href="{% url cl.opts|admin_urlname:'change' obj.pk %}">
+                        {{ obj.name }}
+                    </a>
+                </td>
+                <td>{{ obj.category.name|default:"-" }}</td>
+                <td>{{ obj|service_duration }}</td>
+                <td>
+                    {% with discount=obj.get_active_discount %}
+                        {% if discount %}
+                            {% with discounted_price=obj.get_discounted_price %}
+                                <span class="svc-price">
+                                    <span class="svc-price__old">{{ currency_symbol }} {{ obj|service_price }}</span>
+                                    
+                                    <span class="svc-price__new">{{ currency_symbol }} {{ discounted_price|floatformat:2 }}</span>
+                                </span>
+                            {% endwith %}
+                        {% else %}
+                            <span class="svc-price__normal">{{ currency_symbol }} {{ obj|service_price }}</span>
+                        {% endif %}
+                    {% endwith %}
+                </td>
+                <td>
+                    {% if obj.is_active %}
+                        <span class="svc-active svc-active--yes" aria-label="{% trans 'Active' %}"><img src={% static "admin/icons/active.svg" %} height=16 width=16></span>
+                    {% else %}
+                        <span class="svc-active svc-active--no" aria-label="{% trans 'Inactive' %}"><img src={% static "admin/icons/not-active.png" %} height=16 width=16></span>
+                    {% endif %}
+                </td>
+                <td class="svc-actions">
+                    <a class="svc-action-link" href="{% url cl.opts|admin_urlname:'change' obj.pk %}">
+                        <i class="fas fa-ellipsis-h" aria-hidden="true"></i>
+                    </a>
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td class="svc-empty" colspan="6">
+                    {% if current_search %}
+                        {% blocktrans with term=current_search %}No services found for '{{ term }}'.{% endblocktrans %}
+                    {% else %}
+                        {% trans "No services found." %}
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="svc-pagination">
+    {% changelist_start cl as start_index %}
+    {% changelist_end cl as end_index %}
+    <div class="svc-results">
+        {% if cl.result_count %}
+            {% if start_index == end_index %}
+                {% trans "Showing" %} {{ start_index }} {% trans "of" %} {{ cl.result_count }} {% trans "services" %}
+            {% else %}
+                {% trans "Showing" %} {{ start_index }}-{{ end_index }} {% trans "of" %} {{ cl.result_count }} {% trans "services" %}
+            {% endif %}
+        {% else %}
+            {% trans "Showing 0 services" %}
+        {% endif %}
+    </div>
+
+    <div class="svc-pages">
+        {% with pagination=svc_pagination %}
+            <div class="svc-page-nav">
+                {% if pagination.has_previous %}
+                    <a class="svc-page-btn" data-svc-page="{{ pagination.previous_page }}" href="{% changelist_page_url pagination.previous_page %}">{% trans "Previous" %}</a>
+                {% else %}
+                    <span class="svc-page-btn disabled" data-svc-page="">{% trans "Previous" %}</span>
+                {% endif %}
+                {% if pagination.has_next %}
+                    <a class="svc-page-btn" data-svc-page="{{ pagination.next_page }}" href="{% changelist_page_url pagination.next_page %}">{% trans "Next" %}</a>
+                {% else %}
+                    <span class="svc-page-btn disabled" data-svc-page="">{% trans "Next" %}</span>
+                {% endif %}
+            </div>
+        {% endwith %}
+    </div>
+</div>

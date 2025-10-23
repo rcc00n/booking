@@ -42,7 +42,7 @@
 
                 {% if export_url_xlsx %}
                     <button onclick='window.location.href="{{ export_url_xlsx }}"' class="add-appointment-btn" style="text-decoration:none; width:13vh; margin-right: 1vh;">
-                        Export CSV
+                        Export XSLX
                     </button>
                 {% endif %}
 
@@ -92,6 +92,27 @@
                             <input type="checkbox" name="payment_status" value="{{ ps.id }}">
                             <span>{{ ps.name }}</span>
                         </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="filter-section">
+                <div class="filter-header" onclick="toggleSection(this)">
+                    👨‍🏫 Masters <span class="arrow">⌄</span>
+                </div>
+                <div class="filter-content">
+                    {% for m in masters %}
+                        {% with mid=m.id|stringformat:"s" %}
+                            <label class="checkbox-wrapper">
+                                <input
+                                        type="checkbox"
+                                        name="master"
+                                        value="{{ mid }}"
+                                        {% if mid in selected_masters %}checked{% endif %}
+                                >
+                                <span>{{ m }}</span>
+                            </label>
+                        {% endwith %}
                     {% endfor %}
                 </div>
             </div>

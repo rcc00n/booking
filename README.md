@@ -79,3 +79,39 @@ stripe listen --forward-to localhost:8000/stripe/webhook/
 ```
 
 Client checkout now requires Stripe.js. The cart checkout API returns a PaymentIntent client secret; the portal will open a secure modal where the customer can finish payment.
+## Stripe Integration
+
+### Environment Variables
+Configure the following keys (e.g. in `.env`):
+
+- `STRIPE_PUBLIC_KEY`
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_CURRENCY` (default `cad`)
+- `STRIPE_API_VERSION` (default `2024-06-20`)
+
+### Stripe CLI Webhooks
+```bash
+stripe login
+stripe listen --forward-to localhost:8000/stripe/webhook/
+```
+
+### Test Cards
+- Success: `4242 4242 4242 4242`
+- 3DS required: `4000 0027 6000 3184`
+- Insufficient funds: `4000 0000 0000 9995`
+
+### Useful cURL
+Replay a webhook event:
+```bash
+stripe events resend <event_id> --forward-to localhost:8000/stripe/webhook/
+```
+
+Charge a no-show appointment (staff session cookie required):
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -b "sessionid=<staff_session>" \
+  -d '{"appointment_id": "<uuid>"}' \
+  http://localhost:8000/accounts/api/payments/no-show/charge/
+```

@@ -1,0 +1,57 @@
+{% load i18n admin_urls %}
+
+<li class="uc-grid-row" data-master-id="{{ master_profile.pk }}">
+  <a class="tm-item__overlay" href="{% url cl.opts|admin_urlname:'change' master_profile.pk %}"></a>
+
+  <!-- avatar -->
+  <div class="uc-avatar">
+    {% with first=master.first_name|default_if_none:''|slice:":1" last=master.last_name|default_if_none:''|slice:":1" %}
+      {% if first or last %}{{ first|upper }}{{ last|upper }}{% else %}{{ master.username|default_if_none:''|slice:":2"|upper }}{% endif %}
+    {% endwith %}
+  </div>
+
+  <!-- name + email (email below name) -->
+  <div class="uc-cell uc-cell--name">
+    <div class="uc-namewrap">
+      <h4 class="uc-name">{{ master.get_full_name|default:master.username }}</h4>
+      {% if master.email %}
+        <div class="uc-email"><a href="mailto:{{ master.email }}">{{ master.email }}</a></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- mobile -->
+  <div class="uc-cell">
+    <div class="uc-label">{% trans "Phone" %}</div>
+    <div class="uc-value">
+      {% if user_profile and user_profile.phone %}
+        <a href="tel:{{ user_profile.phone|cut:' ' }}">{{ user_profile.phone }}</a>
+      {% elif master.phone %}
+        <a href="tel:{{ master.phone|cut:' ' }}">{{ master.phone }}</a>
+      {% else %}&mdash;{% endif %}
+    </div>
+  </div>
+
+  <!-- sales -->
+  <div class="uc-cell">
+    <div class="uc-label">{% trans "Sales" %}</div>
+    <div class="uc-value">
+      CA$
+      {% if master.total_sales %}{{ master.total_sales|floatformat:2 }}
+      {% elif master_profile.total_sales %}{{ master_profile.total_sales|floatformat:2 }}
+      {% elif user_profile and user_profile.total_sales %}{{ user_profile.total_sales|floatformat:2 }}
+      {% else %}0.00{% endif %}
+    </div>
+  </div>
+
+  <!-- created -->
+  <div class="uc-cell">
+    <div class="uc-label">{% trans "Created" %}</div>
+    <div class="uc-value">
+      {% if master.date_joined %}{{ master.date_joined|date:"M d, Y" }}
+      {% elif master_profile.created_at %}{{ master_profile.created_at|date:"M d, Y" }}
+      {% elif master.created_at %}{{ master.created_at|date:"M d, Y" }}
+      {% else %}&mdash;{% endif %}
+    </div>
+  </div>
+</li>

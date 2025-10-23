@@ -110,6 +110,7 @@
     .services-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1.25rem}
     .service-card{
       background:#fff;border-radius:var(--radius-lg);padding:1.1rem;display:flex;flex-direction:column;gap:.75rem;
+      height:100%;
       box-shadow:var(--shadow);border:1px solid color-mix(in srgb, var(--green) 18%, transparent);transition:.18s ease;
     }
     .service-card:hover{transform:translateY(-3px);box-shadow:0 10px 22px color-mix(in srgb, var(--green) 18%, rgba(0,0,0,.16))}
@@ -117,7 +118,8 @@
     .service-card__img img{width:100%;height:100%;object-fit:cover;display:block}
     .service-card__img--empty{display:flex;align-items:center;justify-content:center;font-size:.9rem;color:#6f7a75}
     .service-card h3{font-size:1.06rem;font-weight:900;color:var(--ink)}
-    .service-meta{font-size:.92rem;color:var(--muted)}
+    .service-meta{font-size:.92rem;color:var(--muted);margin-top:auto}
+    .service-card .book-btn{margin-top:.75rem}
     .stub{font-style:italic;color:#667;padding:1rem}
     .muted{color:var(--muted);font-size:.92rem}
     .old{color:#9aa0a0;text-decoration:line-through}
@@ -414,7 +416,7 @@
               </div>
               <div class="muted">{{ s.category.name }}</div>
               <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
-              {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
+              {% if s.description %}<p class="muted">{{ s.description|truncatewords:10 }}</p>{% endif %}
               <div class="service-meta">
                 {% with disc=s.get_active_discount %}
                   {% if disc %}
@@ -440,7 +442,7 @@
       {% for c in categories %}
         <h3 style="margin:1.5rem 0 .75rem;color:var(--green);font-weight:800">{{ c.name }}</h3>
         <div class="services-grid">
-          {% for s in c.service_set.all %}
+          {% for s in c.catalog_services %}
             <article class="service-card">
               <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
                 {% if s.card_image_url %}
@@ -450,7 +452,7 @@
                 {% endif %}
               </div>
               <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
-              {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
+              {% if s.description %}<p class="muted">{{ s.description|truncatewords:10 }}</p>{% endif %}
               <div class="service-meta">
                 {% with disc=s.get_active_discount %}
                   {% if disc %}
@@ -485,7 +487,7 @@
                 {% endif %}
               </div>
               <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
-              {% if s.description %}<p class="muted">{{ s.description|truncatewords:22 }}</p>{% endif %}
+              {% if s.description %}<p class="muted">{{ s.description|truncatewords:10 }}</p>{% endif %}
               <div class="service-meta">
                 {% with disc=s.get_active_discount %}
                   {% if disc %}
@@ -519,13 +521,13 @@
   <footer class="site-footer" data-i18n="services.footer.copy">© 2025 Malva Booking</footer>
 
   <!-- ===== Modal: booking ===== -->
-  <div class="modal" id="bookModal" aria-hidden="true">
-    <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="bookTitle">
+  <div class="modal" id="bookModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="bookTitle" data-initial-focus="#bookTitle">
+    <div class="modal__dialog">
       <div class="modal__header">
-        <div class="modal__title" id="bookTitle">
+        <h2 class="modal__title" id="bookTitle" tabindex="-1">
           <span data-i18n="services.modal.title">Add service:</span>
           <span id="bookServiceName"></span>
-        </div>
+        </h2>
         <button class="modal__close" id="bookClose" aria-label="Close" data-i18n-attr="aria-label:common.close">×</button>
       </div>
 
@@ -590,10 +592,10 @@
 </div>
 
   <!-- ===== Modal: cart ===== -->
-  <div class="modal" id="cartModal" aria-hidden="true">
-    <div class="modal__dialog modal__dialog--narrow" role="dialog" aria-modal="true" aria-labelledby="cartTitle">
+  <div class="modal" id="cartModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="cartTitle" data-initial-focus="#cartTitle">
+    <div class="modal__dialog modal__dialog--narrow">
       <div class="modal__header">
-        <div class="modal__title" id="cartTitle" data-i18n="services.cart.title">Cart</div>
+        <h2 class="modal__title" id="cartTitle" tabindex="-1" data-i18n="services.cart.title">Cart</h2>
         <button class="modal__close" id="cartClose" aria-label="Close" data-i18n-attr="aria-label:common.close">×</button>
       </div>
       <div class="cart-list" id="cartItems"></div>
@@ -608,10 +610,10 @@
   </div>
 
   <!-- ===== Modal: payment ===== -->
-  <div class="modal" id="paymentModal" aria-hidden="true">
-    <div class="modal__dialog modal__dialog--payment" role="dialog" aria-modal="true" aria-labelledby="paymentTitle">
+  <div class="modal" id="paymentModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="paymentTitle" data-initial-focus="#paymentTitle">
+    <div class="modal__dialog modal__dialog--payment">
       <div class="modal__header">
-        <div class="modal__title" id="paymentTitle">Secure payment</div>
+        <h2 class="modal__title" id="paymentTitle" tabindex="-1">Secure payment</h2>
         <button class="modal__close" id="paymentClose" aria-label="Close">×</button>
       </div>
       <div class="payment-body" id="paymentBody">
@@ -724,6 +726,8 @@
         return fallback !== undefined ? fallback : key;
       };
       const stripePublicKey = "{{ stripe_public_key|default:''|escapejs }}";
+      console.log("Public Key: ");
+      console.log(stripePublicKey);
       let stripeClient = null;
       let stripeElements = null;
       let stripeCardElement = null;
@@ -832,7 +836,8 @@
       const apiAvail= "/accounts/api/availability/";
       const apiCart = "/accounts/api/cart/";
       const apiCartAdd = "/accounts/api/cart/add/";
-      const apiCartCheckout = "/accounts/api/cart/checkout/";
+      const apiStripeCartIntent = "/accounts/api/payments/cart/create-intent/";
+      const apiStripeCartFinalize = "/accounts/api/payments/cart/finalize/";
       const cartRemoveUrl = (id)=>`/accounts/api/cart/${id}/remove/`;
       const paymentVerifyUrl = (id)=>`/accounts/api/appointment/${id}/payments/verify/`;
 
@@ -888,16 +893,231 @@
       const inputCountry=document.getElementById('paymentCountry');
 
       const BODY_MODAL_CLASS = 'modal-open';
+      const FOCUSABLE_MODAL_SELECTORS = 'a[href],area[href],input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),button:not([disabled]),summary,[tabindex]:not([tabindex="-1"]),[contenteditable="true"]';
 
-      function openModalElement(el){
-        if(!el) return;
-        el.classList.add('modal--open');
-        document.body.classList.add(BODY_MODAL_CLASS);
+      const modalState = {
+        current: null,
+        dialog: null,
+        restoreFocus: null,
+        restoreFocusFallback: null,
+        inertRecords: [],
+        keydownHandler: null,
+        onRequestClose: null,
+      };
+
+      function getModalDialog(el){
+        if(!el) return null;
+        return el.querySelector('.modal__dialog') || el;
       }
 
-      function closeModalElement(el){
+      function isFocusable(element){
+        if(!(element instanceof HTMLElement) && !(element instanceof SVGElement)) return false;
+        if(element.hasAttribute('disabled')) return false;
+        if(element.getAttribute('aria-hidden') === 'true') return false;
+        if(element.hidden) return false;
+        const style = window.getComputedStyle(element);
+        if(style.display === 'none' || style.visibility === 'hidden') return false;
+        return true;
+      }
+
+      function collectFocusable(container){
+        if(!container) return [];
+        return Array.from(container.querySelectorAll(FOCUSABLE_MODAL_SELECTORS)).filter(isFocusable);
+      }
+
+      function focusElement(el){
+        if(!el || typeof el.focus !== 'function') return;
+        try{
+          el.focus({ preventScroll:true });
+        }catch(_){
+          try{
+            el.focus();
+          }catch(__){}
+        }
+      }
+
+      function canRestoreFocusTo(el){
+        if(!el || typeof el.focus !== 'function') return false;
+        if(!el.isConnected) return false;
+        if(!document.body.contains(el)) return false;
+        if(el.closest('[aria-hidden="true"]')) return false;
+        if(el.closest('[inert]')) return false;
+        return true;
+      }
+
+      function setBackgroundInert(except){
+        const records = [];
+        const nodes = Array.from(document.body.children);
+        nodes.forEach((node)=>{
+          if(node === except) return;
+          if(!(node instanceof HTMLElement)) return;
+          if(node.hasAttribute('data-modal-ignore')) return;
+          if(node.hasAttribute('inert')) return;
+          node.setAttribute('inert','');
+          records.push(node);
+        });
+        return records;
+      }
+
+      function clearBackgroundInert(records){
+        if(!Array.isArray(records)) return;
+        records.forEach((node)=>{
+          if(node && node.hasAttribute && node.hasAttribute('inert')){
+            node.removeAttribute('inert');
+          }
+        });
+      }
+
+      function focusModalDialog(dialog, selector){
+        if(!dialog) return;
+        let target = null;
+        if(selector){
+          try{
+            target = dialog.querySelector(selector);
+          }catch(_){
+            target = null;
+          }
+        }
+        if(!(target instanceof HTMLElement || target instanceof SVGElement)){
+          target = dialog.querySelector('[autofocus]');
+        }
+        if(!(target instanceof HTMLElement || target instanceof SVGElement)){
+          const focusables = collectFocusable(dialog);
+          target = focusables[0];
+        }
+        if(!(target instanceof HTMLElement || target instanceof SVGElement)){
+          if(!dialog.hasAttribute('tabindex')){
+            dialog.setAttribute('tabindex','-1');
+          }
+          target = dialog;
+        }
+        focusElement(target);
+      }
+
+      function handleModalKeydown(event){
+        const { current, dialog, onRequestClose } = modalState;
+        if(!current || !dialog) return;
+        if(!current.classList.contains('modal--open')) return;
+        if(event.key === 'Escape'){
+          event.preventDefault();
+          event.stopPropagation();
+          if(typeof onRequestClose === 'function'){
+            onRequestClose(event);
+          }else{
+            closeModalElement(current);
+          }
+          return;
+        }
+        if(event.key === 'Tab'){
+          const focusables = collectFocusable(dialog);
+          if(focusables.length === 0){
+            event.preventDefault();
+            event.stopPropagation();
+            focusElement(dialog);
+            return;
+          }
+          const first = focusables[0];
+          const last = focusables[focusables.length-1];
+          const active = document.activeElement;
+          if(event.shiftKey){
+            if(active === first || !dialog.contains(active)){
+              event.preventDefault();
+              event.stopPropagation();
+              focusElement(last);
+            }
+          }else{
+            if(active === last || !dialog.contains(active)){
+              event.preventDefault();
+              event.stopPropagation();
+              focusElement(first);
+            }
+          }
+        }
+      }
+
+      function openModalElement(el, options = {}){
         if(!el) return;
+        const dialog = getModalDialog(el);
+        if(modalState.current && modalState.current !== el){
+          if(typeof modalState.onRequestClose === 'function'){
+            modalState.onRequestClose({ restoreFocus:false });
+          }else{
+            closeModalElement(modalState.current, { restoreFocus:false });
+          }
+        }
+        const activeElement = document.activeElement;
+        const trigger = options.trigger instanceof HTMLElement || options.trigger instanceof SVGElement
+          ? options.trigger
+          : (activeElement instanceof HTMLElement || activeElement instanceof SVGElement ? activeElement : null);
+
+        modalState.current = el;
+        modalState.dialog = dialog;
+        modalState.restoreFocus = trigger;
+        modalState.restoreFocusFallback = options.restoreFocusFallback instanceof HTMLElement || options.restoreFocusFallback instanceof SVGElement
+          ? options.restoreFocusFallback
+          : null;
+        modalState.onRequestClose = typeof options.onRequestClose === 'function' ? options.onRequestClose : null;
+
+        modalState.inertRecords = setBackgroundInert(el);
+
+        el.classList.add('modal--open');
+        el.removeAttribute('aria-hidden');
+        document.body.classList.add(BODY_MODAL_CLASS);
+        if(dialog && !dialog.hasAttribute('tabindex')){
+          dialog.setAttribute('tabindex','-1');
+        }
+
+        const selector = options.initialFocusSelector || el.getAttribute('data-initial-focus') || (dialog ? dialog.getAttribute('data-initial-focus') : null);
+        window.requestAnimationFrame(()=>{ focusModalDialog(dialog, selector); });
+
+        if(!modalState.keydownHandler){
+          modalState.keydownHandler = (event)=>handleModalKeydown(event);
+          document.addEventListener('keydown', modalState.keydownHandler, true);
+        }
+      }
+
+      function closeModalElement(el, options = {}){
+        if(!el) return;
+        const wasActive = modalState.current === el;
         el.classList.remove('modal--open');
+
+        if(wasActive){
+          clearBackgroundInert(modalState.inertRecords);
+          modalState.inertRecords = [];
+          if(modalState.keydownHandler){
+            document.removeEventListener('keydown', modalState.keydownHandler, true);
+            modalState.keydownHandler = null;
+          }
+          const shouldRestore = options.restoreFocus !== false;
+          const focusTarget = modalState.restoreFocus;
+          const focusFallback = modalState.restoreFocusFallback;
+          modalState.current = null;
+          modalState.dialog = null;
+          modalState.restoreFocus = null;
+          modalState.restoreFocusFallback = null;
+          modalState.onRequestClose = null;
+          let ariaHiddenUpdateScheduled = false;
+
+          if(shouldRestore){
+            let nextFocus = canRestoreFocusTo(focusTarget) ? focusTarget : null;
+            if(!nextFocus && canRestoreFocusTo(focusFallback)){
+              nextFocus = focusFallback;
+            }
+            if(nextFocus){
+              ariaHiddenUpdateScheduled = true;
+              window.requestAnimationFrame(()=>{
+                focusElement(nextFocus);
+                el.setAttribute('aria-hidden','true');
+              });
+            }
+          }
+          if(!ariaHiddenUpdateScheduled){
+            el.setAttribute('aria-hidden','true');
+          }
+        } else {
+          el.setAttribute('aria-hidden','true');
+        }
+
         if(!document.querySelector('.modal.modal--open')){
           document.body.classList.remove(BODY_MODAL_CLASS);
         }
@@ -909,7 +1129,17 @@
       }
 
       let summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
-      let cartState = { items: [], count: 0, total_price: '0', total_duration_min: 0 };
+      let cartState = {
+        items: [],
+        count: 0,
+        total: 0,
+        total_price: '0.00',
+        total_decimal: '0.00',
+        total_display: 'CA$0.00',
+        total_duration_min: 0,
+        currency: 'cad'
+      };
+      let lastCartOpener = null;
 
       function fmtDateTime(iso){
         try{
@@ -1056,6 +1286,8 @@
 
       function ensureStripe(){
         if (!stripePublicKey) return null;
+        console.log("window.Stripe: ");
+        console.log(window.Stripe);
         if (!window.Stripe) return null;
         if (!stripeClient){
           stripeClient = window.Stripe(stripePublicKey);
@@ -1073,6 +1305,7 @@
         }
         if (!stripeCardElement && cardElementTarget){
           stripeCardElement = stripeElements.create('card', {
+            hidePostalCode: true,
             style: {
               base: {
                 color: '#204029',
@@ -1111,6 +1344,7 @@
         }
         if (!stripeCardElement && cardElementTarget){
           stripeCardElement = stripeElements.create('card', {
+            hidePostalCode: true,
             style: {
               base: {
                 color: '#204029',
@@ -1136,85 +1370,118 @@
         return stripeClient;
       }
 
-      function updateCartUI(data){
-        if(!data) return;
-        cartState = data;
-        const count = Number(data.count || 0);
-        if(cartCount){ cartCount.textContent = count; }
-        if(floatingCartCount){ floatingCartCount.textContent = count; }
-        if(floatingCartBtn){
-          const hasItems = count > 0;
-          floatingCartBtn.classList.toggle('floating-cart--visible', hasItems);
-          floatingCartBtn.setAttribute('aria-hidden', hasItems ? 'false' : 'true');
-          floatingCartBtn.tabIndex = hasItems ? 0 : -1;
+
+function updateCartUI(data){
+  if(!data) return;
+  cartState = data;
+  if(!cartState.currency){
+    cartState.currency = data.currency || 'cad';
+  }
+  const currency = data.currency || cartState.currency || 'cad';
+  const items = Array.isArray(data.items) ? data.items : [];
+  const count = Number(
+    Number.isFinite(data.count) ? data.count : items.length
+  );
+  if(cartCount){ cartCount.textContent = count; }
+  if(floatingCartCount){ floatingCartCount.textContent = count; }
+  if(floatingCartBtn){
+    const hasItems = count > 0;
+    floatingCartBtn.classList.toggle('floating-cart--visible', hasItems);
+    floatingCartBtn.setAttribute('aria-hidden', hasItems ? 'false' : 'true');
+    floatingCartBtn.tabIndex = hasItems ? 0 : -1;
+  }
+
+  if(cartItems){
+    cartItems.innerHTML='';
+    if(items.length){
+      cartItems.style.display='flex';
+      items.forEach(item=>{
+        const row=document.createElement('div');
+        row.className='cart-item';
+        row.dataset.itemId=item.id;
+
+        const info=document.createElement('div');
+        info.className='cart-item__info';
+
+        const rawName=item?.service?.name || item?.name || '';
+        const translatedName=translateServiceNameText(rawName) || translate('common.service', null, 'Service');
+        const title=document.createElement('strong');
+        title.textContent=translatedName;
+        info.appendChild(title);
+
+        const meta=document.createElement('div');
+        meta.className='cart-item__meta';
+        const masterName=item?.master?.name || '-';
+        const timeLabel=item?.start_time ? fmtDateTime(item.start_time) : translate('common.noTime', null, 'No time');
+        const durationValue = Number.isFinite(item?.duration_min)
+          ? item.duration_min
+          : ((item?.service?.duration_min || 0) + (item?.service?.extra_time_min || 0));
+        meta.textContent = `${masterName} - ${timeLabel} - ${formatMinutes(durationValue)}`;
+        info.appendChild(meta);
+
+        const priceValue = item?.unit_price_display
+          || item?.service?.price_display
+          || (item?.unit_price_decimal ? formatCurrency(item.unit_price_decimal, currency) : '')
+          || (item?.service?.price ? formatCurrency(item.service.price, currency) : '');
+        if(priceValue){
+          const price=document.createElement('div');
+          price.className='cart-item__meta';
+          price.textContent=priceValue;
+          info.appendChild(price);
         }
 
-        const items = Array.isArray(data.items) ? data.items : [];
-        if(cartItems){
-          cartItems.innerHTML='';
-          if(items.length){
-            cartItems.style.display='flex';
-            items.forEach(item=>{
-              const row=document.createElement('div');
-              row.className='cart-item';
-              row.dataset.itemId=item.id;
+        if(Array.isArray(item?.discounts) && item.discounts.length){
+          const discountLine=document.createElement('div');
+          discountLine.className='cart-item__meta';
+          const discountText=item.discounts.map(d=>{
+            const amount=d.amount_display || formatCurrency(d.amount_decimal || 0, currency);
+            const label=d.label || translate('services.cart.discount', null, 'Discount');
+            return `-${amount} ${label}`.trim();
+          }).join(', ');
+          discountLine.textContent=discountText;
+          info.appendChild(discountLine);
+        }
 
-              const info=document.createElement('div');
-              info.className='cart-item__info';
+        row.appendChild(info);
 
-              const rawName = item?.service?.name || '';
-              const translatedName = translateServiceNameText(rawName) || translate('common.service', null, 'Service');
-              const title=document.createElement('strong');
-              title.textContent=translatedName;
-              info.appendChild(title);
+        const remove=document.createElement('button');
+        remove.type='button';
+        remove.className='cart-remove';
+        remove.dataset.removeId=item.id;
+        const img = document.createElement('img');
+        img.src = '../static/admin/icons/delete.svg';      // путь к твоему файлу
+        img.alt = '';                              // пустой alt, если у кнопки будет aria-label
+        img.width = 24;                            // задай размер
+        img.height = 24;
+        img.decoding = 'async';
+        img.loading = 'lazy';
+        remove.setAttribute('aria-label', translate('services.cart.remove', null, 'Remove item'));
+        remove.replaceChildren(img);   
+        row.appendChild(remove);
 
-              const meta=document.createElement('div');
-              meta.className='cart-item__meta';
-              const masterName=item?.master?.name || '-';
-              const timeLabel=item?.start_time ? fmtDateTime(item.start_time) : translate('common.noTime', null, 'No time');
-              const duration=item?.service?.duration_min || 0;
-              meta.textContent=`${masterName} · ${timeLabel} · ${formatMinutes(duration)}`;
-              info.appendChild(meta);
-
-              if(item?.service?.price){
-                const price=document.createElement('div');
-                price.className='cart-item__meta';
-                price.textContent=`$${item.service.price}`;
-                info.appendChild(price);
-              }
-
-              row.appendChild(info);
-
-              const remove=document.createElement('button');
-              remove.type='button';
-              remove.className='cart-remove';
-              remove.dataset.removeId=item.id;
-              remove.innerHTML='×';
-              remove.setAttribute('aria-label', translate('services.cart.remove', null, 'Remove item'));
-              row.appendChild(remove);
-
-              cartItems.appendChild(row);
-            });
-          }else{
-            cartItems.style.display='none';
-          }
-      }
-      
-      if(cartEmpty){ cartEmpty.style.display = items.length ? 'none' : 'block'; }
-      if(cartCheckout){ cartCheckout.disabled = !items.length; }
-
-      if(cartSummary){
-        const raw = data.total_price;
-        const num = Number(raw);
-        const formatted = Number.isFinite(num) ? num.toFixed(2) : (raw || '0.00');
-        const duration = data.total_duration_min || 0;
-        const durationText = formatMinutes(duration);
-        setTextKey(cartSummary, 'services.cart.summary', {
-          total: `$${formatted}`,
-          duration: durationText
-        }, `Total: $${formatted} · ${durationText}`);
-      }
+        cartItems.appendChild(row);
+      });
+    }else{
+      cartItems.style.display='none';
     }
+  }
+
+  if(cartEmpty){ cartEmpty.style.display = items.length ? 'none' : 'block'; }
+  if(cartCheckout){ cartCheckout.disabled = !items.length; }
+
+  if(cartSummary){
+    const duration = data.total_duration_min || 0;
+    const durationText = formatMinutes(duration);
+    const totalDisplay = data.total_display
+      || formatCurrency(data.total_decimal || data.total_price || '0', currency);
+    setTextKey(
+      cartSummary,
+      'services.cart.summary',
+      { total: totalDisplay, duration: durationText },
+      `Total: ${totalDisplay} - ${durationText}`
+    );
+  }
+}
 
       if (I18N && typeof I18N.onChange === 'function') {
         I18N.onChange(() => {
@@ -1292,23 +1559,47 @@
         if(cartCheckout) cartCheckout.disabled=true;
         setCartMessage(null);
         try{
-          const resp=await fetch(apiCartCheckout,{
+          const resp = await fetch(apiStripeCartIntent,{
             method:'POST',
             headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
             credentials:'same-origin',
             body:JSON.stringify({})
           });
-          const data=await resp.json().catch(()=>({}));
+          const data = await resp.json().catch(()=>({}));
           if(!resp.ok){
-            const msg=(data&&(data.error||data.detail))?(data.error||data.detail):translate('services.cart.checkoutFailed');
+            const msg = (data && (data.error || data.detail)) ? (data.error || data.detail) : translate('services.cart.checkoutFailed');
             throw new Error(msg);
           }
-          await refreshCart(true);
-          // Temporary bypass: skip payment modal while backend flow is adjusted.
-          setCartMessage('success','services.cart.checkoutSuccess');
-          if(cartCheckout) cartCheckout.disabled=false;
-          setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 600);
-          return;
+          if (data.requires_payment === false) {
+            await refreshCart(true);
+            const successText = data.message || translate('services.cart.freeSuccess', null, 'Appointment booked. No payment required.');
+            setCartMessage('success', 'services.cart.freeSuccess', null, successText);
+            const freeFallbackTarget = lastCartOpener instanceof HTMLElement ? lastCartOpener : (cartBtn instanceof HTMLElement ? cartBtn : (floatingCartBtn instanceof HTMLElement ? floatingCartBtn : null));
+            closeCartModal({ restoreFocus:false, restoreFocusFallback: freeFallbackTarget });
+            return;
+          }
+          const payment = {
+            client_secret: data.client_secret || null,
+            payment_intent_id: data.payment_intent_id || null,
+            amount: data.amount || data.total_decimal || '0',
+            amount_minor: Object.prototype.hasOwnProperty.call(data, 'amount_minor') ? data.amount_minor : null,
+            currency: data.currency || 'cad',
+          };
+          const pricing = data.cart || cartState;
+          const appointmentItems = Array.isArray(pricing?.items) ? pricing.items : (Array.isArray(cartState.items) ? cartState.items : []);
+          const primaryStart = appointmentItems.length ? (appointmentItems[0]?.start_time || null) : null;
+          const context = {
+            payment,
+            appointment: {
+              items: appointmentItems,
+              start_time: primaryStart,
+            },
+            cart: pricing,
+          };
+          const checkoutTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          const fallbackTarget = lastCartOpener instanceof HTMLElement ? lastCartOpener : (cartBtn instanceof HTMLElement ? cartBtn : (floatingCartBtn instanceof HTMLElement ? floatingCartBtn : null));
+          closeCartModal({ restoreFocus:false, restoreFocusFallback: fallbackTarget });
+          openPaymentModal(context, { trigger: checkoutTrigger, restoreFocusFallback: fallbackTarget });
         }catch(err){
           const fallback = err && err.message;
           const defaultMessage = translate('services.cart.checkoutFailed');
@@ -1317,26 +1608,73 @@
           }else{
             setCartMessage('error','services.cart.checkoutFailed');
           }
+        }finally{
           if(cartCheckout) cartCheckout.disabled=false;
         }
       }
 
-      async function openCartModal(){
+      async function finalizeCartBooking(paymentIntentId, cartId){
+        if(!paymentIntentId) return null;
+        const payload = {
+          payment_intent_id: paymentIntentId,
+          cart_id: cartId || null,
+        };
+        const defaultMessage = translate('services.cart.finalizeFailed', null, 'Failed to finalize booking.');
+        try{
+          const resp = await fetch(apiStripeCartFinalize, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': getCookie('csrftoken'),
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload),
+          });
+          const data = await resp.json().catch(()=>({}));
+          if(!resp.ok){
+            const message = data && (data.error || data.detail);
+            throw new Error(message || defaultMessage);
+          }
+          return data;
+        }catch(err){
+          const msg = err && err.message ? err.message : defaultMessage;
+          throw new Error(msg);
+        }
+      }
+
+      async function openCartModal(event){
         closeMenuDrawer();
         if(!isAuth){ window.location=loginUrl; return; }
+        const trigger = event && event.currentTarget instanceof HTMLElement
+          ? event.currentTarget
+          : (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+        const defaultCartOpener = cartBtn instanceof HTMLElement ? cartBtn : (floatingCartBtn instanceof HTMLElement ? floatingCartBtn : null);
+        lastCartOpener = trigger instanceof HTMLElement && trigger !== document.body ? trigger : defaultCartOpener;
         setCartMessage(null);
         if(cartModal){
-          openModalElement(cartModal);
+          openModalElement(cartModal, {
+            trigger,
+            initialFocusSelector:'#cartTitle',
+            onRequestClose:(opts)=>closeCartModal(opts)
+          });
         }
         await refreshCart(true);
       }
 
-      function closeCartModal(){
-        if(cartModal){ closeModalElement(cartModal); }
+      function closeCartModal(arg){
+        let options = {};
+        if(arg && typeof arg === 'object'){
+          if(typeof arg.preventDefault === 'function'){
+            arg.preventDefault();
+          }else{
+            options = arg;
+          }
+        }
+        if(cartModal){ closeModalElement(cartModal, options); }
         setCartMessage(null);
       }
 
-      function openPaymentModal(context){
+      function openPaymentModal(context, options = {}){
         if(!context || !context.payment) return;
         currentPaymentContext = context;
         resetPaymentForm();
@@ -1387,6 +1725,7 @@
           stripeCardComplete = false;
           cardElementWrapper?.classList.add('is-visible');
           const stripe = ensureStripe();
+          console.log(stripe);
           if (!stripe) {
             setPaymentMessage('error', PAYMENT_COPY.missingKey);
           } else {
@@ -1412,14 +1751,33 @@
         }
 
         if (paymentModal) {
-          openModalElement(paymentModal);
+          const trigger = options && options.trigger instanceof HTMLElement
+            ? options.trigger
+            : (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+          const restoreFocusFallback = options && (options.restoreFocusFallback instanceof HTMLElement || options.restoreFocusFallback instanceof SVGElement)
+            ? options.restoreFocusFallback
+            : (lastCartOpener instanceof HTMLElement ? lastCartOpener : (cartBtn instanceof HTMLElement ? cartBtn : (floatingCartBtn instanceof HTMLElement ? floatingCartBtn : null)));
+          openModalElement(paymentModal, {
+            trigger,
+            initialFocusSelector:'#paymentTitle',
+            onRequestClose:(opts)=>closePaymentModal(opts),
+            restoreFocusFallback
+          });
         }
 
         checkPaymentForm();
       }
 
-      function closePaymentModal(){
-        if(paymentModal){ closeModalElement(paymentModal); }
+      function closePaymentModal(arg){
+        let options = {};
+        if(arg && typeof arg === 'object'){
+          if(typeof arg.preventDefault === 'function'){
+            arg.preventDefault();
+          }else{
+            options = arg;
+          }
+        }
+        if(paymentModal){ closeModalElement(paymentModal, options); }
         setPaymentMessage(null);
         resetPaymentForm();
         currentPaymentContext = null;
@@ -1429,65 +1787,33 @@
         window.setTimeout(()=>{ window.location.href='/accounts/dashboard/'; }, 1200);
       }
 
-      async function verifyPayment(apptId, intentId){
-        if(!apptId || !intentId) return;
-        try{
-          const resp = await fetch(paymentVerifyUrl(apptId), {
-            method:'POST',
-            headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
-            credentials:'same-origin',
-            body:JSON.stringify({payment_intent_id:intentId})
-          });
-          const data = await resp.json().catch(()=>({}));
-          if(!resp.ok){
-            throw new Error((data && data.error) || PAYMENT_COPY.verifyFailed);
-          }
-
-          const status = data?.payment?.status;
-          if (status === 'processing' || status === 'requires_action' || status === 'requires_confirmation'){
-            setPaymentMessage('status', PAYMENT_COPY.processing);
-            window.setTimeout(()=>verifyPayment(apptId, intentId), 1500);
-            return;
-          }
-
-          if (status !== 'succeeded'){
-            throw new Error(PAYMENT_COPY.failedGeneric);
-          }
-
-          setPaymentMessage('success', PAYMENT_COPY.success);
-          setConfirmLoading(false);
-          if (paymentConfirm) paymentConfirm.disabled = true;
-          redirectAfterPayment();
-        }catch(err){
-          const msg = err && err.message ? err.message : PAYMENT_COPY.failedShort;
-          setPaymentMessage('error', msg);
-          setConfirmLoading(false);
-        }
-      }
-
-      async function confirmPayment(){
+async function confirmPayment(){
         if (!currentPaymentContext || !currentPaymentContext.payment) return;
-        const { payment, appointment } = currentPaymentContext;
-        if (!payment.client_secret){
-          setPaymentMessage('success', PAYMENT_COPY.success);
-          setConfirmLoading(false);
-          redirectAfterPayment();
-          return;
-        }
+        const { payment } = currentPaymentContext;
+        const cartId = currentPaymentContext?.cart?.cart_id || null;
         const stripe = ensureStripe();
-        if (!stripe){
+        const requiresCard = Boolean(payment.client_secret);
+        if (requiresCard && !stripe){
           setPaymentMessage('error', PAYMENT_COPY.missingKey);
           return;
         }
         const details = gatherBillingDetails();
-        if (!emailRegex.test(details.email || '')){
+        if (requiresCard && !emailRegex.test(details.email || '')){
           setPaymentMessage('error', 'Please provide a valid email address for your receipt.');
           checkPaymentForm();
           return;
         }
         setConfirmLoading(true);
-        setPaymentMessage('status', PAYMENT_COPY.processing);
         try{
+          if (!requiresCard){
+            setPaymentMessage('success', PAYMENT_COPY.success);
+            await refreshCart(true);
+            setConfirmLoading(false);
+            if (paymentConfirm) paymentConfirm.disabled = true;
+            redirectAfterPayment();
+            return;
+          }
+          setPaymentMessage('status', PAYMENT_COPY.processing);
           const result = await stripe.confirmCardPayment(payment.client_secret, {
             payment_method: {
               card: stripeCardElement,
@@ -1509,7 +1835,40 @@
           if (result.error){
             throw new Error(result.error.message || PAYMENT_COPY.failedGeneric);
           }
-          await verifyPayment(appointment.id, payment.payment_intent_id || result.paymentIntent?.id);
+          const intent = result.paymentIntent;
+          if (intent && intent.status === 'succeeded'){
+            try{
+              await finalizeCartBooking(payment.payment_intent_id, cartId);
+            }catch(finalizeErr){
+              const fallback = finalizeErr && finalizeErr.message ? finalizeErr.message : translate('services.cart.finalizeFailed', null, 'Failed to finalize booking.');
+              setPaymentMessage('error', fallback);
+              setConfirmLoading(false);
+              return;
+            }
+            setPaymentMessage('success', PAYMENT_COPY.success);
+            await refreshCart(true);
+            setConfirmLoading(false);
+            if (paymentConfirm) paymentConfirm.disabled = true;
+            redirectAfterPayment();
+            return;
+          }
+          if (intent && intent.status === 'processing'){
+            try{
+              await finalizeCartBooking(payment.payment_intent_id, cartId);
+            }catch(finalizeErr){
+              const fallback = finalizeErr && finalizeErr.message ? finalizeErr.message : translate('services.cart.finalizeFailed', null, 'Failed to finalize booking.');
+              setPaymentMessage('error', fallback);
+              setConfirmLoading(false);
+              return;
+            }
+            setPaymentMessage('status', PAYMENT_COPY.processing);
+            await refreshCart(true);
+            setConfirmLoading(false);
+            if (paymentConfirm) paymentConfirm.disabled = true;
+            redirectAfterPayment();
+            return;
+          }
+          throw new Error(PAYMENT_COPY.failedShort);
         }catch(err){
           const msg = err && err.message ? err.message : PAYMENT_COPY.failedShort;
           setPaymentMessage('error', msg);
@@ -1547,7 +1906,7 @@
       };
 
       // ===== open/close =====
-      function openModal(serviceId, serviceName){
+      function openModal(serviceId, serviceName, triggerEl){
         if(!isAuth){ window.location=loginUrl; return; }
         current={ serviceId, serviceName, masterId:null, slot:null, mastersData:[] };
         if (elServiceName) {
@@ -1577,10 +1936,25 @@
           mobileDateInput.disabled = true;
         }
 
-        openModalElement(modal);
+        const trigger = triggerEl instanceof HTMLElement ? triggerEl : (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+        openModalElement(modal, {
+          trigger,
+          initialFocusSelector:'#bookTitle',
+          onRequestClose:(opts)=>closeModal(opts)
+        });
         loadMastersAndRender();
       }
-      function closeModal(){ closeModalElement(modal); }
+      function closeModal(arg){
+        let options = {};
+        if(arg && typeof arg === 'object'){
+          if(typeof arg.preventDefault === 'function'){
+            arg.preventDefault();
+          }else{
+            options = arg;
+          }
+        }
+        closeModalElement(modal, options);
+      }
 
       // ===== availability by day/master =====
       async function fetchAvailability(dayISO, masterId){
@@ -2007,7 +2381,7 @@
       // ===== wire up =====
       document.addEventListener('click',(e)=>{
         const btn=e.target.closest('.book-btn'); if(btn){
-          openModal(btn.dataset.serviceId, btn.dataset.serviceName || translate('common.service', null, 'Service'));
+          openModal(btn.dataset.serviceId, btn.dataset.serviceName || translate('common.service', null, 'Service'), btn);
         }
       });
       btnClose.addEventListener('click',closeModal);
@@ -2105,6 +2479,14 @@
       let aborter = null;
 
       function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+      function truncateWords(text, limit=10){
+        if (text == null) return '';
+        const normalized = String(text).trim();
+        if (!normalized) return '';
+        const words = normalized.split(/\s+/);
+        if (words.length <= limit) return normalized;
+        return words.slice(0, limit).join(' ') + '...';
+      }
       function showLive(){ if(liveTitle) liveTitle.style.display='block'; if(liveGrid) liveGrid.style.display='grid'; if(serverContent) serverContent.style.display='none'; }
       function hideLive(){ if(liveTitle) liveTitle.style.display='none'; if(liveGrid) liveGrid.style.display='none'; if(serverContent) serverContent.style.display='block'; }
       function skeleton(n=8){
@@ -2154,7 +2536,8 @@
              <strong>$${escapeHtml(s.price)}</strong>
              <span class="badge">-${escapeHtml(String(s.discount_percent))}%</span>`
           : `<strong>$${escapeHtml(s.price || s.base_price)}</strong>`;
-        const desc = s.description ? `<p class="muted">${escapeHtml(s.description)}</p>` : '';
+        const descText = truncateWords(s.description, 10);
+        const desc = descText ? `<p class="muted">${escapeHtml(descText)}</p>` : '';
         const cat  = s.category ? `<div class="muted">${escapeHtml(s.category)}</div>` : '';
         const durationLabel = escapeHtml(formatMinutes(s.duration_min || 0));
         return `
@@ -2258,7 +2641,7 @@
           document.getElementById('services')?.scrollIntoView({behavior:'smooth', block:'start'});
         });
       }
-
+      window.DEBUG_checkoutCart = checkoutCart;
       applyServiceNameTranslations(document.getElementById('serverContent'));
     });
   </script>

@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 import sys
 from decouple import config, Csv
@@ -36,7 +37,7 @@ SECRET_KEY = env("SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["malvabeauty.duckdns.org", "127.0.0.1"]
+ALLOWED_HOSTS = ["malvabeauty.duckdns.org", "127.0.0.1", "localhost"]
 
 
 # Application definition
@@ -105,7 +106,6 @@ WSGI_APPLICATION = 'booking.wsgi.application'
 #         'PORT': '5433',
 #     }
 # }
-#
 # DATABASES = {
 #     "default": env.db(
 #         "DATABASE_URL",
@@ -175,11 +175,14 @@ MEDIA_ROOT = env.str("MEDIA_ROOT", default=str(BASE_DIR / "media"))
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # --- Payments / Stripe ---
-STRIPE_PUBLIC_KEY = env("STRIPE_PUBLIC_KEY", default="")
+STRIPE_PUBLIC_KEY = env(
+    "STRIPE_PUBLISHABLE_KEY",
+    default=os.environ.get("STRIPE_PUBLIC_KEY", ""),
+)
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
 STRIPE_CURRENCY = env("STRIPE_CURRENCY", default="cad")
-STRIPE_API_VERSION = env("STRIPE_API_VERSION", default="2024-11-20")
+STRIPE_API_VERSION = env("STRIPE_API_VERSION", default="2024-11-20.acacia")
 STRIPE_PAYMENT_METHOD_TYPES = env.list(
     "STRIPE_PAYMENT_METHOD_TYPES",
     default=["card"],
@@ -189,47 +192,35 @@ STRIPE_ALLOW_PROMISE_PAYMENT = env.bool(
     default=False,
 )
 
+# --- Tax / currency defaults ---
+GST_PERCENT = Decimal(env("GST_PERCENT", default="5.0"))
+GST_ENABLED = env.bool("GST_ENABLED", default=True)
+CURRENCY_CODE = env.str("CURRENCY_CODE", default="CAD")
+
 # # Use S3 as default storage for uploaded media
-# DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 
 # # AWS credentials
 
-# AWS_S3_SIGNATURE_NAME  = 's3v4'
-# # Your S3 bucket name
-# AWS_STORAGE_BUCKET_NAME = 'malvatest1'
-# AWS_S3_REGION_NAME = 'ca-central-1'
-# # Optional: Make files public
-# AWS_QUERYSTRING_AUTH = False
+AWS_S3_SIGNATURE_NAME  = env.str("AWS_S3_SIGNATURE_NAME")
+# Your S3 bucket name
+AWS_STORAGE_BUCKET_NAME = env.str("AWS_STORAGE_BUCKET_NAME")
+AWS_S3_REGION_NAME = env.str("AWS_S3_REGION_NAME")
+# Optional: Make files public
+AWS_QUERYSTRING_AUTH = env.bool("AWS_QUERYSTRING_AUTH")
 
-# # Optional: Customize file URLs
-# AWS_S3_FILE_OVERWRITE = False
-# AWS_DEFAULT_ACL = None
-# # Optional: Specify custom domain (if you use CloudFront or static hosting)
-# # AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
+# Optional: Customize file URLs
+AWS_S3_FILE_OVERWRITE = env.bool("AWS_S3_FILE_OVERWRITE")
+AWS_DEFAULT_ACL = env.str("AWS_DEFAULT_ACL", default=None)
+if isinstance(AWS_DEFAULT_ACL, str) and AWS_DEFAULT_ACL.lower() == "none":
+    AWS_DEFAULT_ACL = None
+# Optional: Specify custom domain (if you use CloudFront or static hosting)
+# AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
 
-# AWS_ACCESS_KEY_ID=env("AWS_ACCESS_KEY_ID")
-# AWS_SECRET_ACCESS_KEY=env("AWS_SECRET_ACCESS_KEY")
+AWS_ACCESS_KEY_ID=env("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY=env("AWS_SECRET_ACCESS_KEY")
 
-# settings.py
-from environ import Env
-env = Env()
 
-USE_S3 = env.bool("USE_S3", default=False)
-
-if USE_S3:
-    INSTALLED_APPS += ["storages"]
-    AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY")
-    AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
-    AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="us-east-1")
-    AWS_S3_SIGNATURE_VERSION = "s3v4"
-    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-else:
-    # локально — файловая система
-    # MEDIA_URL = "/media/"
-    # MEDIA_ROOT = BASE_DIR / "media"
-    STATIC_ROOT = "/app/storage/static"
-    MEDIA_ROOT  = "/app/storage/media"
 # # Media URL for S3
 # MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.ca-central-1.amazonaws.com/'
 # REVIEW_FORM_URL = "https://your-domain.tld/review/{appointment_id}/"
@@ -243,8 +234,8 @@ else:
 
   # для административных уведомлений
 # хороший дефолт, чтобы Django формировал абсолютные ссылки в письмах:
-from environ import Env
-env = Env()
+
+
 
 # ===== Email =====
 USE_SENDGRID = env.bool("USE_SENDGRID", default=False)
@@ -290,6 +281,8 @@ else:
 JAZZMIN_SETTINGS = {
     "site_title": "Malva Admin",
     "site_header": "Malva Health & Beauty",
+    "site_logo": "admin/icons/logo.png",
+    "site_brand": "Malva Beauty",
     "welcome_sign": "Welcome to Malva",
     "copyright": "Malva © 2025",
     "search_model": ["auth.User"],
@@ -298,9 +291,6 @@ JAZZMIN_SETTINGS = {
     "show_ui_builder": False,
     "hide_models": ["Groups"],
     # Цвета темы (можно поменять)
-    "topmenu_links": [
-        {"name": "Webpage", "url": "/", "permissions": ["auth.view_user"]},
-    ],
     "icons": {
         # Django
         "auth.User": "fas fa-user",
@@ -326,62 +316,21 @@ JAZZMIN_SETTINGS = {
         "core.Service": "fas fa-spa",
         "core.ServiceMaster": "fas fa-user-cog",
     },
-    "menu": [
-    {
-        "label": "📅 Appointments",
-        "models": [
-            "core.appointment",
-            "core.appointmentstatus",
-            "core.appointmentprepayment",
-            "core.appointmentstatushistory",
-        ],
-    },
-{
-    "label": "🧑‍💼 Users",
-    "models": [
-        "core.user",
-        "core.userprofile",
-        "core.role",
-        "core.userrole",
-        "core.clientfile",
-    ],
-},
-{
-    "label": "💳 Payments",
-    "models": [
-        "core.payment",
-        "core.paymentstatus",
-        "core.paymentmethod",
-    ],
-},
-{
-    "label": "🛎️ Services",
-    "models": [
-        "core.service",
-        "core.servicemaster",
-    ],
-},
-{
-    "label": "🔔 Notifications",
-    "models": [
-        "core.notification",
-    ]
-},
-{
-    "label": "👨‍🏫 Masters",
-    "models": [
-        "core.masterprofile",
-        "core.masteravailability",
-    ]
-}
-],
+    "search_model_fields": {},
 }
 EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
 ANYMAIL = {
     "SENDGRID_API_KEY": env("SENDGRID_API_KEY"),
 }
-DEFAULT_FROM_EMAIL=env("DEFAULT_FROM_EMAIL")
-SERVER_EMAIL=env("SERVER_EMAIL")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL")
+SERVER_EMAIL = env("SERVER_EMAIL")
+BUSINESS_NAME = env("BUSINESS_NAME", default="Malva Booking")
+BUSINESS_ADDRESS = env("BUSINESS_ADDRESS", default="")
+BUSINESS_PHONE = env("BUSINESS_PHONE", default="")
+BUSINESS_EMAIL = env("BUSINESS_EMAIL", default=DEFAULT_FROM_EMAIL)
+BUSINESS_SUPPORT_EMAIL = env("BUSINESS_SUPPORT_EMAIL", default=BUSINESS_EMAIL)
+BUSINESS_BCC_EMAIL = env("BUSINESS_BCC_EMAIL", default="")
+BUSINESS_WEBSITE = env("BUSINESS_WEBSITE", default="")
 
 # для административных уведомлений
 # хороший дефолт, чтобы Django формировал абсолютные ссылки в письмах:

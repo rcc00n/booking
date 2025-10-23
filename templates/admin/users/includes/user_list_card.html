@@ -1,0 +1,50 @@
+{% load i18n admin_urls filters %}
+{% with color_seed=user.pk|default:counter %}
+<li class="uc-grid-row" data-user-card data-user-id="{{ user.pk }}"{% if user.email %} data-user-email="{{ user.email }}"{% endif %}{% if user_profile and user_profile.phone %} data-user-phone="{{ user_profile.phone }}"{% endif %}>
+  <a class="tm-item__overlay" href="{% url cl.opts|admin_urlname:'change' user.pk %}"></a>
+
+  <!-- col 1: avatar -->
+  <div class="uc-avatar">
+    {% with first=user.first_name|default_if_none:''|slice:":1" last=user.last_name|default_if_none:''|slice:":1" %}
+      {% if first or last %}{{ first|upper }}{{ last|upper }}{% else %}{{ user.username|default_if_none:''|slice:":2"|upper }}{% endif %}
+    {% endwith %}
+  </div>
+
+  <!-- col 2: name + email под именем -->
+  <div class="uc-cell uc-cell--name">
+    <div class="uc-namewrap">
+      <h4 class="uc-name">{{ user.get_full_name|default:user.username }}</h4>
+      {% if user.universal_intake_pending %}
+        <div class="uc-flag" title="General intake form is missing">⚠️ Intake incomplete</div>
+      {% endif %}
+      {% if user.email %}
+        <div class="uc-email"><a href="mailto:{{ user.email }}">{{ user.email }}</a></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- col 3: phone -->
+  <div class="uc-cell">
+    <div class="uc-label">{% trans "Phone" %}</div>
+    <div class="uc-value">
+      {% if user_profile and user_profile.phone %}
+        <a href="tel:{{ user_profile.phone|cut:' ' }}">{{ user_profile.phone }}</a>
+      {% else %}&mdash;{% endif %}
+    </div>
+  </div>
+
+  <!-- col 5: sales (total spent) -->
+  <div class="uc-cell">
+    <div class="uc-label">{% trans "Total spent" %}</div>
+    <div class="uc-value">
+      CA$ {% if user_profile and user_profile.total_spent %}{{ user_profile.total_spent|floatformat:2 }}{% else %}0.00{% endif %}
+    </div>
+  </div>
+
+  <!-- col 6: created -->
+  <div class="uc-cell">
+    <div class="uc-label">{% trans "Created" %}</div>
+    <div class="uc-value">{{ user.date_joined|date:"M d, Y" }}</div>
+  </div>
+</li>
+{% endwith %}

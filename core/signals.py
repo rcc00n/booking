@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Dict, Any, List, Tuple
+import logging
+
 from .utils.sms import send_sms
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
@@ -17,8 +19,20 @@ from .models import (
     AppointmentStatusHistory,
     Notification,
     AppointmentItem,
-    AppointmentItemPromoCode, UserProfile, PaymentStatus
+    AppointmentItemPromoCode,
+    UserProfile,
+    PaymentStatus,
+    Payment,
+    ClientIntakeForm,
 )
+from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
+from core.services.intake_assignments import (
+    ensure_universal_assignments_for_form,
+    ensure_universal_assignments_for_profile,
+)
+from django.db import OperationalError, ProgrammingError
+
+logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Email utility (локальная, чтобы избежать циклических импортов)
@@ -39,7 +53,10 @@ def _send_email(to_email: str, subject: str, text: str, html: str, *, tag: str |
             msg.tags = [tag]   # поддерживает Anymail/Sendgrid, если есть
     except Exception:
         pass
-    msg.send()
+    try:
+        msg.send()
+    except Exception as exc:  # noqa: BLE001 - failing email must not block business flow
+        logger.warning("Failed to send transactional email (tag=%s, to=%s): %s", tag, to_email, exc, exc_info=exc)
 
 
 def _notify_once(appointment_id, user_profile, *, channel="email", message: str):
@@ -65,6 +82,17 @@ def _notify_once(appointment_id, user_profile, *, channel="email", message: str)
         notif.user = user_profile or notif.user
         notif.save(update_fields=["message", "sent_at", "user"])
 
+
+def _safe_assignments_call(func, *args, **kwargs):
+    """
+    Guard assignment helpers so migrations do not fail when tables are missing.
+    """
+    try:
+        return func(*args, **kwargs)
+    except (OperationalError, ProgrammingError):
+        logger.debug("Skipping intake assignment sync; tables not ready yet.")
+        return 0
+
 # 4) Хелпер: список позиций (услуга + мастер + время)
 def _items_summary_lines(appt: Appointment) -> list[str]:
     lines = []
@@ -83,7 +111,17 @@ def _short_labels(appt: Appointment) -> tuple[str, str]:
     if len(items) == 1:
         it = items[0]
         s_name = it.service.name
-        m_name = it.master.user.get_full_name() or it.master.user.username
+        master_profile = getattr(it.master, "user", None)
+        auth_user = getattr(master_profile, "user", None) if master_profile else None
+        name_candidates = []
+        if master_profile and hasattr(master_profile, "get_full_name"):
+            name_candidates.append(master_profile.get_full_name())
+        if auth_user and hasattr(auth_user, "get_full_name"):
+            name_candidates.append(auth_user.get_full_name())
+        if auth_user:
+            name_candidates.extend([getattr(auth_user, "username", ""), getattr(auth_user, "email", "")])
+        name_candidates.append(str(master_profile) if master_profile is not None else "")
+        m_name = next((n for n in name_candidates if n), "")
         return s_name, m_name
     return f"{len(items)} services", "multiple masters"
 
@@ -446,6 +484,43 @@ def on_appointment_status_changing(sender, instance: Appointment, **kwargs):
                 message="Appointment cancelled email queued (direct status change)",
             )
 
+
+@receiver(post_save, sender=UserProfile)
+def ensure_profile_universal_assignments(sender, instance: UserProfile, **kwargs):
+    """
+    Guarantee universal forms stay assigned whenever the profile is saved.
+    """
+    _safe_assignments_call(ensure_universal_assignments_for_profile, instance)
+
+
+@receiver(pre_save, sender=ClientIntakeForm)
+def snapshot_client_intake_form(sender, instance: ClientIntakeForm, **kwargs):
+    """
+    Remember prior universal flag to detect transitions in post_save.
+    """
+    if not instance.pk:
+        instance._previous_is_universal = False
+        return
+    previous = (
+        ClientIntakeForm.objects.filter(pk=instance.pk)
+        .values_list("is_universal", flat=True)
+        .first()
+    )
+    instance._previous_is_universal = bool(previous)
+
+
+@receiver(post_save, sender=ClientIntakeForm)
+def ensure_universal_assignments(sender, instance: ClientIntakeForm, created: bool, **kwargs):
+    """
+    When a form is created or toggled to be universal, auto-assign it to clients.
+    """
+    if not instance.is_universal:
+        return
+    was_universal = getattr(instance, "_previous_is_universal", False)
+    if not created and was_universal:
+        return
+    _safe_assignments_call(ensure_universal_assignments_for_form, instance)
+
 from django.apps import apps
 from django.db import transaction
 
@@ -458,7 +533,7 @@ def ensure_payment_statuses(sender, **kwargs):
 
     PaymentMethod = apps.get_model('core', 'PaymentMethod')
     with transaction.atomic():
-        for name in ("Stripe", "Cash", "Manual"):
+        for name in ("Stripe", "Cash", "Manual", "Credit card", "Debit card"):
             PaymentMethod.objects.get_or_create(name=name)
 
 from django.apps import apps
@@ -483,3 +558,52 @@ def ensure_user_profile(sender, instance, created, **kwargs):
         UserProfile.objects.get_or_create(user=instance, defaults={"phone": None})
 
 post_save.connect(ensure_user_profile, sender=get_user_model())
+
+
+@receiver(pre_save, sender=Payment)
+def cache_previous_payment_state(sender, instance: Payment, **kwargs):
+    if not instance.pk:
+        instance._previous_status = None
+        instance._previous_receipt_sent_at = None
+        return
+
+    previous = (
+        sender.objects.filter(pk=instance.pk)
+        .values_list("status", "receipt_sent_at")
+        .first()
+    )
+    if previous:
+        instance._previous_status = previous[0]
+        instance._previous_receipt_sent_at = previous[1]
+    else:
+        instance._previous_status = None
+        instance._previous_receipt_sent_at = None
+
+
+@receiver(post_save, sender=Payment)
+def trigger_receipt_pipeline(sender, instance: Payment, created: bool, **kwargs):
+    if kwargs.get("raw"):
+        return
+
+    if getattr(instance, "_skip_receipt_signal", False):
+        return
+
+    if instance.status != "succeeded":
+        return
+
+    if created and getattr(instance, "stripe_payment_intent_id", None):
+        return
+
+    previous_status = getattr(instance, "_previous_status", None)
+    if not created and previous_status == "succeeded":
+        return
+
+    if instance.receipt_sent_at:
+        return
+
+    if not instance.appointment_id:
+        return
+
+    payment_id = str(instance.pk)
+    generate_payment_receipt_task.delay(payment_id)
+    email_payment_receipt_task.delay(payment_id)

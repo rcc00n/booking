@@ -1,0 +1,247 @@
+.svc-container{
+    width: 150vh;
+    margin: 0 auto;
+    padding: 12px;
+}
+
+
+.svc-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:16px;
+    margin-bottom:18px;
+}
+.svc-header__info{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+}
+.svc-title{
+    margin:0;
+    font-size:26px;
+    font-weight:700;
+}
+.svc-subtitle{
+    margin:0;
+    color:#64748b;
+}
+.svc-header__actions{
+    display:flex;
+    gap:10px;
+}
+.svc-btn{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:10px 18px;
+    border-radius:999px;
+    text-decoration:none;
+    border:1px solid var(--bs-border-color,#dce1e8);
+    font-weight:600;
+}
+.svc-btn--ghost{
+    background:#fff;
+    color:#1f2937 !important;
+}
+.svc-btn--primary{
+    background:#16a34a;
+    color:#fff !important;
+    border-color:#16a34a;
+}
+
+.svc-filters{
+    display:flex;
+    flex-wrap:wrap;
+    gap:12px;
+    background:#f8fafc;
+    border:1px solid var(--bs-border-color,#e5e7eb);
+    border-radius:16px;
+    padding:12px;
+    margin-bottom:18px;
+}
+.svc-search{
+    position:relative;
+    flex:1 1 260px;
+}
+.svc-search input{
+    width:100%;
+    height:40px;
+    border:1px solid transparent;
+    border-radius:999px;
+    padding:0 16px 0 38px;
+    background:#fff;
+    outline:none;
+}
+.svc-search__icon{
+    position:absolute;
+    top:50%;
+    left:14px;
+    transform:translateY(-50%);
+    color:#94a3b8;
+}
+.svc-select{
+    height:40px;
+    border-radius:999px;
+    border:1px solid transparent;
+    padding:0 16px;
+    background:#fff;
+    color:#1f2937;
+}
+
+.svc-table__wrapper{
+    overflow-x:auto;
+}
+.svc-table{
+
+    width:100%;
+    border-collapse:separate;
+    border-spacing:0;
+
+    border:1px solid var(--bs-border-color,#e5e7eb);
+    border-radius: 16px 16px 0px 0px;
+    box-shadow:0 1px 0 rgba(15,23,42,0.04);
+}
+
+.svc-table thead{
+    background-color: #FBFCFD;
+}
+.svc-table thead th{
+    padding:14px 18px;
+    text-align:left;
+    font-size:13px;
+    color:#475569;
+    border-bottom:1px solid #e2e8f0;
+}
+.svc-table tbody{
+    
+    background:#fff;
+}
+.svc-table tbody td{
+
+    padding:16px 18px;
+    border-bottom:1px solid #f1f5f9;
+    vertical-align:middle;
+}
+.svc-table tbody tr:last-child td{
+    border-bottom:none;
+}
+.svc-name a{
+    color:#0f172a !important;
+    font-weight:400;
+    text-decoration:none;
+}
+
+.svc-actions{
+    text-align:right;
+}
+.svc-action-link{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:32px;
+    height:32px;
+    border-radius:999px;
+    color:#475569;
+}
+.svc-empty{
+    text-align:center;
+    padding:24px;
+    color:#64748b;
+}
+.svc-pagination{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-top:0;
+    padding:12px 20px;
+    background:#fff;
+    border:1px solid var(--bs-border-color,#e2e8f0);
+    border-radius:0 0 16px 16px;
+    border-top:0;
+}
+.svc-results{
+    color:#64748b;
+}
+.svc-pages{
+    display:flex;
+    justify-content:flex-end;
+}
+.svc-page-nav{
+    display:flex;
+    gap:12px;
+}
+.svc-page-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:96px;
+    height:40px;
+    padding:0 22px;
+    border-radius:999px;
+    border:1px solid #d8dee5;
+    background:#fff;
+    color:#0f172a !important;
+    font-weight:600;
+    text-decoration:none;
+    transition:all .15s ease;
+    box-shadow:0 1px 0 rgba(15,23,42,0.04);
+}
+.svc-page-btn:hover{
+    border-color:#16a34a;
+    box-shadow:0 3px 8px rgba(16,185,129,0.25);
+}
+.svc-page-btn.disabled{
+    opacity:0.4;
+    pointer-events:none;
+    box-shadow:none;
+}
+
+/* --- Prices --- */
+.svc-price{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+}
+.svc-price__old{
+    text-decoration:line-through;
+    color:#40454c;
+    opacity: 0.8;
+}
+.svc-price__arrow{
+    opacity:0.6;
+}
+
+
+/* --- Active indicator --- */
+.svc-active{
+    font-size:12px;
+    line-height:1;
+    vertical-align:middle;
+}
+.svc-active--yes{
+    color:#16a34a;
+}
+.svc-active--no{
+    color:#94a3b8;
+}
+
+@media (max-width:768px){
+    .svc-header{
+        flex-direction:column;
+        align-items:flex-start;
+    }
+    .svc-header__actions{
+        width:100%;
+        justify-content:flex-start;
+    }
+    .svc-filters{
+        flex-direction:column;
+    }
+    .svc-select{
+        width:100%;
+    }
+    .svc-actions{
+        text-align:left;
+    }
+}
