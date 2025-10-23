@@ -127,6 +127,8 @@ class UserProfile(models.Model):
                                                                  help_text="personal client's discount, % (0–100)",
                                                                  validators=[MinValueValidator(0), MaxValueValidator(100)])
     health_conditions = models.JSONField(default=dict, blank=True)
+    billing_contact = models.JSONField(default=dict, blank=True)
+    billing_contact_updated_at = models.DateTimeField(null=True, blank=True)
     postal_code = models.CharField(
         max_length=6,
         blank=True,

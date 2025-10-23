@@ -832,3 +832,74 @@ def health_view(request):
         from core.models import UserProfile
         profile, _ = UserProfile.objects.get_or_create(user=request.user)
     return render(request, "client/health_view.html", {"profile": profile})
+
+
+@login_required
+@require_POST
+@csrf_protect
+def api_autofill_payment_contact(request):
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except (ValueError, TypeError):
+        return HttpResponseBadRequest("invalid json")
+
+    allowed_fields = {
+        "name": 160,
+        "email": 254,
+        "phone": 32,
+        "address_line1": 255,
+        "address_line2": 255,
+        "city": 120,
+        "state": 120,
+        "postal_code": 20,
+        "country": 64,
+    }
+
+    cleaned = {}
+    for key, max_len in allowed_fields.items():
+        value = payload.get(key)
+        if value in (None, ""):
+            continue
+        if not isinstance(value, str):
+            value = str(value)
+        value = value.strip()
+        if not value:
+            continue
+        cleaned[key] = value[:max_len]
+
+    profile = getattr(request.user, "userprofile", None)
+    if profile is None:
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    clear_requested = bool(payload.get("clear")) and not cleaned
+    if clear_requested:
+        profile.billing_contact = {}
+        profile.billing_contact_updated_at = timezone.now()
+    elif cleaned:
+        existing = dict(getattr(profile, "billing_contact", {}) or {})
+        has_changes = existing != cleaned
+        if has_changes or not profile.billing_contact_updated_at:
+            profile.billing_contact = cleaned
+            profile.billing_contact_updated_at = timezone.now()
+        else:
+            profile.billing_contact = existing
+    else:
+        # nothing meaningful provided, do not clobber existing data
+        return JsonResponse(
+            {
+                "ok": True,
+                "billing_contact": profile.billing_contact or {},
+                "updated_at": (profile.billing_contact_updated_at.isoformat() if profile.billing_contact_updated_at else ""),
+                "skipped": True,
+            }
+        )
+
+    profile.save(update_fields=["billing_contact", "billing_contact_updated_at"])
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "billing_contact": profile.billing_contact or {},
+            "updated_at": profile.billing_contact_updated_at.isoformat() if profile.billing_contact_updated_at else "",
+        }
+    )

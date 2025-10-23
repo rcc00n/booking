@@ -339,7 +339,7 @@
     }
   </style>
 </head>
-<body data-autofill-user="{{ request.user.pk }}">
+<body {% if request.user.is_authenticated %}data-autofill-user="{{ request.user.pk }}" data-autofill-payment-endpoint="{% url 'api-autofill-payment' %}"{% endif %}>
 
   <!-- header -->
   <header class="site-header">
@@ -718,20 +718,99 @@
       }
       const autofillApi = window.MalvaAutofill;
       const profileDefaults = autofillDefaults.profile || {};
+      const paymentDefaults = autofillDefaults.payment || {};
+      const paymentEndpoint = document.body?.dataset?.autofillPaymentEndpoint || '';
+      const csrftoken = (document.cookie.match('(^|;)\\s*csrftoken\\s*=\\s*([^;]+)')||[])[2] || '';
+      const paymentAllowedKeys = ['name', 'email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'postal_code', 'country'];
       const paymentFormEl = document.getElementById('paymentForm');
-      const hydratePaymentFromProfile = (persistToStorage) => {
-        if (!profileDefaults || Object.keys(profileDefaults).length === 0) {
+      const paymentFields = paymentFormEl ? {
+        name: document.getElementById('paymentName'),
+        email: document.getElementById('paymentEmail'),
+        address_line1: document.getElementById('paymentAddress1'),
+        address_line2: document.getElementById('paymentAddress2'),
+        city: document.getElementById('paymentCity'),
+        state: document.getElementById('paymentState'),
+        postal_code: document.getElementById('paymentPostal'),
+        country: document.getElementById('paymentCountry'),
+      } : {};
+
+      const normalizePaymentPayload = (payload) => {
+        const result = {};
+        Object.entries(payload || {}).forEach(([key, value]) => {
+          if (!paymentAllowedKeys.includes(key)) return;
+          if (value === undefined || value === null) return;
+          let str = value;
+          if (typeof str !== 'string') {
+            str = String(str);
+          }
+          str = str.trim();
+          if (!str) return;
+          result[key] = str;
+        });
+        return result;
+      };
+
+      let paymentPersistTimer = null;
+      const sendPaymentContact = async (payload, { clear = false } = {}) => {
+        if (!paymentEndpoint) return;
+        const body = clear ? { clear: true } : normalizePaymentPayload(payload);
+        if (!clear && Object.keys(body).length === 0) {
           return;
         }
+        try {
+          const resp = await fetch(paymentEndpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': csrftoken,
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(body),
+          });
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+          }
+          const data = await resp.json();
+          autofillDefaults.payment = Object.assign({}, data?.billing_contact || {}, data?.updated_at ? { updated_at: data.updated_at } : {});
+        } catch (err) {
+          console.warn('[mainmenu] Unable to sync payment contact', err);
+        }
+      };
+
+      const persistPaymentContact = (payload, { immediate = false } = {}) => {
+        if (!paymentEndpoint) return;
+        const task = () => sendPaymentContact(payload);
+        if (immediate) {
+          task();
+          return;
+        }
+        window.clearTimeout(paymentPersistTimer);
+        paymentPersistTimer = window.setTimeout(task, 600);
+      };
+
+      const collectPaymentValues = () => {
+        const data = {};
+        Object.entries(paymentFields).forEach(([key, element]) => {
+          if (element && element.value) {
+            data[key] = element.value;
+          }
+        });
+        return data;
+      };
+
+      const hydratePaymentFromProfile = (persistToStorage) => {
+        if (!paymentFormEl) {
+          return false;
+        }
         const fields = {
-          name: document.getElementById('paymentName'),
-          email: document.getElementById('paymentEmail'),
-          address_line1: document.getElementById('paymentAddress1'),
-          address_line2: document.getElementById('paymentAddress2'),
-          city: document.getElementById('paymentCity'),
-          state: document.getElementById('paymentState'),
-          postal_code: document.getElementById('paymentPostal'),
-          country: document.getElementById('paymentCountry'),
+          name: paymentFields.name,
+          email: paymentFields.email,
+          address_line1: paymentFields.address_line1,
+          address_line2: paymentFields.address_line2,
+          city: paymentFields.city,
+          state: paymentFields.state,
+          postal_code: paymentFields.postal_code,
+          country: paymentFields.country,
         };
         const setIfEmpty = (element, value) => {
           if (!element || !value || element.value) {
@@ -744,6 +823,10 @@
           return true;
         };
         let hydrated = false;
+        Object.entries(paymentDefaults).forEach(([key, value]) => {
+          if (!fields[key]) return;
+          hydrated = setIfEmpty(fields[key], value) || hydrated;
+        });
         const fullName = `${profileDefaults.first_name || ''} ${profileDefaults.last_name || ''}`.trim();
         hydrated = setIfEmpty(fields.name, fullName) || hydrated;
         hydrated = setIfEmpty(fields.email, profileDefaults.email) || hydrated;
@@ -774,8 +857,10 @@
           });
           if (Object.keys(payload).length) {
             autofillApi.save('payment', payload, { userId: resolvedUserId });
+            persistPaymentContact(payload, { immediate: true });
           }
         }
+        return hydrated;
       };
       if (paymentFormEl) {
         if (autofillApi) {
@@ -783,11 +868,35 @@
           const storedPayment = autofillApi.load('payment', { userId: resolvedUserId });
           const hasStoredPayment = storedPayment && Object.keys(storedPayment.values || {}).length > 0;
           if (!hasStoredPayment) {
-            hydratePaymentFromProfile(true);
+            const hydrated = hydratePaymentFromProfile(true);
+            if (!hydrated && paymentDefaults && Object.keys(paymentDefaults).length) {
+              persistPaymentContact(paymentDefaults, { immediate: true });
+            }
           }
         } else if (Object.keys(profileDefaults).length) {
           hydratePaymentFromProfile(false);
         }
+        if (paymentEndpoint) {
+          const eventType = (field) => (field && (field.tagName === 'SELECT' || field.type === 'checkbox' || field.type === 'radio') ? 'change' : 'input');
+          Object.values(paymentFields).forEach((field) => {
+            if (!field) return;
+            field.addEventListener(eventType(field), () => {
+              const payload = collectPaymentValues();
+              persistPaymentContact(payload);
+            });
+          });
+        }
+      }
+      if (autofillApi && paymentEndpoint) {
+        autofillApi.subscribe(({ group, userId, state }) => {
+          if (group !== 'payment') return;
+          if (String(userId || 'guest') !== resolvedUserId) return;
+          const values = (state && state.values) || (state && state.state && state.state.values) || {};
+          if (!Object.keys(values).length) {
+            return;
+          }
+          persistPaymentContact(values, { immediate: true });
+        });
       }
       let refreshPending = false;
       const queueRefresh = () => {

@@ -6,6 +6,7 @@
   const subscribers = new Set();
 
   const scheduleMap = new WeakMap();
+  const memoryStore = new Map();
 
   let storageStatus = null;
 
@@ -56,10 +57,10 @@
   }
 
   function readState(userId, group) {
-    if (!storageAvailable()) {
-      return { values: {}, updatedAt: null };
-    }
     const key = getKey(userId, group);
+    if (!storageAvailable()) {
+      return memoryStore.get(key) || { values: {}, updatedAt: null };
+    }
     const raw = window.localStorage.getItem(key);
     if (!raw) {
       return { values: {}, updatedAt: null };
@@ -79,14 +80,16 @@
   }
 
   function writeState(userId, group, values) {
-    if (!storageAvailable()) {
-      return;
-    }
     const key = getKey(userId, group);
     const payload = {
       values: values,
       updatedAt: new Date().toISOString(),
     };
+    memoryStore.set(key, payload);
+    if (!storageAvailable()) {
+      notify(group, userId, payload);
+      return;
+    }
     try {
       window.localStorage.setItem(key, JSON.stringify(payload));
     } catch (err) {
@@ -96,10 +99,12 @@
   }
 
   function clearState(userId, group) {
+    const key = getKey(userId, group);
+    memoryStore.delete(key);
     if (!storageAvailable()) {
+      notify(group, userId, { values: {}, updatedAt: null });
       return;
     }
-    const key = getKey(userId, group);
     window.localStorage.removeItem(key);
     notify(group, userId, { values: {}, updatedAt: null });
   }

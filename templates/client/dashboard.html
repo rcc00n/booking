@@ -113,7 +113,7 @@
     }
   </style>
 </head>
-<body class="h-full bg-[#F7F6F1] text-[#4D4D4D]" data-autofill-user="{{ request.user.pk }}">
+<body class="h-full bg-[#F7F6F1] text-[#4D4D4D]" data-autofill-user="{{ request.user.pk }}" data-autofill-payment-endpoint="{% url 'api-autofill-payment' %}">
 <div class="dashboard-backdrop" data-nav-backdrop></div>
 <div class="dashboard-shell">
 
@@ -603,6 +603,75 @@
           </div>
         </article>
 
+        <article class="tab-card bg-white border border-[#DAD3C1] shadow-sm rounded-2xl p-6 flex flex-col gap-4" data-payment-account-card>
+          <div>
+            <h3 class="text-lg font-semibold text-[#204029]">Billing details saved to your account</h3>
+            <p class="text-sm text-[#4D4D4D]/70">We reuse these fields across invoices and checkout on every device.</p>
+          </div>
+          {% with billing=autofill_defaults.payment %}
+            <dl class="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm" data-payment-account-list>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Billing name</dt>
+                <dd class="text-[#204029]" data-payment-account-field="name">{{ billing.name|default:"—" }}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Email</dt>
+                <dd class="text-[#204029] break-words" data-payment-account-field="email">{{ billing.email|default:"—" }}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Phone</dt>
+                <dd class="text-[#204029]" data-payment-account-field="phone">{{ billing.phone|default:"—" }}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Postal code</dt>
+                <dd class="text-[#204029]" data-payment-account-field="postal_code">{{ billing.postal_code|default:"—" }}</dd>
+              </div>
+              <div class="sm:col-span-2">
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Address</dt>
+                <dd class="text-[#204029] whitespace-pre-line" data-payment-account-field="address">
+                  {% if billing.address_line1 or billing.address_line2 %}
+                    {% if billing.address_line1 %}{{ billing.address_line1 }}{% endif %}
+                    {% if billing.address_line2 %}\n{{ billing.address_line2 }}{% endif %}
+                  {% else %}
+                    —
+                  {% endif %}
+                </dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">City</dt>
+                <dd class="text-[#204029]" data-payment-account-field="city">{{ billing.city|default:"—" }}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Province / State</dt>
+                <dd class="text-[#204029]" data-payment-account-field="state">{{ billing.state|default:"—" }}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Country</dt>
+                <dd class="text-[#204029]" data-payment-account-field="country">{{ billing.country|default:"—" }}</dd>
+              </div>
+            </dl>
+            <p class="text-xs text-[#4D4D4D]/60" data-payment-account-updated>
+              {% if billing.updated_at %}
+                Updated {{ billing.updated_at }}
+              {% else %}
+                Not updated yet.
+              {% endif %}
+            </p>
+            <div class="flex flex-wrap gap-3 pt-2">
+              <button type="button"
+                      class="px-4 py-2 bg-[#204029] text-white rounded-lg hover:bg-[#1b3626] transition"
+                      data-autofill-sync-account="payment">
+                Sync this device to account
+              </button>
+              <button type="button"
+                      class="px-4 py-2 border border-[#204029]/30 text-[#204029] rounded-lg hover:border-[#204029]"
+                      data-autofill-clear-account="payment">
+                Clear account copy
+              </button>
+            </div>
+          {% endwith %}
+        </article>
+
         <article class="tab-card bg-white border border-[#DAD3C1] shadow-sm rounded-2xl p-6 flex flex-col gap-4">
           <div>
             <h3 class="text-lg font-semibold text-[#204029]">Device autofill</h3>
@@ -809,12 +878,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   const autofillApi = window.MalvaAutofill;
   const resolvedUserId = (document.body?.dataset?.autofillUser) ? String(document.body.dataset.autofillUser) : 'guest';
+  const paymentEndpoint = document.body?.dataset?.autofillPaymentEndpoint || '';
+  const paymentAccountCard = document.querySelector('[data-payment-account-card]');
+  const paymentAccountUpdatedEl = paymentAccountCard?.querySelector('[data-payment-account-updated]');
+  const paymentAccountFieldNodes = paymentAccountCard ? paymentAccountCard.querySelectorAll('[data-payment-account-field]') : [];
   const autofillGroups = ['profile', 'health', 'payment'];
   const deviceListEl = document.querySelector('[data-autofill-list]');
   const deviceEmptyEl = document.querySelector('[data-autofill-empty]');
   const syncButtons = document.querySelectorAll('[data-autofill-sync]');
   const clearButtons = document.querySelectorAll('[data-autofill-clear]');
   const clearAllButton = document.querySelector('[data-autofill-clear-all]');
+  const accountSyncButtons = document.querySelectorAll('[data-autofill-sync-account]');
+  const accountClearButtons = document.querySelectorAll('[data-autofill-clear-account]');
+  const paymentAllowedKeys = ['name', 'email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'postal_code', 'country'];
+  const defaultPayment = Object.assign({}, autofillDefaults.payment || {});
+  autofillDefaults.payment = defaultPayment;
   const groupLabels = {
     profile: 'Profile form',
     health: 'Health questionnaire',
@@ -825,6 +903,108 @@ document.addEventListener('DOMContentLoaded', () => {
     const dt = new Date(iso);
     if (Number.isNaN(dt.getTime())) return '';
     return `Updated ${dt.toLocaleString(getLocale(), { dateStyle: 'medium', timeStyle: 'short' })}`;
+  };
+  const updatePaymentAccountCard = (values, updatedAt) => {
+    if (!paymentAccountCard) return;
+    const data = values || {};
+    paymentAccountFieldNodes.forEach((el) => {
+      const key = el.dataset.paymentAccountField;
+      if (!key) return;
+      let text = '—';
+      if (key === 'address') {
+        const addr = [data.address_line1, data.address_line2].filter(Boolean).join('\n');
+        if (addr) text = addr;
+      } else if (data[key]) {
+        text = data[key];
+      }
+      el.textContent = text;
+    });
+    if (paymentAccountUpdatedEl) {
+      paymentAccountUpdatedEl.textContent = updatedAt ? formatAutofillTimestamp(updatedAt) : 'Not updated yet.';
+    }
+  };
+  updatePaymentAccountCard(defaultPayment, defaultPayment.updated_at || defaultPayment.updatedAt || '');
+
+  const normalizePaymentPayload = (payload) => {
+    const result = {};
+    Object.entries(payload || {}).forEach(([key, value]) => {
+      if (!paymentAllowedKeys.includes(key)) return;
+      if (value === undefined || value === null) return;
+      let str = value;
+      if (typeof str !== 'string') {
+        str = String(str);
+      }
+      str = str.trim();
+      if (!str) return;
+      result[key] = str;
+    });
+    return result;
+  };
+
+  let paymentPersistTimer = null;
+  const sendPaymentContact = async (payload, { clear = false } = {}) => {
+    if (!paymentEndpoint) return;
+    const body = clear ? { clear: true } : normalizePaymentPayload(payload);
+    if (!clear && Object.keys(body).length === 0) {
+      return;
+    }
+    try {
+      const resp = await fetch(paymentEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrftoken,
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      const contact = data?.billing_contact || {};
+      const updatedAt = data?.updated_at || '';
+      autofillDefaults.payment = Object.assign({}, contact, updatedAt ? { updated_at: updatedAt } : {});
+      updatePaymentAccountCard(autofillDefaults.payment, updatedAt);
+    } catch (err) {
+      console.warn('[dashboard] Failed to persist payment contact', err);
+    }
+  };
+
+  const persistPaymentContact = (payload, { immediate = false } = {}) => {
+    if (!paymentEndpoint) return;
+    const task = () => sendPaymentContact(payload);
+    if (immediate) {
+      task();
+      return;
+    }
+    window.clearTimeout(paymentPersistTimer);
+    paymentPersistTimer = window.setTimeout(task, 600);
+  };
+
+  const fallbackPaymentPayload = () => {
+    const profileDefaults = autofillDefaults.profile || {};
+    const paymentDefaults = Object.assign({}, autofillDefaults.payment || {});
+    const finalPayload = Object.assign({}, paymentDefaults);
+    if (!finalPayload.name) {
+      const fullName = `${profileDefaults.first_name || ''} ${profileDefaults.last_name || ''}`.trim();
+      if (fullName) finalPayload.name = fullName;
+    }
+    ['email', 'phone', 'postal_code'].forEach((key) => {
+      if (!finalPayload[key] && profileDefaults[key]) {
+        finalPayload[key] = profileDefaults[key];
+      }
+    });
+    if (!finalPayload.address_line1 && profileDefaults.address) {
+      const lines = String(profileDefaults.address).split('\n').map((line) => line.trim()).filter(Boolean);
+      if (lines.length) {
+        finalPayload.address_line1 = lines[0];
+        if (lines.length > 1) {
+          finalPayload.address_line2 = lines.slice(1).join(' ');
+        }
+      }
+    }
+    return normalizePaymentPayload(finalPayload);
   };
   const renderAutofillDevice = () => {
     if (!autofillApi || !deviceListEl || !deviceEmptyEl) {
@@ -883,7 +1063,12 @@ document.addEventListener('DOMContentLoaded', () => {
       el.classList.remove('opacity-70');
     }, 1800);
   };
-  if (!autofillApi || !autofillApi.storageAvailable()) {
+  if (autofillApi) {
+    autofillApi.attachAll('form[data-autofill-group]');
+  }
+
+  const storageSupported = autofillApi ? autofillApi.storageAvailable() : false;
+  if (!storageSupported) {
     if (deviceEmptyEl) {
       deviceEmptyEl.textContent = 'Autofill requires local storage support. Enable cookies/local storage or switch to another browser.';
       deviceEmptyEl.classList.remove('hidden');
@@ -893,14 +1078,24 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.classList.add('opacity-50', 'cursor-not-allowed');
     });
   } else {
-    autofillApi.attachAll('form[data-autofill-group]');
     renderAutofillDevice();
-    autofillApi.subscribe(({ group, userId }) => {
+  }
+
+  if (autofillApi) {
+    autofillApi.subscribe(({ group, userId, state }) => {
       if (String(userId || 'guest') !== resolvedUserId) return;
-      if (!autofillGroups.includes(group)) return;
-      renderAutofillDevice();
+      if (storageSupported && autofillGroups.includes(group)) {
+        renderAutofillDevice();
+      }
+      if (group === 'payment') {
+        const source = (state && state.values) || (state && state.state && state.state.values) || {};
+        persistPaymentContact(source);
+      }
     });
-    const profileKeys = ['first_name', 'last_name', 'email', 'phone', 'birth_date', 'address', 'postal_code', 'how_heard', 'email_marketing_consent'];
+  }
+
+  const profileKeys = ['first_name', 'last_name', 'email', 'phone', 'birth_date', 'address', 'postal_code', 'how_heard', 'email_marketing_consent'];
+  if (autofillApi) {
     syncButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         const group = btn.dataset.autofillSync;
@@ -916,6 +1111,9 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         }
         autofillApi.save(group, payload, { userId: resolvedUserId });
+        if (group === 'payment') {
+          persistPaymentContact(payload, { immediate: true });
+        }
         flash(btn, 'Synced');
       });
     });
@@ -924,14 +1122,51 @@ document.addEventListener('DOMContentLoaded', () => {
         const group = btn.dataset.autofillClear;
         if (!group) return;
         autofillApi.clear(group, { userId: resolvedUserId });
+        if (group === 'payment') {
+          sendPaymentContact({}, { clear: true });
+        }
         flash(btn, 'Cleared');
       });
     });
     clearAllButton?.addEventListener('click', () => {
-      autofillGroups.forEach((group) => autofillApi.clear(group, { userId: resolvedUserId }));
+      autofillGroups.forEach((group) => {
+        autofillApi.clear(group, { userId: resolvedUserId });
+        if (group === 'payment') {
+          sendPaymentContact({}, { clear: true });
+        }
+      });
       flash(clearAllButton, 'Cleared');
     });
   }
+
+  accountSyncButtons.forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!paymentEndpoint) {
+        flash(btn, 'Unavailable');
+        return;
+      }
+      let payload = {};
+      if (autofillApi) {
+        const state = autofillApi.load('payment', { userId: resolvedUserId });
+        payload = Object.assign({}, (state && state.values) || {});
+      }
+      if (!Object.keys(payload).length) {
+        payload = fallbackPaymentPayload();
+      }
+      await sendPaymentContact(payload);
+      flash(btn, 'Synced');
+    });
+  });
+  accountClearButtons.forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!paymentEndpoint) {
+        flash(btn, 'Unavailable');
+        return;
+      }
+      await sendPaymentContact({}, { clear: true });
+      flash(btn, 'Cleared');
+    });
+  });
 
   /* chart */
   const el = document.getElementById('stats_chart');

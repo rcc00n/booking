@@ -377,9 +377,45 @@ class ClientProfileForm(forms.Form):
         consent = bool(self.cleaned_data.get("email_marketing_consent"))
         prof.set_marketing_consent(consent)
 
+        billing_contact = dict(getattr(prof, "billing_contact", {}) or {})
+        updated_billing = False
+
+        def _set_contact(key: str, value: str, *, force: bool = False) -> None:
+            nonlocal updated_billing
+            if value in (None, ""):
+                if force and billing_contact.get(key):
+                    billing_contact.pop(key, None)
+                    updated_billing = True
+                return
+            if force or billing_contact.get(key) != value:
+                billing_contact[key] = value
+                updated_billing = True
+
+        full_name = f"{self.user.first_name} {self.user.last_name}".strip()
+        _set_contact("name", full_name, force=True)
+        _set_contact("email", self.cleaned_data["email"], force=True)
+        _set_contact("phone", prof.phone or "", force=True)
+        _set_contact("postal_code", prof.postal_code or "", force=True)
+
+        address_value = (self.cleaned_data.get("address", "") or "").strip()
+        if address_value:
+            lines = [line.strip() for line in address_value.split("\n") if line.strip()]
+            if lines:
+                _set_contact("address_line1", lines[0], force=True)
+                if len(lines) > 1:
+                    _set_contact("address_line2", " ".join(lines[1:]), force=True)
+        else:
+            _set_contact("address_line1", "", force=True)
+            _set_contact("address_line2", "", force=True)
+
+        if updated_billing:
+            prof.billing_contact = {k: v for k, v in billing_contact.items() if v not in (None, "")}
+            prof.billing_contact_updated_at = timezone.now()
+
         prof.save(update_fields=[
             "phone", "birth_date", "address", "postal_code", "how_heard",
             "email_marketing_consent", "email_marketing_consented_at",
+            "billing_contact", "billing_contact_updated_at",
         ])
         return self.user
 
