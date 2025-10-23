@@ -1,0 +1,69 @@
+{% extends "admin/base_site.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block extrastyle %}
+<style>
+    .exports-wrap{max-width:1080px;margin:0 auto;padding:24px}
+    .exports-wrap h1{margin-top:0;margin-bottom:24px;font-size:28px;font-weight:600}
+    .exports-wrap .intro{margin:-12px 0 32px;color:#6b7280}
+    .export-card{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:20px;margin-bottom:24px;box-shadow:0 4px 12px rgba(0,0,0,.04)}
+    .export-card h2{margin-top:0;margin-bottom:16px;font-size:18px;color:#111827}
+    .export-item{display:flex;align-items:center;gap:16px;padding:12px 0;border-top:1px solid #f3f4f6;flex-wrap:wrap}
+    .export-item:first-of-type{border-top:none;padding-top:0}
+    .export-info{flex:1 1 320px;min-width:220px}
+    .export-label{font-weight:600;color:#111827;margin-bottom:4px}
+    .export-meta{font-size:12px;text-transform:uppercase;color:#6b7280;letter-spacing:.06em}
+    .export-info p{margin:4px 0 0;color:#4b5563;font-size:13px}
+    .export-range{display:flex;align-items:center;gap:8px}
+    .export-range input[type="date"]{padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px}
+    .export-range span{color:#9ca3af;font-size:12px}
+    .btn-download{padding:8px 16px;border-radius:999px;border:1px solid #111827;background:#111827;color:#fff;font-weight:500;cursor:pointer;transition:background .15s ease}
+    .btn-download:hover{background:#1f2937}
+    .nothing{color:#6b7280;font-style:italic}
+    @media (max-width:680px){
+        .export-item{align-items:flex-start}
+        .btn-download{width:100%}
+        .export-range{width:100%;justify-content:space-between}
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="exports-wrap">
+    <h1>{{ title }}</h1>
+    <p class="intro">Use these curated exports to pull data without browsing each model individually. Date filters apply where supported.</p>
+
+    {% for group, items in grouped_exports %}
+        <section class="export-card">
+            <h2>{{ group }}</h2>
+            {% for entry in items %}
+                <form method="get" action="{{ entry.url }}" class="export-item" target="_blank">
+                    {% for name, value in entry.params.items %}
+                        <input type="hidden" name="{{ name }}" value="{{ value }}">
+                    {% endfor %}
+
+                    <div class="export-info">
+                        <div class="export-label">{{ entry.label }}</div>
+                        <div class="export-meta">{{ entry.file_format }}</div>
+                        {% if entry.description %}<p>{{ entry.description }}</p>{% endif %}
+                    </div>
+
+                    {% if entry.supports_range %}
+                        <div class="export-range">
+                            <input type="date" name="start" value="{{ default_start }}" {% if entry.requires_range %}required{% endif %}>
+                            <span>–</span>
+                            <input type="date" name="end" value="{{ default_end }}" {% if entry.requires_range %}required{% endif %}>
+                        </div>
+                    {% endif %}
+
+                    <button type="submit" class="btn-download">Download</button>
+                </form>
+            {% empty %}
+                <p class="nothing">No exports registered in this group.</p>
+            {% endfor %}
+        </section>
+    {% empty %}
+        <p class="nothing">No exports available.</p>
+    {% endfor %}
+</div>
+{% endblock %}

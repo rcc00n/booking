@@ -3,6 +3,7 @@ from collections import defaultdict
 from decimal import Decimal
 from io import BytesIO
 from typing import Dict, Any, List, Sequence, Iterable, Tuple, Optional
+from dataclasses import dataclass, field
 from urllib.parse import urlencode
 
 from django.contrib.admin import DateFieldListFilter
@@ -198,6 +199,19 @@ def _coerce_json(value):
     if isinstance(value, Decimal):
         return str(value)
     return value
+
+
+@dataclass(frozen=True)
+class ExportDashboardEntry:
+    key: str
+    label: str
+    url: str
+    file_format: str = "XLSX"
+    group: str = "Data"
+    description: Optional[str] = None
+    params: Dict[str, Any] = field(default_factory=dict)
+    supports_range: bool = False
+    requires_range: bool = False
 
 # --- Preset Date Range Filter (factory) ---
 def _start_of_week(d: date) -> date:
@@ -498,6 +512,12 @@ def custom_index(request):
 admin.site.index = custom_index
 class ExportCsvMixin:
     export_fields = None  # список полей; можно переопределить в admin
+    export_dashboard_label = None
+    export_dashboard_group = None
+    export_dashboard_description = None
+    export_dashboard_supports_range = True
+    export_dashboard_requires_range = False
+    export_dashboard_params = None
 
     def get_urls(self):
         opts = self.model._meta
@@ -554,6 +574,13 @@ class ExportXlsxMixin:
       - Экшены: export_appointments_xlsx / export_appointment_items_xlsx
     Подключение: наследуй нужный ModelAdmin от этого миксина.
     """
+
+    export_dashboard_label = None
+    export_dashboard_group = None
+    export_dashboard_description = None
+    export_dashboard_supports_range = True
+    export_dashboard_requires_range = False
+    export_dashboard_params = None
 
     # ============ ПУБЛИЧНЫЕ ТОЧКИ ============
 
@@ -957,6 +984,55 @@ class ExportXlsxMixin:
         )
 
         return wb
+
+    def build_statistics_flat_workbook(
+            self,
+            *,
+            start, end,
+            kpi_total_revenue, kpi_total_appointments, kpi_with_discount,
+            top_bookers, top_spenders, ds_totals,
+            discount_breakdown, promo_breakdown, client_source_table,
+    ) -> Workbook:
+        """Строит однолистовую книгу с блоками статистики друг за другом."""
+        source_wb = self.build_statistics_workbook(
+            start=start,
+            end=end,
+            kpi_total_revenue=kpi_total_revenue,
+            kpi_total_appointments=kpi_total_appointments,
+            kpi_with_discount=kpi_with_discount,
+            top_bookers=top_bookers,
+            top_spenders=top_spenders,
+            ds_totals=ds_totals,
+            discount_breakdown=discount_breakdown,
+            promo_breakdown=promo_breakdown,
+            client_source_table=client_source_table,
+        )
+
+        combined = Workbook()
+        ws = combined.active
+        ws.title = "Statistics"
+
+        sheets = list(source_wb.worksheets)
+        for idx, sheet in enumerate(sheets):
+            if sheet.max_row == 0:
+                continue
+
+            ws.append([sheet.title])
+            for cell in ws[ws.max_row]:
+                cell.font = Font(bold=True)
+
+            for row_index, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+                ws.append(list(row))
+                if row_index == 1:
+                    for cell in ws[ws.max_row]:
+                        cell.font = Font(bold=True)
+                        cell.alignment = Alignment(vertical="center")
+
+            if idx != len(sheets) - 1:
+                ws.append([])
+
+        _autosize_columns(ws)
+        return combined
 
 
 class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
@@ -4739,6 +4815,145 @@ def _client_source_aggregation(qs):
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+def _collect_model_admin_exports(request: HttpRequest) -> List[ExportDashboardEntry]:
+    entries: List[ExportDashboardEntry] = []
+
+    for model, model_admin in admin.site._registry.items():
+        try:
+            if hasattr(model_admin, "has_view_permission") and not model_admin.has_view_permission(request):
+                continue
+        except Exception:
+            continue
+
+        provider = getattr(model_admin, "get_export_dashboard_entries", None)
+        if callable(provider):
+            custom = provider(request)
+            if custom:
+                entries.extend(custom)
+            continue
+
+        base_group = getattr(model_admin, "export_dashboard_group", None)
+        if not base_group:
+            base_group = model._meta.app_label.replace("_", " ").title() or "Data"
+
+        base_label = getattr(model_admin, "export_dashboard_label", None)
+        if not base_label:
+            base_label = str(model._meta.verbose_name_plural).title()
+
+        description = getattr(model_admin, "export_dashboard_description", None)
+        supports_range = bool(getattr(model_admin, "export_dashboard_supports_range", False))
+        requires_range = bool(getattr(model_admin, "export_dashboard_requires_range", False))
+        params = getattr(model_admin, "export_dashboard_params", None) or {}
+
+        app_label = model._meta.app_label
+        model_name = model._meta.model_name
+
+        if isinstance(model_admin, ExportCsvMixin):
+            try:
+                url = reverse(f"admin:{app_label}_{model_name}_export_csv")
+            except NoReverseMatch:
+                url = None
+            if url:
+                entries.append(
+                    ExportDashboardEntry(
+                        key=f"{app_label}.{model_name}.quick_xlsx",
+                        label=f"{base_label} — Quick XLSX",
+                        url=url,
+                        description=description,
+                        group=base_group,
+                        params=dict(params),
+                        supports_range=supports_range,
+                        requires_range=requires_range,
+                    )
+                )
+
+        if isinstance(model_admin, ExportXlsxMixin):
+            try:
+                url = reverse(f"admin:{app_label}_{model_name}_export_xlsx")
+            except NoReverseMatch:
+                url = None
+            if url:
+                entries.append(
+                    ExportDashboardEntry(
+                        key=f"{app_label}.{model_name}.full_xlsx",
+                        label=f"{base_label} — Full XLSX",
+                        url=url,
+                        description=description,
+                        group=base_group,
+                        params=dict(params),
+                        supports_range=supports_range,
+                        requires_range=requires_range,
+                    )
+                )
+
+    return entries
+
+
+def _manual_export_entries(request: HttpRequest) -> List[ExportDashboardEntry]:
+    entries: List[ExportDashboardEntry] = []
+    try:
+        stats_url = reverse("admin:stats")
+    except NoReverseMatch:
+        stats_url = None
+
+    if stats_url:
+        description = "Period-based performance metrics with breakdowns by clients and discounts."
+        entries.append(
+            ExportDashboardEntry(
+                key="stats.multi_sheet",
+                label="Statistics — Multi-sheet workbook",
+                url=stats_url,
+                description=description,
+                group="Analytics",
+                params={"export": "xlsx"},
+                supports_range=True,
+                requires_range=True,
+            )
+        )
+        entries.append(
+            ExportDashboardEntry(
+                key="stats.combined_sheet",
+                label="Statistics — Combined sheet",
+                url=stats_url,
+                description="All statistics sheets flattened into a single tab.",
+                group="Analytics",
+                params={"export": "xlsx_flat"},
+                supports_range=True,
+                requires_range=True,
+            )
+        )
+
+    return entries
+
+
+def _collect_export_dashboard_entries(request: HttpRequest) -> List[ExportDashboardEntry]:
+    entries = _collect_model_admin_exports(request)
+    entries.extend(_manual_export_entries(request))
+    return entries
+
+
+@staff_member_required
+def exports_dashboard_view(request: HttpRequest) -> HttpResponse:
+    entries = _collect_export_dashboard_entries(request)
+    grouped: Dict[str, List[ExportDashboardEntry]] = defaultdict(list)
+    for entry in entries:
+        grouped[entry.group].append(entry)
+
+    grouped_exports = [
+        (group, sorted(items, key=lambda e: e.label.lower()))
+        for group, items in sorted(grouped.items(), key=lambda item: item[0].lower())
+    ]
+
+    start, end = _parse_period(request)
+    context = {
+        "title": "Exports",
+        "grouped_exports": grouped_exports,
+        "default_start": start.isoformat(),
+        "default_end": end.isoformat(),
+    }
+    return render(request, "admin/exports_dashboard.html", context)
+
+
 @staff_member_required
 def stats_view(request: HttpRequest) -> HttpResponse:
     # ── Период
@@ -5050,9 +5265,16 @@ def stats_view(request: HttpRequest) -> HttpResponse:
     src_revenue = [float(r["revenue"]) for r in client_source_stats]
 
 
-    if request.GET.get("export") == "xlsx":
+    export_kind = request.GET.get("export")
+    if export_kind in {"xlsx", "xlsx_flat"}:
         exporter = ExportXlsxMixin()  # просто используем миксин как helper
-        wb = exporter.build_statistics_workbook(
+        builder = exporter.build_statistics_workbook
+        filename = "statistics.xlsx"
+        if export_kind == "xlsx_flat":
+            builder = exporter.build_statistics_flat_workbook
+            filename = "statistics_flat.xlsx"
+
+        wb = builder(
             start=start, end=end,
             kpi_total_revenue=kpi_total_revenue,
             kpi_total_appointments=kpi_total_appointments,
@@ -5064,13 +5286,16 @@ def stats_view(request: HttpRequest) -> HttpResponse:
             promo_breakdown=list(promo_breakdown),
             client_source_table=list(client_source_table),
         )
-        return exporter._wb_response(wb, "statistics.xlsx")
+        return exporter._wb_response(wb, filename)
 
     # === иначе — рендерим страницу и даём ссылку на экспорт с текущими фильтрами ===
     params = request.GET.copy()
     params["export"] = "xlsx"
-
     export_xlsx_url = f"{request.path}?{params.urlencode()}"  # сохраняет все фильтры + export=xlsx
+
+    params_flat = request.GET.copy()
+    params_flat["export"] = "xlsx_flat"
+    export_flat_xlsx_url = f"{request.path}?{params_flat.urlencode()}"
     # ── Контекст для шаблона
     context = {
         "title": "Statistics",
@@ -5093,13 +5318,15 @@ def stats_view(request: HttpRequest) -> HttpResponse:
 
         "client_source_stacked": client_source_stacked,
         "client_source_table": client_source_table,
-        "export_xlsx_url": export_xlsx_url
+        "export_xlsx_url": export_xlsx_url,
+        "export_flat_xlsx_url": export_flat_xlsx_url,
     }
     return render(request, "admin/statistics.html", context)
 
 def _inject_admin_urls(original_get_urls):
     def get_urls():
         my = [
+            path("exports/", admin.site.admin_view(exports_dashboard_view), name="exports"),
             path("stats/", admin.site.admin_view(stats_view), name="stats"),
         ]
         return my + original_get_urls()
