@@ -22,6 +22,7 @@ from core.models import (
     ServiceCategory,
     ServiceMaster,
 )
+from core.payments.stripe_api import _ensure_appointment_from_cart
 
 
 class DummyStripeObject:
@@ -254,3 +255,116 @@ class StripeWebhookTests(TestCase):
 
         expected_minor = int(Decimal('120.00') * Decimal('0.5') * Decimal('100'))
         self.assertEqual(mock_create_intent.call_args.kwargs['amount'], expected_minor)
+
+
+@override_settings(STRIPE_SECRET_KEY='sk_test', STRIPE_WEBHOOK_SECRET='wh_test')
+class StripeFinalizeCartTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user('finalize@example.com', password='pass123', email='finalize@example.com')
+        self.client.force_login(self.user)
+        self.profile = self.user.userprofile
+
+        master_user = User.objects.create_user('finalize-master@example.com', password='pass123', email='finalize-master@example.com')
+        master_user.first_name = 'Master'
+        master_user.last_name = 'Finalizer'
+        master_user.save(update_fields=['first_name', 'last_name'])
+        self.master_profile = MasterProfile.objects.create(user=master_user.userprofile)
+        for weekday in range(6):
+            MasterWorkDay.objects.create(
+                master=self.master_profile,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(20, 0),
+            )
+
+        category = ServiceCategory.objects.create(name='Finalize')
+        self.service = Service.objects.create(
+            name='Finalize Service',
+            base_price=Decimal('75.00'),
+            duration_min=30,
+            category=category,
+        )
+        ServiceMaster.objects.create(service=self.service, master=self.master_profile)
+
+    def _create_cart_item(self, start=None):
+        cart = BookingCart.for_user(self.profile)
+        start_time = start or (timezone.now() + timedelta(days=1))
+        return BookingCartItem.objects.create(
+            cart=cart,
+            service=self.service,
+            master=self.master_profile,
+            start_time=start_time,
+        )
+
+    @patch('core.payments.stripe_api.stripe.PaymentIntent.modify')
+    @patch('core.payments.stripe_api._fetch_intent')
+    def test_finalize_cart_creates_appointment(self, mock_fetch_intent, mock_modify):
+        item = self._create_cart_item()
+        cart = item.cart
+        intent = DummyStripeObject(
+            id='pi_finalize',
+            metadata={
+                'user_id': str(self.profile.pk),
+                'cart_id': str(cart.pk),
+            },
+        )
+        mock_fetch_intent.return_value = intent
+
+        with patch('core.signals._send_email'):
+            response = self.client.post(
+                '/accounts/api/payments/cart/finalize/',
+                data=json.dumps({
+                    'payment_intent_id': 'pi_finalize',
+                    'cart_id': str(cart.pk),
+                }),
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload.get('ok'))
+        self.assertFalse(payload.get('already_finalized'))
+
+        appointment_id = payload['appointment']['id']
+        appointment = Appointment.objects.get(pk=appointment_id)
+        self.assertEqual(appointment.client, self.profile)
+        self.assertFalse(cart.items.exists())
+        mock_modify.assert_called_once()
+
+    @patch('core.payments.stripe_api.stripe.PaymentIntent.modify')
+    @patch('core.payments.stripe_api._fetch_intent')
+    def test_finalize_cart_returns_existing_appointment(self, mock_fetch_intent, mock_modify):
+        item = self._create_cart_item()
+        cart = item.cart
+        with patch('core.signals._send_email'):
+            appointment, _ = _ensure_appointment_from_cart(
+                self.profile,
+                {"cart_id": str(cart.pk)},
+            )
+        self.assertIsNotNone(appointment)
+        self.assertFalse(cart.items.exists())
+
+        intent = DummyStripeObject(
+            id='pi_finalize_existing',
+            metadata={
+                'user_id': str(self.profile.pk),
+                'cart_id': str(cart.pk),
+                'appointment_id': str(appointment.pk),
+            },
+        )
+        mock_fetch_intent.return_value = intent
+
+        response = self.client.post(
+            '/accounts/api/payments/cart/finalize/',
+            data=json.dumps({
+                'payment_intent_id': 'pi_finalize_existing',
+                'cart_id': str(cart.pk),
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload.get('already_finalized'))
+        self.assertEqual(payload['appointment']['id'], str(appointment.pk))
+        mock_modify.assert_called_once()

@@ -20,6 +20,7 @@ from core.views import (
 )
 from core.payments.stripe_api import (
     stripe_create_cart_intent,
+    stripe_finalize_cart_booking,
     stripe_list_cards,
     stripe_set_default_card,
     stripe_no_show_charge,
@@ -52,6 +53,7 @@ urlpatterns = [
     path("api/verification/confirm/", api_verification_confirm, name="api-verify-confirm"),
     path("api/verification/resend/",  api_verification_resend,  name="api-verify-resend"),
     path("api/payments/cart/create-intent/", stripe_create_cart_intent, name="stripe-cart-intent"),
+    path("api/payments/cart/finalize/", stripe_finalize_cart_booking, name="stripe-cart-finalize"),
     path("api/payments/cards/", stripe_list_cards, name="stripe-cards"),
     path("api/payments/cards/set-default/", stripe_set_default_card, name="stripe-set-default"),
     path("api/payments/no-show/charge/", stripe_no_show_charge, name="stripe-no-show-charge"),
@@ -66,8 +68,6 @@ urlpatterns = [
     path("api/appointment/<uuid:appt_id>/cancel/",     api_appointment_cancel,     name="api-appt-cancel"),
     path("api/appointment/<uuid:appt_id>/reschedule/", api_appointment_reschedule, name="api-appt-reschedule"),
 ]
-
-
 
 
 

@@ -835,6 +835,7 @@
       const apiCart = "/accounts/api/cart/";
       const apiCartAdd = "/accounts/api/cart/add/";
       const apiStripeCartIntent = "/accounts/api/payments/cart/create-intent/";
+      const apiStripeCartFinalize = "/accounts/api/payments/cart/finalize/";
       const cartRemoveUrl = (id)=>`/accounts/api/cart/${id}/remove/`;
       const paymentVerifyUrl = (id)=>`/accounts/api/appointment/${id}/payments/verify/`;
 
@@ -1610,6 +1611,35 @@ function updateCartUI(data){
         }
       }
 
+      async function finalizeCartBooking(paymentIntentId, cartId){
+        if(!paymentIntentId) return null;
+        const payload = {
+          payment_intent_id: paymentIntentId,
+          cart_id: cartId || null,
+        };
+        const defaultMessage = translate('services.cart.finalizeFailed', null, 'Failed to finalize booking.');
+        try{
+          const resp = await fetch(apiStripeCartFinalize, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': getCookie('csrftoken'),
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload),
+          });
+          const data = await resp.json().catch(()=>({}));
+          if(!resp.ok){
+            const message = data && (data.error || data.detail);
+            throw new Error(message || defaultMessage);
+          }
+          return data;
+        }catch(err){
+          const msg = err && err.message ? err.message : defaultMessage;
+          throw new Error(msg);
+        }
+      }
+
       async function openCartModal(event){
         closeMenuDrawer();
         if(!isAuth){ window.location=loginUrl; return; }
@@ -1758,6 +1788,7 @@ function updateCartUI(data){
 async function confirmPayment(){
         if (!currentPaymentContext || !currentPaymentContext.payment) return;
         const { payment } = currentPaymentContext;
+        const cartId = currentPaymentContext?.cart?.cart_id || null;
         const stripe = ensureStripe();
         const requiresCard = Boolean(payment.client_secret);
         if (requiresCard && !stripe){
@@ -1804,6 +1835,14 @@ async function confirmPayment(){
           }
           const intent = result.paymentIntent;
           if (intent && intent.status === 'succeeded'){
+            try{
+              await finalizeCartBooking(payment.payment_intent_id, cartId);
+            }catch(finalizeErr){
+              const fallback = finalizeErr && finalizeErr.message ? finalizeErr.message : translate('services.cart.finalizeFailed', null, 'Failed to finalize booking.');
+              setPaymentMessage('error', fallback);
+              setConfirmLoading(false);
+              return;
+            }
             setPaymentMessage('success', PAYMENT_COPY.success);
             await refreshCart(true);
             setConfirmLoading(false);
@@ -1812,6 +1851,14 @@ async function confirmPayment(){
             return;
           }
           if (intent && intent.status === 'processing'){
+            try{
+              await finalizeCartBooking(payment.payment_intent_id, cartId);
+            }catch(finalizeErr){
+              const fallback = finalizeErr && finalizeErr.message ? finalizeErr.message : translate('services.cart.finalizeFailed', null, 'Failed to finalize booking.');
+              setPaymentMessage('error', fallback);
+              setConfirmLoading(false);
+              return;
+            }
             setPaymentMessage('status', PAYMENT_COPY.processing);
             await refreshCart(true);
             setConfirmLoading(false);

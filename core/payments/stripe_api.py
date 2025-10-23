@@ -89,6 +89,42 @@ def _ensure_payment_status(name: str) -> PaymentStatus:
     return status
 
 
+def _serialize_appointment_brief(appointment: Appointment) -> dict[str, Any]:
+    """
+    Return a compact, UI-friendly representation of the appointment with
+    basic timing, service and payment information.
+    """
+    refreshed = (
+        Appointment.objects.select_related("payment_status")
+        .filter(pk=appointment.pk)
+        .first()
+    )
+    appt = refreshed or appointment
+
+    item = (
+        appt.items.select_related("service", "master__user")
+        .order_by("start_time")
+        .first()
+    )
+    service_name = ""
+    if item and item.service:
+        service_name = item.service.name
+
+    master_name = ""
+    if item and item.master:
+        master_user = getattr(item.master, "user", None)
+        if master_user:
+            master_name = master_user.get_full_name() or master_user.username
+
+    return {
+        "id": str(appt.pk),
+        "start_time": appt.start_time.isoformat() if appt.start_time else None,
+        "payment_status": getattr(appt.payment_status, "name", ""),
+        "service_name": service_name,
+        "master_name": master_name,
+    }
+
+
 def _payment_method_from_funding(funding: Optional[str]) -> PaymentMethod:
     mapping = {
         "credit": "Credit card",
@@ -606,6 +642,76 @@ def stripe_create_cart_intent(request):
             "amount_minor": pricing["total"],
             "currency": pricing["currency"],
             "cart": pricing,
+        }
+    )
+
+
+@login_required
+@require_POST
+@csrf_protect
+def stripe_finalize_cart_booking(request):
+    profile = getattr(request.user, "userprofile", None)
+    if profile is None:
+        return JsonResponse({"error": "User profile is required to finalize the booking."}, status=400)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON payload."}, status=400)
+
+    payment_intent_id = payload.get("payment_intent_id")
+    cart_id = payload.get("cart_id")
+
+    if not payment_intent_id:
+        return JsonResponse({"error": "payment_intent_id is required."}, status=400)
+
+    try:
+        intent = _fetch_intent({"id": payment_intent_id})
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except stripe.error.StripeError as exc:
+        logger.exception("Failed to retrieve intent %s during cart finalization.", payment_intent_id)
+        return JsonResponse({"error": getattr(exc, "user_message", str(exc))}, status=502)
+
+    metadata = dict(getattr(intent, "metadata", {}) or {})
+    metadata["user_id"] = str(profile.pk)
+    if cart_id:
+        metadata["cart_id"] = str(cart_id)
+
+    appointment = _ensure_appointment_from_metadata(metadata)
+    already_finalized = appointment is not None
+
+    if appointment and appointment.client_id != profile.id:
+        return JsonResponse(
+            {"error": "This appointment belongs to another user."},
+            status=403,
+        )
+
+    if appointment is None:
+        appointment, _pricing = _ensure_appointment_from_cart(profile, metadata)
+        if appointment is None:
+            return JsonResponse(
+                {"error": "Unable to create an appointment from the current cart."},
+                status=404,
+            )
+
+    metadata["appointment_id"] = str(appointment.pk)
+
+    try:
+        stripe.PaymentIntent.modify(payment_intent_id, metadata=metadata)
+    except stripe.error.StripeError as exc:
+        logger.warning(
+            "Failed to update metadata for payment intent %s: %s",
+            payment_intent_id,
+            exc,
+        )
+
+    summary = _serialize_appointment_brief(appointment)
+    return JsonResponse(
+        {
+            "ok": True,
+            "appointment": summary,
+            "already_finalized": already_finalized,
         }
     )
 

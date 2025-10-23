@@ -176,6 +176,7 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
 
         # профиль может отсутствовать → None
         ctx["profile"] = getattr(user, "userprofile", None)
+        ctx["now"] = now
 
         # быстрые действия — список услуг
         ctx["services"] = Service.objects.filter(is_active=True).order_by("name")
