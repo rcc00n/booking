@@ -387,13 +387,7 @@
                                             </div>
                                         {% endif %}
                                     </div>
-                                    {% if pricing and pricing.discount_tags %}
-                                        <div class="ab-muted js-item-tags" style="margin-top:6px">
-                                            {% for tag in pricing.discount_tags %}
-                                                <span class="ab-pill">{{ tag|title }}</span>
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
+                                    
                                 </div>
 
                                 {% if items_formset.can_delete %}
