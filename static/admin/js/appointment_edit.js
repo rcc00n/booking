@@ -914,7 +914,9 @@
             return raw;
         };
         const getAddPaymentUrl = () => payBtn.dataset.paymentAddUrl || cfg.addPaymentUrl || "";
-        const getFeeEndpoint = () => payBtn.dataset.feeEndpoint || cfg.enableFeeUrl || "";
+        const getTerminalStartUrl = () => payBtn.dataset.terminalStartUrl || cfg.terminalStartUrl || "";
+        const getTerminalConnUrl = () => payBtn.dataset.terminalConnUrl || cfg.terminalConnUrl || "";
+        const getVerifyUrl = () => payBtn.dataset.paymentVerifyUrl || cfg.verifyUrl || "";
         const currentTotalAmount = () => {
             if (totalDisplay && totalDisplay.dataset.totalAmount) {
                 return totalDisplay.dataset.totalAmount;
@@ -977,38 +979,165 @@
             }
         }
 
-        async function applyCardFee() {
+        async function startTerminalPayment() {
             const apptId = requireSavedAppointment();
-            if (!apptId) return;
-            const feeUrl = getFeeEndpoint();
-            if (!feeUrl) {
-                alert("Please save the appointment before applying the card fee.");
+            if (!apptId) throw new Error("Please save the appointment first.");
+            const url = getTerminalStartUrl();
+            if (!url) {
+                throw new Error("Terminal payment endpoint is unavailable.");
+            }
+            const response = await fetch(url, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Accept": "application/json",
+                    "X-CSRFToken": csrfToken,
+                },
+            });
+            let payload = {};
+            try {
+                payload = await response.json();
+            } catch (err) {
+                console.error("Failed to parse terminal start payload", err);
+            }
+            if (!response.ok || payload.ok === false) {
+                throw new Error(payload.error || "Failed to start terminal payment.");
+            }
+            if (!payload.client_secret || !payload.payment_intent_id) {
+                throw new Error("Incomplete terminal payment response.");
+            }
+            return payload;
+        }
+
+        async function getConnectionToken() {
+            const url = getTerminalConnUrl();
+            if (!url) {
+                throw new Error("Terminal connection endpoint is unavailable.");
+            }
+            const response = await fetch(url, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Accept": "application/json" },
+            });
+            let payload = {};
+            try {
+                payload = await response.json();
+            } catch (err) {
+                console.error("Failed to parse connection token payload", err);
+            }
+            if (!response.ok || !payload.secret) {
+                throw new Error(payload.error || "Unable to fetch connection token.");
+            }
+            return payload.secret;
+        }
+
+        let terminalInstance = null;
+        let readerConnected = false;
+        let paymentInFlight = false;
+
+        async function discoverAndConnect(terminal) {
+            const discover = async (options = {}) => {
+                const discovery = await terminal.discoverReaders({
+                    discoveryMethod: "internet",
+                    ...options,
+                });
+                if (discovery.error) {
+                    throw discovery.error;
+                }
+                return discovery.discoveredReaders || [];
+            };
+
+            let readers = await discover();
+            if (!readers.length) {
+                readers = await discover({ simulated: true });
+            }
+            if (!readers.length) {
+                throw new Error("No Stripe Terminal readers found. Connect a reader or enable the simulator.");
+            }
+            const connectResult = await terminal.connectReader(readers[0]);
+            if (connectResult.error) {
+                throw connectResult.error;
+            }
+            return connectResult.reader;
+        }
+
+        async function ensureTerminalConnected() {
+            if (!window.StripeTerminal) {
+                throw new Error("StripeTerminal SDK is not loaded.");
+            }
+            if (!terminalInstance) {
+                terminalInstance = window.StripeTerminal.create({
+                    onFetchConnectionToken: () => getConnectionToken(),
+                    onUnexpectedReaderDisconnect: () => {
+                        readerConnected = false;
+                        alert("Reader disconnected. Please reconnect before collecting payment.");
+                    },
+                });
+            }
+            if (!readerConnected) {
+                await discoverAndConnect(terminalInstance);
+                readerConnected = true;
+            }
+            return terminalInstance;
+        }
+
+        function applyFeePreview(serverAmount) {
+            cardFeeApplied = true;
+            payBtn.dataset.feeApplied = "true";
+            try {
+                recomputeAllTotals();
+            } catch (err) {
+                console.warn("Failed to recompute totals", err);
+            }
+            if (!totalDisplay || typeof serverAmount === "undefined") {
                 return;
             }
-            try {
-                const response = await fetch(feeUrl, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRFToken": csrfToken,
-                    },
-                    body: JSON.stringify({ source: "admin_pay_split" }),
-                });
-                if (!response.ok) {
-                    throw new Error(await response.text());
-                }
-                await response.json();
-                cardFeeApplied = true;
-                payBtn.dataset.feeApplied = "true";
-                alert("Card fee (3% + $0.50) applied. Take payment on the terminal and wait for the Stripe webhook.");
-                window.location.reload();
-            } catch (error) {
-                console.error(error);
-                alert("Failed to apply the card fee. Please try again.");
+            const numeric = Number(serverAmount);
+            if (!Number.isNaN(numeric)) {
+                totalDisplay.textContent = money(numeric);
+                totalDisplay.dataset.totalAmount = numeric.toFixed(2);
             }
         }
 
-        menu.addEventListener("click", (event) => {
+        async function processTerminalPayment(clientSecret) {
+            const terminal = await ensureTerminalConnected();
+            const collect = await terminal.collectPaymentMethod(clientSecret);
+            if (collect.error) {
+                throw collect.error;
+            }
+            const processed = await terminal.processPayment(collect.paymentIntent);
+            if (processed.error) {
+                throw processed.error;
+            }
+            return processed.paymentIntent;
+        }
+
+        async function verifyPayment(paymentIntentId) {
+            const verifyUrl = getVerifyUrl();
+            if (!verifyUrl || !paymentIntentId) {
+                return;
+            }
+            try {
+                const response = await fetch(verifyUrl, {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "X-CSRFToken": csrfToken,
+                    },
+                    body: JSON.stringify({ payment_intent_id: paymentIntentId }),
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || `Verify failed (${response.status})`);
+                }
+            } catch (error) {
+                console.warn("Verify failed (webhook will still update):", error);
+            }
+        }
+
+        menu.addEventListener("click", async (event) => {
             const target = event.target.closest("[data-pay]");
             if (!target) return;
             event.preventDefault();
@@ -1018,8 +1147,27 @@
                 navigateToPaymentAdd({ method_hint: mode, status_hint: "succeeded" });
                 return;
             }
-            if (mode === "credit" || mode === "debit") {
-                applyCardFee();
+            if (mode === "card-credit" || mode === "card-debit") {
+                if (paymentInFlight) {
+                    alert("A terminal payment is already in progress.");
+                    return;
+                }
+                paymentInFlight = true;
+                const prevDisabled = payBtn.disabled;
+                payBtn.disabled = true;
+                try {
+                    const session = await startTerminalPayment();
+                    applyFeePreview(session.amount);
+                    await processTerminalPayment(session.client_secret);
+                    await verifyPayment(session.payment_intent_id);
+                    window.location.reload();
+                } catch (error) {
+                    console.error(error);
+                    alert(error && error.message ? error.message : "Terminal payment failed");
+                } finally {
+                    paymentInFlight = false;
+                    payBtn.disabled = prevDisabled;
+                }
             }
         });
     }

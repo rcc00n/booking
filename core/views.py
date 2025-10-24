@@ -10,6 +10,7 @@ from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 from datetime import datetime
+from decimal import Decimal
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import transaction
 import json
@@ -31,6 +32,7 @@ from core.services.booking import (
 from accounts.utils import build_autofill_defaults
 from core.services import payments as payment_services
 from core.services.pricing import compute_cart_pricing
+from core.utils.fees import card_processing_fee
 
 def _build_catalog_context(request):
     """Общий конструктор контекста каталога."""
@@ -411,6 +413,72 @@ def api_payment_verify(request, appt_id):
             "payment_status": getattr(appt.payment_status, "name", ""),
         },
     })
+
+
+@csrf_exempt
+@staff_member_required
+@require_POST
+def terminal_connection_token(request):
+    secret_key = getattr(settings, "STRIPE_SECRET_KEY", "")
+    if not secret_key:
+        return JsonResponse({"error": "Stripe is not configured"}, status=500)
+
+    stripe.api_key = secret_key
+    api_version = getattr(settings, "STRIPE_API_VERSION", None)
+    if api_version:
+        stripe.api_version = api_version
+    try:
+        token = stripe.terminal.ConnectionToken.create()
+    except stripe.error.StripeError as err:
+        return JsonResponse({"error": getattr(err, "user_message", str(err))}, status=502)
+    return JsonResponse({"secret": token.secret})
+
+
+@staff_member_required
+@require_POST
+@csrf_protect
+def api_terminal_start(request, appt_id):
+    appt = get_object_or_404(
+        Appointment.objects.select_related("client"),
+        pk=appt_id,
+    )
+
+    # Ensure base totals are current before applying the card-present surcharge.
+    appt.recompute_totals(save=True)
+    pre_fee_total = Decimal(appt.final_price or Decimal("0.00")) - Decimal(
+        appt.card_processing_fee or Decimal("0.00")
+    )
+    if pre_fee_total < Decimal("0.00"):
+        pre_fee_total = Decimal("0.00")
+    else:
+        pre_fee_total = pre_fee_total.quantize(Decimal("0.01"))
+
+    card_fee = card_processing_fee(pre_fee_total)
+    appt.apply_card_processing_fee = True
+    appt.card_processing_fee = card_fee
+    appt.final_price = (pre_fee_total + card_fee).quantize(Decimal("0.01"))
+    appt.save(update_fields=["apply_card_processing_fee", "card_processing_fee", "final_price"])
+
+    try:
+        bundle = payment_services.create_or_update_terminal_intent(appt)
+    except stripe.error.StripeError as err:
+        return JsonResponse({"ok": False, "error": getattr(err, "user_message", str(err))}, status=502)
+    except ImproperlyConfigured as cfg_err:
+        return JsonResponse({"ok": False, "error": str(cfg_err)}, status=500)
+
+    intent = getattr(bundle, "intent", None)
+    if not intent:
+        return JsonResponse({"ok": False, "error": "PaymentIntent not created"}, status=500)
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "payment_intent_id": intent.id,
+            "client_secret": intent.client_secret,
+            "amount": str(bundle.payment.amount),
+            "currency": bundle.payment.currency,
+        }
+    )
 
 
 

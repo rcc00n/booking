@@ -28,6 +28,7 @@
 
     <script src="{% url 'admin:jsi18n' %}"></script>
     <script src="{% static 'admin/js/quarter_timepicker.js' %}"></script>
+    <script src="https://js.stripe.com/terminal/v1/"></script>
     <script>
         window.PRODUCT_SALE_PRICE_ENDPOINT = "{{ product_sale_price_endpoint }}";
     </script>
@@ -800,15 +801,18 @@
                             data-payment-add-url="{{ payment_add_url }}"
                             data-fee-endpoint="{{ enable_card_fee_url|default:'' }}"
                             data-appointment-id="{{ form.instance.pk }}"
-                            data-fee-applied="{{ form.instance.apply_card_processing_fee|yesno:'true,false' }}">
+                            data-fee-applied="{{ form.instance.apply_card_processing_fee|yesno:'true,false' }}"
+                            data-terminal-start-url="{{ terminal_start_url|default:'' }}"
+                            data-terminal-conn-url="{{ terminal_conn_token_url|default:'' }}"
+                            data-payment-verify-url="{{ payment_verify_url|default:'' }}">
                             Pay ▾
                         </button>
                         <div id="pay-menu" class="pay-menu" hidden>
                             <button type="button" class="pay-menu__item" data-pay="cash">Cash</button>
                             <button type="button" class="pay-menu__item" data-pay="etransfer">E-transfer</button>
                             <hr>
-                            <button type="button" class="pay-menu__item accent" data-pay="credit">Credit card (terminal)</button>
-                            <button type="button" class="pay-menu__item accent" data-pay="debit">Debit card (terminal)</button>
+                            <button type="button" class="pay-menu__item ab-btn small accent" data-pay="card-credit">Credit card (terminal)</button>
+                            <button type="button" class="pay-menu__item ab-btn small accent" data-pay="card-debit">Debit card (terminal)</button>
                         </div>
                     </div>
                 {% endif %}
@@ -841,7 +845,10 @@
             totalAmount: "{{ appointment_total_amount|default_if_none:0|floatformat:2 }}",
             addPaymentUrl: "{{ payment_add_url }}",
             enableFeeUrl: "{{ enable_card_fee_url|default:'' }}",
-            feeApplied: {{ form.instance.apply_card_processing_fee|yesno:"true,false" }}
+            feeApplied: {{ form.instance.apply_card_processing_fee|yesno:"true,false" }},
+            terminalStartUrl: "{{ terminal_start_url|default:'' }}",
+            terminalConnUrl: "{{ terminal_conn_token_url|default:'' }}",
+            verifyUrl: "{{ payment_verify_url|default:'' }}"
         };
     </script>
 

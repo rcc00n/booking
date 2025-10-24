@@ -1903,6 +1903,34 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         return data
 
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        extra_context = extra_context or {}
+        obj = None
+        if object_id:
+            obj = self.get_object(request, object_id)
+
+        def _safe_reverse(name, *, kwargs=None):
+            try:
+                return reverse(name, kwargs=kwargs) if kwargs else reverse(name)
+            except NoReverseMatch:
+                return ""
+
+        extra_context.setdefault("terminal_conn_token_url", _safe_reverse("terminal-conn-token"))
+        if obj:
+            extra_context.setdefault(
+                "terminal_start_url",
+                _safe_reverse("api-terminal-start", kwargs={"appt_id": obj.pk}),
+            )
+            extra_context.setdefault(
+                "payment_verify_url",
+                _safe_reverse("api-payment-verify", kwargs={"appt_id": obj.pk}),
+            )
+        else:
+            extra_context.setdefault("terminal_start_url", "")
+            extra_context.setdefault("payment_verify_url", "")
+
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
 
         ctx = dict(context)

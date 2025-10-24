@@ -210,6 +210,26 @@ def create_or_update_payment_intent(
     return PaymentIntentBundle(payment=payment, intent=intent)
 
 
+def create_or_update_terminal_intent(
+    appointment: Appointment,
+    *,
+    amount: Decimal | None = None,
+    currency: str | None = None,
+) -> PaymentIntentBundle:
+    """
+    Create or update a Stripe Terminal PaymentIntent ensuring card-present method types.
+    Delegates to create_or_update_payment_intent so downstream persistence stays consistent.
+    """
+    pm_types = ["card_present", "interac_present"]
+    return create_or_update_payment_intent(
+        appointment,
+        amount=amount,
+        currency=currency,
+        payment_method_types=pm_types,
+        allow_reuse_existing=True,
+    )
+
+
 def _apply_intent(
     payment: Payment,
     intent: stripe.PaymentIntent,
