@@ -3589,7 +3589,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 with transaction.atomic():
                     service_model = self.model
                     base_name = original.name
-                    new_name = base_name
+                    new_name = base_name + "- Copy"
 
                     manager = service_model._default_manager
                     if manager.filter(name=new_name).exclude(pk=original.pk).exists():
