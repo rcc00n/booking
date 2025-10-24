@@ -87,6 +87,18 @@
         }
         select.value = val;
     }
+    function ensureUiOption(selectEl, value, label) {
+        if (!selectEl) return;
+        const val = String(value ?? "");
+        if (!val) return;
+        const exists = Array.from(selectEl.options).some(o => o.value === val);
+        if (!exists) {
+            const opt = document.createElement("option");
+            opt.value = val;
+            opt.textContent = label || val;
+            selectEl.appendChild(opt);
+        }
+    }
     function roundCurrency(value) {
         return Math.round((Number(value) || 0) * 100) / 100;
     }
@@ -450,10 +462,14 @@
         if (IS_MASTER && uiMaster) uiMaster.disabled = true;
 
         // услуги исходя из мастер-id
+        const nativeSvcLabel = nativeSvc?.selectedOptions?.[0]?.textContent || "";
         const effectiveMasterId = (nativeMaster ? nativeMaster.value : (uiMaster ? uiMaster.value : ""));
         populateServices(uiSvc, effectiveMasterId);
-        if (nativeSvc && nativeSvc.value) uiSvc.value = String(nativeSvc.value);
-        const initialOpt = uiSvc.selectedOptions?.[0];
+        if (nativeSvc && uiSvc && nativeSvc.value) {
+            ensureUiOption(uiSvc, nativeSvc.value, nativeSvcLabel);
+            uiSvc.value = String(nativeSvc.value);
+        }
+        const initialOpt = uiSvc?.selectedOptions?.[0];
         if (durationInput && (!durationInput.value || durationInput.dataset.auto === '1')) {
             const initialTotal = initialOpt && initialOpt.dataset ? (initialOpt.dataset.totalDuration || initialOpt.dataset.duration || '') : '';
             if (initialTotal) {
@@ -463,11 +479,9 @@
         }
         mirrorOptions(nativeSvc, uiSvc);
 
-
-// после того как uiSvc.value задан — протолкнём в native
-
-        const label = uiSvc.selectedOptions?.[0]?.textContent || "";
-        setSelectValueEnsuringOption(nativeSvc, uiSvc.value, label);
+        // после того как uiSvc.value задан — протолкнём в native
+        const label = uiSvc?.selectedOptions?.[0]?.textContent || nativeSvcLabel;
+        setSelectValueEnsuringOption(nativeSvc, uiSvc ? uiSvc.value : "", label);
         syncTaxableMeta();
         updateRowSummary(row);
 

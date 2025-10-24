@@ -346,7 +346,20 @@ class AppointmentItemInlineForm(forms.ModelForm):
             service = Service.objects.filter(pk=service).first()
         service_field = self.fields.get("service")
         if service_field:
-            service_field.queryset = _services_for_selection()
+            current_service_id = None
+            if getattr(self.instance, "service_id", None):
+                current_service_id = self.instance.service_id
+            elif "service" in self.initial:
+                current_service_id = self.initial["service"]
+            if isinstance(current_service_id, Service):
+                current_service_id = current_service_id.pk
+            elif hasattr(current_service_id, "pk"):
+                current_service_id = current_service_id.pk
+            include_ids = [current_service_id] if current_service_id else None
+            service_field.queryset = _services_for_selection(
+                include_ids=include_ids,
+                include_inactive_ids=True,
+            )
         if "unit_price" in self.fields:
             has_price_initial = self.initial.get("unit_price") or getattr(self.instance, "unit_price", None)
             if not has_price_initial and service and getattr(service, "base_price", None) is not None:

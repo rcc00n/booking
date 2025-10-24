@@ -1988,17 +1988,17 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             duration_min = service.duration_min or 0
             extra_min = service.extra_time_min or 0
             total_duration = duration_min + extra_min
-        ms_map[str(sm.master_id)].append({
-            "id": str(sm.service_id),
-            "name": service.name,
-            "base_price": str(service.base_price),
-            "duration_min": duration_min,
-            "extra_time_min": extra_min,
-            "total_duration_min": total_duration,
-            "svc_disc": svc_discounts.get(sid, 0),  # %
-            "is_taxable": bool(service.is_taxable),
-            "category": service.category.name if service.category_id else "Other",
-        })
+            ms_map[str(sm.master_id)].append({
+                "id": str(sm.service_id),
+                "name": service.name,
+                "base_price": str(service.base_price),
+                "duration_min": duration_min,
+                "extra_time_min": extra_min,
+                "total_duration_min": total_duration,
+                "svc_disc": svc_discounts.get(sid, 0),  # %
+                "is_taxable": bool(service.is_taxable),
+                "category": service.category.name if service.category_id else "Other",
+            })
 
         # промокоды
         promos_by_service = defaultdict(list)
