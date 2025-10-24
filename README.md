@@ -115,3 +115,10 @@ curl -X POST \
   -d '{"appointment_id": "<uuid>"}' \
   http://localhost:8000/accounts/api/payments/no-show/charge/
 ```
+
+### Admin Pay Flow
+
+- Editing an appointment in Django Admin now shows a `Pay ▾` split button next to Save/Cancel.
+- Choose **Cash** or **E-transfer** to jump to the “Add payment” admin form with appointment, amount, and method pre-filled.
+- Choose **Credit card** or **Debit card** after taking payment on the physical terminal; this applies the 3% + $0.50 Stripe fee (stored on the appointment) so totals and receipts stay accurate while the Stripe webhook finalizes the charge.
+- Appointments created through the public cart automatically flag the card fee so online self-bookings match Stripe totals, while admin-created appointments stay fee-free until credit/debit is selected.

@@ -2,6 +2,11 @@
 {% load static %}
 {% load filters %}
 
+{% if form.instance.pk %}
+    {% url 'admin:core_appointment_enable_card_fee' appointment_id=form.instance.pk as enable_card_fee_url %}
+{% endif %}
+{% url 'admin:core_payment_add' as payment_add_url %}
+
 {% block extrahead %}
     {{ block.super }}
     <script>
@@ -72,7 +77,8 @@
 
         .ab-muted{color:#6b7280;font-size:12px}
         .ab-hr{height:1px;background:#eee;margin:16px 0}
-        .ab-r{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+        .ab-r{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:16px;flex-wrap:wrap}
+        .ab-action-group{display:flex;gap:10px;flex-wrap:wrap}
         .ab-btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:10px 14px;border:1px solid #e5e7eb;background:#111827;color:#fff;cursor:pointer}
         .ab-btn.secondary{background:#fff;color:#111827;border-color:#d1d5db}
         .ab-btn.danger{background:#b91c1c}
@@ -98,6 +104,14 @@
         .status-pill.missing{background:#fef3c7;color:#92400e}
         .ab-btn.small{padding:8px 12px;font-size:13px}
         .table-responsive{overflow:auto}
+        .pay-split{position:relative}
+        .pay-menu{position:absolute;right:0;top:calc(100% + 6px);background:#fff;border:1px solid #d1d5db;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,0.18);padding:10px;min-width:220px;z-index:20}
+        .pay-menu[hidden]{display:none}
+        .pay-menu__item{width:100%;text-align:left;padding:8px 10px;border:none;border-radius:8px;background:#f9fafb;color:#111827;font-size:14px;cursor:pointer;margin-bottom:6px}
+        .pay-menu__item:last-of-type{margin-bottom:0}
+        .pay-menu__item.accent{background:#111827;color:#fff}
+        .pay-menu__item:hover{background:#e5e7eb;color:#0f172a}
+        .pay-menu hr{border:none;border-top:1px solid #e5e7eb;margin:6px 0}
 
     </style>
 {% endblock %}
@@ -195,7 +209,7 @@
                                         </div>
                                         <div class="ab-summary-line ab-summary-line--total">
                                             <span>Total</span>
-                                            <strong id="appt-total">{{ currency_symbol|default:"CA$" }}{{ pricing.totals.grand_total|floatformat:2 }}</strong>
+                                            <strong id="appt-total" data-total-amount="{{ appointment_total_amount|default_if_none:0|floatformat:2 }}">{{ currency_symbol|default:"CA$" }}{{ pricing.totals.grand_total|floatformat:2 }}</strong>
                                         </div>
                                         <div class="ab-summary-line">
                                             <span>Paid</span>
@@ -229,7 +243,7 @@
                                             </div>
                                             <div class="ab-summary-line ab-summary-line--total">
                                                 <span>Total</span>
-                                                <strong id="appt-total">{{ currency_symbol|default:"CA$" }}{{ gross|floatformat:2 }}</strong>
+                                                <strong id="appt-total" data-total-amount="{{ appointment_total_amount|default_if_none:0|floatformat:2 }}">{{ currency_symbol|default:"CA$" }}{{ gross|floatformat:2 }}</strong>
                                             </div>
                                             <div class="ab-summary-line">
                                                 <span>Paid</span>
@@ -772,9 +786,32 @@
                 </div>
             </section>
 
-            <div class="ab-r" style="margin-top:18px">
-                <button type="submit" class="ab-btn">Save</button>
-                <a href="{% url 'admin:core_appointment_changelist' %}" class="ab-btn secondary">Cancel</a>
+            <div class="ab-r">
+                <div class="ab-action-group">
+                    <button type="submit" class="ab-btn">Save</button>
+                    <a href="{% url 'admin:core_appointment_changelist' %}" class="ab-btn secondary">Cancel</a>
+                </div>
+                {% if form.instance.pk %}
+                    <div class="pay-split">
+                        <button
+                            type="button"
+                            class="ab-btn secondary"
+                            id="pay-btn"
+                            data-payment-add-url="{{ payment_add_url }}"
+                            data-fee-endpoint="{{ enable_card_fee_url|default:'' }}"
+                            data-appointment-id="{{ form.instance.pk }}"
+                            data-fee-applied="{{ form.instance.apply_card_processing_fee|yesno:'true,false' }}">
+                            Pay ▾
+                        </button>
+                        <div id="pay-menu" class="pay-menu" hidden>
+                            <button type="button" class="pay-menu__item" data-pay="cash">Cash</button>
+                            <button type="button" class="pay-menu__item" data-pay="etransfer">E-transfer</button>
+                            <hr>
+                            <button type="button" class="pay-menu__item accent" data-pay="credit">Credit card (terminal)</button>
+                            <button type="button" class="pay-menu__item accent" data-pay="debit">Debit card (terminal)</button>
+                        </div>
+                    </div>
+                {% endif %}
             </div>
         </form>
     </div>
@@ -796,6 +833,15 @@
         window.APPOINTMENT_CTX = {
             is_master: {{ is_master|yesno:"true,false" }},
             current_master_id: {{ current_master_id|default:"null" }}
+        };
+    </script>
+    <script>
+        window.APPOINTMENT_PAY = {
+            appointmentId: "{{ form.instance.pk|default:'' }}",
+            totalAmount: "{{ appointment_total_amount|default_if_none:0|floatformat:2 }}",
+            addPaymentUrl: "{{ payment_add_url }}",
+            enableFeeUrl: "{{ enable_card_fee_url|default:'' }}",
+            feeApplied: {{ form.instance.apply_card_processing_fee|yesno:"true,false" }}
         };
     </script>
 

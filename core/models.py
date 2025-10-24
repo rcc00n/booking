@@ -935,7 +935,17 @@ class Appointment(models.Model):
     # payment_status = models.ForeignKey(PaymentStatus, on_delete=models.CASCADE, default=PaymentStatus.objects.get(name="Not Paid").id)
     final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
     tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"), editable=False)
-    card_processing_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"), editable=False)
+    apply_card_processing_fee = models.BooleanField(
+        default=False,
+        editable=False,
+        help_text="If true, card/Stripe processing fee is included in totals.",
+    )
+    card_processing_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        editable=False,
+    )
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -1009,7 +1019,13 @@ class Appointment(models.Model):
         subtotal = self._subtotal_for_tax()
         tax_total = Decimal(getattr(self, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
         base_total = (subtotal + tax_total).quantize(TWOPLACES)
-        fee = card_processing_fee(base_total)
+        fee = Decimal("0.00")
+        if getattr(self, "apply_card_processing_fee", False):
+            stored_fee = Decimal(getattr(self, "card_processing_fee", Decimal("0.00")) or Decimal("0.00"))
+            if stored_fee > Decimal("0.00"):
+                fee = stored_fee.quantize(TWOPLACES)
+            else:
+                fee = card_processing_fee(base_total)
         return (base_total + fee).quantize(TWOPLACES)
 
 
@@ -1068,11 +1084,29 @@ class Appointment(models.Model):
                 )
         self.tax_amount = tax_total.quantize(TWOPLACES)
         base_total = (subtotal + tax_total).quantize(TWOPLACES)
-        processing_fee = card_processing_fee(base_total)
-        self.card_processing_fee = processing_fee
+        processing_fee = Decimal("0.00")
+        if self.apply_card_processing_fee:
+            stored_fee = Decimal(getattr(self, "card_processing_fee", Decimal("0.00")) or Decimal("0.00"))
+            if stored_fee > Decimal("0.00"):
+                processing_fee = stored_fee.quantize(TWOPLACES)
+                self.card_processing_fee = processing_fee
+            else:
+                processing_fee = card_processing_fee(base_total)
+                self.card_processing_fee = processing_fee
+        else:
+            self.card_processing_fee = Decimal("0.00")
         self.final_price = (base_total + processing_fee).quantize(TWOPLACES)
         if save:
-            super().save(update_fields=["final_price", "tax_amount", "card_processing_fee", "discount_source", "start_time"])
+            super().save(
+                update_fields=[
+                    "final_price",
+                    "tax_amount",
+                    "card_processing_fee",
+                    "discount_source",
+                    "start_time",
+                    "apply_card_processing_fee",
+                ]
+            )
 
     def sync_start_time_from_items(self, *, save: bool = True) -> None:
         """

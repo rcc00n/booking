@@ -49,6 +49,18 @@
     const feeRowDisplay = document.getElementById("appt-fee-row");
     const CARD_FEE_PERCENT = Number(parseJSON("card-fee-percent", "0"));
     const CARD_FEE_FIXED = Number(parseJSON("card-fee-fixed", "0"));
+    let cardFeeApplied = false;
+    function initialFeeAppliedState() {
+        const payButton = document.getElementById("pay-btn");
+        if (payButton && typeof payButton.dataset.feeApplied !== "undefined") {
+            return payButton.dataset.feeApplied === "true";
+        }
+        const cfg = window.APPOINTMENT_PAY || {};
+        if (typeof cfg.feeApplied !== "undefined") {
+            return !!cfg.feeApplied;
+        }
+        return false;
+    }
     if (taxRowDisplay && !GST_ENABLED) {
         taxRowDisplay.classList.add("ab-hidden");
     }
@@ -302,14 +314,17 @@
         taxSum = roundCurrency(taxSum);
         const preFeeTotal = roundCurrency(subtotalSum + taxSum);
         let processingFee = 0;
-        if (preFeeTotal > 0 && (CARD_FEE_PERCENT > 0 || CARD_FEE_FIXED > 0)) {
+        if (cardFeeApplied && preFeeTotal > 0 && (CARD_FEE_PERCENT > 0 || CARD_FEE_FIXED > 0)) {
             processingFee = roundCurrency((preFeeTotal * CARD_FEE_PERCENT) + CARD_FEE_FIXED);
         }
         const totalSum = roundCurrency(preFeeTotal + processingFee);
 
         if (subtotalDisplay) subtotalDisplay.textContent = money(subtotalSum);
         if (taxDisplay) taxDisplay.textContent = money(taxSum);
-        if (totalDisplay) totalDisplay.textContent = money(totalSum);
+        if (totalDisplay) {
+            totalDisplay.textContent = money(totalSum);
+            totalDisplay.dataset.totalAmount = totalSum.toFixed(2);
+        }
         if (taxRowDisplay) taxRowDisplay.classList.toggle('ab-hidden', taxSum === 0);
         if (gstLabelDisplay) gstLabelDisplay.textContent = GST_LABEL;
         if (feeDisplay) feeDisplay.textContent = money(processingFee);
@@ -886,6 +901,129 @@
         initSaleRow(node);
     }
 
+    function initPayMenu() {
+        const cfg = window.APPOINTMENT_PAY || {};
+        const payBtn = document.getElementById("pay-btn");
+        const menu = document.getElementById("pay-menu");
+        if (!payBtn || !menu) return;
+
+        const csrfToken = (document.querySelector('input[name="csrfmiddlewaretoken"]') || {}).value || "";
+        const getAppointmentId = () => {
+            const raw = (payBtn.dataset.appointmentId || cfg.appointmentId || "").trim();
+            if (!raw || raw.toLowerCase() === "none") return "";
+            return raw;
+        };
+        const getAddPaymentUrl = () => payBtn.dataset.paymentAddUrl || cfg.addPaymentUrl || "";
+        const getFeeEndpoint = () => payBtn.dataset.feeEndpoint || cfg.enableFeeUrl || "";
+        const currentTotalAmount = () => {
+            if (totalDisplay && totalDisplay.dataset.totalAmount) {
+                return totalDisplay.dataset.totalAmount;
+            }
+            if (cfg.totalAmount && cfg.totalAmount !== "None") {
+                return cfg.totalAmount;
+            }
+            if (!totalDisplay) return "";
+            const raw = (totalDisplay.textContent || "").replace(/[^\d.,-]/g, "");
+            return raw.replace(",", ".");
+        };
+
+        const requireSavedAppointment = () => {
+            const apptId = getAppointmentId();
+            if (!apptId) {
+                alert("Please save the appointment first.");
+                return null;
+            }
+            return apptId;
+        };
+
+        const showMenu = (visible) => {
+            menu.hidden = !visible;
+        };
+
+        payBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            showMenu(menu.hidden);
+        });
+
+        document.addEventListener("click", (event) => {
+            if (!menu.contains(event.target) && !payBtn.contains(event.target)) {
+                showMenu(false);
+            }
+        });
+
+        function navigateToPaymentAdd(params) {
+            const apptId = requireSavedAppointment();
+            if (!apptId) return;
+            const base = getAddPaymentUrl();
+            if (!base) {
+                alert("Payment form is unavailable.");
+                return;
+            }
+            try {
+                const url = new URL(base, window.location.origin);
+                const query = {
+                    appointment: apptId,
+                    amount: currentTotalAmount(),
+                    ...params,
+                };
+                Object.entries(query).forEach(([key, value]) => {
+                    if (value !== undefined && value !== null && String(value).length > 0) {
+                        url.searchParams.set(key, value);
+                    }
+                });
+                window.location.href = url.toString();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function applyCardFee() {
+            const apptId = requireSavedAppointment();
+            if (!apptId) return;
+            const feeUrl = getFeeEndpoint();
+            if (!feeUrl) {
+                alert("Please save the appointment before applying the card fee.");
+                return;
+            }
+            try {
+                const response = await fetch(feeUrl, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRFToken": csrfToken,
+                    },
+                    body: JSON.stringify({ source: "admin_pay_split" }),
+                });
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+                await response.json();
+                cardFeeApplied = true;
+                payBtn.dataset.feeApplied = "true";
+                alert("Card fee (3% + $0.50) applied. Take payment on the terminal and wait for the Stripe webhook.");
+                window.location.reload();
+            } catch (error) {
+                console.error(error);
+                alert("Failed to apply the card fee. Please try again.");
+            }
+        }
+
+        menu.addEventListener("click", (event) => {
+            const target = event.target.closest("[data-pay]");
+            if (!target) return;
+            event.preventDefault();
+            showMenu(false);
+            const mode = target.getAttribute("data-pay");
+            if (mode === "cash" || mode === "etransfer") {
+                navigateToPaymentAdd({ method_hint: mode, status_hint: "succeeded" });
+                return;
+            }
+            if (mode === "credit" || mode === "debit") {
+                applyCardFee();
+            }
+        });
+    }
+
     // вкладки
     function initTabs() {
         const tabs = $$(".tab");
@@ -921,6 +1059,7 @@
         if (appointmentClientSelect) {
             appointmentClientSelect.addEventListener("change", refreshSaleClientDefaultFromAppointment);
         }
+        cardFeeApplied = initialFeeAppliedState();
         initExistingRows();
         initExistingSales();
         recomputeAllTotals();
@@ -962,6 +1101,7 @@
             });
             mo.observe(container, { childList: true, subtree: true });
         }
+        initPayMenu();
     });
 
 })();

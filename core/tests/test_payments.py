@@ -25,6 +25,7 @@ from core.models import (
     ServiceMaster,
 )
 from core.services import payments as payment_services
+from core.services.booking import create_appointment_from_cart_items
 from core.services.pricing import compute_cart_pricing
 from core.payments import stripe_api
 
@@ -294,6 +295,19 @@ class CartCheckoutViewTests(CartTestMixin, TestCase):
         self.assertEqual(kwargs["metadata"]["cart_id"], data["cart"]["cart_id"])
         self.assertEqual(kwargs["metadata"]["cart_processing_fee_minor"], "239")
         self.assertEqual(kwargs["metadata"]["cart_service_fee_minor"], "0")
+
+
+class CartAppointmentCreationTests(CartTestMixin, TestCase):
+    def test_create_appointment_sets_card_fee_flag(self):
+        service = self.create_service(name="Signature Facial", price="80.00")
+        item = self.add_cart_item(service)
+
+        appointment = create_appointment_from_cart_items(profile=self.profile, items=[item])
+        appointment.refresh_from_db()
+
+        self.assertTrue(appointment.apply_card_processing_fee)
+        self.assertGreater(appointment.card_processing_fee, Decimal("0.00"))
+        self.assertGreater(appointment.final_price, Decimal("80.00"))
 
 
 class StripeWebhookTests(CartTestMixin, TestCase):

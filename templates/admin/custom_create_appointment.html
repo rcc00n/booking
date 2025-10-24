@@ -541,8 +541,8 @@
                         return code ? code.toUpperCase() + " " : "CA$";
                 }
             })(CURRENCY_CODE);
-            const CARD_FEE_RATE = 0.03;
-            const CARD_FEE_FLAT = 0.50;
+            const CARD_FEE_RATE = 0;
+            const CARD_FEE_FLAT = 0;
 
             const POSTED_ITEMS = JSON.parse(document.getElementById('ab-posted-items').textContent || '[]');
             const ITEM_ERRORS  = JSON.parse(document.getElementById('ab-item-errors').textContent || '{}');
@@ -926,9 +926,7 @@
                 subtotalSum = roundCurrency(subtotalSum);
                 taxSum = roundCurrency(taxSum);
                 const preFeeTotal = roundCurrency(subtotalSum + taxSum);
-                const processingFee = preFeeTotal > 0
-                    ? roundCurrency((preFeeTotal * CARD_FEE_RATE) + CARD_FEE_FLAT)
-                    : 0;
+                const processingFee = 0;
                 const totalSum = roundCurrency(preFeeTotal + processingFee);
 
                 if (subtotalDisplay) subtotalDisplay.textContent = money(subtotalSum);

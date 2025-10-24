@@ -1,6 +1,6 @@
 ﻿from bisect import bisect_left
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import Dict, Any, List, Sequence, Iterable, Tuple, Optional
 from dataclasses import dataclass, field
@@ -28,7 +28,8 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 from datetime import date, timedelta, time as time_cls
 from django.contrib.admin.views.decorators import staff_member_required
-from django.http import HttpRequest, HttpResponse, Http404, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, Http404, HttpResponseRedirect, HttpResponseBadRequest
+from django.templatetags.static import static
 from django.contrib.auth.models import Permission
 from django.db.models.functions import Coalesce, Concat, Greatest
 from django.db.models import DecimalField, Value
@@ -54,8 +55,11 @@ from core.services.user_import import (
     UserImportSchemaError,
 )
 from core.services.pricing import compute_appointment_pricing, PricingComputationError
-from core.utils.fees import CARD_PROCESSING_PERCENT, CARD_PROCESSING_FIXED
+from core.utils.fees import CARD_PROCESSING_PERCENT, CARD_PROCESSING_FIXED, card_processing_fee
 from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
+
+PAID_BADGE_ICON_URL = static("admin/icons/paid.png")
+PARTIAL_BADGE_ICON_URL = static("admin/icons/partially-paid.png")
 
 # -----------------------------
 # Custom filter for filtering users by Role
@@ -2062,8 +2066,28 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             paid_total = Decimal(paid_agg.get("total") or Decimal("0.00")).quantize(TWOPLACES)
         ctx["paid_total"] = paid_total
 
+        appointment_total_amount = Decimal("0.00")
+        if obj:
+            if appointment_pricing_snapshot:
+                totals_payload = appointment_pricing_snapshot.get("totals") or {}
+                total_value = (
+                    totals_payload.get("grand_total")
+                    or totals_payload.get("final_price_recorded")
+                    or totals_payload.get("pre_fee_total")
+                    or Decimal("0.00")
+                )
+                appointment_total_amount = Decimal(str(total_value))
+            else:
+                appointment_total_amount = Decimal(getattr(obj, "final_price", Decimal("0.00")) or Decimal("0.00"))
+        ctx["appointment_total_amount"] = appointment_total_amount.quantize(TWOPLACES)
+
         ctx["card_fee_percent"] = str(CARD_PROCESSING_PERCENT)
         ctx["card_fee_fixed"] = str(CARD_PROCESSING_FIXED)
+
+        try:
+            ctx["payment_add_url"] = reverse("admin:core_payment_add")
+        except NoReverseMatch:
+            ctx["payment_add_url"] = ""
 
         intake_forms_overview: List[Dict[str, Any]] = []
         intake_required_ids: List[str] = []
@@ -2286,9 +2310,55 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 self.admin_site.admin_view(self.custom_create_view),
                 name="core_appointment_custom_create",
             ),
-
+            path(
+                "api/appointment/<uuid:appointment_id>/enable-card-fee/",
+                self.admin_site.admin_view(self.enable_card_fee_view),
+                name="core_appointment_enable_card_fee",
+            ),
         ]
         return custom + urls
+
+    def enable_card_fee_view(self, request, appointment_id):
+        if request.method != "POST":
+            return HttpResponseBadRequest("POST required")
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+
+        appointment = get_object_or_404(Appointment, pk=appointment_id)
+
+        try:
+            snapshot = compute_appointment_pricing(appointment)
+        except PricingComputationError:
+            appointment.recompute_totals(save=True)
+            snapshot = compute_appointment_pricing(appointment)
+
+        totals = snapshot.get("totals") or {}
+        pre_fee_raw = totals.get("pre_fee_total") or totals.get("final_subtotal") or Decimal("0.00")
+        try:
+            pre_fee_total = Decimal(pre_fee_raw)
+        except Exception:
+            pre_fee_total = Decimal("0.00")
+        if pre_fee_total < Decimal("0.00"):
+            pre_fee_total = Decimal("0.00")
+
+        if pre_fee_total <= Decimal("0.00"):
+            fee = Decimal("0.50").quantize(TWOPLACES)
+        else:
+            fee = card_processing_fee(pre_fee_total).quantize(TWOPLACES)
+
+        appointment.apply_card_processing_fee = True
+        appointment.card_processing_fee = fee
+        appointment.recompute_totals(save=True)
+        appointment.refresh_from_db(fields=["final_price", "card_processing_fee"])
+
+        return JsonResponse(
+            {
+                "ok": True,
+                "fee": f"{fee:.2f}",
+                "grand_total": f"{appointment.final_price or Decimal('0.00'):.2f}",
+                "apply_card_processing_fee": True,
+            }
+        )
 
 
     def _calendar_date_for_obj(self, obj) -> str | None:
@@ -3371,6 +3441,46 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
         'stripe_charge_id', 'created_at',
     ]
     actions = ["action_generate_receipts", "action_send_receipts"]
+
+    def get_changeform_initial_data(self, request):
+        initial = super().get_changeform_initial_data(request)
+        appointment_id = request.GET.get("appointment")
+        amount = request.GET.get("amount")
+        method_hint = (request.GET.get("method_hint") or "").lower()
+        status_hint = (request.GET.get("status_hint") or "").strip().lower()
+
+        if appointment_id:
+            try:
+                initial["appointment"] = Appointment.objects.get(pk=appointment_id)
+            except Appointment.DoesNotExist:
+                pass
+
+        if amount:
+            try:
+                initial["amount"] = Decimal(amount)
+            except (InvalidOperation, TypeError, ValueError):
+                pass
+
+        if method_hint:
+            normalized = method_hint.replace("-", "").replace("_", "")
+            if normalized == "cash":
+                target_name = "Cash"
+            elif "transfer" in normalized:
+                target_name = "E-transfer"
+            else:
+                target_name = None
+
+            if target_name:
+                method = PaymentMethod.objects.filter(name__iexact=target_name).first()
+                if method:
+                    initial["method"] = method
+
+        if status_hint:
+            valid_statuses = {choice[0] for choice in Payment.STRIPE_STATUS_CHOICES}
+            if status_hint in valid_statuses:
+                initial["status"] = status_hint
+
+        return initial
 
     def get_fields(self, request, obj=None):
         fields = list(super().get_fields(request, obj))
@@ -5486,9 +5596,17 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         eps = Decimal("0.01")
         if paid_total is not None and grand_total is not None and (grand_total >= eps or paid_total >= eps):
             if paid_total >= grand_total - eps:
-                payment_html = "<span class='badge badge--paid'>PAID</span>"
+                payment_html = (
+                    f"<span class='badge badge--paid'>"
+                    f"<img src=\"{PAID_BADGE_ICON_URL}\" alt=\"Paid\" class=\"badge-icon\" height=\"24\" />"
+                    f"</span>"
+                )
             elif paid_total >= eps and paid_total < grand_total - eps:
-                payment_html = "<span class='badge badge--partial'>PARTIAL</span>"
+                payment_html = (
+                    f"<span class='badge badge--partial'>"
+                    f"<img src=\"{PARTIAL_BADGE_ICON_URL}\" alt=\"Partially paid\" class=\"badge-icon\" height=\"24\"/>"
+                    f"</span>"
+                )
 
         if show_flag:
             ico = "⚕️"
@@ -5980,10 +6098,18 @@ def _corner_badges_html(appt, appt_promocode):
     payment_html = ""
     eps = Decimal("0.01")
     if grand_total is not None and (grand_total >= eps or paid_total >= eps):
-        if paid_total >= grand_total - eps:
-            payment_html = "<span class='badge badge--paid'>PAID</span>"
-        elif paid_total >= eps and paid_total < grand_total - eps:
-            payment_html = "<span class='badge badge--partial'>PARTIAL</span>"
+            if paid_total >= grand_total - eps:
+                payment_html = (
+                    f"<span class='badge badge--paid'>"
+                    f"<img src=\"{PAID_BADGE_ICON_URL}\" alt=\"Paid\" class=\"badge-icon\" />"
+                    f"</span>"
+                )
+            elif paid_total >= eps and paid_total < grand_total - eps:
+                payment_html = (
+                    f"<span class='badge badge--partial'>"
+                    f"<img src=\"{PARTIAL_BADGE_ICON_URL}\" alt=\"Partially paid\" class=\"badge-icon\" />"
+                    f"</span>"
+                )
 
     # здоровье
     show_flag, flag_url, flag_title = _health_flag_info(appt)

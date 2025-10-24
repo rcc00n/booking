@@ -403,9 +403,13 @@ def compute_appointment_pricing(appointment: Appointment) -> Dict[str, Any]:
     tax_total = service_tax_total + product_tax_total
     pre_fee_total = _quantize(final_subtotal_overall + tax_total)
 
-    processing_fee = _quantize(_to_decimal(getattr(appointment, "card_processing_fee", None)))
-    if processing_fee == Decimal("0.00"):
-        processing_fee = card_processing_fee(pre_fee_total)
+    apply_fee = bool(getattr(appointment, "apply_card_processing_fee", False))
+    stored_fee = _quantize(_to_decimal(getattr(appointment, "card_processing_fee", None)))
+    processing_fee = Decimal("0.00")
+    if apply_fee:
+        processing_fee = stored_fee
+        if processing_fee == Decimal("0.00"):
+            processing_fee = card_processing_fee(pre_fee_total)
 
     grand_total = _quantize(pre_fee_total + processing_fee)
     final_price_recorded = _quantize(_to_decimal(getattr(appointment, "final_price", grand_total)))

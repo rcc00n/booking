@@ -395,6 +395,9 @@ def _summarize_pricing(pricing: Any) -> tuple[dict[str, Any], Optional[int]]:
     if isinstance(data.get("summary"), dict):
         summary["details"] = data["summary"]
 
+    summary.setdefault("total", summary["grand_total_minor"])
+    summary.setdefault("processing_fee", summary["processing_fee_minor"])
+
     return summary, grand_minor or summary["grand_total_minor"]
 
 
@@ -694,8 +697,24 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
         except PricingComputationError:
             pricing_snapshot = None
 
-    summary_source = pricing_snapshot if pricing_snapshot else metadata.get("cart_pricing") or metadata
-    summary, expected_minor = _summarize_pricing(summary_source)
+    summary = None
+    expected_minor = None
+    reuse_previous_summary = bool(previous_metadata.get("cart_pricing")) and not metadata.get("cart_pricing")
+    if reuse_previous_summary:
+        summary = previous_metadata["cart_pricing"]
+        expected_minor = _coerce_minor(
+            summary.get("total")
+            or summary.get("grand_total_minor")
+        )
+    else:
+        summary_source = metadata.get("cart_pricing")
+        if not summary_source and pricing_snapshot:
+            summary_source = pricing_snapshot
+        if not summary_source and previous_metadata.get("cart_pricing"):
+            summary_source = previous_metadata["cart_pricing"]
+        if not summary_source:
+            summary_source = metadata or {}
+        summary, expected_minor = _summarize_pricing(summary_source)
     if summary:
         meta["cart_pricing"] = summary
         meta["cart_service_fee_minor"] = str(summary.get("service_fee_minor", 0))
