@@ -197,7 +197,7 @@
                                 {% endif %}
                             </td>
                             <td style="text-align: right;">
-                                {{ item.base_price|floatformat:2 }} {{ totals.currency }}
+                                {{ item.display_price|default:item.base_price|floatformat:2 }} {{ totals.currency }}
                                 {% if item.discount_amount and item.discount_amount|floatformat:2 != "0.00" %}
                                     <div class="text-muted">Discount -{{ item.discount_amount|floatformat:2 }} {{ totals.currency }}</div>
                                     <div class="text-muted">Final {{ item.final_price|floatformat:2 }} {{ totals.currency }}</div>

@@ -3,11 +3,10 @@ Receipt generation services for payments.
 """
 from __future__ import annotations
 
-import uuid
+import json
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List, Optional
-import json
+from typing import Any, Dict, List, Optional
 
 from django.conf import settings
 from django.core.files.base import ContentFile
@@ -20,226 +19,367 @@ from core.models import AppointmentItem, Payment
 from core.services.pricing import compute_appointment_pricing, PricingComputationError
 from core.utils.pdf import render_html_to_pdf
 
-
-@dataclass
-class ReceiptTotals:
-    subtotal: Decimal
-    discount_total: Decimal
-    tax_total: Decimal
-    processing_fee: Decimal
-    service_fee: Decimal
-    total: Decimal
-    currency: str
-    base_subtotal: Decimal = Decimal("0.00")
-    summary: Dict[str, Any] = field(default_factory=dict)
+ZERO = Decimal("0.00")
 
 
 def _quantize(value: Decimal | None) -> Decimal:
     if value is None:
-        return Decimal("0.00")
+        return ZERO
     return value.quantize(Decimal("0.01"))
 
 
-def _from_minor_units(value: Any) -> Decimal:
-    if value in (None, ""):
-        return Decimal("0.00")
-    try:
-        if isinstance(value, int):
-            return Decimal(value) / Decimal("100")
-        if isinstance(value, str) and value.strip().isdigit():
-            return Decimal(int(value.strip())) / Decimal("100")
-        return Decimal(str(value))
-    except Exception:
-        return Decimal("0.00")
-
-
 def _to_decimal(value: Any) -> Decimal:
-    if value in (None, ""):
-        return Decimal("0.00")
+    if value in (None, "", "null"):
+        return ZERO
     if isinstance(value, Decimal):
         return value
     try:
         return Decimal(str(value))
     except Exception:
-        return Decimal("0.00")
+        return ZERO
 
 
-def _payment_totals(
-    payment: Payment,
-    items: Iterable[AppointmentItem],
-) -> tuple[ReceiptTotals, Optional[Dict[str, Any]]]:
-    appointment = getattr(payment, "appointment", None)
-    raw_metadata: Any = payment.metadata or {}
-    if isinstance(raw_metadata, str):
+def _decimal_from_minor(value: Any) -> Decimal:
+    """
+    Convert an integer (in minor units) or stringified integer to a Decimal dollar value.
+    """
+    if value in (None, "", "null"):
+        return ZERO
+    try:
+        if isinstance(value, int):
+            return Decimal(value) / Decimal("100")
+        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+            return Decimal(int(value.strip())) / Decimal("100")
+        return _to_decimal(value)
+    except Exception:
+        return ZERO
+
+
+def _parse_metadata(metadata: Any) -> Dict[str, Any]:
+    if isinstance(metadata, dict):
+        return dict(metadata)
+    if isinstance(metadata, str):
         try:
-            metadata: Dict[str, Any] = json.loads(raw_metadata)
+            return json.loads(metadata)
         except json.JSONDecodeError:
-            metadata = {}
-    elif isinstance(raw_metadata, dict):
-        metadata = dict(raw_metadata)
-    else:
-        metadata = {}
-    service_fee_source = metadata.get("service_fee_minor")
-    if service_fee_source in (None, ""):
-        service_fee_source = metadata.get("cart_service_fee_minor")
-    service_fee = _quantize(_from_minor_units(service_fee_source))
-    if service_fee == Decimal("0.00"):
-        service_fee = _quantize(_to_decimal(metadata.get("service_fee")))
-    pricing_snapshot: Optional[Dict[str, Any]] = None
-    if appointment is not None:
-        try:
-            pricing_snapshot = compute_appointment_pricing(appointment)
-        except PricingComputationError:
-            pricing_snapshot = None
+            return {}
+    return {}
 
-    if pricing_snapshot:
-        totals_data = pricing_snapshot.get("totals", {})
-        subtotal = _quantize(totals_data.get("final_subtotal", Decimal("0.00")))
-        tax_total = _quantize(totals_data.get("tax_total", Decimal("0.00")))
-        discount_total = _quantize(totals_data.get("discount_total", Decimal("0.00")))
-        processing_fee = _quantize(totals_data.get("processing_fee", Decimal("0.00")))
-        service_fee_candidate = totals_data.get("service_fee", Decimal("0.00"))
-        if isinstance(service_fee_candidate, dict):
-            service_fee_candidate = service_fee_candidate.get("amount", Decimal("0.00"))
-        service_fee_from_totals = _quantize(_to_decimal(service_fee_candidate))
-        if service_fee_from_totals > Decimal("0.00"):
-            service_fee = service_fee_from_totals
-        total = _quantize(totals_data.get("grand_total", payment.amount_received or payment.amount or Decimal("0.00")))
-        base_subtotal = _quantize(
-            totals_data.get("base_services_subtotal", Decimal("0.00"))
-            + totals_data.get("product_subtotal", Decimal("0.00"))
+
+@dataclass
+class PricingLine:
+    name: str = ""
+    base_price: Decimal = ZERO
+    discount_amount: Decimal = ZERO
+    final_price: Decimal = ZERO
+    tax_amount: Decimal = ZERO
+    total_with_tax: Decimal = ZERO
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def as_payload(
+        self,
+        appointment_item: Optional[AppointmentItem] = None,
+    ) -> Dict[str, Any]:
+        """
+        Render a template-ready row, merging appointment data (master, start time, duration).
+        """
+        service_name = self.name
+        master_name = ""
+        start_at = None
+        duration_min = None
+        if appointment_item:
+            service = getattr(appointment_item, "service", None)
+            if not service_name and service:
+                service_name = getattr(service, "name", "") or service_name
+            master_name = _master_display(appointment_item)
+            duration_min = getattr(appointment_item, "duration_min", None)
+            start_raw = getattr(appointment_item, "start_time", None)
+            if start_raw:
+                try:
+                    start_at = localtime(start_raw)
+                except Exception:
+                    start_at = start_raw
+
+        # For the PDF we show the pre-discount amount in the main column.
+        display_price = self.base_price if self.base_price > ZERO else self.final_price
+        return {
+            "name": service_name,
+            "master": master_name,
+            "duration_min": duration_min,
+            "start_at": start_at,
+            "base_price": self.base_price,
+            "discount_amount": self.discount_amount,
+            "final_price": self.final_price,
+            "tax_amount": self.tax_amount,
+            "total_with_tax": self.total_with_tax,
+            "display_price": display_price,
+        }
+
+
+@dataclass
+class ReceiptTotals:
+    currency: str
+    base_subtotal: Decimal
+    subtotal: Decimal
+    discount_total: Decimal
+    tax_total: Decimal
+    service_fee: Decimal
+    processing_fee: Decimal
+    total: Decimal
+    summary: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PricingSummary:
+    currency: str
+    base_subtotal: Decimal = ZERO
+    subtotal: Decimal = ZERO
+    discount_total: Decimal = ZERO
+    tax_total: Decimal = ZERO
+    service_fee: Decimal = ZERO
+    processing_fee: Decimal = ZERO
+    total: Decimal = ZERO
+    items: List[PricingLine] = field(default_factory=list)
+    details: Dict[str, Any] = field(default_factory=dict)
+
+    def to_totals(self) -> ReceiptTotals:
+        details = dict(self.details or {})
+        return ReceiptTotals(
+            currency=self.currency,
+            base_subtotal=_quantize(self.base_subtotal),
+            subtotal=_quantize(self.subtotal),
+            discount_total=_quantize(self.discount_total),
+            tax_total=_quantize(self.tax_total),
+            service_fee=_quantize(self.service_fee),
+            processing_fee=_quantize(self.processing_fee),
+            total=_quantize(self.total),
+            summary=details,
         )
-        if discount_total < Decimal("0.00"):
-            discount_total = Decimal("0.00")
 
-        receipt_totals = ReceiptTotals(
-            subtotal=subtotal,
-            discount_total=discount_total,
-            tax_total=tax_total,
-            processing_fee=processing_fee,
-            service_fee=service_fee,
-            total=total,
-            currency=(payment.currency or pricing_snapshot.get("currency") or settings.STRIPE_CURRENCY or "cad").upper(),
-            base_subtotal=base_subtotal,
-            summary=pricing_snapshot.get("summary", {}),
-        )
-        return receipt_totals, pricing_snapshot
+    def normalized(self) -> "PricingSummary":
+        """
+        Ensure totals are consistent with line items. Metadata can be missing/partial;
+        reconcile sums to avoid showing zeros on the receipt.
+        """
+        if self.items:
+            sum_base = sum((line.base_price for line in self.items), ZERO)
+            sum_final = sum((line.final_price for line in self.items), ZERO)
+            sum_discount = sum((line.discount_amount for line in self.items), ZERO)
+            sum_tax = sum((line.tax_amount for line in self.items), ZERO)
+            if self.base_subtotal <= ZERO and sum_base > ZERO:
+                self.base_subtotal = _quantize(sum_base)
+            if self.subtotal <= ZERO and sum_final > ZERO:
+                self.subtotal = _quantize(sum_final)
+            if self.discount_total <= ZERO and sum_discount > ZERO:
+                self.discount_total = _quantize(sum_discount)
+            if self.tax_total <= ZERO and sum_tax > ZERO:
+                self.tax_total = _quantize(sum_tax)
+        computed_total = _quantize(self.subtotal + self.tax_total + self.service_fee + self.processing_fee)
+        if self.total <= ZERO and computed_total > ZERO:
+            self.total = computed_total
+        return self
 
-    subtotal = Decimal("0.00")
-    base_subtotal = Decimal("0.00")
-    item_tax_total = Decimal("0.00")
-    processing_fee = Decimal("0.00")
-    for item in items:
-        price = getattr(item, "final_price", None) or getattr(item, "unit_price", None) or Decimal("0.00")
-        price = _quantize(price)
-        subtotal += price
-        base_subtotal += price
-        item_tax_total += _quantize(getattr(item, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
 
-    sales_list = []
-    if appointment is not None:
-        product_sales_rel = getattr(appointment, "product_sales", None)
-        if product_sales_rel is not None:
-            sales_list = list(product_sales_rel.all())
-            for sale in sales_list:
-                sale_total = _quantize(getattr(sale, "total_amount", Decimal("0.00")) or Decimal("0.00"))
-                subtotal += sale_total
-                base_subtotal += sale_total
-                item_tax_total += _quantize(getattr(sale, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
-
-    total = _quantize(payment.amount_received or payment.amount or Decimal("0.00"))
-
-    if base_subtotal < subtotal:
-        base_subtotal = subtotal
-
-    discount_total = base_subtotal - subtotal
-    if discount_total < Decimal("0.00"):
-        discount_total = Decimal("0.00")
-
-    computed_tax = item_tax_total
-    summary_meta = None
-    summary_source = metadata.get("cart_pricing")
-    if isinstance(summary_source, str):
+def _pricing_from_metadata(payment: Payment, metadata: Dict[str, Any]) -> Optional[PricingSummary]:
+    summary = metadata.get("cart_pricing")
+    if isinstance(summary, str):
         try:
-            summary_meta = json.loads(summary_source)
+            summary = json.loads(summary)
         except json.JSONDecodeError:
-            summary_meta = None
-    elif isinstance(summary_source, dict):
-        summary_meta = summary_source
+            summary = None
+    if not isinstance(summary, dict):
+        return None
 
-    if isinstance(summary_meta, dict):
-        subtotal = _quantize(_from_minor_units(summary_meta.get("subtotal_minor")))
-        discount_total = _quantize(_from_minor_units(summary_meta.get("discount_minor")))
-        base_subtotal = subtotal + discount_total
-        computed_tax = _quantize(_from_minor_units(summary_meta.get("tax_minor")))
-        processing_fee = _quantize(_from_minor_units(summary_meta.get("processing_fee_minor")))
-        service_fee_candidate = summary_meta.get("service_fee_minor")
-        if service_fee_candidate is None:
-            service_fee_candidate = metadata.get("service_fee_minor") or metadata.get("cart_service_fee_minor")
-        service_fee_from_summary = _quantize(_from_minor_units(service_fee_candidate))
-        if service_fee_from_summary > Decimal("0.00"):
-            service_fee = service_fee_from_summary
-        total_minor = summary_meta.get("grand_total_minor")
-        if isinstance(total_minor, int):
-            total = _quantize(_from_minor_units(total_minor))
-    if service_fee <= Decimal("0.00"):
-        derived_service_fee = total - (subtotal + computed_tax + processing_fee)
-        derived_service_fee = _quantize(derived_service_fee)
-        if derived_service_fee > Decimal("0.00"):
-            service_fee = derived_service_fee
-        else:
-            service_fee = Decimal("0.00")
+    currency = (
+        summary.get("currency")
+        or metadata.get("cart_currency")
+        or payment.currency
+        or getattr(settings, "STRIPE_CURRENCY", "cad")
+    ).upper()
 
-    receipt_totals = ReceiptTotals(
-        subtotal=_quantize(subtotal),
-        discount_total=_quantize(discount_total),
-        tax_total=_quantize(computed_tax),
-        processing_fee=_quantize(processing_fee),
+    processing_fee = summary.get("processing_fee_minor")
+    service_fee = summary.get("service_fee_minor")
+    total_minor = summary.get("grand_total_minor")
+
+    if processing_fee in (None, "", "0"):
+        processing_fee = metadata.get("cart_processing_fee_minor")
+    if service_fee in (None, "", "0"):
+        service_fee = metadata.get("cart_service_fee_minor")
+    if total_minor in (None, "", "0"):
+        total_minor = metadata.get("cart_total_minor")
+
+    items: List[PricingLine] = []
+    for entry in summary.get("items", []):
+        base_price = _quantize(_decimal_from_minor(entry.get("base_minor")))
+        discount_amount = _quantize(_decimal_from_minor(entry.get("discount_minor")))
+        final_price = _quantize(base_price - discount_amount)
+        if final_price < ZERO:
+            final_price = ZERO
+        tax_amount = _quantize(_decimal_from_minor(entry.get("tax_minor")))
+        total_with_tax = _quantize(_decimal_from_minor(entry.get("total_minor")))
+        if total_with_tax <= ZERO:
+            total_with_tax = _quantize(final_price + tax_amount)
+        items.append(
+            PricingLine(
+                name=str(entry.get("name", "")),
+                base_price=base_price,
+                discount_amount=discount_amount,
+                final_price=final_price,
+                tax_amount=tax_amount,
+                total_with_tax=total_with_tax,
+                metadata={k: v for k, v in entry.items() if k not in {"name", "base_minor", "discount_minor", "total_minor", "tax_minor"}},
+            )
+        )
+
+    details = {}
+    if isinstance(summary.get("details"), dict):
+        details = dict(summary["details"])
+    elif isinstance(metadata.get("cart_pricing_details"), dict):
+        details = dict(metadata["cart_pricing_details"])
+
+    return PricingSummary(
+        currency=currency,
+        base_subtotal=_quantize(_decimal_from_minor(summary.get("base_subtotal_minor"))),
+        subtotal=_quantize(_decimal_from_minor(summary.get("subtotal_minor"))),
+        discount_total=_quantize(_decimal_from_minor(summary.get("discount_minor"))),
+        tax_total=_quantize(_decimal_from_minor(summary.get("tax_minor"))),
+        service_fee=_quantize(_decimal_from_minor(service_fee)),
+        processing_fee=_quantize(_decimal_from_minor(processing_fee)),
+        total=_quantize(_decimal_from_minor(total_minor)),
+        items=items,
+        details=details,
+    ).normalized()
+
+
+def _pricing_from_appointment(payment: Payment, appointment) -> Optional[PricingSummary]:
+    if appointment is None:
+        return None
+    try:
+        snapshot = compute_appointment_pricing(appointment)
+    except PricingComputationError:
+        return None
+
+    totals = snapshot.get("totals", {})
+    currency = (
+        snapshot.get("currency")
+        or getattr(settings, "STRIPE_CURRENCY", "cad")
+        or payment.currency
+    ).upper()
+
+    base_services = _quantize(_to_decimal(totals.get("base_services_subtotal")))
+    product_subtotal = _quantize(_to_decimal(totals.get("product_subtotal")))
+    items: List[PricingLine] = []
+    for entry in snapshot.get("items", []):
+        base_price = _quantize(_to_decimal(entry.get("base_price")))
+        final_price = _quantize(_to_decimal(entry.get("final_price")))
+        discount_amount = _quantize(_to_decimal(entry.get("discount_amount")))
+        tax_amount = _quantize(_to_decimal(entry.get("tax_amount")))
+        total_with_tax = _quantize(final_price + tax_amount)
+        items.append(
+            PricingLine(
+                name=str(entry.get("name", "")),
+                base_price=base_price,
+                discount_amount=discount_amount,
+                final_price=final_price,
+                tax_amount=tax_amount,
+                total_with_tax=total_with_tax,
+                metadata={k: v for k, v in entry.items() if k not in {"name", "base_price", "final_price", "discount_amount", "tax_amount"}},
+            )
+        )
+
+    # Compute a service fee if the appointment tracks it separately.
+    service_fee = _to_decimal(getattr(appointment, "service_fee", ZERO))
+    processing_fee = _to_decimal(totals.get("processing_fee", ZERO))
+
+    return PricingSummary(
+        currency=currency,
+        base_subtotal=_quantize(base_services + product_subtotal),
+        subtotal=_quantize(_to_decimal(totals.get("final_subtotal"))),
+        discount_total=_quantize(_to_decimal(totals.get("discount_total"))),
+        tax_total=_quantize(_to_decimal(totals.get("tax_total"))),
         service_fee=_quantize(service_fee),
-        total=total,
-        currency=(payment.currency or settings.STRIPE_CURRENCY or "cad").upper(),
-        base_subtotal=_quantize(base_subtotal),
-        summary=summary_meta or {},
-    )
-    return receipt_totals, None
+        processing_fee=_quantize(processing_fee),
+        total=_quantize(_to_decimal(totals.get("grand_total"))),
+        items=items,
+        details=dict(snapshot.get("summary", {})),
+    ).normalized()
 
 
-def build_payment_context(payment: Payment) -> Dict[str, Any]:
-    appointment = payment.appointment
+def _master_display(item: AppointmentItem) -> str:
+    master = getattr(item, "master", None)
+    if not master:
+        return ""
+    profile_user = getattr(master, "user", None)
+    if profile_user and hasattr(profile_user, "get_full_name"):
+        name = profile_user.get_full_name().strip()
+        if name:
+            return name
+    if profile_user and getattr(profile_user, "user", None):
+        name = profile_user.user.get_full_name().strip()
+        if name:
+            return name
+    return str(master)
+
+
+def _appointment_items(appointment) -> List[AppointmentItem]:
+    if appointment is None:
+        return []
+    qs = appointment.items.select_related("service", "master__user__user")
+    return list(qs.order_by("start_time"))
+
+
+def _merge_items(pricing: PricingSummary, appointment) -> List[Dict[str, Any]]:
+    appointment_items = _appointment_items(appointment)
+    merged: List[Dict[str, Any]] = []
+
+    for index, line in enumerate(pricing.items):
+        appointment_item = appointment_items[index] if index < len(appointment_items) else None
+        payload = line.as_payload(appointment_item)
+        if not payload["name"] and appointment_item:
+            service = getattr(appointment_item, "service", None)
+            payload["name"] = getattr(service, "name", "") or payload["name"]
+        merged.append(payload)
+
+    # If the appointment has extra items not present in metadata, append them.
+    if len(appointment_items) > len(pricing.items):
+        for appointment_item in appointment_items[len(pricing.items):]:
+            base_price = _quantize(_to_decimal(getattr(appointment_item, "unit_price", None)))
+            final_price = _quantize(_to_decimal(getattr(appointment_item, "final_price", None) or base_price))
+            discount_amount = _quantize(base_price - final_price) if base_price > final_price else ZERO
+            tax_amount = _quantize(_to_decimal(getattr(appointment_item, "tax_amount", None)))
+            line = PricingLine(
+                name=getattr(getattr(appointment_item, "service", None), "name", ""),
+                base_price=base_price,
+                discount_amount=discount_amount,
+                final_price=final_price,
+                tax_amount=tax_amount,
+                total_with_tax=_quantize(final_price + tax_amount),
+            )
+            merged.append(line.as_payload(appointment_item))
+
+    return merged
+
+
+def _client_contact(payment: Payment, metadata: Dict[str, Any]) -> Dict[str, str]:
+    appointment = getattr(payment, "appointment", None)
     client = getattr(appointment, "client", None)
     user = getattr(client, "user", None)
-    metadata_raw: Dict[str, Any] = payment.metadata or {}
+    contact = {
+        "name": getattr(client, "get_full_name", lambda: "")() if client else "",
+        "email": getattr(user, "email", "") if user else "",
+        "phone": getattr(client, "phone", "") if client else "",
+    }
+    if not any(contact.values()):
+        contact = {
+            "name": metadata.get("client_name", ""),
+            "email": metadata.get("client_email", ""),
+            "phone": metadata.get("client_phone", ""),
+        }
+    return contact
 
-    items_qs = []
-    if appointment:
-        items_qs = list(
-            appointment.items.select_related(
-                "service",
-                "master__user__user",
-            )
-            .all()
-        )
 
-    totals, pricing_snapshot = _payment_totals(payment, items_qs)
-    if not pricing_snapshot and isinstance(metadata_raw, dict):
-        pricing_snapshot = metadata_raw.get("cart_pricing")
-        if isinstance(pricing_snapshot, str):
-            try:
-                pricing_snapshot = json.loads(pricing_snapshot)
-            except json.JSONDecodeError:
-                pricing_snapshot = None
-    summary_meta = totals.summary if isinstance(totals.summary, dict) and totals.summary else None
-    if summary_meta is None and isinstance(metadata_raw, dict):
-        summary_candidate = metadata_raw.get("cart_pricing")
-        if isinstance(summary_candidate, str):
-            try:
-                summary_candidate = json.loads(summary_candidate)
-            except json.JSONDecodeError:
-                summary_candidate = None
-        if isinstance(summary_candidate, dict) and summary_candidate:
-            summary_meta = summary_candidate
-
-    business = {
+def _business_profile() -> Dict[str, str]:
+    return {
         "name": getattr(settings, "BUSINESS_NAME", "Malva Booking"),
         "address": getattr(settings, "BUSINESS_ADDRESS", ""),
         "phone": getattr(settings, "BUSINESS_PHONE", ""),
@@ -248,169 +388,31 @@ def build_payment_context(payment: Payment) -> Dict[str, Any]:
         "website": getattr(settings, "BUSINESS_WEBSITE", ""),
     }
 
-    def _master_name(item: AppointmentItem) -> str:
-        master = getattr(item, "master", None)
-        if not master:
-            return ""
-        profile_user = getattr(master, "user", None)
-        if profile_user and hasattr(profile_user, "get_full_name"):
-            name = profile_user.get_full_name().strip()
-            if name:
-                return name
-        if profile_user and getattr(profile_user, "user", None):
-            name = profile_user.user.get_full_name().strip()
-            if name:
-                return name
-        return str(master)
 
-    pricing_item_lookup: Dict[str, Dict[str, Any]] = {}
-    if pricing_snapshot:
-        pricing_item_lookup = {
-            entry.get("id"): entry for entry in pricing_snapshot.get("items", []) if entry.get("id")
-        }
+def build_payment_context(payment: Payment) -> Dict[str, Any]:
+    metadata = _parse_metadata(payment.metadata)
+    appointment = getattr(payment, "appointment", None)
 
-    items_payload: List[Dict[str, Any]] = []
-    for item in items_qs:
-        start_dt = localtime(item.start_time) if getattr(item, "start_time", None) else None
-        pricing_entry = pricing_item_lookup.get(str(getattr(item, "pk", "")), {}) if pricing_item_lookup else {}
-        base_price = _to_decimal(pricing_entry.get("base_price"))
-        if base_price <= Decimal("0.00"):
-            try:
-                base_price = item._effective_unit_price()
-            except Exception:
-                base_price = getattr(item, "unit_price", None) or getattr(getattr(item, "service", None), "base_price", Decimal("0.00"))
-        base_price = _quantize(base_price)
-        final_price = _quantize(getattr(item, "final_price", None) or getattr(item, "unit_price", None) or base_price)
-        discount_amount = pricing_entry.get("discount_amount")
-        if discount_amount is not None:
-            discount_amount = _quantize(abs(_to_decimal(discount_amount)))
-        else:
-            calc_discount = base_price - final_price
-            discount_amount = _quantize(calc_discount if calc_discount > 0 else Decimal("0.00"))
-        tax_amount = _quantize(getattr(item, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
-        items_payload.append(
-            {
-                "name": getattr(getattr(item, "service", None), "name", ""),
-                "master": _master_name(item),
-                "duration_min": item.duration_min if hasattr(item, "duration_min") else None,
-                "start_at": start_dt,
-                "base_price": base_price,
-                "final_price": final_price,
-                "price": base_price,
-                "discount_amount": discount_amount,
-                "tax_amount": tax_amount,
-            }
+    pricing = _pricing_from_metadata(payment, metadata)
+    if pricing is None:
+        pricing = _pricing_from_appointment(payment, appointment)
+    if pricing is None:
+        pricing = PricingSummary(
+            currency=(payment.currency or getattr(settings, "STRIPE_CURRENCY", "cad") or "cad").upper(),
         )
 
-    if summary_meta and items_payload:
-        summary_items = summary_meta.get("items", [])
-        for idx, entry in enumerate(summary_items):
-            base_minor = entry.get("base_minor")
-            total_minor = entry.get("total_minor")
-            discount_minor = entry.get("discount_minor")
-            if idx < len(items_payload):
-                target = items_payload[idx]
-            else:
-                target = {
-                    "name": entry.get("name", ""),
-                    "master": "",
-                    "duration_min": None,
-                    "start_at": None,
-                    "base_price": Decimal("0.00"),
-                    "final_price": Decimal("0.00"),
-                    "price": Decimal("0.00"),
-                    "discount_amount": Decimal("0.00"),
-                    "tax_amount": Decimal("0.00"),
-                }
-                items_payload.append(target)
-            if base_minor is not None:
-                target["base_price"] = _quantize(_from_minor_units(base_minor))
-            if total_minor is not None:
-                target["final_price"] = _quantize(_from_minor_units(total_minor))
-            if discount_minor is not None:
-                target["discount_amount"] = _quantize(_from_minor_units(discount_minor))
-            target["price"] = target.get("base_price", Decimal("0.00"))
-
-    if not items_payload and summary_meta:
-        for entry in summary_meta.get("items", []):
-            if not isinstance(entry, dict):
-                continue
-            base_minor = entry.get("base_minor")
-            total_minor = entry.get("total_minor")
-            discount_minor = entry.get("discount_minor")
-            items_payload.append(
-                {
-                    "name": entry.get("name", ""),
-                    "master": "",
-                    "duration_min": None,
-                    "start_at": None,
-                    "base_price": _quantize(_from_minor_units(base_minor)),
-                    "final_price": _quantize(_from_minor_units(total_minor)),
-                    "price": _quantize(_from_minor_units(base_minor)),
-                    "discount_amount": _quantize(_from_minor_units(discount_minor)),
-                    "tax_amount": Decimal("0.00"),
-                }
-            )
-
-    if not items_payload and isinstance(pricing_snapshot, dict):
-        for entry in pricing_snapshot.get("items", []):
-            if not isinstance(entry, dict):
-                continue
-            start_at = entry.get("start_time") or entry.get("start_at")
-            try:
-                start_dt = localtime(start_at) if hasattr(start_at, "tzinfo") else None
-            except Exception:
-                start_dt = None
-            total_minor = entry.get("total_minor")
-            if isinstance(total_minor, int):
-                price_value = Decimal(total_minor) / Decimal("100")
-            else:
-                price_value = _to_decimal(
-                    entry.get("unit_price_decimal")
-                    or entry.get("subtotal_decimal")
-                    or entry.get("unit_price")
-                    or entry.get("subtotal")
-                )
-            discount_value = _to_decimal(entry.get("discount_total_decimal") or entry.get("discount_amount"))
-            if discount_value < 0:
-                discount_value = -discount_value
-            base_value = price_value + discount_value
-            items_payload.append(
-                {
-                    "name": entry.get("name") or entry.get("service", {}).get("name", ""),
-                    "master": (entry.get("master") or {}).get("name") or entry.get("master_name", ""),
-                    "duration_min": entry.get("duration_min") or entry.get("service", {}).get("duration_min"),
-                    "start_at": start_dt,
-                    "base_price": _quantize(base_value),
-                    "final_price": _quantize(price_value),
-                    "price": _quantize(base_value),
-                    "discount_amount": _quantize(discount_value),
-                    "tax_amount": _quantize(_to_decimal(entry.get("tax") or entry.get("tax_amount"))),
-                }
-            )
-
-    client_contact = {
-        "name": getattr(client, "get_full_name", lambda: "")(),
-        "email": getattr(user, "email", ""),
-        "phone": getattr(client, "phone", ""),
-    }
-    if not any(client_contact.values()) and isinstance(metadata_raw, dict):
-        client_contact = {
-            "name": metadata_raw.get("client_name", ""),
-            "email": metadata_raw.get("client_email", ""),
-            "phone": metadata_raw.get("client_phone", ""),
-        }
+    items_payload = _merge_items(pricing, appointment)
+    totals = pricing.normalized().to_totals()
 
     return {
         "payment": payment,
         "appointment": appointment,
-        "client": client,
-        "client_contact": client_contact,
+        "client": getattr(appointment, "client", None),
+        "client_contact": _client_contact(payment, metadata),
         "items": items_payload,
         "totals": totals,
-        "pricing_snapshot": pricing_snapshot,
         "issued_at": timezone.now(),
-        "business": business,
+        "business": _business_profile(),
         "receipt_number": getattr(payment, "public_id", None) or str(payment.pk),
     }
 

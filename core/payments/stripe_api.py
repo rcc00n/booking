@@ -245,7 +245,7 @@ def _charge_captured_at(charge: Optional[dict[str, Any]]) -> Optional[datetime]:
 
 
 def _metadata_json(value: Any) -> str:
-    return json.dumps(value, default=str, separators=(",", ":"))
+    return json.dumps(value, default=str)
 
 
 def _coerce_minor(value: Any) -> Optional[int]:
@@ -356,6 +356,12 @@ def _summarize_pricing(pricing: Any) -> tuple[dict[str, Any], Optional[int]]:
             "discount_total_minor",
             "discount_amount",
         ))
+        tax_item_minor = _pick_minor_from_entry(entry, (
+            "tax",
+            "tax_minor",
+            "tax_amount",
+            "tax_total_minor",
+        ))
         if total_minor is None:
             total_minor = 0
         if base_minor_item is None and discount_item_minor is not None:
@@ -369,6 +375,7 @@ def _summarize_pricing(pricing: Any) -> tuple[dict[str, Any], Optional[int]]:
             "total_minor": total_minor,
             "base_minor": base_minor_item,
             "discount_minor": discount_item_minor,
+            "tax_minor": tax_item_minor or 0,
         })
     summary["items"] = compact_items
     if isinstance(items, list):
@@ -385,7 +392,46 @@ def _summarize_pricing(pricing: Any) -> tuple[dict[str, Any], Optional[int]]:
         else:
             summary["item_count"] = 0
 
+    if isinstance(data.get("summary"), dict):
+        summary["details"] = data["summary"]
+
     return summary, grand_minor or summary["grand_total_minor"]
+
+
+def _compact_pricing_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    """
+    Reduce pricing summary for Stripe metadata (<=500 chars per value).
+    Retain totals and a short preview of items while omitting verbose details.
+    """
+    keep_keys = (
+        "currency",
+        "grand_total_minor",
+        "tax_minor",
+        "processing_fee_minor",
+        "service_fee_minor",
+        "subtotal_minor",
+        "discount_minor",
+        "base_subtotal_minor",
+        "item_count",
+    )
+    compact: dict[str, Any] = {key: summary[key] for key in keep_keys if key in summary}
+    items = summary.get("items", [])
+    compact_items: list[dict[str, Any]] = []
+    for entry in items[:3]:
+        if not isinstance(entry, dict):
+            continue
+        snapshot = {
+            "name": str(entry.get("name", ""))[:30],
+            "total_minor": entry.get("total_minor"),
+            "base_minor": entry.get("base_minor"),
+            "discount_minor": entry.get("discount_minor"),
+        }
+        if entry.get("tax_minor"):
+            snapshot["tax_minor"] = entry.get("tax_minor")
+        compact_items.append(snapshot)
+    if compact_items:
+        compact["items"] = compact_items
+    return compact
 
 
 def _pick_minor_from_entry(entry: dict[str, Any], keys: tuple[str, ...] | None = None) -> Optional[int]:
@@ -603,7 +649,8 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
                 .filter(pk=user_id)
                 .first()
             )
-        if profile:
+        need_conversion = bool(profile) and not cart_finalized
+        if need_conversion:
             appointment_candidate, pricing_data = _ensure_appointment_from_cart(
                 profile,
                 metadata,
@@ -650,7 +697,7 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
     summary_source = pricing_snapshot if pricing_snapshot else metadata.get("cart_pricing") or metadata
     summary, expected_minor = _summarize_pricing(summary_source)
     if summary:
-        meta["cart_pricing"] = _metadata_json(summary)
+        meta["cart_pricing"] = summary
         meta["cart_service_fee_minor"] = str(summary.get("service_fee_minor", 0))
         meta_changed = True
     if cart_finalized or created_via_cart_conversion:
@@ -783,7 +830,7 @@ def stripe_create_cart_intent(request):
             summary, _ = _summarize_pricing(pricing_snapshot or pricing)
             meta = dict(payment.metadata or {})
             if summary:
-                meta["cart_pricing"] = _metadata_json(summary)
+                meta["cart_pricing"] = summary
             meta["cart_checkout"] = {"mode": "free"}
             meta["cart_finalized"] = "true"
             payment.metadata = meta
@@ -842,7 +889,7 @@ def stripe_create_cart_intent(request):
         "cart_finalized": "false",
     }
     if summary_payload:
-        stripe_metadata["cart_pricing"] = _metadata_json(summary_payload)
+        stripe_metadata["cart_pricing"] = _metadata_json(_compact_pricing_summary(summary_payload))
 
     try:
         intent = stripe.PaymentIntent.create(
@@ -936,7 +983,7 @@ def stripe_finalize_cart_booking(request):
     if snapshot_for_metadata:
         summary_payload, _ = _summarize_pricing(snapshot_for_metadata)
         if summary_payload:
-            metadata["cart_pricing"] = _metadata_json(summary_payload)
+            metadata["cart_pricing"] = _metadata_json(_compact_pricing_summary(summary_payload))
             metadata["cart_service_fee_minor"] = str(summary_payload.get("service_fee_minor", 0))
         client_profile = getattr(appointment, "client", None)
         client_user = getattr(client_profile, "user", None)
@@ -966,7 +1013,7 @@ def stripe_finalize_cart_booking(request):
         if payment:
             payment_meta = dict(payment.metadata or {})
             if summary_payload:
-                payment_meta["cart_pricing"] = _metadata_json(summary_payload)
+                payment_meta["cart_pricing"] = summary_payload
                 payment_meta["cart_service_fee_minor"] = str(summary_payload.get("service_fee_minor", 0))
             payment_meta["cart_finalized"] = "true"
             payment.metadata = payment_meta
