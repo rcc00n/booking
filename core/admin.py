@@ -2048,6 +2048,20 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "usd": "$",
             }.get(str(currency_code_current).lower(), f"{str(currency_code_current).upper()} ")
 
+        paid_total = Decimal("0.00")
+        if obj:
+            paid_agg = obj.payments.filter(status="succeeded").aggregate(
+                total=Coalesce(
+                    Sum(
+                        F("amount_received") - F("amount_refunded"),
+                        output_field=DecimalField(max_digits=12, decimal_places=2),
+                    ),
+                    Value(Decimal("0.00")),
+                )
+            )
+            paid_total = Decimal(paid_agg.get("total") or Decimal("0.00")).quantize(TWOPLACES)
+        ctx["paid_total"] = paid_total
+
         ctx["card_fee_percent"] = str(CARD_PROCESSING_PERCENT)
         ctx["card_fee_fixed"] = str(CARD_PROCESSING_FIXED)
 
@@ -3179,7 +3193,15 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         appointments = AppointmentItem.objects.select_related(
             'appointment__client', 'service', 'master'
-        ).prefetch_related('appointment__items__service', 'appointment__product_sales')
+        ).prefetch_related(
+            'appointment__items__service',
+            'appointment__product_sales',
+            Prefetch(
+                'appointment__payments',
+                queryset=Payment.objects.filter(status="succeeded").only("amount_received", "amount_refunded", "status"),
+                to_attr='prefetched_succeeded_payments',
+            ),
+        )
 
         start_of_day = make_aware(datetime.combine(selected_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(selected_date, datetime.max.time()))
@@ -5393,6 +5415,28 @@ def get_price_html(service):
 
 
 
+def _compute_paid_total(appointment_obj):
+    paid_total_value = Decimal("0.00")
+    prefetched = getattr(appointment_obj, "prefetched_succeeded_payments", None)
+    if prefetched is not None:
+        payments_iterable = prefetched
+    else:
+        payments_rel = getattr(appointment_obj, "payments", None)
+        if payments_rel is None:
+            return paid_total_value.quantize(TWOPLACES)
+        try:
+            payments_iterable = payments_rel.all()
+        except AttributeError:
+            payments_iterable = payments_rel or []
+    for payment in payments_iterable or []:
+        if getattr(payment, "status", "") != "succeeded":
+            continue
+        amount_received = getattr(payment, "amount_received", Decimal("0.00")) or Decimal("0.00")
+        amount_refunded = getattr(payment, "amount_refunded", Decimal("0.00")) or Decimal("0.00")
+        paid_total_value += Decimal(amount_received) - Decimal(amount_refunded)
+    return paid_total_value.quantize(TWOPLACES)
+
+
 def createTable(selected_date, time_pointer, end_time, slot_times, items, masters, availabilities):
     """
     items: QuerySet[AppointmentItem] с select_related('appointment__client','service','master')
@@ -5403,7 +5447,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
     MASTER_COLORS = dict(zip(master_ids, cycle(COLOR_PALETTE)))
 
     # ───── badges для позиции ───────────────────────────────────────────────────
-    def _corner_badges_for_item(item):
+    def _corner_badges_for_item(item, meta):
         # скидка: если установлен промокод/персональная скидка на уровне позиции
         promo_html = ""
         base = item.unit_price if getattr(item, "unit_price", None) is not None else item.service.base_price
@@ -5436,15 +5480,26 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         health_html = ""
         show_flag, flag_url, flag_title = _health_flag_info(item.appointment)
 
+        payment_html = ""
+        paid_total = meta.get("paid_total_decimal")
+        grand_total = meta.get("grand_total_decimal")
+        eps = Decimal("0.01")
+        if paid_total is not None and grand_total is not None and (grand_total >= eps or paid_total >= eps):
+            if paid_total >= grand_total - eps:
+                payment_html = "<span class='badge badge--paid'>PAID</span>"
+            elif paid_total >= eps and paid_total < grand_total - eps:
+                payment_html = "<span class='badge badge--partial'>PARTIAL</span>"
+
         if show_flag:
             ico = "⚕️"
             health_html = (
                 f'<a class="badge badge--health" href="{flag_url}" title="{flag_title}">{ico}</a>'
                 if flag_url else f'<span class="badge badge--health" title="{flag_title}">{ico}</span>'
             )
-        if not promo_html and not health_html:
+        badges_html = "".join(filter(None, [promo_html, payment_html, health_html]))
+        if not badges_html:
             return ""
-        return f"<div class='corner-badges'>{promo_html}{health_html}</div>"
+        return f"<div class='corner-badges'>{badges_html}</div>"
 
     # ───── вспомогательные ──────────────────────────────────────────────────────
     def _item_meta(item, master_obj):
@@ -5492,6 +5547,11 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             grand_total = service_total_with_tax + products_total_with_tax
         grand_total = grand_total.quantize(TWOPLACES)
 
+        paid_total_cached = getattr(appointment_obj, "_cached_paid_total", None)
+        if paid_total_cached is None:
+            paid_total_cached = _compute_paid_total(appointment_obj)
+            setattr(appointment_obj, "_cached_paid_total", paid_total_cached)
+
         has_discount = bool(getattr(appointment_obj, "discount_source", ""))
         if not has_discount and base_price_decimal > Decimal("0.00"):
             if (base_price_decimal - service_discounted_subtotal) >= Decimal("0.01"):
@@ -5518,12 +5578,15 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "products_total_raw": f"{products_total_with_tax:.2f}",
             "has_discount": has_discount,
             "phone": escape(getattr(client, "phone", "") or ""),
+            "grand_total_decimal": grand_total,
+            "paid_total_decimal": paid_total_cached,
+            "paid_total_raw": f"{paid_total_cached:.2f}",
         }
 
     def _cell_html_item(item, meta, show_cancelled=False):
         cancelled_suffix = " (Cancelled)" if show_cancelled else ""
         opacity = ".7" if show_cancelled else "1"
-        corner = _corner_badges_for_item(item)
+        corner = _corner_badges_for_item(item, meta)
         footer = f"<div class='cell-mini-footer'>{meta['items_count']} services</div>" if meta.get('items_count', 1) > 1 else ""
         return f"""
         {corner}
@@ -5564,6 +5627,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "products_total_raw": meta.get("products_total_raw", "0.00"),
             "has_discount": meta.get("has_discount", False),
             "items_count": meta["items_count"],
+            "paid_total_raw": meta.get("paid_total_raw", "0.00"),
         }
 
     def _make_unavail_cell(kind, rowsp, colspan, avail_id, reason, from_s, to_s, until_s):
@@ -5869,6 +5933,58 @@ def _corner_badges_html(appt, appt_promocode):
     if appt_promocode or appt.final_price != appt.service.base_price:
         promo_html = "<span class='badge badge--promo' title='Applied discount'>%</span>"
 
+    paid_total = getattr(appt, "_cached_paid_total", None)
+    if paid_total is None:
+        paid_total = _compute_paid_total(appt)
+        setattr(appt, "_cached_paid_total", paid_total)
+
+    final_price = getattr(appt, "final_price", None)
+    grand_total = Decimal(final_price or Decimal("0.00"))
+    if final_price is None:
+        service_discounted_subtotal = Decimal("0.00")
+        service_tax_total = Decimal("0.00")
+        items_rel = getattr(appt, "items", None)
+        if items_rel is not None:
+            try:
+                items_iterable = items_rel.all()
+            except AttributeError:
+                items_iterable = items_rel or []
+            for appt_item in items_iterable or []:
+                final_val = getattr(appt_item, "final_price", None)
+                if final_val is None:
+                    if appt_item.unit_price is not None:
+                        final_val = appt_item.unit_price
+                    else:
+                        final_val = getattr(appt_item.service, "base_price", Decimal("0.00"))
+                service_discounted_subtotal += Decimal(final_val or Decimal("0.00"))
+                service_tax_total += Decimal(getattr(appt_item, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+        service_discounted_subtotal = service_discounted_subtotal.quantize(TWOPLACES)
+        service_tax_total = service_tax_total.quantize(TWOPLACES)
+
+        products_total_with_tax = Decimal("0.00")
+        product_sales_rel = getattr(appt, "product_sales", None)
+        if product_sales_rel is not None:
+            try:
+                product_sales_iterable = product_sales_rel.all()
+            except AttributeError:
+                product_sales_iterable = product_sales_rel or []
+            for sale in product_sales_iterable or []:
+                subtotal = Decimal(getattr(sale, "total_amount", Decimal("0.00")) or Decimal("0.00"))
+                tax_amount = Decimal(getattr(sale, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+                products_total_with_tax += subtotal + tax_amount
+        products_total_with_tax = products_total_with_tax.quantize(TWOPLACES)
+        grand_total = (service_discounted_subtotal + service_tax_total + products_total_with_tax).quantize(TWOPLACES)
+    else:
+        grand_total = grand_total.quantize(TWOPLACES)
+
+    payment_html = ""
+    eps = Decimal("0.01")
+    if grand_total is not None and (grand_total >= eps or paid_total >= eps):
+        if paid_total >= grand_total - eps:
+            payment_html = "<span class='badge badge--paid'>PAID</span>"
+        elif paid_total >= eps and paid_total < grand_total - eps:
+            payment_html = "<span class='badge badge--partial'>PARTIAL</span>"
+
     # здоровье
     show_flag, flag_url, flag_title = _health_flag_info(appt)
     health_html = ""
@@ -5879,10 +5995,11 @@ def _corner_badges_html(appt, appt_promocode):
         else:
             health_html = f'<span class="badge badge--health" title="{flag_title}">{ico}</span>'
 
-    if not promo_html and not health_html:
+    badges_html = "".join(filter(None, [promo_html, payment_html, health_html]))
+    if not badges_html:
         return ""
 
-    return f"<div class='corner-badges'>{promo_html}{health_html}</div>"
+    return f"<div class='corner-badges'>{badges_html}</div>"
 
 # core/admin.py
 from django.db import connection

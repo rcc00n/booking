@@ -4,7 +4,12 @@ Thank you for your payment of {{ payment.amount }} {{ payment.currency|upper }} 
 Your receipt is attached as a PDF.
 
 Appointment: {{ appointment_datetime|default:"N/A" }}
-Total: {{ payment.amount }} {{ payment.currency|upper }}
+Appointment total: {{ totals.grand_total|default_if_none:0|floatformat:2 }} {{ totals.currency }}
+Received to date: {{ totals.received_to_date|default_if_none:0|floatformat:2 }} {{ totals.currency }}
+Balance due: {{ totals.balance_due|default_if_none:0|floatformat:2 }} {{ totals.currency }}
+{% if totals.overpaid_amount|default_if_none:0 > 0 %}
+Overpaid: {{ totals.overpaid_amount|default_if_none:0|floatformat:2 }} {{ totals.currency }}
+{% endif %}
 
 If you have questions, reply to this email.
 {{ business.name }}

@@ -682,4 +682,6 @@ html, body {
     user-select:none; text-decoration:none;
 }
 .badge--promo{ background:#ff7b92; color:#fff; }
+.badge--paid{ background:#dcfce7; border:1px solid #16a34a; color:#166534; }
+.badge--partial{ background:#fff7ed; border:1px solid #f59e0b; color:#92400e; }
 .badge--health{ background:#eefbf3; color:#0f5132; border-color:#b7e4c7; }

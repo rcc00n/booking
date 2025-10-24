@@ -55,6 +55,27 @@ def ensure_payment_status(name: str) -> PaymentStatus:
     return status
 
 
+def get_total_received_for_appointment(appointment: Appointment | None) -> Decimal:
+    """
+    Sum the received amounts for all succeeded payments tied to the appointment.
+    Falls back to gross amount when amount_received is not populated.
+    """
+    if appointment is None:
+        return Decimal("0.00")
+
+    total = Decimal("0.00")
+    succeeded = (
+        Payment.objects.filter(appointment=appointment, status__iexact="succeeded")
+        .values_list("amount_received", "amount")
+    )
+    for amount_received, amount in succeeded:
+        value = amount_received or Decimal("0.00")
+        if value <= Decimal("0.00"):
+            value = amount or Decimal("0.00")
+        total += value
+    return total.quantize(Decimal("0.01"))
+
+
 def _base_metadata(appointment: Appointment) -> dict[str, str]:
     user = appointment.client.user if appointment.client else None
     meta = {

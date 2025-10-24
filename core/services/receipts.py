@@ -16,8 +16,9 @@ from django.utils import timezone
 from django.utils.timezone import localtime
 
 from core.models import AppointmentItem, Payment
-from core.services.pricing import compute_appointment_pricing, PricingComputationError
+from core.services.pricing import compute_appointment_pricing, PricingComputationError, get_appointment_grand_total
 from core.utils.pdf import render_html_to_pdf
+from core.services.payments import get_total_received_for_appointment
 
 ZERO = Decimal("0.00")
 
@@ -126,6 +127,10 @@ class ReceiptTotals:
     service_fee: Decimal
     processing_fee: Decimal
     total: Decimal
+    grand_total: Decimal = ZERO
+    received_to_date: Decimal = ZERO
+    balance_due: Decimal = ZERO
+    overpaid_amount: Decimal = ZERO
     summary: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -403,6 +408,21 @@ def build_payment_context(payment: Payment) -> Dict[str, Any]:
 
     items_payload = _merge_items(pricing, appointment)
     totals = pricing.normalized().to_totals()
+    if appointment:
+        grand_total = _quantize(get_appointment_grand_total(appointment))
+        received_to_date = _quantize(get_total_received_for_appointment(appointment))
+    else:
+        grand_total = totals.total
+        received_to_date = ZERO
+    balance_due = grand_total - received_to_date
+    overpaid_amount = ZERO
+    if balance_due < ZERO:
+        overpaid_amount = _quantize(-balance_due)
+        balance_due = ZERO
+    totals.grand_total = grand_total
+    totals.received_to_date = received_to_date
+    totals.balance_due = _quantize(balance_due)
+    totals.overpaid_amount = overpaid_amount
 
     return {
         "payment": payment,

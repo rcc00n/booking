@@ -197,6 +197,10 @@
                                             <span>Total</span>
                                             <strong id="appt-total">{{ currency_symbol|default:"CA$" }}{{ pricing.totals.grand_total|floatformat:2 }}</strong>
                                         </div>
+                                        <div class="ab-summary-line">
+                                            <span>Paid</span>
+                                            <strong id="appt-paid">{{ currency_symbol|default:"CA$" }}{{ paid_total|floatformat:2 }}</strong>
+                                        </div>
                                     {% else %}
                                         {% with gross=form.instance.final_price|default_if_none:0 tax=form.instance.tax_amount|default_if_none:0 %}
                                             <div class="ab-summary-line">
@@ -226,6 +230,10 @@
                                             <div class="ab-summary-line ab-summary-line--total">
                                                 <span>Total</span>
                                                 <strong id="appt-total">{{ currency_symbol|default:"CA$" }}{{ gross|floatformat:2 }}</strong>
+                                            </div>
+                                            <div class="ab-summary-line">
+                                                <span>Paid</span>
+                                                <strong id="appt-paid">{{ currency_symbol|default:"CA$" }}{{ paid_total|floatformat:2 }}</strong>
                                             </div>
                                         {% endwith %}
                                     {% endif %}

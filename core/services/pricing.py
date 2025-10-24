@@ -299,9 +299,6 @@ def compute_cart_pricing(
     }
 
 
-__all__ = ["compute_cart_pricing", "PricingComputationError"]
-
-
 def _currency_symbol(code: str) -> str:
     return CURRENCY_SYMBOLS.get(code.lower(), f"{code.upper()} ")
 
@@ -451,4 +448,36 @@ def compute_appointment_pricing(appointment: Appointment) -> Dict[str, Any]:
     }
 
 
-__all__ = ["compute_cart_pricing", "PricingComputationError", "compute_appointment_pricing"]
+def get_appointment_grand_total(appointment: Appointment) -> Decimal:
+    """
+    Return the appointment grand total including taxes and processing fees.
+    Falls back to stored totals if pricing metadata cannot be computed.
+    """
+    if appointment is None:
+        return Decimal("0.00")
+
+    try:
+        pricing = compute_appointment_pricing(appointment)
+    except PricingComputationError:
+        pricing = None
+
+    if pricing:
+        totals = pricing.get("totals") or {}
+        for key in ("grand_total", "final_price_recorded", "pre_fee_total", "final_subtotal"):
+            if key in totals:
+                value = _to_decimal(totals.get(key))
+                if value > Decimal("0.00"):
+                    return _quantize(value)
+
+    fallback = getattr(appointment, "total_with_tax", None)
+    if fallback is None:
+        fallback = getattr(appointment, "final_price", None)
+    return _quantize(_to_decimal(fallback or Decimal("0.00")))
+
+
+__all__ = [
+    "compute_cart_pricing",
+    "PricingComputationError",
+    "compute_appointment_pricing",
+    "get_appointment_grand_total",
+]
