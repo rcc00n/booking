@@ -635,6 +635,7 @@
       <div class="success" id="cartSuccess" style="display:none;"></div>
       <div class="modal__footer cart-footer">
         <div class="cart-summary" id="cartSummary" data-i18n="services.cart.summary" data-i18n-vars='{"total":"$0","duration":"0 min"}'>Total: $0 · 0 min</div>
+        <div class="cart-fee-note" id="cartFeeNotice" style="display:none;">Includes $0.00 card processing fee (3% + $0.50).</div>
         <button class="btn btn--primary" id="cartCheckout" disabled data-i18n="services.cart.checkout">Checkout</button>
       </div>
     </div>
@@ -652,6 +653,7 @@
           <aside class="payment-panel" id="paymentSummaryPanel">
             <div class="payment-panel__title">Order summary</div>
             <div class="payment-panel__line"><span>Amount due</span><strong id="paymentSummaryAmount">$0.00</strong></div>
+            <div class="payment-panel__line payment-panel__line--muted" id="paymentFeeLine" style="display:none;"><span>Card processing fee</span><strong id="paymentFeeLineAmount">$0.00</strong></div>
             <div class="payment-panel__line"><span>Appointment</span><strong id="paymentSummaryTime">—</strong></div>
             <div class="payment-panel__items" id="paymentSummaryItems"></div>
             <div class="payment-badges">
@@ -662,6 +664,7 @@
           </aside>
           <form class="payment-form" id="paymentForm" novalidate data-autofill-group="payment">
             <p id="paymentSummary" class="text-base font-medium text-[#204029]">Complete your payment of $0.</p>
+            <p id="paymentFeeNotice" class="text-sm text-[#3C4D3E]" style="display:none;">Includes $0.00 card processing fee (3% + $0.50).</p>
             <div class="payment-fieldset">
               <div class="field">
                 <label for="paymentName">Cardholder name</label>
@@ -961,6 +964,7 @@
       const PAYMENT_COPY = {
         title: 'Secure payment',
         summary: (amount) => `Complete your payment of ${amount}.`,
+        feeNotice: (fee) => `Includes ${fee} card processing fee (3% + $0.50).`,
         missingKey: 'Payments are temporarily unavailable.',
         noCharge: (amount) => `No payment needed (${amount}).`,
         offline: (amount) => `Payments are currently handled offline. Click "Confirm booking" to finish.`,
@@ -1093,6 +1097,7 @@
       const cartError=document.getElementById('cartError');
       const cartSuccess=document.getElementById('cartSuccess');
       const cartSummary=document.getElementById('cartSummary');
+      const cartFeeNotice=document.getElementById('cartFeeNotice');
       const cartCheckout=document.getElementById('cartCheckout');
       const cartCount=document.getElementById('cartCount');
       const floatingCartBtn=document.getElementById('floatingCart');
@@ -1101,6 +1106,7 @@
       const paymentClose=document.getElementById('paymentClose');
       const paymentConfirm=document.getElementById('paymentConfirm');
       const paymentSummary=document.getElementById('paymentSummary');
+      const paymentFeeNotice=document.getElementById('paymentFeeNotice');
       const paymentTitle=document.getElementById('paymentTitle');
       const paymentCardLabel=document.querySelector('label[for="cardElement"]');
       const cardElementWrapper=document.getElementById('cardElementWrapper');
@@ -1109,6 +1115,8 @@
       const paymentSummaryAmount=document.getElementById('paymentSummaryAmount');
       const paymentSummaryTime=document.getElementById('paymentSummaryTime');
       const paymentSummaryItems=document.getElementById('paymentSummaryItems');
+      const paymentFeeLine=document.getElementById('paymentFeeLine');
+      const paymentFeeLineAmount=document.getElementById('paymentFeeLineAmount');
       const paymentMessage=document.getElementById('paymentMessage');
       const inputName=document.getElementById('paymentName');
       const inputEmail=document.getElementById('paymentEmail');
@@ -1363,6 +1371,12 @@
         total_price: '0.00',
         total_decimal: '0.00',
         total_display: 'CA$0.00',
+        pre_fee_total: 0,
+        pre_fee_total_decimal: '0.00',
+        pre_fee_total_display: 'CA$0.00',
+        processing_fee: 0,
+        processing_fee_decimal: '0.00',
+        processing_fee_display: 'CA$0.00',
         total_duration_min: 0,
         currency: 'cad'
       };
@@ -1488,6 +1502,20 @@
           `Total: ${totalDisplay} • ${durationText}`
         );
         bookCartPreview.appendChild(totals);
+
+        const feeMinor = Number(cartState?.processing_fee || 0);
+        if (feeMinor > 0){
+          const feeDisplay = cartState?.processing_fee_display
+            || formatCurrency(cartState?.processing_fee_decimal || (feeMinor / 100), currency);
+          const feeNote = document.createElement('div');
+          feeNote.className = 'book-cart-preview__note';
+          feeNote.textContent = translate(
+            'services.modal.cartPreviewFee',
+            { fee: feeDisplay },
+            `${feeDisplay} card processing fee (3% + $0.50) included.`
+          );
+          bookCartPreview.appendChild(feeNote);
+        }
       }
 
       function fmtDateTime(iso){
@@ -1519,6 +1547,13 @@
           stripeCardElement.clear();
         }
         cardElementWrapper?.classList.remove('is-visible');
+        if (paymentFeeLine) {
+          paymentFeeLine.style.display = 'none';
+        }
+        if (paymentFeeNotice) {
+          paymentFeeNotice.style.display = 'none';
+          paymentFeeNotice.textContent = '';
+        }
         if (inputCountry) {
           const defaultOption = Array.from(inputCountry.options).find(opt => opt.value === 'CA');
           inputCountry.value = defaultOption ? 'CA' : (inputCountry.options[0]?.value || '');
@@ -1831,6 +1866,24 @@ function updateCartUI(data){
     );
   }
 
+  if (cartFeeNotice){
+    const feeMinor = Number(data.processing_fee || 0);
+    if (feeMinor > 0){
+      const feeDisplay = data.processing_fee_display
+        || formatCurrency(data.processing_fee_decimal || (feeMinor / 100), currency);
+      cartFeeNotice.style.display = 'block';
+      setTextKey(
+        cartFeeNotice,
+        'services.cart.processingFeeNotice',
+        { fee: feeDisplay },
+        `${feeDisplay} card processing fee (3% + $0.50) is included in the total.`
+      );
+    }else{
+      cartFeeNotice.style.display = 'none';
+      clearTextKey(cartFeeNotice);
+    }
+  }
+
   rebuildCartSlotIndex();
   updateBookCartPreview();
   if (modal && modal.classList && modal.classList.contains('modal--open')){
@@ -1877,6 +1930,12 @@ function updateCartUI(data){
               total_price: '0.00',
               total_decimal: '0.00',
               total_display: formatCurrency(0, cartState?.currency || 'cad'),
+              pre_fee_total: 0,
+              pre_fee_total_decimal: '0.00',
+              pre_fee_total_display: formatCurrency(0, cartState?.currency || 'cad'),
+              processing_fee: 0,
+              processing_fee_decimal: '0.00',
+              processing_fee_display: formatCurrency(0, cartState?.currency || 'cad'),
               total_duration_min: 0,
               currency: cartState?.currency || 'cad'
             };
@@ -2059,6 +2118,34 @@ function updateCartUI(data){
         }
         if (paymentSummaryAmount) {
           paymentSummaryAmount.textContent = amountText;
+        }
+
+        const pricing = context.cart || {};
+        const processingFeeMinor = Number(pricing?.processing_fee || 0);
+        const processingFeeDisplay = processingFeeMinor > 0
+          ? (pricing.processing_fee_display
+            || formatCurrency(pricing.processing_fee_decimal || (processingFeeMinor / 100), context.payment.currency))
+          : null;
+
+        if (paymentFeeLine) {
+          if (processingFeeDisplay) {
+            paymentFeeLine.style.display = '';
+            if (paymentFeeLineAmount) {
+              paymentFeeLineAmount.textContent = processingFeeDisplay;
+            }
+          } else {
+            paymentFeeLine.style.display = 'none';
+          }
+        }
+
+        if (paymentFeeNotice) {
+          if (processingFeeDisplay) {
+            paymentFeeNotice.style.display = '';
+            paymentFeeNotice.textContent = PAYMENT_COPY.feeNotice(processingFeeDisplay);
+          } else {
+            paymentFeeNotice.style.display = 'none';
+            paymentFeeNotice.textContent = '';
+          }
         }
 
         const appointmentData = context.appointment || {};

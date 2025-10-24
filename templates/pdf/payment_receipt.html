@@ -197,7 +197,11 @@
                                 {% endif %}
                             </td>
                             <td style="text-align: right;">
-                                {{ item.price|floatformat:2 }} {{ totals.currency }}
+                                {{ item.base_price|floatformat:2 }} {{ totals.currency }}
+                                {% if item.discount_amount and item.discount_amount|floatformat:2 != "0.00" %}
+                                    <div class="text-muted">Discount -{{ item.discount_amount|floatformat:2 }} {{ totals.currency }}</div>
+                                    <div class="text-muted">Final {{ item.final_price|floatformat:2 }} {{ totals.currency }}</div>
+                                {% endif %}
                             </td>
                         </tr>
                     {% endfor %}
@@ -213,16 +217,28 @@
     <div class="totals">
         <table>
             <tr>
-                <td>Subtotal</td>
-                <td style="text-align: right;">{{ totals.subtotal|floatformat:2 }} {{ totals.currency }}</td>
+                <td>Subtotal (before discounts)</td>
+                <td style="text-align: right;">{{ totals.base_subtotal|floatformat:2 }} {{ totals.currency }}</td>
             </tr>
             <tr>
                 <td>Discounts</td>
-                <td style="text-align: right;">{{ totals.discount_total|floatformat:2 }} {{ totals.currency }}</td>
+                <td style="text-align: right;">-{{ totals.discount_total|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            <tr>
+                <td>Subtotal (after discounts)</td>
+                <td style="text-align: right;">{{ totals.subtotal|floatformat:2 }} {{ totals.currency }}</td>
             </tr>
             <tr>
                 <td>Taxes</td>
                 <td style="text-align: right;">{{ totals.tax_total|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            <tr>
+                <td>Service fee</td>
+                <td style="text-align: right;">{{ totals.service_fee|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            <tr>
+                <td>Processing fee (Stripe)</td>
+                <td style="text-align: right;">{{ totals.processing_fee|floatformat:2 }} {{ totals.currency }}</td>
             </tr>
             <tr>
                 <td>Total Paid</td>
@@ -230,6 +246,16 @@
             </tr>
         </table>
     </div>
+    {% with summary=totals.summary %}
+        {% if summary.discount_tags %}
+            <p class="text-muted">
+                Discounts applied:
+                {% for tag, count in summary.discount_tags.items %}
+                    {{ tag|title }}{% if not forloop.last %}, {% endif %}
+                {% endfor %}.
+            </p>
+        {% endif %}
+    {% endwith %}
 
     <div class="footer">
         <div>

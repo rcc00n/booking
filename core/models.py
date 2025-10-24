@@ -32,6 +32,7 @@ from storages.backends.s3boto3 import S3Boto3Storage
 from django.utils.text import slugify
 
 from core.utils.tax import compute_tax
+from core.utils.fees import card_processing_fee
 
 
 TWOPLACES = Decimal("0.01")
@@ -934,6 +935,7 @@ class Appointment(models.Model):
     # payment_status = models.ForeignKey(PaymentStatus, on_delete=models.CASCADE, default=PaymentStatus.objects.get(name="Not Paid").id)
     final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
     tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"), editable=False)
+    card_processing_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"), editable=False)
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -1000,13 +1002,15 @@ class Appointment(models.Model):
     @property
     def total_with_tax(self) -> Decimal:
         """
-        Appointment grand total including GST.
+        Appointment grand total including GST and card processing surcharge.
         """
         if self.final_price is not None:
             return Decimal(self.final_price).quantize(TWOPLACES)
         subtotal = self._subtotal_for_tax()
         tax_total = Decimal(getattr(self, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
-        return (subtotal + tax_total).quantize(TWOPLACES)
+        base_total = (subtotal + tax_total).quantize(TWOPLACES)
+        fee = card_processing_fee(base_total)
+        return (base_total + fee).quantize(TWOPLACES)
 
 
 
@@ -1056,16 +1060,19 @@ class Appointment(models.Model):
                 tax_total += Decimal(getattr(sale, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
 
         self.sync_start_time_from_items(save=True)
-        self.discount_source = max(item_sources)
+        self.discount_source = max(item_sources) if item_sources else ""
         with transaction.atomic():
             if persist_items and changed:
                 type(self).items.rel.related_model.objects.bulk_update(
                     changed, ["final_price", "tax_amount", "discount_source", "unit_price"]
                 )
         self.tax_amount = tax_total.quantize(TWOPLACES)
-        self.final_price = (subtotal + tax_total).quantize(TWOPLACES)
+        base_total = (subtotal + tax_total).quantize(TWOPLACES)
+        processing_fee = card_processing_fee(base_total)
+        self.card_processing_fee = processing_fee
+        self.final_price = (base_total + processing_fee).quantize(TWOPLACES)
         if save:
-            super().save(update_fields=["final_price", "tax_amount", "discount_source", "start_time"])
+            super().save(update_fields=["final_price", "tax_amount", "card_processing_fee", "discount_source", "start_time"])
 
     def sync_start_time_from_items(self, *, save: bool = True) -> None:
         """

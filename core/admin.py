@@ -53,6 +53,8 @@ from core.services.user_import import (
     UserImportError,
     UserImportSchemaError,
 )
+from core.services.pricing import compute_appointment_pricing, PricingComputationError
+from core.utils.fees import CARD_PROCESSING_PERCENT, CARD_PROCESSING_FIXED
 from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
 
 # -----------------------------
@@ -1831,7 +1833,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
     ordering = ("-start_time",)
     autocomplete=["promocode",]
-    readonly_fields = ("final_price", "discount_source", "personal_discount_percent", "computed_total_readonly", "items_preview",)
+    readonly_fields = ("final_price", "card_processing_fee", "discount_source", "personal_discount_percent", "computed_total_readonly", "items_preview",)
 
     fieldsets = (
         (None, {
@@ -1842,6 +1844,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "status",             # если есть
                 "payment_status",     # если есть
                 "personal_discount",  # если есть
+                "card_processing_fee",
                 "computed_total_readonly",
                 "items_preview",
             )
@@ -1985,17 +1988,17 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             duration_min = service.duration_min or 0
             extra_min = service.extra_time_min or 0
             total_duration = duration_min + extra_min
-            ms_map[str(sm.master_id)].append({
-                "id": str(sm.service_id),
-                "name": service.name,
-                "base_price": str(service.base_price),
-                "duration_min": duration_min,
-                "extra_time_min": extra_min,
-                "total_duration_min": total_duration,
-                "svc_disc": svc_discounts.get(sid, 0),  # %
-                "is_taxable": bool(service.is_taxable),
-                "category": service.category.name if service.category_id else "Other",
-            })
+        ms_map[str(sm.master_id)].append({
+            "id": str(sm.service_id),
+            "name": service.name,
+            "base_price": str(service.base_price),
+            "duration_min": duration_min,
+            "extra_time_min": extra_min,
+            "total_duration_min": total_duration,
+            "svc_disc": svc_discounts.get(sid, 0),  # %
+            "is_taxable": bool(service.is_taxable),
+            "category": service.category.name if service.category_id else "Other",
+        })
 
         # промокоды
         promos_by_service = defaultdict(list)
@@ -2009,6 +2012,44 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                     promos_by_service[str(s.pk)].append(payload)
             else:
                 promos_global.append(payload)
+
+        appointment_pricing_snapshot = None
+        item_pricing_map: Dict[str, Any] = {}
+        if obj:
+            try:
+                appointment_pricing_snapshot = compute_appointment_pricing(obj)
+            except PricingComputationError:
+                appointment_pricing_snapshot = None
+
+        if appointment_pricing_snapshot:
+            ctx["appointment_pricing_snapshot"] = appointment_pricing_snapshot
+            if items_inline is not None:
+                lookup = {
+                    item_data.get("id"): item_data
+                    for item_data in appointment_pricing_snapshot.get("items", [])
+                    if item_data.get("id")
+                }
+                mapped: Dict[str, Any] = {}
+                for form in items_inline.formset.forms:
+                    inst_pk = getattr(form.instance, "pk", None)
+                    if inst_pk:
+                        data = lookup.get(str(inst_pk))
+                        if data:
+                            mapped[form.prefix] = data
+                item_pricing_map = mapped
+            ctx["item_pricing_map"] = item_pricing_map
+            ctx["currency_code"] = appointment_pricing_snapshot.get("currency") or getattr(settings, "CURRENCY_CODE", "CAD")
+            ctx["currency_symbol"] = appointment_pricing_snapshot.get("currency_symbol") or "CA$"
+        else:
+            ctx["item_pricing_map"] = {}
+            currency_code_current = ctx.get("currency_code") or getattr(settings, "CURRENCY_CODE", "CAD")
+            ctx["currency_symbol"] = {
+                "cad": "CA$",
+                "usd": "$",
+            }.get(str(currency_code_current).lower(), f"{str(currency_code_current).upper()} ")
+
+        ctx["card_fee_percent"] = str(CARD_PROCESSING_PERCENT)
+        ctx["card_fee_fixed"] = str(CARD_PROCESSING_FIXED)
 
         intake_forms_overview: List[Dict[str, Any]] = []
         intake_required_ids: List[str] = []
@@ -2065,8 +2106,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "current_master_id": mp.id if mp else None,
             "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
             "gst_enabled": getattr(settings, "GST_ENABLED", True),
-            "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
         })
+        ctx.setdefault("currency_code", getattr(settings, "CURRENCY_CODE", "CAD"))
+        ctx.setdefault("currency_symbol", {
+            "cad": "CA$",
+            "usd": "$",
+        }.get(str(ctx["currency_code"]).lower(), f"{str(ctx['currency_code']).upper()} "))
         ctx["notifications"] = notifications
         return super().render_change_form(request, ctx, add=add, change=change, form_url=form_url, obj=obj)
 

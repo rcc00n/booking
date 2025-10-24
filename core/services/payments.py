@@ -112,6 +112,15 @@ def create_or_update_payment_intent(
             "Payments handled offline" if (total > Decimal("0.00") and not payments_enabled)
             else "No payment required"
         )
+        metadata = {"note": note}
+        if appointment:
+            fee_value = getattr(appointment, "card_processing_fee", None) or Decimal("0.00")
+            try:
+                fee_minor = _to_minor_units(Decimal(fee_value))
+            except Exception:
+                fee_minor = 0
+            if fee_minor:
+                metadata["card_processing_fee_minor"] = str(fee_minor)
         with transaction.atomic():
             payment = Payment.objects.create(
                 appointment=appointment,
@@ -120,7 +129,7 @@ def create_or_update_payment_intent(
                 method=method,
                 status="succeeded",
                 amount_received=amount_received,
-                metadata={"note": note},
+                metadata=metadata,
             )
             paid_status = ensure_payment_status("Paid")
             appointment.payment_status = paid_status

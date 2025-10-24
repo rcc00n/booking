@@ -334,6 +334,11 @@
         .ab-total-line--grand strong{
             font-size:24px;
         }
+        .ab-total-note{
+            font-size:13px;
+            color:var(--ab-muted);
+            margin-top:2px;
+        }
         .ab-summary{
             display:flex;
             flex-direction:column;
@@ -447,10 +452,15 @@
                     <span id="gst-label">GST</span>
                     <strong id="appt-tax">CA$0.00</strong>
                 </div>
+                <div class="ab-total-line" id="appt-fee-row" style="display:none;">
+                    <span>Card processing fee</span>
+                    <strong id="appt-fee">CA$0.00</strong>
+                </div>
                 <div class="ab-total-line ab-total-line--grand">
                     <span>Total</span>
                     <strong id="appt-total">CA$0.00</strong>
                 </div>
+                <div class="ab-total-note" id="appt-fee-note" style="display:none;">A 3% + $0.50 card processing fee is included in the total.</div>
             </div>
         </div>
 
@@ -531,6 +541,8 @@
                         return code ? code.toUpperCase() + " " : "CA$";
                 }
             })(CURRENCY_CODE);
+            const CARD_FEE_RATE = 0.03;
+            const CARD_FEE_FLAT = 0.50;
 
             const POSTED_ITEMS = JSON.parse(document.getElementById('ab-posted-items').textContent || '[]');
             const ITEM_ERRORS  = JSON.parse(document.getElementById('ab-item-errors').textContent || '{}');
@@ -551,6 +563,9 @@
             const subtotalDisplay = document.getElementById('appt-subtotal');
             const taxDisplay = document.getElementById('appt-tax');
             const totalDisplay = document.getElementById('appt-total');
+            const feeDisplay = document.getElementById('appt-fee');
+            const feeRowDisplay = document.getElementById('appt-fee-row');
+            const feeNoteDisplay = document.getElementById('appt-fee-note');
             const taxRowDisplay = document.getElementById('appt-tax-row');
             const gstLabelDisplay = document.getElementById('gst-label');
             if (taxRowDisplay && !GST_ENABLED) {
@@ -910,13 +925,29 @@
                 });
                 subtotalSum = roundCurrency(subtotalSum);
                 taxSum = roundCurrency(taxSum);
-                const totalSum = roundCurrency(subtotalSum + taxSum);
+                const preFeeTotal = roundCurrency(subtotalSum + taxSum);
+                const processingFee = preFeeTotal > 0
+                    ? roundCurrency((preFeeTotal * CARD_FEE_RATE) + CARD_FEE_FLAT)
+                    : 0;
+                const totalSum = roundCurrency(preFeeTotal + processingFee);
 
                 if (subtotalDisplay) subtotalDisplay.textContent = money(subtotalSum);
                 if (taxDisplay) taxDisplay.textContent = money(taxSum);
+                if (feeDisplay) feeDisplay.textContent = money(processingFee);
                 if (totalDisplay) totalDisplay.textContent = money(totalSum);
                 if (taxRowDisplay) taxRowDisplay.classList.toggle('ab-hidden', !GST_ENABLED);
                 if (gstLabelDisplay) gstLabelDisplay.textContent = GST_LABEL;
+                if (feeRowDisplay) {
+                    feeRowDisplay.style.display = processingFee > 0 ? '' : 'none';
+                }
+                if (feeNoteDisplay) {
+                    if (processingFee > 0) {
+                        feeNoteDisplay.style.display = 'block';
+                        feeNoteDisplay.textContent = `${money(processingFee)} card processing fee (3% + $0.50) is included in the total.`;
+                    } else {
+                        feeNoteDisplay.style.display = 'none';
+                    }
+                }
             }
 
             function formatSlotLabel(dateObj){

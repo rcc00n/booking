@@ -167,21 +167,91 @@
                         <div class="ab-field" style="grid-column:3/5; text-align:right">
                             <label>Totals</label>
                             <div class="ab-summary">
-                                {% with gross=form.instance.final_price|default_if_none:0 tax=form.instance.tax_amount|default_if_none:0 %}
-                                <div class="ab-summary-line">
-                                    <span>Subtotal</span>
-                                    <strong id="appt-subtotal">CA${{ gross|subtract:tax|floatformat:2 }}</strong>
-                                </div>
-                                <div class="ab-summary-line" id="appt-tax-row">
-                                    <span id="gst-label">GST</span>
-                                    <strong id="appt-tax">CA${{ tax|floatformat:2 }}</strong>
-                                </div>
-                                <div class="ab-summary-line ab-summary-line--total">
-                                    <span>Total</span>
-                                    <strong id="appt-total">CA${{ gross|floatformat:2 }}</strong>
-                                </div>
+                                {% with pricing=appointment_pricing_snapshot %}
+                                    {% if pricing %}
+                                        <div class="ab-summary-line">
+                                            <span>Before discounts</span>
+                                            <strong id="appt-base-subtotal">{{ currency_symbol|default:"CA$" }}{{ pricing.totals.base_services_subtotal|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line">
+                                            <span>Discounts</span>
+                                            <strong id="appt-discount-total">-{{ currency_symbol|default:"CA$" }}{{ pricing.totals.discount_total|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line">
+                                            <span>Subtotal (after discounts)</span>
+                                            <strong id="appt-subtotal">{{ currency_symbol|default:"CA$" }}{{ pricing.totals.services_subtotal|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line">
+                                            <span>Products</span>
+                                            <strong id="appt-product-subtotal">{{ currency_symbol|default:"CA$" }}{{ pricing.totals.product_subtotal|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line" id="appt-tax-row">
+                                            <span id="gst-label">GST</span>
+                                            <strong id="appt-tax">{{ currency_symbol|default:"CA$" }}{{ pricing.totals.tax_total|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line" id="appt-fee-row"{% if not pricing.totals.processing_fee %} style="display:none;"{% endif %}>
+                                            <span>Card processing fee</span>
+                                            <strong id="appt-fee">{{ currency_symbol|default:"CA$" }}{{ pricing.totals.processing_fee|floatformat:2 }}</strong>
+                                        </div>
+                                        <div class="ab-summary-line ab-summary-line--total">
+                                            <span>Total</span>
+                                            <strong id="appt-total">{{ currency_symbol|default:"CA$" }}{{ pricing.totals.grand_total|floatformat:2 }}</strong>
+                                        </div>
+                                    {% else %}
+                                        {% with gross=form.instance.final_price|default_if_none:0 tax=form.instance.tax_amount|default_if_none:0 %}
+                                            <div class="ab-summary-line">
+                                                <span>Before discounts</span>
+                                                <strong id="appt-base-subtotal">{{ currency_symbol|default:"CA$" }}{{ gross|floatformat:2 }}</strong>
+                                            </div>
+                                            <div class="ab-summary-line">
+                                                <span>Discounts</span>
+                                                <strong id="appt-discount-total">-{{ currency_symbol|default:"CA$" }}0.00</strong>
+                                            </div>
+                                            <div class="ab-summary-line">
+                                                <span>Subtotal (after discounts)</span>
+                                                <strong id="appt-subtotal">{{ currency_symbol|default:"CA$" }}{{ gross|subtract:tax|floatformat:2 }}</strong>
+                                            </div>
+                                            <div class="ab-summary-line">
+                                                <span>Products</span>
+                                                <strong id="appt-product-subtotal">{{ currency_symbol|default:"CA$" }}0.00</strong>
+                                            </div>
+                                            <div class="ab-summary-line" id="appt-tax-row">
+                                                <span id="gst-label">GST</span>
+                                                <strong id="appt-tax">{{ currency_symbol|default:"CA$" }}{{ tax|floatformat:2 }}</strong>
+                                            </div>
+                                            <div class="ab-summary-line" id="appt-fee-row" style="display:none;">
+                                                <span>Card processing fee</span>
+                                                <strong id="appt-fee">{{ currency_symbol|default:"CA$" }}0.00</strong>
+                                            </div>
+                                            <div class="ab-summary-line ab-summary-line--total">
+                                                <span>Total</span>
+                                                <strong id="appt-total">{{ currency_symbol|default:"CA$" }}{{ gross|floatformat:2 }}</strong>
+                                            </div>
+                                        {% endwith %}
+                                    {% endif %}
                                 {% endwith %}
                             </div>
+                            {% if appointment_pricing_snapshot %}
+                                <div class="ab-muted" style="margin-top:8px">
+                                    {% with summary=appointment_pricing_snapshot.summary %}
+                                        {% if summary.personal_discount_percent %}
+                                            <div>Personal discount: {{ summary.personal_discount_percent }}% applied.</div>
+                                        {% endif %}
+                                        {% if summary.promo_codes %}
+                                            <div>Promocodes: {{ summary.promo_codes|join:", " }}.</div>
+                                        {% endif %}
+                                        {% if summary.has_service_discount %}
+                                            <div>Service discounts applied.</div>
+                                        {% endif %}
+                                        {% if summary.has_manual_discount %}
+                                            <div>Manual adjustments applied.</div>
+                                        {% endif %}
+                                        {% if not summary.personal_discount_percent and not summary.promo_codes and not summary.has_service_discount and not summary.has_manual_discount %}
+                                            <div>No discounts applied.</div>
+                                        {% endif %}
+                                    {% endwith %}
+                                </div>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -196,7 +266,14 @@
 
                     <div id="items-container" class="ab-items">
                         {% for f in items_formset.forms %}
-                            <div class="ab-item" data-form-index="{{ forloop.counter0 }}" data-final-price="{{ f.instance.final_price|default_if_none:'0.00' }}">
+                            {% with pricing=item_pricing_map|lookup:f.prefix %}
+                            <div class="ab-item"
+                                 data-form-index="{{ forloop.counter0 }}"
+                                 data-has-pricing="{% if pricing %}1{% else %}0{% endif %}"
+                                 data-base-price="{% if pricing %}{{ pricing.base_price|floatformat:2 }}{% elif f.instance.service %}{{ f.instance.service.base_price|floatformat:2 }}{% elif f.instance.unit_price %}{{ f.instance.unit_price|floatformat:2 }}{% else %}0.00{% endif %}"
+                                 data-discount-amount="{% if pricing %}{{ pricing.discount_amount|floatformat:2 }}{% else %}0.00{% endif %}"
+                                 data-final-price="{% if pricing %}{{ pricing.final_price|floatformat:2 }}{% else %}{{ f.instance.final_price|default_if_none:0|floatformat:2 }}{% endif %}"
+                                 data-tax-amount="{% if pricing %}{{ pricing.tax_amount|floatformat:2 }}{% else %}{{ f.instance.tax_amount|default_if_none:0|floatformat:2 }}{% endif %}">
                                 {% if f.non_field_errors %}<div class="ab-err">{{ f.non_field_errors }}</div>{% endif %}
                                 {% for h in f.hidden_fields %}{{ h }}{% endfor %}
 
@@ -272,25 +349,58 @@
                                         <span class="ab-pill">{{ f.instance.discount_source|default:"—" }}</span>
                                     </div>
                                     <div class="ab-summary">
-                                        <div class="ab-summary-line">
-                                            <span>Subtotal</span>
-                                            <strong class="js-item-subtotal">CA${{ f.instance.final_price|default_if_none:0|floatformat:2 }}</strong>
-                                        </div>
-                                        <div class="ab-summary-line js-item-tax-row">
-                                            <span class="js-item-tax-label">GST</span>
-                                            <strong class="js-item-tax">CA${{ f.instance.tax_amount|default_if_none:0|floatformat:2 }}</strong>
-                                        </div>
-                                        <div class="ab-summary-line ab-summary-line--total">
-                                            <span>Total</span>
-                                            <strong class="js-item-total">CA${{ f.instance.final_price|default_if_none:0|add:f.instance.tax_amount|floatformat:2 }}</strong>
-                                        </div>
+                                        {% if pricing %}
+                                            <div class="ab-summary-line">
+                                                <span>Base price</span>
+                                                <strong class="js-item-base">{{ currency_symbol|default:"CA$" }}{{ pricing.base_price|floatformat:2 }}</strong>
+                                            </div>
+                                            {% if pricing.discount_amount %}
+                                                <div class="ab-summary-line">
+                                                    <span>Discount</span>
+                                                    <strong class="js-item-discount">-{{ currency_symbol|default:"CA$" }}{{ pricing.discount_amount|floatformat:2 }}</strong>
+                                                </div>
+                                            {% endif %}
+                                            <div class="ab-summary-line">
+                                                <span>Discounted price</span>
+                                                <strong class="js-item-subtotal">{{ currency_symbol|default:"CA$" }}{{ pricing.final_price|floatformat:2 }}</strong>
+                                            </div>
+                                            <div class="ab-summary-line js-item-tax-row"{% if pricing.tax_amount|default_if_none:0 == 0 %} style="display:none;"{% endif %}>
+                                                <span class="js-item-tax-label">GST</span>
+                                                <strong class="js-item-tax">{{ currency_symbol|default:"CA$" }}{{ pricing.tax_amount|floatformat:2 }}</strong>
+                                            </div>
+                                            <div class="ab-summary-line ab-summary-line--total">
+                                                <span>Total</span>
+                                                <strong class="js-item-total">{{ currency_symbol|default:"CA$" }}{{ pricing.total_with_tax|floatformat:2 }}</strong>
+                                            </div>
+                                        {% else %}
+                                            <div class="ab-summary-line">
+                                                <span>Discounted price</span>
+                                                <strong class="js-item-subtotal">{{ currency_symbol|default:"CA$" }}{{ f.instance.final_price|default_if_none:0|floatformat:2 }}</strong>
+                                            </div>
+                                            <div class="ab-summary-line js-item-tax-row">
+                                                <span class="js-item-tax-label">GST</span>
+                                                <strong class="js-item-tax">{{ currency_symbol|default:"CA$" }}{{ f.instance.tax_amount|default_if_none:0|floatformat:2 }}</strong>
+                                            </div>
+                                            <div class="ab-summary-line ab-summary-line--total">
+                                                <span>Total</span>
+                                                <strong class="js-item-total">{{ currency_symbol|default:"CA$" }}{{ f.instance.final_price|default_if_none:0|add:f.instance.tax_amount|floatformat:2 }}</strong>
+                                            </div>
+                                        {% endif %}
                                     </div>
+                                    {% if pricing and pricing.discount_tags %}
+                                        <div class="ab-muted js-item-tags" style="margin-top:6px">
+                                            {% for tag in pricing.discount_tags %}
+                                                <span class="ab-pill">{{ tag|title }}</span>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
                                 </div>
 
                                 {% if items_formset.can_delete %}
                                     <div class="ab-r"><label class="ab-btn danger">{{ f.DELETE }} Remove</label></div>
                                 {% endif %}
                             </div>
+                            {% endwith %}
                         {% endfor %}
                     </div>
 
@@ -300,7 +410,7 @@
 
                     <!-- empty form template -->
                     <template id="empty-form-tpl">
-                        <div class="ab-item" data-form-index="__prefix__" data-final-price="0.00">
+                        <div class="ab-item" data-form-index="__prefix__" data-has-pricing="0" data-base-price="0.00" data-discount-amount="0.00" data-final-price="0.00" data-tax-amount="0.00">
                             {% with f=items_formset.empty_form %}
                                 {% for h in f.hidden_fields %}{{ h.as_widget }}{% endfor %}
 
@@ -677,6 +787,8 @@
     {{ gst_percent|json_script:"gst-percent" }}
     {{ gst_enabled|json_script:"gst-enabled" }}
     {{ currency_code|json_script:"currency-code" }}
+    {{ card_fee_percent|json_script:"card-fee-percent" }}
+    {{ card_fee_fixed|json_script:"card-fee-fixed" }}
 
     <script>
         window.APPOINTMENT_CTX = {

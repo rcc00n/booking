@@ -85,7 +85,7 @@ class StripeWebhookTests(TestCase):
             start_time=timezone.now() + timedelta(days=1),
         )
 
-    def _fake_intent(self, metadata: dict, *, payment_method: str = 'pm_card_visa', amount_minor: int = 5000):
+    def _fake_intent(self, metadata: dict, *, payment_method: str = 'pm_card_visa', amount_minor: int = 5200):
         charges = SimpleNamespace(data=[{
             'id': 'ch_test',
             'amount_refunded': 0,
@@ -142,7 +142,7 @@ class StripeWebhookTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
         payment = Payment.objects.get(stripe_payment_intent_id='pi_test')
-        self.assertEqual(payment.amount, Decimal('50.00'))
+        self.assertEqual(payment.amount, Decimal('52.00'))
         self.assertEqual(payment.method.name, 'Credit card')
         self.assertEqual(payment.receipt_url, 'https://stripe.test/receipt')
 
@@ -169,7 +169,7 @@ class StripeWebhookTests(TestCase):
             'type': 'payment_intent.payment_failed',
             'data': {'object': {'id': 'pi_fail'}},
         }
-        intent = self._fake_intent(metadata, payment_method='pm_card_visa', amount_minor=5000)
+        intent = self._fake_intent(metadata, payment_method='pm_card_visa', amount_minor=5200)
         intent.id = 'pi_fail'
         intent.status = 'payment_failed'
         intent.amount_received = 0
@@ -188,7 +188,7 @@ class StripeWebhookTests(TestCase):
         payment = Payment.objects.get(stripe_payment_intent_id='pi_fail')
         self.assertEqual(payment.status, 'payment_failed')
         self.assertIsNone(payment.appointment)
-        self.assertEqual(payment.amount, Decimal('50.00'))
+        self.assertEqual(payment.amount, Decimal('52.00'))
 
     @override_settings(STRIPE_SECRET_KEY='sk_test', STRIPE_WEBHOOK_SECRET='wh_test')
     @patch('core.payments.stripe_api.stripe.PaymentMethod.retrieve')

@@ -20,6 +20,13 @@ def getfield(form, name):
         return None
 
 @register.filter
+def lookup(mapping, key):
+    try:
+        return mapping.get(key)
+    except Exception:
+        return None
+
+@register.filter
 def is_master_user(user):
     return is_master(user)
 

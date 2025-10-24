@@ -30,7 +30,11 @@ from core.models import (
 )
 from core.services.booking import create_appointment_from_cart_items
 from core.services import payments as payment_services
-from core.services.pricing import compute_cart_pricing, PricingComputationError
+from core.services.pricing import (
+    compute_cart_pricing,
+    compute_appointment_pricing,
+    PricingComputationError,
+)
 from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
 
 logger = logging.getLogger(__name__)
@@ -240,6 +244,168 @@ def _charge_captured_at(charge: Optional[dict[str, Any]]) -> Optional[datetime]:
     return datetime.fromtimestamp(created, tz=dt_timezone.utc)
 
 
+def _metadata_json(value: Any) -> str:
+    return json.dumps(value, default=str, separators=(",", ":"))
+
+
+def _coerce_minor(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, Decimal):
+        return _to_minor_units(value)
+    try:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            if value.isdigit():
+                return int(value)
+            return _to_minor_units(Decimal(value))
+        if isinstance(value, (float,)):  # pragma: no cover
+            return _to_minor_units(Decimal(str(value)))
+    except Exception:  # pragma: no cover
+        return None
+    return None
+
+
+def _summarize_pricing(pricing: Any) -> tuple[dict[str, Any], Optional[int]]:
+    data = pricing
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            return {}, None
+    if not isinstance(data, dict):
+        return {}, None
+
+    required_keys = {"currency", "grand_total_minor", "tax_minor", "processing_fee_minor", "subtotal_minor", "discount_minor", "items", "item_count"}
+    if required_keys.issubset(data.keys()):
+        if "service_fee_minor" not in data:
+            service_minor_existing = _coerce_minor(
+                data.get("service_fee_minor")
+                or data.get("service_fee")
+                or data.get("cart_service_fee_minor")
+            )
+            if service_minor_existing is not None:
+                data = dict(data)
+                data["service_fee_minor"] = service_minor_existing
+        total_minor = data.get("grand_total_minor")
+        return data, total_minor if isinstance(total_minor, int) else _coerce_minor(total_minor)
+
+    totals = data.get("totals") if isinstance(data.get("totals"), dict) else {}
+
+    def _pick_minor(*keys: str) -> Optional[int]:
+        for source in (data, totals):
+            if not isinstance(source, dict):
+                continue
+            for key in keys:
+                if key in source:
+                    value = source[key]
+                    minor = _coerce_minor(value)
+                    if minor is not None:
+                        return minor
+        return None
+
+    summary: dict[str, Any] = {}
+    summary["currency"] = (
+        data.get("currency")
+        or data.get("currency_code")
+        or totals.get("currency")
+        or getattr(settings, "STRIPE_CURRENCY", "cad")
+    )
+
+    grand_minor = _pick_minor("grand_total_minor", "grand_total", "total", "cart_total_minor")
+    tax_minor = _pick_minor("tax_total_minor", "tax_total", "cart_tax_minor")
+    fee_minor = _pick_minor("processing_fee_minor", "processing_fee", "cart_processing_fee_minor")
+    service_fee_minor = _pick_minor("service_fee_minor", "service_fee", "cart_service_fee_minor")
+    subtotal_minor = _pick_minor(
+        "services_subtotal", "subtotal_minor", "subtotal", "pre_fee_total", "cart_subtotal_minor", "cart_pre_fee_total_minor"
+    )
+    base_minor = _pick_minor("base_services_subtotal", "base_subtotal", "base_total")
+    discount_minor = _pick_minor("discount_total_minor", "discount_total")
+    if discount_minor is None and base_minor is not None and subtotal_minor is not None:
+        inferred = base_minor - subtotal_minor
+        if inferred > 0:
+            discount_minor = inferred
+
+    summary["grand_total_minor"] = grand_minor or 0
+    summary["tax_minor"] = tax_minor or 0
+    summary["processing_fee_minor"] = fee_minor or 0
+    summary["service_fee_minor"] = service_fee_minor or 0
+    summary["subtotal_minor"] = subtotal_minor or 0
+    summary["discount_minor"] = discount_minor or 0
+    summary["base_subtotal_minor"] = base_minor if base_minor is not None else (summary["subtotal_minor"] + summary["discount_minor"])
+
+    items = data.get("items") if isinstance(data.get("items"), list) else []
+    compact_items: list[dict[str, Any]] = []
+    for entry in items[:3]:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name") or (entry.get("service") or {}).get("name", "")
+        total_minor = _pick_minor_from_entry(entry)
+        base_minor_item = _pick_minor_from_entry(entry, (
+            "base_total_minor",
+            "base_total",
+            "base_price",
+            "base_price_minor",
+            "base_price_decimal",
+        ))
+        discount_item_minor = _pick_minor_from_entry(entry, (
+            "discount_total_minor",
+            "discount_amount",
+        ))
+        if total_minor is None:
+            total_minor = 0
+        if base_minor_item is None and discount_item_minor is not None:
+            base_minor_item = discount_item_minor + total_minor
+        if base_minor_item is None:
+            base_minor_item = total_minor
+        if discount_item_minor is None:
+            discount_item_minor = max(base_minor_item - total_minor, 0)
+        compact_items.append({
+            "name": str(name)[:40],
+            "total_minor": total_minor,
+            "base_minor": base_minor_item,
+            "discount_minor": discount_item_minor,
+        })
+    summary["items"] = compact_items
+    if isinstance(items, list):
+        summary["item_count"] = len(items)
+    else:
+        for key in ("item_count", "cart_item_count", "count"):
+            raw = data.get(key)
+            if isinstance(raw, int):
+                summary["item_count"] = raw
+                break
+            if isinstance(raw, str) and raw.isdigit():
+                summary["item_count"] = int(raw)
+                break
+        else:
+            summary["item_count"] = 0
+
+    return summary, grand_minor or summary["grand_total_minor"]
+
+
+def _pick_minor_from_entry(entry: dict[str, Any], keys: tuple[str, ...] | None = None) -> Optional[int]:
+    candidates = keys or (
+        "total_with_tax",
+        "total_with_tax_minor",
+        "total_with_tax_decimal",
+        "total",
+        "total_minor",
+        "final_price",
+        "unit_price",
+    )
+    for key in candidates:
+        if key in entry:
+            minor = _coerce_minor(entry[key])
+            if minor is not None:
+                return minor
+    return None
+
+
 def _ensure_appointment_from_metadata(metadata: dict[str, Any]) -> Optional[Appointment]:
     appointment_id = metadata.get("appointment_id")
     if not appointment_id:
@@ -350,6 +516,13 @@ def _upsert_payment_from_intent(
     amount_received = _from_minor_units(getattr(intent, "amount_received", None))
     currency = (getattr(intent, "currency", None) or _default_currency()).lower()
     metadata = dict(getattr(intent, "metadata", {}) or {})
+    if appointment is not None:
+        fee_value = getattr(appointment, "card_processing_fee", None) or Decimal("0.00")
+        try:
+            fee_minor = _to_minor_units(Decimal(fee_value))
+        except Exception:
+            fee_minor = _to_minor_units(Decimal("0.00"))
+        metadata.setdefault("card_processing_fee_minor", str(fee_minor))
     raw_response = intent.to_dict_recursive()
     method = _payment_method_from_funding((payment_method_data or {}).get("card", {}).get("funding"))
 
@@ -408,6 +581,8 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
     intent = _fetch_intent(intent_obj)
     metadata = dict(getattr(intent, "metadata", {}) or {})
     appointment = _ensure_appointment_from_metadata(metadata)
+    cart_finalized = str(metadata.get("cart_finalized", "")).lower() == "true"
+    created_via_cart_conversion = False
     pricing_snapshot: Optional[dict[str, Any]] = None
 
     payment = (
@@ -429,13 +604,18 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
                 .first()
             )
         if profile:
-            appointment, pricing_snapshot = _ensure_appointment_from_cart(
+            appointment_candidate, pricing_data = _ensure_appointment_from_cart(
                 profile,
                 metadata,
             )
-            if appointment:
+            if appointment_candidate:
+                appointment = appointment_candidate
                 profile = appointment.client
-        elif payment and payment.appointment:
+                pricing_snapshot = pricing_data
+                cart_finalized = True
+                metadata["cart_finalized"] = "true"
+                created_via_cart_conversion = True
+        if not appointment and payment and payment.appointment:
             appointment = payment.appointment
             profile = appointment.client
     elif appointment:
@@ -452,33 +632,51 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
 
     payment = _upsert_payment_from_intent(intent, appointment, payment_method_id, payment_method_data)
 
+    if appointment and payment.appointment_id != appointment.pk:
+        payment.appointment = appointment
+        payment.save(update_fields=["appointment", "updated_at"])
+
     if profile or (appointment and appointment.client):
         _sync_client_card(profile or appointment.client, getattr(intent, "customer", None), payment_method_id, payment_method_data)
 
     meta_changed = False
     meta = dict(payment.metadata or {})
-    if pricing_snapshot:
-        meta["cart_pricing"] = pricing_snapshot
-        expected_total = pricing_snapshot.get("total")
+    if not pricing_snapshot and appointment:
+        try:
+            pricing_snapshot = compute_appointment_pricing(appointment)
+        except PricingComputationError:
+            pricing_snapshot = None
+
+    summary_source = pricing_snapshot if pricing_snapshot else metadata.get("cart_pricing") or metadata
+    summary, expected_minor = _summarize_pricing(summary_source)
+    if summary:
+        meta["cart_pricing"] = _metadata_json(summary)
+        meta["cart_service_fee_minor"] = str(summary.get("service_fee_minor", 0))
+        meta_changed = True
+    if cart_finalized or created_via_cart_conversion:
+        if meta.get("cart_finalized") != "true":
+            meta["cart_finalized"] = "true"
+            meta_changed = True
+
+    if cart_finalized:
         intent_amount = getattr(intent, "amount_received", None)
         if intent_amount is None:
             intent_amount = getattr(intent, "amount", None)
         if (
             isinstance(intent_amount, int)
-            and isinstance(expected_total, int)
-            and expected_total != intent_amount
+            and expected_minor is not None
+            and expected_minor != intent_amount
         ):
             meta["pricing_amount_mismatch"] = {
-                "expected": expected_total,
+                "expected": expected_minor,
                 "intent": intent_amount,
             }
             logger.warning(
                 "Stripe intent %s amount mismatch (expected %s, got %s)",
                 intent.id,
-                expected_total,
+                expected_minor,
                 intent_amount,
             )
-        meta_changed = True
 
     if "cart_pricing" not in meta and "cart_pricing" in previous_metadata:
         meta["cart_pricing"] = previous_metadata["cart_pricing"]
@@ -512,6 +710,9 @@ def _handle_payment_intent_failed(intent_obj: Any) -> Payment:
         payment_method_id = (charge or {}).get("payment_method")
     payment_method_id, payment_method_data = _retrieve_payment_method(payment_method_id)
     payment = _upsert_payment_from_intent(intent, appointment, payment_method_id, payment_method_data)
+    if appointment and payment.appointment_id != appointment.pk:
+        payment.appointment = appointment
+        payment.save(update_fields=["appointment", "updated_at"])
     error = getattr(intent, "last_payment_error", None)
     if error:
         meta = dict(payment.metadata)
@@ -579,9 +780,12 @@ def stripe_create_cart_intent(request):
                 currency=pricing["currency"],
             )
             payment = bundle.payment
+            summary, _ = _summarize_pricing(pricing_snapshot or pricing)
             meta = dict(payment.metadata or {})
-            meta["cart_pricing"] = pricing_snapshot or pricing
+            if summary:
+                meta["cart_pricing"] = _metadata_json(summary)
             meta["cart_checkout"] = {"mode": "free"}
+            meta["cart_finalized"] = "true"
             payment.metadata = meta
             payment.raw_response = {"source": "cart_zero_total"}
             payment.save(update_fields=["metadata", "raw_response", "updated_at"])
@@ -607,16 +811,38 @@ def stripe_create_cart_intent(request):
         logger.exception("Stripe error retrieving customer for user %s", profile.pk)
         return JsonResponse({"error": getattr(exc, "user_message", str(exc))}, status=400)
 
+    processing_fee_minor = pricing.get("processing_fee") or 0
+    pre_fee_minor = pricing.get("pre_fee_total")
+    if pre_fee_minor is None:
+        pre_fee_minor = pricing["total"] - processing_fee_minor
+    service_fee_minor = _coerce_minor(
+        pricing.get("service_fee_minor")
+        or pricing.get("service_fee")
+        or pricing.get("cart_service_fee_minor")
+    )
+    if service_fee_minor is None and pre_fee_minor is not None:
+        derived_service_fee = pricing["total"] - processing_fee_minor - pre_fee_minor
+        if derived_service_fee > 0:
+            service_fee_minor = derived_service_fee
+    if service_fee_minor is None:
+        service_fee_minor = 0
+    summary_payload, summary_total_minor = _summarize_pricing(pricing)
     stripe_metadata = {
         "user_id": str(profile.pk),
         "cart_id": str(pricing["cart_id"]),
         "booking_type": "appointment_cart",
         "cart_total_minor": str(pricing["total"]),
+        "cart_pre_fee_total_minor": str(pre_fee_minor),
         "cart_subtotal_minor": str(pricing.get("subtotal", 0)),
         "cart_tax_minor": str(pricing.get("tax_total", 0)),
+        "cart_processing_fee_minor": str(processing_fee_minor),
+        "cart_service_fee_minor": str(service_fee_minor),
         "cart_currency": pricing["currency"],
         "cart_item_count": str(pricing.get("count", len(pricing.get("items", [])))),
+        "cart_finalized": "false",
     }
+    if summary_payload:
+        stripe_metadata["cart_pricing"] = _metadata_json(summary_payload)
 
     try:
         intent = stripe.PaymentIntent.create(
@@ -696,6 +922,30 @@ def stripe_finalize_cart_booking(request):
             )
 
     metadata["appointment_id"] = str(appointment.pk)
+    metadata["cart_finalized"] = "true"
+    snapshot_for_metadata = None
+    if appointment is not None:
+        try:
+            appointment.recompute_totals(save=True)
+        except Exception:
+            pass
+        try:
+            snapshot_for_metadata = compute_appointment_pricing(appointment)
+        except PricingComputationError:
+            snapshot_for_metadata = None
+    if snapshot_for_metadata:
+        summary_payload, _ = _summarize_pricing(snapshot_for_metadata)
+        if summary_payload:
+            metadata["cart_pricing"] = _metadata_json(summary_payload)
+            metadata["cart_service_fee_minor"] = str(summary_payload.get("service_fee_minor", 0))
+        client_profile = getattr(appointment, "client", None)
+        client_user = getattr(client_profile, "user", None)
+        if client_user and not metadata.get("client_name"):
+            metadata["client_name"] = client_user.get_full_name() or client_user.username
+        if client_user and not metadata.get("client_email"):
+            metadata["client_email"] = client_user.email or ""
+        if client_profile and not metadata.get("client_phone"):
+            metadata["client_phone"] = client_profile.phone or ""
 
     try:
         stripe.PaymentIntent.modify(payment_intent_id, metadata=metadata)
@@ -705,6 +955,24 @@ def stripe_finalize_cart_booking(request):
             payment_intent_id,
             exc,
         )
+
+    summary_payload, _ = _summarize_pricing(snapshot_for_metadata or metadata)
+    with transaction.atomic():
+        payment = (
+            Payment.objects.select_for_update()
+            .filter(stripe_payment_intent_id=payment_intent_id)
+            .first()
+        )
+        if payment:
+            payment_meta = dict(payment.metadata or {})
+            if summary_payload:
+                payment_meta["cart_pricing"] = _metadata_json(summary_payload)
+                payment_meta["cart_service_fee_minor"] = str(summary_payload.get("service_fee_minor", 0))
+            payment_meta["cart_finalized"] = "true"
+            payment.metadata = payment_meta
+            if payment.appointment_id != appointment.pk:
+                payment.appointment = appointment
+            payment.save(update_fields=["metadata", "appointment", "updated_at"])
 
     summary = _serialize_appointment_brief(appointment)
     return JsonResponse(

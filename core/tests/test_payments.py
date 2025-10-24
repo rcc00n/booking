@@ -222,9 +222,12 @@ class CartPricingTests(CartTestMixin, TestCase):
 
         pricing = compute_cart_pricing(self.profile)
 
-        self.assertEqual(pricing["total"], 5985)
-        self.assertEqual(pricing["total_decimal"], "59.85")
+        self.assertEqual(pricing["total"], 6215)
+        self.assertEqual(pricing["total_decimal"], "62.15")
         self.assertEqual(pricing["count"], 1)
+        self.assertEqual(pricing["processing_fee"], 230)
+        self.assertEqual(pricing["processing_fee_decimal"], "2.30")
+        self.assertEqual(pricing["pre_fee_total_decimal"], "59.85")
         item = pricing["items"][0]
         self.assertEqual(item["unit_price_decimal"], "59.85")
         discount_types = {entry["type"] for entry in item["discounts"]}
@@ -257,6 +260,7 @@ class CartCheckoutViewTests(CartTestMixin, TestCase):
         self.assertEqual(payment.amount, Decimal("0.00"))
         self.assertEqual(payment.status, "succeeded")
         self.assertFalse(self.cart.items.exists())
+        self.assertEqual(data["cart"]["processing_fee"], 0)
 
     @mock.patch("core.payments.stripe_api._get_or_create_stripe_customer", return_value="cus_test")
     @mock.patch("core.payments.stripe_api.stripe.PaymentIntent.create")
@@ -281,13 +285,15 @@ class CartCheckoutViewTests(CartTestMixin, TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["requires_payment"])
-        self.assertEqual(data["amount"], "63.00")
-        self.assertEqual(data["amount_minor"], 6300)
+        self.assertEqual(data["amount"], "65.39")
+        self.assertEqual(data["amount_minor"], 6539)
         mock_create_intent.assert_called_once()
         kwargs = mock_create_intent.call_args.kwargs
-        self.assertEqual(kwargs["amount"], 6300)
+        self.assertEqual(kwargs["amount"], 6539)
         self.assertEqual(kwargs["currency"], "cad")
         self.assertEqual(kwargs["metadata"]["cart_id"], data["cart"]["cart_id"])
+        self.assertEqual(kwargs["metadata"]["cart_processing_fee_minor"], "239")
+        self.assertEqual(kwargs["metadata"]["cart_service_fee_minor"], "0")
 
 
 class StripeWebhookTests(CartTestMixin, TestCase):
@@ -343,10 +349,13 @@ class StripeWebhookTests(CartTestMixin, TestCase):
         self.assertEqual(appointment.items.count(), 2)
         zero_item = appointment.items.filter(final_price=Decimal("0.00")).first()
         self.assertIsNotNone(zero_item)
-        self.assertEqual(payment.amount, Decimal("63.00"))
+        self.assertEqual(payment.amount, Decimal("65.39"))
         self.assertEqual(payment.status, "succeeded")
         self.assertEqual(payment.method.name, "Credit card")
         self.assertEqual(payment.metadata.get("cart_pricing", {}).get("total"), pricing["total"])
+        self.assertEqual(payment.metadata.get("cart_pricing", {}).get("processing_fee"), pricing["processing_fee"])
+        self.assertEqual(payment.metadata.get("card_processing_fee_minor"), "239")
+        self.assertEqual(payment.metadata.get("cart_service_fee_minor"), "0")
         self.assertFalse(self.cart.items.exists())
 
     @mock.patch("core.payments.stripe_api._retrieve_payment_method")
