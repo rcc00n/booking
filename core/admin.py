@@ -646,49 +646,14 @@ class ExportXlsxMixin:
 
     # Экшен: 1 строка = 1 Appointment Item
     def export_appointment_items_xlsx(self, request, queryset):
-        qs = self._qs_for_export(request, queryset)
-        headers = [
-            "Appointment ID",
-            "Item ID",
-            "Item Start",
-            "Service",
-            "Master",
-            "Quantity",
-            "Unit Price",
-            "Service Discount",
-            "Promocode",
-            "Final Price",
-            "Client",
-            "Appointment Status",
-            "Payment Status",
-            "Personal Discount (Appointment)",
-        ]
-        rows = []
-        for appt in qs:
-            items = getattr(appt, "appointmentitem_set").all()
-            for it in items:
-                rows.append([
-                    str(getattr(appt, "pk", "")),
-                    str(getattr(it, "pk", "")),
-                    self._to_naive_dt(getattr(it, "start_time", None)),
-                    self._safe_str(getattr(getattr(it, "service", None), "name", getattr(it, "service", ""))),
-                    self._safe_str(getattr(getattr(it, "master", None), "short_name",
-                                           getattr(getattr(getattr(it, "master", None), "user", None), "username", ""))),
-                    getattr(it, "quantity", 1),
-                    self._as_decimal(getattr(it, "unit_price", None)),
-                    self._safe_str(getattr(getattr(it, "service_discount", None), "name", getattr(it, "service_discount", ""))),
-                    self._safe_str(getattr(getattr(it, "promocode", None), "code", getattr(it, "promocode", ""))),
-                    self._as_decimal(getattr(it, "final_price", None)),
-                    self._client_name(getattr(appt, "client", None)),
-                    self._safe_str(getattr(appt, "status", "")),
-                    self._safe_str(getattr(appt, "payment_status", "")),
-                    getattr(appt, "personal_discount", None),
-                ])
-
-        # Item Start = 3 (datetime), Unit Price = 7, Final Price = 10 (денежные)
+        dataset = self._appointment_item_export_dataset(self._qs_for_export(request, queryset))
         return self._xlsx_response(
-            "appointment_items.xlsx", "Items", headers, rows,
-            money_cols={7, 10}, datetime_cols={3}
+            "appointment_items.xlsx",
+            "Items",
+            dataset["headers"],
+            dataset["rows"],
+            money_cols=dataset["money_cols"],
+            datetime_cols=dataset["datetime_cols"],
         )
 
     export_appointment_items_xlsx.short_description = "Export Appointment Items (XLSX, 1 row per item)"
@@ -703,7 +668,22 @@ class ExportXlsxMixin:
         Полная выгрузка текущего списка (как в changelist, с учетом фильтров).
         По умолчанию — 1 строка = 1 объект self.model с его ._meta.fields.
         """
-        queryset = self.get_queryset(request)
+        queryset = self._qs_for_export(request)
+        model_meta = getattr(getattr(self, "model", None), "_meta", None)
+        model_name = getattr(model_meta, "model_name", "").lower() if model_meta else ""
+
+        if model_name == "appointment":
+            dataset = self._appointment_item_export_dataset(queryset)
+            filename = f"{self.model._meta.model_name}.xlsx"
+            return self._xlsx_response(
+                filename,
+                "Export",
+                dataset["headers"],
+                dataset["rows"],
+                money_cols=dataset["money_cols"],
+                datetime_cols=dataset["datetime_cols"],
+            )
+
         fields = [f.name for f in self.model._meta.fields]
         headers = fields
         rows = ([self._xlsx_safe(getattr(obj, f)) for f in fields] for obj in queryset)
@@ -714,15 +694,242 @@ class ExportXlsxMixin:
         Оптимизация выборки для экшенов по встречам и их позициям.
         Переопредели под свою модель при необходимости.
         """
-        qs = (queryset or self.get_queryset(request)).select_related(
-            "client",
-        ).prefetch_related(
-            "appointmentitem_set__service",
-            "appointmentitem_set__master",
-            "appointmentitem_set__promocode",
-            "appointmentitem_set__service_discount",
+        qs = (queryset or self.get_queryset(request))
+
+        model_meta = getattr(getattr(self, "model", None), "_meta", None)
+        model_name = getattr(model_meta, "model_name", "").lower() if model_meta else ""
+        if model_name != "appointment":
+            return qs
+
+        qs = qs.select_related("client__user")
+
+        item_qs = AppointmentItem.objects.select_related(
+            "service",
+            "service__category",
+            "service__room",
+            "master__user__user",
+        ).order_by("start_time")
+
+        history_qs = (
+            AppointmentStatusHistory.objects
+            .select_related("status", "set_by__user", "cancellation_reason")
+            .order_by("-set_at")
         )
-        return qs
+
+        payment_qs = Payment.objects.select_related("method")
+
+        return qs.prefetch_related(
+            Prefetch("items", queryset=item_qs, to_attr="_export_items"),
+            Prefetch(
+                "appointmentstatushistory_set",
+                queryset=history_qs,
+                to_attr="_export_status_history",
+            ),
+            Prefetch("payments", queryset=payment_qs, to_attr="_export_payments"),
+        )
+
+    def _appointment_item_export_dataset(self, qs):
+        """
+        Построение набора данных для XLSX с 1 строкой на AppointmentItem.
+        """
+        headers = [
+            "Appt. ref.",
+            "Client",
+            "Team member",
+            "Status",
+            "Created date",
+            "Scheduled date",
+            "Cancelled date",
+            "Category",
+            "Service",
+            "Duration (mins)",
+            "Appt. slot",
+            "Created by",
+            "Cancelled by",
+            "Net sales",
+            "Cancellation reason",
+            "Fees charged",
+            "Upfront payments",
+        ]
+
+        card_method_keywords = ("card", "credit", "debit", "terminal", "stripe")
+
+        def person_label(entity):
+            if entity is None:
+                return ""
+            user_obj = None
+            candidate = getattr(entity, "user", None)
+            if candidate is not None:
+                nested = getattr(candidate, "user", None)
+                user_obj = nested or candidate
+            elif hasattr(entity, "get_full_name"):
+                name = entity.get_full_name()
+                if name:
+                    return name
+                return getattr(entity, "username", "") or ""
+            if user_obj is None:
+                return ""
+            full_name = user_obj.get_full_name()
+            if full_name:
+                return full_name
+            return getattr(user_obj, "username", "") or ""
+
+        def localize_dt(value):
+            if not value:
+                return None
+            try:
+                return localtime(value)
+            except Exception:
+                return value
+
+        def to_excel_dt(value):
+            dt = localize_dt(value)
+            if isinstance(dt, datetime) and is_aware(dt):
+                return dt.replace(tzinfo=None)
+            return dt
+
+        def coalesce_decimal(*values):
+            for candidate in values:
+                if candidate in (None, ""):
+                    continue
+                if isinstance(candidate, Decimal):
+                    return candidate.quantize(TWOPLACES)
+                try:
+                    return Decimal(candidate).quantize(TWOPLACES)
+                except (InvalidOperation, TypeError, ValueError):
+                    continue
+            return Decimal("0.00")
+
+        def derive_status_bundle(appt):
+            status_name = getattr(getattr(appt, "status", None), "name", None)
+            history = getattr(appt, "_export_status_history", None)
+            if history is None:
+                history = list(
+                    appt.appointmentstatushistory_set.select_related(
+                        "status", "set_by__user", "cancellation_reason"
+                    ).order_by("-set_at")
+                )
+            cancelled_dt = None
+            cancelled_by = ""
+            cancel_reason = ""
+            if history:
+                latest = history[0]
+                if not status_name:
+                    status_name = getattr(getattr(latest, "status", None), "name", None)
+                for entry in history:
+                    entry_status = (getattr(getattr(entry, "status", None), "name", "") or "").lower()
+                    if entry_status in {"cancelled", "canceled"}:
+                        cancelled_dt = getattr(entry, "set_at", None)
+                        cancelled_by = person_label(getattr(entry, "set_by", None))
+                        cancel_reason = getattr(getattr(entry, "cancellation_reason", None), "name", "") or ""
+                        break
+            return status_name or "New", cancelled_dt, cancelled_by, cancel_reason
+
+        def uses_card_fee(appt):
+            if getattr(appt, "apply_card_processing_fee", False):
+                return True
+            payments = getattr(appt, "_export_payments", None)
+            if payments is None:
+                payments = appt.payments.select_related("method").all()
+            for payment in payments:
+                method_name = (getattr(getattr(payment, "method", None), "name", "") or "").lower()
+                if any(keyword in method_name for keyword in card_method_keywords):
+                    return True
+            return False
+
+        def iter_items(appt):
+            items = getattr(appt, "_export_items", None)
+            if items is not None:
+                return items
+            return appt.items.select_related(
+                "service",
+                "service__category",
+                "service__room",
+                "master__user__user",
+            ).order_by("start_time")
+
+        def short_reference(appt):
+            value = getattr(appt, "id", None) or getattr(appt, "pk", None)
+            if not value:
+                return ""
+            hex_value = getattr(value, "hex", None)
+            if hex_value:
+                return hex_value[:8].upper()
+            return str(value).replace("-", "")[:8].upper()
+
+        rows = []
+        for appt in qs:
+            status_name, cancelled_dt, cancelled_by, cancel_reason = derive_status_bundle(appt)
+            created_by_display = person_label(getattr(appt, "created_by", None))
+            client_display = person_label(getattr(appt, "client", None))
+            fee_applicable = uses_card_fee(appt)
+            appt_ref = short_reference(appt)
+            created_dt = to_excel_dt(getattr(appt, "created_at", None))
+
+            for item in iter_items(appt):
+                service = getattr(item, "service", None)
+                category = getattr(getattr(service, "category", None), "name", "") if service else ""
+                service_name = getattr(service, "name", "") or ""
+                duration_override = getattr(item, "duration_override_min", None)
+                if duration_override is not None:
+                    duration_minutes = int(duration_override)
+                    buffer_minutes = 0
+                else:
+                    base_duration = getattr(service, "duration_min", None) if service else None
+                    duration_minutes = int(base_duration or 0)
+                    buffer_minutes = int(getattr(service, "extra_time_min", 0) or 0) if service else 0
+                slot_minutes = duration_minutes + buffer_minutes
+
+                start_dt_local = localize_dt(getattr(item, "start_time", None))
+                scheduled_dt = to_excel_dt(getattr(item, "start_time", None))
+                end_dt_local = start_dt_local + timedelta(minutes=slot_minutes) if start_dt_local else None
+                appt_slot = ""
+                if start_dt_local and end_dt_local:
+                    appt_slot = f"{start_dt_local.strftime('%H:%M:%S')}-{end_dt_local.strftime('%H:%M:%S')}"
+
+                net_sales = coalesce_decimal(
+                    getattr(item, "final_price", None),
+                    getattr(item, "unit_price", None),
+                    getattr(service, "base_price", None) if service else None,
+                )
+                tax_component = None
+                try:
+                    tax_component = getattr(item, "tax_amount", None)
+                except Exception:
+                    tax_component = None
+                if tax_component not in (None, ""):
+                    net_sales = (net_sales + coalesce_decimal(tax_component)).quantize(TWOPLACES)
+                fees_charged = Decimal("0.00")
+                if fee_applicable:
+                    fees_charged = (net_sales * CARD_PROCESSING_PERCENT + CARD_PROCESSING_FIXED).quantize(TWOPLACES)
+                upfront_payments = Decimal("0.00")
+
+                rows.append([
+                    appt_ref,
+                    client_display,
+                    person_label(getattr(item, "master", None)),
+                    status_name,
+                    created_dt,
+                    scheduled_dt,
+                    to_excel_dt(cancelled_dt),
+                    category or "",
+                    service_name,
+                    duration_minutes,
+                    appt_slot,
+                    created_by_display,
+                    cancelled_by,
+                    net_sales,
+                    cancel_reason,
+                    fees_charged,
+                    upfront_payments,
+                ])
+
+        return {
+            "headers": headers,
+            "rows": rows,
+            "money_cols": {14, 16, 17},
+            "datetime_cols": {5, 6, 7},
+        }
 
     # ============ НИЗКИЙ УРОВЕНЬ (XLSX) ============
 

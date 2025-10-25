@@ -739,7 +739,7 @@
                                     <th style="width:110px">Kind</th>
                                     <th style="width:90px">Status</th>
                                     <th style="width:110px">Provider</th>
-                                    <th style="width:160px">Provider Msg ID</th>
+                                    
                                     <th>Message</th>
                                     <th style="width:140px">Error</th>
                                 </tr>
@@ -765,7 +765,7 @@
                                                 {% endif %}
                                             </td>
                                             <td>{{ n.provider|default:"—" }}</td>
-                                            <td>{{ n.provider_message_id|default:"—" }}</td>
+                            
                                             <td><pre style="white-space:pre-wrap;margin:0">{{ n.message|default:"" }}</pre></td>
                                             <td>
                                                 {% if n.error %}
