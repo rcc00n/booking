@@ -804,7 +804,8 @@
                             data-fee-applied="{{ form.instance.apply_card_processing_fee|yesno:'true,false' }}"
                             data-terminal-start-url="{{ terminal_start_url|default:'' }}"
                             data-terminal-conn-url="{{ terminal_conn_token_url|default:'' }}"
-                            data-payment-verify-url="{{ payment_verify_url|default:'' }}">
+                            data-payment-verify-url="{{ payment_verify_url|default:'' }}"
+                            data-amount-due="{{ appointment_outstanding_amount|default_if_none:'0.00' }}">
                             Pay ▾
                         </button>
                         <div id="pay-menu" class="pay-menu" hidden>
@@ -848,7 +849,8 @@
             feeApplied: {{ form.instance.apply_card_processing_fee|yesno:"true,false" }},
             terminalStartUrl: "{{ terminal_start_url|default:'' }}",
             terminalConnUrl: "{{ terminal_conn_token_url|default:'' }}",
-            verifyUrl: "{{ payment_verify_url|default:'' }}"
+            verifyUrl: "{{ payment_verify_url|default:'' }}",
+            outstandingAmount: "{{ appointment_outstanding_amount|default_if_none:0|floatformat:2 }}"
         };
     </script>
 

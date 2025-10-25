@@ -76,6 +76,24 @@ def get_total_received_for_appointment(appointment: Appointment | None) -> Decim
     return total.quantize(Decimal("0.01"))
 
 
+def get_outstanding_amount(appointment: Appointment | None) -> Decimal:
+    """
+    Return the remaining balance for an appointment (grand total minus payments received).
+    """
+    if appointment is None:
+        return Decimal("0.00")
+
+    if hasattr(appointment, "total_with_tax"):
+        total = Decimal(appointment.total_with_tax or Decimal("0.00"))
+    else:
+        total = Decimal(getattr(appointment, "final_price", Decimal("0.00")) or Decimal("0.00"))
+    received = get_total_received_for_appointment(appointment)
+    remaining = total - received
+    if remaining <= Decimal("0.00"):
+        return Decimal("0.00")
+    return remaining.quantize(Decimal("0.01"))
+
+
 def _base_metadata(appointment: Appointment) -> dict[str, str]:
     user = appointment.client.user if appointment.client else None
     meta = {

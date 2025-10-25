@@ -55,6 +55,7 @@ from core.services.user_import import (
     UserImportSchemaError,
 )
 from core.services.pricing import compute_appointment_pricing, PricingComputationError
+from core.services import payments as payment_services
 from core.utils.fees import CARD_PROCESSING_PERCENT, CARD_PROCESSING_FIXED, card_processing_fee
 from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
 
@@ -2315,6 +2316,10 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             else:
                 appointment_total_amount = Decimal(getattr(obj, "final_price", Decimal("0.00")) or Decimal("0.00"))
         ctx["appointment_total_amount"] = appointment_total_amount.quantize(TWOPLACES)
+        outstanding_amount = (appointment_total_amount - paid_total).quantize(TWOPLACES)
+        if outstanding_amount < Decimal("0.00"):
+            outstanding_amount = Decimal("0.00")
+        ctx["appointment_outstanding_amount"] = outstanding_amount
 
         ctx["card_fee_percent"] = str(CARD_PROCESSING_PERCENT)
         ctx["card_fee_fixed"] = str(CARD_PROCESSING_FIXED)
@@ -2576,20 +2581,27 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         if pre_fee_total < Decimal("0.00"):
             pre_fee_total = Decimal("0.00")
 
-        if pre_fee_total <= Decimal("0.00"):
-            fee = Decimal("0.50").quantize(TWOPLACES)
+        paid_total = payment_services.get_total_received_for_appointment(appointment)
+        current_total = Decimal(appointment.final_price or Decimal("0.00"))
+        outstanding_due = (current_total - paid_total).quantize(TWOPLACES)
+
+        if outstanding_due <= Decimal("0.00"):
+            fee = Decimal("0.00")
         else:
-            fee = card_processing_fee(pre_fee_total).quantize(TWOPLACES)
+            fee = card_processing_fee(outstanding_due).quantize(TWOPLACES)
+
+        existing_fee = Decimal(getattr(appointment, "card_processing_fee", Decimal("0.00")) or Decimal("0.00"))
+        total_fee = (existing_fee + fee).quantize(TWOPLACES)
 
         appointment.apply_card_processing_fee = True
-        appointment.card_processing_fee = fee
-        appointment.recompute_totals(save=True)
-        appointment.refresh_from_db(fields=["final_price", "card_processing_fee"])
+        appointment.card_processing_fee = total_fee
+        appointment.final_price = (pre_fee_total + total_fee).quantize(TWOPLACES)
+        appointment.save(update_fields=["apply_card_processing_fee", "card_processing_fee", "final_price"])
 
         return JsonResponse(
             {
                 "ok": True,
-                "fee": f"{fee:.2f}",
+                "fee": f"{total_fee:.2f}",
                 "grand_total": f"{appointment.final_price or Decimal('0.00'):.2f}",
                 "apply_card_processing_fee": True,
             }

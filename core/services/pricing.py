@@ -12,6 +12,7 @@ from core.models import (
     UserProfile,
     Appointment,
     ProductSale,
+    PrepaymentOption,
 )
 from core.utils.tax import compute_tax, gst_enabled, gst_percent
 from core.utils.fees import card_processing_fee
@@ -24,6 +25,7 @@ CURRENCY_SYMBOLS = {
     "cad": "CA$",
     "usd": "$",
 }
+DEFAULT_PREPAYMENT_PERCENTS = (100, 25)
 
 UserLike = Union[UserProfile, Any]
 
@@ -50,6 +52,34 @@ def _minor_to_decimal(value: int) -> Decimal:
 def _format_currency(amount: Decimal, currency: str) -> str:
     symbol = CURRENCY_SYMBOLS.get(currency.lower(), f"{currency.upper()} ")
     return f"{symbol}{_quantize(amount):,.2f}"
+
+
+def get_available_prepayment_percents() -> List[int]:
+    """
+    Return the ordered list of allowed client-facing prepayment percentages.
+    Preference is given to DB-backed records while falling back to defaults.
+    """
+    try:
+        configured = list(
+            PrepaymentOption.objects.order_by("-percent").values_list("percent", flat=True)
+        )
+    except Exception:
+        configured = []
+
+    normalized: List[int] = []
+    for value in configured:
+        try:
+            percent = int(value)
+        except (TypeError, ValueError):
+            continue
+        if percent not in DEFAULT_PREPAYMENT_PERCENTS:
+            continue
+        if percent not in normalized:
+            normalized.append(percent)
+
+    if normalized:
+        return normalized
+    return list(DEFAULT_PREPAYMENT_PERCENTS)
 
 
 def _apply_percent_discount(amount: Decimal, percent: Decimal) -> Decimal:
@@ -311,6 +341,34 @@ def _to_decimal(value: Any) -> Decimal:
     return Decimal(str(value or "0"))
 
 
+def compute_partial_charge(pre_fee_total: Decimal | float | int | str, percent: int) -> Dict[str, Any]:
+    """
+    Compute the base amount, processing surcharge, and total for a partial checkout.
+    Returns both Decimal values and their minor-unit representations so callers can
+    keep payment math consistent between server and client.
+    """
+    percent_decimal = Decimal(max(0, min(percent, 100))) / HUNDRED
+    pre_fee_decimal = _quantize(_to_decimal(pre_fee_total))
+    base_amount = _quantize(pre_fee_decimal * percent_decimal)
+    base_minor = _to_minor_units(base_amount)
+    fee_amount = card_processing_fee(base_amount)
+    fee_minor = _to_minor_units(fee_amount)
+    total_amount = _quantize(base_amount + fee_amount)
+    total_minor = _to_minor_units(total_amount)
+    return {
+        "percent": int(percent_decimal * HUNDRED),
+        "base": base_amount,
+        "base_minor": base_minor,
+        "base_decimal": f"{base_amount:.2f}",
+        "processing_fee": fee_amount,
+        "processing_fee_minor": fee_minor,
+        "processing_fee_decimal": f"{fee_amount:.2f}",
+        "total": total_amount,
+        "total_minor": total_minor,
+        "total_decimal": f"{total_amount:.2f}",
+    }
+
+
 def compute_appointment_pricing(appointment: Appointment) -> Dict[str, Any]:
     """
     Build a pricing snapshot for an existing appointment, including discounts,
@@ -484,4 +542,6 @@ __all__ = [
     "PricingComputationError",
     "compute_appointment_pricing",
     "get_appointment_grand_total",
+    "get_available_prepayment_percents",
+    "compute_partial_charge",
 ]

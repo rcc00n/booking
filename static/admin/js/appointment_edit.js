@@ -928,6 +928,16 @@
             const raw = (totalDisplay.textContent || "").replace(/[^\d.,-]/g, "");
             return raw.replace(",", ".");
         };
+        const getOutstandingAmount = () => {
+            const raw =
+                payBtn.dataset.amountDue ||
+                cfg.outstandingAmount ||
+                "";
+            if (raw && String(raw).toLowerCase() !== "none") {
+                return raw;
+            }
+            return currentTotalAmount();
+        };
 
         const requireSavedAppointment = () => {
             const apptId = getAppointmentId();
@@ -965,7 +975,7 @@
                 const url = new URL(base, window.location.origin);
                 const query = {
                     appointment: apptId,
-                    amount: currentTotalAmount(),
+                    amount: getOutstandingAmount(),
                     ...params,
                 };
                 Object.entries(query).forEach(([key, value]) => {
@@ -1005,6 +1015,11 @@
             }
             if (!payload.client_secret || !payload.payment_intent_id) {
                 throw new Error("Incomplete terminal payment response.");
+            }
+            if (payload.outstanding) {
+                payBtn.dataset.amountDue = String(payload.outstanding);
+            } else if (payload.amount) {
+                payBtn.dataset.amountDue = String(payload.amount);
             }
             return payload;
         }
@@ -1084,6 +1099,9 @@
         function applyFeePreview(serverAmount) {
             cardFeeApplied = true;
             payBtn.dataset.feeApplied = "true";
+            if (typeof serverAmount !== "undefined" && serverAmount !== null) {
+                payBtn.dataset.amountDue = String(serverAmount);
+            }
             try {
                 recomputeAllTotals();
             } catch (err) {
@@ -1148,6 +1166,12 @@
                 return;
             }
             if (mode === "card-credit" || mode === "card-debit") {
+                const outstandingRaw = getOutstandingAmount();
+                const outstandingValue = parseFloat(outstandingRaw || "0");
+                if (!outstandingRaw || Number.isNaN(outstandingValue) || outstandingValue <= 0) {
+                    alert("Appointment has no outstanding balance to charge.");
+                    return;
+                }
                 if (paymentInFlight) {
                     alert("A terminal payment is already in progress.");
                     return;

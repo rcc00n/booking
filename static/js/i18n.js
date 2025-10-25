@@ -114,6 +114,17 @@
           checkoutSuccess: 'Appointment created! Redirecting…',
           remove: 'Remove item'
         },
+        payment: {
+          amountDueLabel: 'Amount due',
+          feeLabel: 'Card processing fee',
+          optionLabel: 'Payment option',
+          payInFullLabel: 'Pay in full ({{percent}}%)',
+          payInFullHint: 'The entire balance will be charged today.',
+          payPartialLabel: 'Pay {{percent}}% now',
+          payPartialHint: 'Remaining {{remaining}} will be due later.',
+          partialNote: 'Remaining balance will be due in person or later.',
+          confirmButton: 'Confirm booking'
+        },
         dynamic: {
           names: {
             'service-one': 'Service One',

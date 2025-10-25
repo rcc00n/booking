@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import json
 from datetime import datetime, timedelta, time
 from types import SimpleNamespace
 from unittest import mock
@@ -26,7 +27,7 @@ from core.models import (
 )
 from core.services import payments as payment_services
 from core.services.booking import create_appointment_from_cart_items
-from core.services.pricing import compute_cart_pricing
+from core.services.pricing import compute_cart_pricing, compute_partial_charge
 from core.payments import stripe_api
 
 
@@ -101,6 +102,21 @@ class CartTestMixin:
             master=self.master_profile,
             start_time=start_time or self.now,
         )
+
+
+class PartialChargeTests(TestCase):
+    def test_partial_charge_25_percent(self):
+        result = compute_partial_charge(Decimal("200.00"), 25)
+        self.assertEqual(result["base_decimal"], "50.00")
+        self.assertEqual(result["processing_fee_decimal"], "2.00")
+        self.assertEqual(result["total_decimal"], "52.00")
+        self.assertEqual(result["total_minor"], 5200)
+
+    def test_partial_charge_full_amount(self):
+        result = compute_partial_charge(Decimal("80.00"), 100)
+        self.assertEqual(result["base_decimal"], "80.00")
+        self.assertEqual(result["processing_fee_decimal"], "2.90")
+        self.assertEqual(result["total_decimal"], "82.90")
 
 class PaymentServiceTests(TestCase):
     def setUp(self):
@@ -296,6 +312,78 @@ class CartCheckoutViewTests(CartTestMixin, TestCase):
         self.assertEqual(kwargs["metadata"]["cart_processing_fee_minor"], "239")
         self.assertEqual(kwargs["metadata"]["cart_service_fee_minor"], "0")
 
+    @override_settings(GST_ENABLED=False)
+    @mock.patch("core.payments.stripe_api._get_or_create_stripe_customer", return_value="cus_test")
+    @mock.patch("core.payments.stripe_api.stripe.PaymentIntent.create")
+    def test_create_cart_intent_supports_partial_prepayment(
+        self,
+        mock_create_intent,
+        _mock_customer,
+    ):
+        service = self.create_service(name="Signature Facial", price="100.00")
+        self.add_cart_item(service)
+        self.client.force_login(self.user)
+        mock_create_intent.return_value = SimpleNamespace(
+            id="pi_partial",
+            client_secret="secret_partial",
+        )
+
+        response = self.client.post(
+            "/accounts/api/payments/cart/create-intent/",
+            data=json.dumps({"prepayment_percent": 25}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["prepayment_percent"], 25)
+        self.assertIn("prepayment", data)
+        prepayment = data["prepayment"]
+        self.assertEqual(prepayment["percent"], 25)
+        self.assertEqual(prepayment["base_decimal"], "25.00")
+        self.assertEqual(prepayment["processing_fee_decimal"], "1.25")
+        self.assertEqual(prepayment["total_decimal"], "26.25")
+        self.assertEqual(data["amount_minor"], prepayment["total_minor"])
+        mock_create_intent.assert_called_once()
+        kwargs = mock_create_intent.call_args.kwargs
+        self.assertEqual(kwargs["amount"], prepayment["total_minor"])
+        self.assertEqual(kwargs["metadata"]["prepayment_percent"], "25")
+        self.assertEqual(kwargs["metadata"]["partial_total_minor"], str(prepayment["total_minor"]))
+
+    @override_settings(GST_ENABLED=False)
+    @mock.patch("core.payments.stripe_api._get_or_create_stripe_customer", return_value="cus_test")
+    @mock.patch("core.payments.stripe_api.stripe.PaymentIntent.create")
+    def test_create_cart_intent_falls_back_to_full_amount_for_invalid_percent(
+        self,
+        mock_create_intent,
+        _mock_customer,
+    ):
+        service = self.create_service(name="Glow Facial", price="90.00")
+        self.add_cart_item(service)
+        self.client.force_login(self.user)
+        mock_create_intent.return_value = SimpleNamespace(
+            id="pi_full",
+            client_secret="secret_full",
+        )
+
+        response = self.client.post(
+            "/accounts/api/payments/cart/create-intent/",
+            data=json.dumps({"prepayment_percent": 5}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["prepayment_percent"], 100)
+        self.assertIn("prepayment", data)
+        prepayment = data["prepayment"]
+        self.assertEqual(prepayment["percent"], 100)
+        self.assertEqual(float(prepayment["total_decimal"]), float(data["cart"]["total_decimal"]))
+        mock_create_intent.assert_called_once()
+        kwargs = mock_create_intent.call_args.kwargs
+        self.assertEqual(kwargs["amount"], data["amount_minor"])
+        self.assertEqual(kwargs["metadata"]["prepayment_percent"], "100")
+
 
 class CartAppointmentCreationTests(CartTestMixin, TestCase):
     def test_create_appointment_sets_card_fee_flag(self):
@@ -392,3 +480,35 @@ class StripeWebhookTests(CartTestMixin, TestCase):
         self.assertEqual(first_payment.pk, second_payment.pk)
         self.assertEqual(first_payment.appointment_id, second_payment.appointment_id)
         self.assertEqual(first_payment.metadata.get("cart_pricing", {}), second_payment.metadata.get("cart_pricing", {}))
+
+    @mock.patch("core.payments.stripe_api._retrieve_payment_method")
+    @mock.patch("core.payments.stripe_api._fetch_intent")
+    def test_webhook_partial_payment_leaves_appointment_partially_paid(
+        self,
+        mock_fetch_intent,
+        mock_retrieve_method,
+    ):
+        pricing = self._prime_cart()
+        partial = compute_partial_charge(Decimal(pricing["pre_fee_total_decimal"]), 25)
+        intent = self._build_intent(pricing)
+        intent.metadata.update(
+            {
+                "prepayment_percent": "25",
+                "partial_base_minor": str(partial["base_minor"]),
+                "partial_processing_fee_minor": str(partial["processing_fee_minor"]),
+                "partial_total_minor": str(partial["total_minor"]),
+            }
+        )
+        intent.amount = partial["total_minor"]
+        intent.amount_received = partial["total_minor"]
+        mock_fetch_intent.return_value = intent
+        mock_retrieve_method.return_value = ("pm_card", {"card": {"funding": "credit"}})
+
+        payment = stripe_api._handle_payment_intent_succeeded({"id": intent.id})
+        payment.refresh_from_db()
+        self.assertEqual(payment.metadata.get("prepayment_percent"), "25")
+        self.assertEqual(payment.metadata.get("partial_total_minor"), str(partial["total_minor"]))
+        appointment = payment.appointment
+        self.assertIsNotNone(appointment)
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.payment_status.name, "Partially paid")

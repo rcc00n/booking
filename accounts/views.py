@@ -42,6 +42,7 @@ from core.models import (
     ClientIntakeFormSubmission,
 )
 from core.services.intake_assignments import ensure_universal_assignments_for_profile
+from core.services.pricing import get_available_prepayment_percents
 
 from .forms import (
     AccountPasswordResetForm,
@@ -225,6 +226,13 @@ class MainMenuView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx["stripe_public_key"] = settings.STRIPE_PUBLIC_KEY
+        options = get_available_prepayment_percents()
+        ctx["prepayment_options"] = options
+        ctx["prepayment_choices"] = [
+            {"percent": value, "remaining": max(0, 100 - int(value))}
+            for value in options
+        ]
+        ctx["default_prepayment_percent"] = options[0] if options else 100
         return ctx
 
 

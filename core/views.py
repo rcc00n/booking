@@ -31,7 +31,7 @@ from core.services.booking import (
 )
 from accounts.utils import build_autofill_defaults
 from core.services import payments as payment_services
-from core.services.pricing import compute_cart_pricing
+from core.services.pricing import compute_cart_pricing, get_available_prepayment_percents
 from core.utils.fees import card_processing_fee
 
 def _build_catalog_context(request):
@@ -126,6 +126,13 @@ def public_mainmenu(request):
 
     ctx["stripe_public_key"] = settings.STRIPE_PUBLIC_KEY
     ctx["autofill_defaults"] = build_autofill_defaults(request.user)
+    options = get_available_prepayment_percents()
+    ctx["prepayment_options"] = options
+    ctx["prepayment_choices"] = [
+        {"percent": value, "remaining": max(0, 100 - int(value))}
+        for value in options
+    ]
+    ctx["default_prepayment_percent"] = options[0] if options else 100
 
     return render(request, "client/mainmenu.html", ctx)
 
@@ -445,22 +452,30 @@ def api_terminal_start(request, appt_id):
 
     # Ensure base totals are current before applying the card-present surcharge.
     appt.recompute_totals(save=True)
-    pre_fee_total = Decimal(appt.final_price or Decimal("0.00")) - Decimal(
-        appt.card_processing_fee or Decimal("0.00")
-    )
+    paid_total = payment_services.get_total_received_for_appointment(appt)
+    existing_fee = Decimal(getattr(appt, "card_processing_fee", Decimal("0.00")) or Decimal("0.00"))
+    pre_fee_total = Decimal(appt.final_price or Decimal("0.00")) - existing_fee
     if pre_fee_total < Decimal("0.00"):
         pre_fee_total = Decimal("0.00")
-    else:
-        pre_fee_total = pre_fee_total.quantize(Decimal("0.01"))
+    outstanding_due = (Decimal(appt.final_price or Decimal("0.00")) - paid_total).quantize(Decimal("0.01"))
+    if outstanding_due <= Decimal("0.00"):
+        return JsonResponse({"ok": False, "error": "Appointment has no outstanding balance."}, status=400)
 
-    card_fee = card_processing_fee(pre_fee_total)
+    card_fee = card_processing_fee(outstanding_due)
+    total_fee = (existing_fee + card_fee).quantize(Decimal("0.01"))
     appt.apply_card_processing_fee = True
-    appt.card_processing_fee = card_fee
-    appt.final_price = (pre_fee_total + card_fee).quantize(Decimal("0.01"))
+    appt.card_processing_fee = total_fee
+    appt.final_price = (pre_fee_total + total_fee).quantize(Decimal("0.01"))
     appt.save(update_fields=["apply_card_processing_fee", "card_processing_fee", "final_price"])
 
+    outstanding_total = payment_services.get_outstanding_amount(appt)
+    if outstanding_total <= Decimal("0.00"):
+        return JsonResponse({"ok": False, "error": "Appointment has no outstanding balance."}, status=400)
+
+    amount_to_charge = outstanding_total
+
     try:
-        bundle = payment_services.create_or_update_terminal_intent(appt)
+        bundle = payment_services.create_or_update_terminal_intent(appt, amount=amount_to_charge)
     except stripe.error.StripeError as err:
         return JsonResponse({"ok": False, "error": getattr(err, "user_message", str(err))}, status=502)
     except ImproperlyConfigured as cfg_err:
@@ -477,6 +492,7 @@ def api_terminal_start(request, appt_id):
             "client_secret": intent.client_secret,
             "amount": str(bundle.payment.amount),
             "currency": bundle.payment.currency,
+            "outstanding": str(outstanding_total),
         }
     )
 
