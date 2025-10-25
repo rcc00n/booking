@@ -948,6 +948,11 @@ class Appointment(models.Model):
     )
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(
+        blank=True,
+        default="",
+        help_text="Internal notes, visible to staff only.",
+    )
 
     # Снимок персональной скидки клиента на момент создания
     personal_discount_percent = models.PositiveSmallIntegerField(

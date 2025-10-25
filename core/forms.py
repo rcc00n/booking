@@ -273,7 +273,16 @@ class AppointmentAdminForm(forms.ModelForm):
             "client",
             "start_time",
             "payment_status",    # NOTE: если есть
+            "notes",
         )
+        widgets = {
+            "notes": forms.Textarea(
+                attrs={
+                    "rows": 6,
+                    "placeholder": "Visible to staff only",
+                }
+            ),
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -308,6 +317,11 @@ class AppointmentAdminForm(forms.ModelForm):
             self.fields["promocode"].queryset = qs
             self.fields["promocode"].required = False
             self.fields["promocode"].help_text = "Выберите действующий промокод (опционально)."
+
+        notes_field = self.fields.get("notes")
+        if notes_field:
+            existing_class = notes_field.widget.attrs.get("class", "")
+            notes_field.widget.attrs["class"] = f"{existing_class} ab-textarea".strip()
 
 
 # ──────────────────────────────────────────────────────────────────────────────

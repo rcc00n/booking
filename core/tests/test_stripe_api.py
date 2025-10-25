@@ -287,9 +287,17 @@ class StripeFinalizeCartTests(TestCase):
         )
         ServiceMaster.objects.create(service=self.service, master=self.master_profile)
 
+    def _next_available_start(self):
+        base = timezone.now()
+        for offset in range(1, 8):
+            candidate = base + timedelta(days=offset)
+            if candidate.weekday() < 6:  # masters work Mon-Sat in tests
+                return candidate
+        return base + timedelta(days=1)
+
     def _create_cart_item(self, start=None):
         cart = BookingCart.for_user(self.profile)
-        start_time = start or (timezone.now() + timedelta(days=1))
+        start_time = start or self._next_available_start()
         return BookingCartItem.objects.create(
             cart=cart,
             service=self.service,

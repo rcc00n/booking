@@ -64,7 +64,8 @@
                             data-service-total="{{ cell.service_total_raw }}"
                             data-product-total="{{ cell.products_total_raw }}"
                             data-has-discount="{{ cell.has_discount|yesno:'true,false' }}"
-                            data-items-count="{{ cell.items_count }}">
+                            data-items-count="{{ cell.items_count }}"
+                            data-has-note="{{ cell.has_note|yesno:'true,false' }}">
                             <div class="event-inner"
                                  style="background-color: {{ cell.background }}; {% if cell.status == 'Cancelled' %}opacity:.6;{% endif %} position:relative;">
 

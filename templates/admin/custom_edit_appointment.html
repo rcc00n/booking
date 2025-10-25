@@ -133,6 +133,7 @@
                 {% if product_sales_formset %}
                     <button type="button" class="tab" data-tab="product-sales">Product sales</button>
                 {% endif %}
+                <button type="button" class="tab" data-tab="notes">Notes</button>
                 <button type="button" class="tab" data-tab="messages">Messages</button>
             </nav>
 
@@ -724,6 +725,18 @@
                     </div>
                 </section>
             {% endif %}
+
+            <section class="tab-panel" data-tab-panel="notes">
+                <div class="ab-section ab-card">
+                    <h3 class="ab-h">Notes</h3>
+                    <p class="ab-sub">Internal notes are visible to staff only.</p>
+                    <div class="ab-field">
+                        {{ form.notes.label_tag }} {{ form.notes }}
+                        {% if form.notes.errors %}<div class="ab-err">{{ form.notes.errors }}</div>{% endif %}
+                        {% if form.notes.help_text %}<div class="ab-muted">{{ form.notes.help_text }}</div>{% endif %}
+                    </div>
+                </div>
+            </section>
 
             <section class="tab-panel" data-tab-panel="messages">
                 <div class="ab-section ab-card">

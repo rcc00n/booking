@@ -527,13 +527,23 @@ from django.apps import apps
 from django.db import transaction
 
 def ensure_payment_statuses(sender, **kwargs):
-    PaymentStatus = apps.get_model('core', 'PaymentStatus')
+    PaymentStatus = apps.get_model("core", "PaymentStatus")
+    Appointment = apps.get_model("core", "Appointment")
     defaults = ["Not Paid", "Pending", "Partially paid", "Paid", "Failed"]
     with transaction.atomic():
         for name in defaults:
-            PaymentStatus.objects.get_or_create(name=name)
+            existing = PaymentStatus.objects.filter(name=name).order_by("id")
+            if existing.exists():
+                primary = existing.first()
+                duplicates = list(existing[1:])
+                if duplicates:
+                    duplicate_ids = [dup.pk for dup in duplicates]
+                    Appointment.objects.filter(payment_status_id__in=duplicate_ids).update(payment_status=primary)
+                    PaymentStatus.objects.filter(pk__in=duplicate_ids).delete()
+            else:
+                PaymentStatus.objects.create(name=name)
 
-    PaymentMethod = apps.get_model('core', 'PaymentMethod')
+    PaymentMethod = apps.get_model("core", "PaymentMethod")
     with transaction.atomic():
         for name in ("Stripe", "Cash", "Manual", "Credit card", "Debit card"):
             PaymentMethod.objects.get_or_create(name=name)

@@ -61,6 +61,7 @@ from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
 
 PAID_BADGE_ICON_URL = static("admin/icons/paid.png")
 PARTIAL_BADGE_ICON_URL = static("admin/icons/partially-paid.png")
+NOTES_BADGE_ICON_URL = static("admin/icons/message.png")
 
 # -----------------------------
 # Custom filter for filtering users by Role
@@ -2059,6 +2060,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "card_processing_fee",
                 "computed_total_readonly",
                 "items_preview",
+                "notes",
             )
         }),
     )
@@ -2532,7 +2534,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             return (("Client", {"fields": ("client",)}),)
         # на редактировании — ваша стандартная форма
         return (
-            (None, {"fields": ("client", "start_time", "payment_status")}),
+            (None, {"fields": ("client", "start_time", "payment_status", "notes")}),
             ("Totals", {"fields": ("final_price", "discount_source", "personal_discount_percent"),
                         "classes": ("collapse",)}),
         )
@@ -5896,7 +5898,13 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                 f'<a class="badge badge--health" href="{flag_url}" title="{flag_title}">{ico}</a>'
                 if flag_url else f'<span class="badge badge--health" title="{flag_title}">{ico}</span>'
             )
-        badges_html = "".join(filter(None, [promo_html, payment_html, health_html]))
+        note_html = ""
+        if meta.get("has_note"):
+            note_html = (
+                f"<span class='badge badge--note'>"
+                f"<img src=\"{NOTES_BADGE_ICON_URL}\" alt=\"Notes present\" class=\"badge-icon\" height=\"24\"/>"
+                f"</span>")
+        badges_html = "".join(filter(None, [promo_html, payment_html, health_html, note_html]))
         if not badges_html:
             return ""
         return f"<div class='corner-badges'>{badges_html}</div>"
@@ -5959,6 +5967,8 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
 
         client = appointment_obj.client
         client_label = client.get_full_name() or client.user.username
+        notes_value = getattr(appointment_obj, "notes", "") or ""
+        has_note = bool(str(notes_value).strip())
 
         return {
             "s_local": s_local,
@@ -5981,6 +5991,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "grand_total_decimal": grand_total,
             "paid_total_decimal": paid_total_cached,
             "paid_total_raw": f"{paid_total_cached:.2f}",
+            "has_note": has_note,
         }
 
     def _cell_html_item(item, meta, show_cancelled=False):
@@ -6028,6 +6039,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "has_discount": meta.get("has_discount", False),
             "items_count": meta["items_count"],
             "paid_total_raw": meta.get("paid_total_raw", "0.00"),
+            "has_note": meta.get("has_note", False),
         }
 
     def _make_unavail_cell(kind, rowsp, colspan, avail_id, reason, from_s, to_s, until_s):
@@ -6403,7 +6415,11 @@ def _corner_badges_html(appt, appt_promocode):
         else:
             health_html = f'<span class="badge badge--health" title="{flag_title}">{ico}</span>'
 
-    badges_html = "".join(filter(None, [promo_html, payment_html, health_html]))
+    note_html = ""
+    note_value = getattr(appt, "notes", "") or ""
+    if str(note_value).strip():
+        note_html = "<span class='badge badge--note' title='Internal note'>??</span>"
+    badges_html = "".join(filter(None, [promo_html, payment_html, health_html, note_html]))
     if not badges_html:
         return ""
 

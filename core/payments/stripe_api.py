@@ -647,26 +647,34 @@ def _upsert_payment_from_intent(
     return payment
 
 
-def _update_appointment_payment_status(appointment: Optional[Appointment], succeeded: bool) -> None:
+def _update_appointment_payment_status(
+    appointment: Optional[Appointment],
+    succeeded: bool,
+    *,
+    force_paid: bool = False,
+) -> None:
     if not appointment:
         return
     if not succeeded:
         target = _ensure_payment_status("Failed")
     else:
-        try:
-            grand_total = get_appointment_grand_total(appointment)
-        except PricingComputationError:
-            fallback = getattr(appointment, "final_price", None)
-            if fallback is None:
-                fallback = getattr(appointment, "total_with_tax", None)
-            grand_total = Decimal(str(fallback or "0"))
-        received = payment_services.get_total_received_for_appointment(appointment)
-        if grand_total <= Decimal("0.00") or received >= grand_total:
+        if force_paid:
             target = _ensure_payment_status("Paid")
-        elif received > Decimal("0.00"):
-            target = _ensure_payment_status("Partially paid")
         else:
-            target = _ensure_payment_status("Pending")
+            try:
+                grand_total = get_appointment_grand_total(appointment)
+            except PricingComputationError:
+                fallback = getattr(appointment, "final_price", None)
+                if fallback is None:
+                    fallback = getattr(appointment, "total_with_tax", None)
+                grand_total = Decimal(str(fallback or "0"))
+            received = payment_services.get_total_received_for_appointment(appointment)
+            if grand_total <= Decimal("0.00") or received >= grand_total:
+                target = _ensure_payment_status("Paid")
+            elif received > Decimal("0.00"):
+                target = _ensure_payment_status("Partially paid")
+            else:
+                target = _ensure_payment_status("Pending")
     if appointment.payment_status_id != target.id:
         appointment.payment_status = target
         appointment.save(update_fields=["payment_status"])
@@ -1277,7 +1285,11 @@ def stripe_no_show_charge(request):
     payment_method_id, payment_method_data = _retrieve_payment_method(intent.payment_method)
     payment = _upsert_payment_from_intent(intent, appointment, payment_method_id, payment_method_data)
     _sync_client_card(profile, card.stripe_customer_id, payment_method_id, payment_method_data)
-    _update_appointment_payment_status(appointment, succeeded=intent.status == "succeeded")
+    _update_appointment_payment_status(
+        appointment,
+        succeeded=intent.status == "succeeded",
+        force_paid=True,
+    )
 
     return JsonResponse(
         {
