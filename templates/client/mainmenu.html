@@ -14,20 +14,25 @@
        Design tokens
        ========================= */
     :root{
-      --green-dark:#204029; --green:#1F5C3A; --green-600:#2e5a3a;
-      --gold:#AF9525; --taupe:#DAD3C1; --lgray:#DEDEDE; --dgray:#4D4D4D; --white:#FFF;
+      --green-dark:#0f2f23; --green:#1f5f44; --green-600:#2a7a56;
+      --gold:#c79b49; --taupe:#dcd0bb; --lgray:#e6e8e2; --dgray:#3f4540; --white:#ffffff;
 
-      --bg-grad-1:#EFF4F2; --bg-grad-2:#EEF3F0;
-      --ink: color-mix(in srgb, var(--green-dark) 80%, #000);
-      --muted: color-mix(in srgb, var(--dgray) 70%, var(--green-dark) 20%);
+      --bg-grad-1:#f9faf7; --bg-grad-2:#eef5f0;
+      --surface:#ffffff; --surface-soft:#f7f8f5; --surface-muted:#eef2ef;
+      --ink:color-mix(in srgb, var(--green-dark) 78%, #111);
+      --muted:color-mix(in srgb, var(--dgray) 65%, color-mix(in srgb, var(--green) 35%, #95a097));
+      --border-soft:rgba(11,54,29,.12);
+      --shadow:0 24px 60px rgba(11,54,29,.08);
+      --shadow-card:0 30px 60px rgba(18,56,42,.12);
 
-      --free:#1F5C3A; --busy:#D32F2F; --today-bg:#FAFDFB; --grid-border:#E6E7E7; --chip-bg:#F3F7F5;
+      --free:var(--green); --busy:#d6453d; --today-bg:#f4faf6; --grid-border:#e2e7df; --chip-bg:#f9fbf9;
 
-      --radius-lg:1.25rem; --radius-md:.75rem; --radius-sm:.55rem;
-      --shadow:0 8px 20px rgba(0,0,0,.10);
-      --container:clamp(280px,92vw,1160px);
+      --radius-xl:2.4rem; --radius-lg:1.35rem; --radius-md:.95rem; --radius-sm:.65rem;
+      --container:clamp(280px,92vw,1180px);
+      --header-blur:rgba(255,255,255,.9);
+      --icon-bg:rgba(15,47,35,.08);
+      --icon-color:#1f5f44;
 
-      /* >>> ШРИФТЫ: как в твоём примере (Inter) <<< */
       --font-ui:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,Cantarell,"Open Sans","Helvetica Neue",sans-serif;
       --font-heading:var(--font-ui);
     }
@@ -38,64 +43,152 @@
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     html{font-size:16px;scroll-behavior:smooth}
     body{
-      font-family:var(--font-ui); color:var(--ink); line-height:1.5;
-      background:
-        radial-gradient(60% 120% at 15% 110%, color-mix(in srgb, var(--green) 10%, transparent) 0%, transparent 62%),
-        radial-gradient(60% 120% at 80% -10%,  color-mix(in srgb, var(--green) 12%, transparent) 0%, transparent 62%),
-        linear-gradient(135deg, var(--bg-grad-1) 0%, var(--bg-grad-2) 100%);
+      font-family:var(--font-ui); color:var(--ink); line-height:1.6;
+      background:linear-gradient(135deg, var(--bg-grad-1) 0%, var(--bg-grad-2) 100%);
+      min-height:100vh;
     }
     img{max-width:100%;display:block}
-    a{color:inherit;text-decoration:none}
-    .container{width:var(--container);margin-inline:auto;padding-inline:1rem}
+    a{color:inherit;text-decoration:none;transition:color .2s ease}
+    .container{width:var(--container);margin-inline:auto;padding-inline:1.25rem}
 
     /* =========================
        Buttons
        ========================= */
     .btn{
-      display:inline-flex; align-items:center; justify-content:center; gap:.5em;
-      padding:.7rem 1.15rem; border-radius:var(--radius-sm);
-      font-weight:800; cursor:pointer; transition:.2s ease; white-space:nowrap; user-select:none; line-height:1;
+      display:inline-flex;align-items:center;justify-content:center;gap:.55em;
+      padding:.85rem 1.4rem;border-radius:999px;border:1px solid transparent;
+      font-weight:700;cursor:pointer;transition:.22s ease;white-space:nowrap;user-select:none;line-height:1;
       font-family:var(--font-heading);
     }
-    .btn:focus-visible{outline:2px solid color-mix(in srgb, var(--gold) 70%, #fff); outline-offset:2px}
-    .btn--primary{background:linear-gradient(135deg, var(--green-600) 0%, var(--gold) 100%); color:#fff; border:0}
-    .btn--primary:hover{transform:translateY(-1px); filter:brightness(1.03); box-shadow:0 4px 14px rgba(175,149,37,.35)}
-    .btn--loading{position:relative;pointer-events:none;opacity:.8}
+    .btn:focus-visible{outline:2px solid color-mix(in srgb, var(--gold) 60%, #fff);outline-offset:2px}
+    .btn--primary{
+      background:linear-gradient(135deg,#153d30,#2d7a58);color:#fff;border:0;
+      box-shadow:0 18px 40px rgba(17,59,44,.28);
+    }
+    .btn--primary:hover{transform:translateY(-2px);filter:brightness(1.03)}
+    .btn--ghost{
+      background:var(--surface);border-color:color-mix(in srgb, var(--green-dark) 12%, transparent);
+      color:var(--green-dark);box-shadow:0 10px 26px rgba(18,56,42,.12);
+    }
+    .btn--outline{
+      color:var(--green-dark);border-color:rgba(21,63,47,.2);background:transparent;
+    }
+    .btn--outline:hover{border-color:rgba(21,63,47,.4);color:var(--green)}
+    .btn--loading{position:relative;pointer-events:none;opacity:.85}
     .btn--loading::after{content:'';position:absolute;width:1rem;height:1rem;border:2px solid rgba(255,255,255,.9);border-top-color:transparent;border-radius:999px;right:.75rem;animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg);}}
-    .btn--ghost{background:linear-gradient(135deg, var(--green-600) 0%, var(--gold) 100%); color:#fff; border:0}
-    .btn--ghost:hover{transform:translateY(-1px); filter:brightness(1.03); box-shadow:0 4px 14px rgba(175,149,37,.35)}
-    .btn--ghost[disabled], .btn--primary[disabled]{opacity:.5;cursor:not-allowed}
+    .btn--ghost[disabled], .btn--primary[disabled], .btn--outline[disabled]{opacity:.5;cursor:not-allowed}
 
     /* =========================
-       Header & Hero
+       Header & hero
        ========================= */
-    .site-header{background:var(--green-dark);box-shadow:var(--shadow);position:sticky;top:0;z-index:100;padding-block:.75rem}
-    .site-header__inner{display:flex;align-items:center;justify-content:space-between}
-    .logo{font:900 1.25rem/1 var(--font-heading);color:var(--gold);letter-spacing:.3px}
-    .header-actions{display:flex;align-items:center;gap:.75rem;margin-left:auto}
-    .lang-picker{display:inline-flex;align-items:center;gap:.4rem;margin-right:.5rem;color:var(--taupe);font-size:.82rem}
-    .lang-picker__label{opacity:.75;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-    .lang-picker__select{appearance:none;background:rgba(255,255,255,.12);color:#111;border:1px solid rgba(255,255,255,.25);padding:.35rem .75rem;border-radius:.55rem;font-weight:600;cursor:pointer;min-width:5.5rem}
-    .lang-picker__select:focus{outline:2px solid color-mix(in srgb, var(--gold) 70%, #fff);outline-offset:2px}
-    .cart-bubble{display:inline-flex;align-items:center;justify-content:center;min-width:1.5rem;padding:0 .35rem;border-radius:999px;background:rgba(255,255,255,.2);font-size:.85rem;font-weight:700}
-
-    .hero{
-      display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;gap:1.1rem;
-      padding:5.25rem 1rem;
-      background:
-        radial-gradient(60% 120% at 82% -10%, color-mix(in srgb, var(--green) 18%, transparent) 0%, transparent 60%),
-        linear-gradient(135deg, color-mix(in srgb, #fff 90%, var(--bg-grad-1) 10%) 0%, color-mix(in srgb, var(--bg-grad-2) 90%, #fff 10%) 100%);
-      border-bottom:1px solid color-mix(in srgb, var(--green) 12%, transparent);
+    .site-header{
+      position:sticky;top:0;z-index:120;
+      background:var(--header-blur);
+      backdrop-filter:blur(24px);
+      border-bottom:1px solid rgba(14,46,34,.08);
+      box-shadow:0 12px 30px rgba(15,47,35,.05);
     }
-    .hero h1{font:900 clamp(2rem,4vw,3.2rem)/1.1 var(--font-heading); color:var(--green-dark)}
-    .hero p{font-size:1.08rem; max-width:52ch; color:var(--muted)}
-
-    .mobile-nav-btn{display:none;align-items:center;justify-content:center;width:2.75rem;height:2.75rem;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:var(--taupe);font-size:1.35rem;transition:.2s ease;}
+    .site-header__inner{display:flex;align-items:center;gap:1.5rem;padding-block:.85rem;}
+    .brand{display:flex;align-items:center;gap:.85rem;color:var(--green-dark);font-weight:800;text-decoration:none;}
+    .brand__mark{
+      width:46px;height:46px;border-radius:50%;background:var(--green-dark);color:#fff;
+      display:grid;place-items:center;font-weight:800;letter-spacing:.08em;font-size:1rem;
+      box-shadow:0 16px 32px rgba(16,54,38,.35);
+    }
+    .brand__copy{display:flex;flex-direction:column;line-height:1;}
+    .brand__copy strong{font-size:1.1rem;}
+    .brand__copy small{font-size:.78rem;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;}
+    .mobile-nav-btn{
+      display:none;align-items:center;justify-content:center;width:2.7rem;height:2.7rem;
+      border-radius:999px;border:1px solid rgba(16,54,38,.14);background:var(--surface);
+      color:var(--green-dark);font-size:1.35rem;transition:.2s ease;
+    }
     .mobile-nav-btn:active{transform:scale(.94);}
-    .mobile-nav-backdrop{display:none;}
-    .mobile-close{display:none;}
-    .floating-cart{display:none;}
+    .header-actions{display:flex;align-items:center;gap:1rem;margin-left:auto;}
+    .nav-links{display:flex;align-items:center;gap:.5rem;}
+    .nav-link{
+      padding:.42rem .9rem;border-radius:999px;font-weight:600;color:var(--muted);
+      border:1px solid transparent;
+    }
+    .nav-link:hover{color:var(--green);}
+    .nav-link--pill{
+      border-color:rgba(18,56,42,.14);
+      background:var(--surface);
+      box-shadow:0 12px 26px rgba(18,56,42,.12);
+      color:var(--green-dark);
+    }
+    .header-controls{display:flex;align-items:center;gap:.75rem;}
+    .lang-picker{display:flex;flex-direction:column;gap:.15rem;font-size:.78rem;color:var(--muted);}
+    .lang-picker__label{font-weight:700;letter-spacing:.08em;text-transform:uppercase;}
+    .lang-picker__select{
+      appearance:none;border-radius:.8rem;border:1px solid rgba(14,46,34,.14);
+      background:var(--surface);padding:.45rem .9rem;font-weight:600;color:var(--green-dark);cursor:pointer;
+    }
+    .cart-bubble{display:inline-flex;align-items:center;justify-content:center;min-width:1.7rem;height:1.7rem;border-radius:999px;background:rgba(255,255,255,.15);font-size:.85rem;font-weight:700;border:1px solid rgba(255,255,255,.35);}
+    .icon-buttons{display:flex;align-items:center;gap:.35rem;}
+    .icon-btn{
+      width:42px;height:42px;border-radius:50%;border:1px solid rgba(16,54,38,.15);
+      background:var(--surface);display:grid;place-items:center;color:var(--icon-color);
+      box-shadow:0 12px 28px rgba(15,47,35,.12);font-size:1rem;cursor:pointer;
+    }
+    .cart-button{display:inline-flex;align-items:center;gap:.45rem;padding-inline:1.15rem;}
+    .cart-button__icon{font-size:1rem}
+    .header-auth{display:flex;align-items:center;gap:.75rem;}
+
+    .user-menu{position:relative;}
+    .user-menu__trigger{
+      display:flex;align-items:center;gap:.75rem;padding:.35rem .85rem .35rem .35rem;
+      border-radius:999px;border:1px solid rgba(16,54,38,.14);background:var(--surface);
+      box-shadow:0 16px 32px rgba(15,47,35,.16);cursor:pointer;
+    }
+    .user-menu__avatar{
+      width:42px;height:42px;border-radius:50%;background:var(--green-dark);
+      color:#fff;display:grid;place-items:center;font-weight:800;
+    }
+    .user-menu__label{display:flex;flex-direction:column;line-height:1;}
+    .user-menu__greeting{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+    .user-menu__dropdown{
+      position:absolute;right:0;top:calc(100% + .65rem);width:min(320px,90vw);
+      background:var(--surface);border-radius:1.3rem;padding:1.2rem;
+      box-shadow:var(--shadow-card);opacity:0;pointer-events:none;transform:translateY(-8px);
+      transition:.2s ease;
+    }
+    .user-menu.is-open .user-menu__dropdown{opacity:1;pointer-events:auto;transform:translateY(0);}
+    .user-menu__header{display:flex;flex-direction:column;gap:.25rem;margin-bottom:.8rem;}
+    .user-menu__header small{font-size:.85rem;color:var(--muted);}
+    .user-menu__list{display:flex;flex-direction:column;gap:.2rem;}
+    .user-menu__link{
+      display:flex;align-items:center;gap:.65rem;padding:.55rem .4rem;border-radius:.85rem;
+      transition:background .2s ease, color .2s ease;font-weight:600;color:var(--ink);
+    }
+    .user-menu__link svg{width:18px;height:18px;color:var(--icon-color);}
+    .user-menu__link:hover{background:var(--surface-muted);}
+    .user-menu__link--danger{color:#d6453d;}
+    .user-menu__footer{margin-top:.9rem;padding-top:.9rem;border-top:1px solid rgba(16,54,38,.08);display:flex;flex-direction:column;gap:.4rem;}
+    .user-menu__footer-link{font-size:.85rem;color:var(--muted);}
+
+    .hero{padding:4.75rem 0 3.1rem;}
+    .hero__inner{
+      display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,320px);
+      gap:3rem;align-items:center;
+    }
+    .hero__badge{
+      display:inline-flex;align-items:center;gap:.4rem;padding:.3rem .85rem;
+      border-radius:999px;background:rgba(31,95,68,.12);color:var(--green-dark);
+      font-size:.85rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+    }
+    .hero h1{font:900 clamp(2.2rem,5vw,3.4rem)/1.05 var(--font-heading);color:var(--green-dark);margin-top:1rem;}
+    .hero p{font-size:1.06rem;color:var(--muted);max-width:46ch;margin-top:.85rem;}
+    .hero__actions{display:flex;flex-wrap:wrap;gap:.85rem;margin-top:1.35rem;}
+    .hero__card{
+      background:var(--surface);border-radius:var(--radius-xl);padding:1.6rem;
+      box-shadow:var(--shadow-card);display:flex;flex-direction:column;gap:1.1rem;
+      border:1px solid rgba(16,54,38,.05);
+    }
+    .hero__stat{display:flex;flex-direction:column;gap:.2rem;}
+    .hero__stat strong{font-size:1.45rem;color:var(--green-dark);}
+    .hero__stat span{font-size:.9rem;color:var(--muted);}
 
     h2{font:900 1.5rem/1.2 var(--font-heading)}
     h3{font:800 1.1rem/1.2 var(--font-heading)}
@@ -103,25 +196,66 @@
     /* =========================
        Filters & Cards
        ========================= */
-    .filters{display:flex;flex-wrap:wrap;gap:.75rem;margin:1.25rem 0 1.75rem}
-    .filters input,.filters select{
-      padding:.6rem 1rem; border:1px solid color-mix(in srgb, var(--green) 22%, var(--lgray));
-      border-radius:var(--radius-sm); font-size:.95rem; min-width:170px; background:#fff
+    .search-panel{
+      margin-top:1.75rem;background:var(--surface);border-radius:var(--radius-xl);
+      padding:1.6rem;border:1px solid rgba(16,54,38,.06);box-shadow:var(--shadow-card);
     }
-    .services-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1.25rem}
+    .services-shell{padding-block:3rem;}
+    .filters{display:flex;flex-direction:column;gap:1.25rem;}
+    .filters__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;}
+    .pill-input{display:flex;flex-direction:column;gap:.35rem;}
+    .pill-input__label{font-size:.78rem;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;}
+    .pill-input__control{
+      display:flex;align-items:center;gap:.6rem;padding:.75rem 1rem;border-radius:999px;
+      border:1px solid rgba(16,54,38,.12);background:var(--surface-soft);box-shadow:inset 0 1px 0 rgba(255,255,255,.6);
+    }
+    .pill-input__icon{width:1.2rem;height:1.2rem;color:var(--icon-color);display:grid;place-items:center;}
+    .pill-input input,.pill-input select{
+      border:0;background:transparent;font-size:1rem;color:var(--ink);flex:1;min-width:0;
+    }
+    .pill-input input:focus,.pill-input select:focus{outline:none;}
+    .filters__actions{display:flex;flex-wrap:wrap;gap:.75rem;}
+    .category-headline{display:flex;flex-direction:column;gap:.45rem;margin-top:2.5rem;}
+    .category-headline p{color:var(--muted);max-width:60ch;}
+    .category-pills{
+      margin-top:1rem;display:flex;flex-wrap:wrap;gap:.6rem;
+    }
+    .category-pill{
+      display:inline-flex;align-items:center;justify-content:center;
+      padding:.4rem 1.15rem;border-radius:999px;border:1px solid rgba(16,54,38,.18);
+      font-weight:600;color:var(--muted);background:var(--surface);transition:.2s ease;
+    }
+    .category-pill.is-active{background:var(--green-dark);color:#fff;border-color:var(--green-dark);box-shadow:0 10px 24px rgba(18,56,42,.26);}
+
+    .services-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1.5rem;margin-top:1.5rem;}
     .service-card{
-      background:#fff;border-radius:var(--radius-lg);padding:1.1rem;display:flex;flex-direction:column;gap:.75rem;
-      height:100%;
-      box-shadow:var(--shadow);border:1px solid color-mix(in srgb, var(--green) 18%, transparent);transition:.18s ease;
+      background:var(--surface);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column;
+      border:1px solid rgba(16,54,38,.06);box-shadow:var(--shadow-card);height:100%;transition:transform .2s ease, box-shadow .2s ease;
     }
-    .service-card:hover{transform:translateY(-3px);box-shadow:0 10px 22px color-mix(in srgb, var(--green) 18%, rgba(0,0,0,.16))}
-    .service-card__img{aspect-ratio:16/9;background:color-mix(in srgb, var(--green) 10%, #fff);border-radius:.7rem;overflow:hidden;position:relative}
-    .service-card__img img{width:100%;height:100%;object-fit:cover;display:block}
-    .service-card__img--empty{display:flex;align-items:center;justify-content:center;font-size:.9rem;color:#6f7a75}
-    .service-card h3{font-size:1.06rem;font-weight:900;color:var(--ink)}
-    .service-meta{font-size:.92rem;color:var(--muted);margin-top:auto}
-    .service-card .book-btn{margin-top:.75rem}
-    .stub{font-style:italic;color:#667;padding:1rem}
+    .service-card:hover{transform:translateY(-4px);box-shadow:0 30px 70px rgba(15,47,35,.15);}
+    .service-card__img{position:relative;aspect-ratio:5/3;background:var(--surface-muted);}
+    .service-card__img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+    .service-card__img--empty{display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:.9rem;}
+    .service-card__tags{position:absolute;top:1rem;left:1rem;display:flex;flex-wrap:wrap;gap:.4rem;}
+    .service-card__tag{
+      padding:.2rem .75rem;border-radius:999px;font-size:.8rem;font-weight:600;
+      background:rgba(255,255,255,.9);color:var(--green-dark);backdrop-filter:blur(6px);
+    }
+    .service-card__tag--accent{background:rgba(199,155,73,.9);color:#fff;}
+    .service-card__body{padding:1.25rem;display:flex;flex-direction:column;gap:.65rem;flex:1;}
+    .service-card__header{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;}
+    .service-card__header h3{font-size:1.15rem;font-weight:800;color:var(--ink);}
+    .service-card__duration{font-size:.9rem;color:var(--muted);font-weight:600;}
+    .service-card__desc{font-size:.92rem;color:var(--muted);}
+    .service-card__price{display:flex;align-items:center;gap:.4rem;font-weight:700;color:var(--green-dark);}
+    .service-card__price .old{font-size:.9rem;color:#9aa0a0;text-decoration:line-through;}
+    .service-card__actions{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:.75rem;}
+    .service-card .book-btn{flex-shrink:0;}
+    .stub{font-style:italic;color:var(--muted);padding:1rem;border:1px dashed rgba(16,54,38,.2);border-radius:var(--radius-md);}
+    .section-heading{margin:2rem 0 1rem;font:800 1.25rem/1.2 var(--font-heading);color:var(--green-dark);}
+    .section-divider{margin:2rem 0;border:none;border-top:1px solid rgba(16,54,38,.12);}
+    .category-section{margin-top:2.5rem;}
+    .catalog-content{margin-top:1.5rem;}
     .muted{color:var(--muted);font-size:.92rem}
     .old{color:#9aa0a0;text-decoration:line-through}
     .badge{font-size:.75rem;background:var(--gold);color:#fff;border-radius:999px;padding:.18rem .55rem;margin-left:.35rem}
@@ -334,34 +468,31 @@
 
     @media (max-width: 900px){
       body.nav-open{overflow:hidden;}
-      .container{padding-inline:1.15rem;}
+      .container{padding-inline:1rem;}
       .site-header{padding-block:.65rem;}
       .site-header__inner{gap:.9rem;}
       .mobile-nav-btn{display:inline-flex;margin-left:auto;}
-      .header-actions{position:fixed;top:0;right:0;bottom:0;width:min(320px,92vw);background:linear-gradient(180deg,#204029 0%,#1b3626 100%);padding:1.75rem 1.5rem 2rem;border-radius:0;transform:translateX(100%);transition:transform .3s ease,opacity .3s ease;opacity:0;display:flex;flex-direction:column;align-items:stretch;gap:1.2rem;box-shadow:-18px 0 35px rgba(0,0,0,.32);z-index:120;margin-left:0;}
+      .header-actions{
+        position:fixed;top:0;right:0;bottom:0;width:min(320px,92vw);
+        background:var(--surface);padding:1.75rem 1.5rem 2rem;border-radius:0;
+        transform:translateX(100%);transition:transform .3s ease,opacity .3s ease;
+        opacity:0;display:flex;flex-direction:column;align-items:stretch;gap:1.2rem;
+        box-shadow:-18px 0 35px rgba(0,0,0,.15);z-index:120;margin-left:0;
+      }
       body.nav-open .header-actions{transform:translateX(0);opacity:1;}
-      .header-actions::before{content:'';width:72px;height:4px;border-radius:999px;background:rgba(255,255,255,.25);align-self:center;margin-bottom:.75rem;}
+      .header-actions::before{content:'';width:72px;height:4px;border-radius:999px;background:rgba(15,47,35,.12);align-self:center;margin-bottom:.75rem;}
       .header-actions .btn{width:100%;justify-content:center;}
-      .header-actions .lang-picker{flex-direction:column;align-items:stretch;gap:.5rem;margin-right:0;color:#fff;}
-      .header-actions .lang-picker__label{opacity:.85;}
-      .header-actions .lang-picker__select{width:100%;background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.35);}
-      .mobile-close{display:inline-flex;align-items:center;gap:.45rem;color:#fff;background:transparent;border:none;font-size:1rem;font-weight:700;justify-content:flex-start;padding:0;}
-      .mobile-nav-backdrop{position:fixed;top:0;bottom:0;left:0;right:0;background:rgba(15,23,17,.45);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:110;display:none;}
+      .header-actions .lang-picker{flex-direction:column;align-items:stretch;gap:.5rem;margin-right:0;color:var(--muted);}
+      .header-actions .lang-picker__select{width:100%;}
+      .mobile-close{display:inline-flex;align-items:center;gap:.45rem;color:var(--green-dark);background:transparent;border:none;font-size:1rem;font-weight:700;justify-content:flex-start;padding:0;}
+      .mobile-nav-backdrop{position:fixed;top:0;bottom:0;left:0;right:0;background:rgba(15,23,17,.3);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:110;display:none;}
       body.nav-open .mobile-nav-backdrop{opacity:1;pointer-events:auto;display:block;right:min(320px,92vw);}
-      .hero{padding:4rem 1.25rem 3.4rem;align-items:flex-start;text-align:left;gap:1.2rem;}
-      .hero h1{font-size:clamp(2rem,8vw,2.6rem);} 
-      .hero p{font-size:1rem;max-width:32ch;}
-      .filters{flex-direction:column;align-items:stretch;gap:.85rem;}
-      .filters input,.filters select{width:100%;}
+      .hero{padding:3.5rem 0 2.5rem;}
+      .hero__inner{grid-template-columns:1fr;gap:2rem;}
+      .filters__grid{grid-template-columns:1fr;}
       .filters .btn{width:100%;justify-content:center;}
-      .services-grid{grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1.1rem;}
-      .service-card{border-radius:1.25rem;padding:1rem .95rem;}
-      .service-card__img{height:160px;}
-      .service-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;}
-      .floating-cart{display:none;position:fixed;right:1.15rem;bottom:1.25rem;background:linear-gradient(135deg,var(--green) 0%,var(--gold) 100%);color:#fff;border:none;border-radius:999px;padding:.75rem 1.15rem;align-items:center;gap:.6rem;box-shadow:0 18px 28px rgba(32,64,41,.25);z-index:105;transition:transform .2s ease,opacity .2s ease;}
-      .floating-cart.floating-cart--visible{display:flex;}
-      .floating-cart__icon{font-size:1.35rem;line-height:1;}
-      .floating-cart__count{min-width:1.9rem;height:1.9rem;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:rgba(255,255,255,.18);font-weight:800;}
+      .services-grid{grid-template-columns:1fr;}
+      .floating-cart{right:1rem;bottom:1.1rem;}
       body.modal-open .floating-cart,
       body.nav-open .floating-cart{display:none;}
     }
@@ -378,25 +509,126 @@
   <!-- header -->
   <header class="site-header">
     <div class="container site-header__inner">
-      <span class="logo" data-i18n="common.brand">Malva Booking</span>
-      <button type="button" class="mobile-nav-btn" data-menu-toggle aria-label="Open menu" aria-expanded="false">☰</button>
+      <a href="{% url 'client-dashboard' %}" class="brand">
+        <span class="brand__mark">MB</span>
+        <span class="brand__copy">
+          <strong data-i18n="common.brand">Malva Booking</strong>
+          <small data-i18n="services.header.tagline">Beauty & Wellness Studio</small>
+        </span>
+      </a>
+      <button type="button"
+              class="mobile-nav-btn"
+              data-menu-toggle
+              aria-expanded="false"
+              data-i18n-attr="aria-label:services.header.openMenu">☰</button>
       <nav class="header-actions" data-menu-drawer>
-        <button type="button" class="mobile-close" data-menu-close aria-label="Close menu">
-          ✕ <span data-i18n="common.close">Close</span>
+        <button type="button" class="mobile-close" data-menu-close data-i18n-attr="aria-label:services.header.closeMenu">
+          ✕ <span data-i18n="services.header.closeMenuText">Close menu</span>
         </button>
-        <div class="lang-picker" data-i18n-attr="aria-label:common.language">
-          <label for="langSelect" class="lang-picker__label" data-i18n="common.language">Language</label>
-          <select id="langSelect" class="lang-picker__select" data-lang-switch></select>
+        <div class="nav-links">
+          <a href="#services" class="nav-link" data-i18n="services.header.sendGift">Send a gift card</a>
+          <a href="#services" class="nav-link nav-link--pill" data-i18n="services.header.listBusiness">List your business</a>
         </div>
-        <button type="button" class="btn btn--primary" id="cartButton">
-          <span data-i18n="services.nav.cart">Cart</span>
-          <span class="cart-bubble" id="cartCount">0</span>
-        </button>
-        {% if user.is_authenticated %}
-          <a href="{% url 'dashboard' %}" class="btn btn--ghost" data-i18n="services.nav.clientProfile">Client Profile</a>
-        {% else %}
-          <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="btn btn--ghost" data-i18n="services.nav.login">Login</a>
-        {% endif %}
+        <div class="header-controls">
+          <div class="lang-picker" data-i18n-attr="aria-label:common.language">
+            <label for="langSelect" class="lang-picker__label" data-i18n="common.language">Language</label>
+            <select id="langSelect" class="lang-picker__select" data-lang-switch></select>
+          </div>
+          <div class="icon-buttons" aria-hidden="true">
+            <button class="icon-btn" type="button" data-i18n-attr="aria-label:services.header.calendar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
+            </button>
+            <button class="icon-btn" type="button" data-i18n-attr="aria-label:services.header.notifications">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 6a4 4 0 0 0-4 4v3.5l-.94 2.82A1 1 0 0 0 8.01 18h7.98a1 1 0 0 0 .95-1.68L16 13.5V10a4 4 0 0 0-4-4z"/><path d="M10 18a2 2 0 0 0 4 0"/></svg>
+            </button>
+          </div>
+          <button type="button"
+                  class="btn btn--primary cart-button"
+                  id="cartButton"
+                  data-i18n-attr="aria-label:services.header.openCart">
+            <span class="cart-button__icon" aria-hidden="true">🛒</span>
+            <span data-i18n="services.nav.cart">Cart</span>
+            <span class="cart-bubble" id="cartCount">0</span>
+          </button>
+          {% if user.is_authenticated %}
+            {% with user_display=request.user.get_full_name|default:request.user.username %}
+              <div class="user-menu" data-user-menu>
+                <button type="button"
+                        class="user-menu__trigger"
+                        data-user-menu-trigger
+                        aria-expanded="false"
+                        data-i18n-attr="aria-label:services.userMenu.open">
+                  <span class="user-menu__avatar">{{ user_display|default:user.username|slice:":1"|upper }}</span>
+                  <span class="user-menu__label">
+                    <span class="user-menu__greeting" data-i18n="services.userMenu.greeting">Welcome back</span>
+                    <strong>{{ user_display }}</strong>
+                  </span>
+                </button>
+                <div class="user-menu__dropdown" data-user-menu-dropdown>
+                  <div class="user-menu__header">
+                    <strong>{{ user_display }}</strong>
+                    <small data-i18n="services.userMenu.tier">Malva Member</small>
+                  </div>
+                  <div class="user-menu__list">
+                    <a href="{% url 'dashboard' %}" class="user-menu__link">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Z"/><path d="M19 21a7 7 0 0 0-14 0"/></svg>
+                      <span data-i18n="services.userMenu.profile">Profile</span>
+                    </a>
+                    <a href="{% url 'client_appointments' %}" class="user-menu__link">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 10h18M8 2v4M16 2v4"/></svg>
+                      <span data-i18n="services.userMenu.appointments">Appointments</span>
+                    </a>
+                    <a href="{% url 'dashboard' %}#wallet" class="user-menu__link">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3z"/><path d="M16 11h4v4h-4z"/></svg>
+                      <span data-i18n="services.userMenu.wallet">Wallet</span>
+                    </a>
+                    <a href="#services" class="user-menu__link">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m5 12 5 5 9-10"/></svg>
+                      <span data-i18n="services.userMenu.favorites">Favorites</span>
+                    </a>
+                    <a href="#services" class="user-menu__link">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h16M4 12a4 4 0 0 1 0-8h12a4 4 0 0 1 0 8m-16 0a4 4 0 0 0 0 8h12a4 4 0 0 0 0-8"/></svg>
+                      <span data-i18n="services.userMenu.giftCard">Send a gift card</span>
+                    </a>
+                    <a href="{% url 'client-intake-forms' %}" class="user-menu__link">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 2h12v20H6z"/><path d="M9 6h6M9 10h6M9 14h3"/></svg>
+                      <span data-i18n="services.userMenu.forms">Forms</span>
+                    </a>
+                    <a href="{% url 'dashboard' %}#orders" class="user-menu__link">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h12l3 7H3z"/><path d="m3 10 1.7 9.59A2 2 0 0 0 6.69 21h10.62a2 2 0 0 0 1.99-1.41L21 10"/></svg>
+                      <span data-i18n="services.userMenu.orders">Product orders</span>
+                    </a>
+                    <a href="{% url 'dashboard' %}#settings" class="user-menu__link">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 15.5a3.5 3.5 0 1 0-3.5-3.5 3.5 3.5 0 0 0 3.5 3.5z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 1-2.54 0 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 1 0-2.54 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 1 2.54 0 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 1 0 2.54 1.65 1.65 0 0 0-.6 1z"/></svg>
+                      <span data-i18n="services.userMenu.settings">Settings</span>
+                    </a>
+                    <div class="user-menu__link">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+                      <span data-i18n="services.userMenu.language">Languages</span>
+                    </div>
+                    <form method="post" action="{% url 'logout' %}" class="user-menu__link user-menu__link--danger">
+                      {% csrf_token %}
+                      <button type="submit" style="all:unset;display:flex;align-items:center;gap:.6rem;cursor:pointer;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>
+                        <span data-i18n="services.userMenu.logout">Log out</span>
+                      </button>
+                    </form>
+                  </div>
+                  <div class="user-menu__footer">
+                    <a href="#download" class="user-menu__footer-link" data-i18n="services.userMenu.download">Download the app</a>
+                    <a href="#help" class="user-menu__footer-link" data-i18n="services.userMenu.help">Help & support</a>
+                    <a href="#business" class="user-menu__footer-link" data-i18n="services.userMenu.business">For businesses</a>
+                  </div>
+                </div>
+              </div>
+            {% endwith %}
+          {% else %}
+            <div class="header-auth">
+              <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="btn btn--ghost" data-i18n="services.nav.login">Login</a>
+              <a href="{% url 'register' %}" class="btn btn--primary" data-i18n="services.nav.register">Create account</a>
+            </div>
+          {% endif %}
+        </div>
       </nav>
     </div>
   </header>
@@ -404,41 +636,93 @@
 
   <!-- hero -->
   <section class="hero">
-    <h1 data-i18n="services.hero.title">Book your appointment in 2 clicks</h1>
-    <p data-i18n="services.hero.subtitle">Pick a service, a specialist, and a time — we’ll handle the rest.</p>
-    <a href="#services" class="btn btn--primary" data-i18n="services.hero.cta">Browse services ↓</a>
+    <div class="container hero__inner">
+      <div>
+        <span class="hero__badge" data-i18n="services.hero.badge">Luxury wellness</span>
+        <h1 data-i18n="services.hero.title">Our Services</h1>
+        <p data-i18n="services.hero.description">Book your appointment in two clicks. Choose a category, pick your specialist, and enjoy concierge-level care.</p>
+        <div class="hero__actions">
+          <a href="#services" class="btn btn--primary" data-i18n="services.hero.ctaPrimary">Book now</a>
+          <a href="#categories" class="btn btn--outline" data-i18n="services.hero.ctaSecondary">Explore categories</a>
+        </div>
+      </div>
+      <div class="hero__card">
+        <div class="hero__stat">
+          <strong data-i18n="services.hero.stats.clients.value">3.2K+</strong>
+          <span data-i18n="services.hero.stats.clients.label">Happy clients this month</span>
+        </div>
+        <div class="hero__stat">
+          <strong data-i18n="services.hero.stats.specialists.value">42</strong>
+          <span data-i18n="services.hero.stats.specialists.label">Verified specialists online</span>
+        </div>
+        <div class="hero__stat">
+          <strong data-i18n="services.hero.stats.speed.value">2 clicks</strong>
+          <span data-i18n="services.hero.stats.speed.label">Average booking time</span>
+        </div>
+      </div>
+    </div>
   </section>
 
-  <main id="services" class="container" style="padding-block:3rem;">
-    <h2 style="font-size:1.75rem;font-weight:800;margin-bottom:1.5rem;color:var(--green);" data-i18n="services.section.title">Services</h2>
+  <main id="services" class="container services-shell">
+    <section class="search-panel" aria-label="Service search">
+      <form method="get" class="filters" role="search">
+        <div class="filters__grid">
+          <label class="pill-input">
+            <span class="pill-input__label" data-i18n="services.filters.searchLabel">Search Service</span>
+            <div class="pill-input__control">
+              <span class="pill-input__icon" aria-hidden="true">🔍</span>
+              <input type="search" name="q" placeholder="Search a service…" value="{{ q|default:'' }}" data-i18n-attr="placeholder:services.filters.searchPlaceholder">
+            </div>
+          </label>
+          <label class="pill-input">
+            <span class="pill-input__label" data-i18n="services.filters.categoryLabel">Category</span>
+            <div class="pill-input__control">
+              <span class="pill-input__icon" aria-hidden="true">▾</span>
+              <select name="cat">
+                <option value="" data-i18n="services.filters.allCategories">All categories</option>
+                {% for c in filter_categories %}
+                  <option value="{{ c.id }}" {% if active_category == c.id|stringformat:'s' %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </label>
+        </div>
+        <div class="filters__actions">
+          <button class="btn btn--primary" type="submit" data-i18n="services.filters.submit">Search</button>
+          <button type="button"
+                  class="btn btn--outline"
+                  data-reset-link
+                  {% if not q and not active_category %}style="display:none;" aria-hidden="true"{% endif %}
+                  data-i18n="services.filters.reset">Reset</button>
+        </div>
+      </form>
+    </section>
 
-    <!-- Filters -->
-    <form method="get" class="filters" role="search">
-      <input type="search" name="q" placeholder="Search a service…" value="{{ q|default:'' }}" data-i18n-attr="placeholder:services.filters.searchPlaceholder">
-      <select name="cat">
-        <option value="" data-i18n="services.filters.allCategories">All categories</option>
+    <section class="category-headline" id="categories">
+      <div>
+        <h2 data-i18n="services.categories.title">Popular Services</h2>
+        <p data-i18n="services.categories.subtitle">Discover trending experiences curated by our senior aestheticians.</p>
+      </div>
+      <div class="category-pills" role="list">
+        <a href="{% url 'client-dashboard' %}#services"
+           class="category-pill{% if not active_category %} is-active{% endif %}"
+           data-i18n="services.categories.all">All Services</a>
         {% for c in filter_categories %}
-          <option value="{{ c.id }}" {% if active_category == c.id|stringformat:'s' %}selected{% endif %}>{{ c.name }}</option>
+          <a href="?cat={{ c.id }}#services"
+             class="category-pill{% if active_category == c.id|stringformat:'s' %} is-active{% endif %}">{{ c.name }}</a>
         {% endfor %}
-      </select>
-      <button class="btn btn--primary" type="submit" data-i18n="services.filters.submit">Search</button>
-      <a
-        class="btn btn--ghost"
-        data-reset-link
-        href="{% url 'client-dashboard' %}#services"
-        {% if not q and not active_category %}style="display:none;" aria-hidden="true"{% endif %}
-        data-i18n="services.filters.reset"
-      >Reset</a>
-    </form>
+      </div>
+    </section>
 
-    <!-- Live results (JS) -->
-    <h3 id="liveTitle" style="margin:.5rem 0 1rem; display:none;" data-i18n="services.search.liveTitle">Search results</h3>
-    <div id="liveGrid" class="services-grid" style="display:none;"></div>
+    <section aria-live="polite" aria-atomic="true">
+      <h3 id="liveTitle" class="section-heading" style="display:none;" data-i18n="services.search.liveTitle">Search results</h3>
+      <div id="liveGrid" class="services-grid" style="display:none;"></div>
+    </section>
 
     <!-- Server-rendered fallback/results -->
-    <div id="serverContent">
+    <div id="serverContent" class="catalog-content">
       {% if search_results %}
-        <h3 style="margin:.5rem 0 1rem;" data-i18n="services.search.resultsTitle">Search results</h3>
+        <h3 class="section-heading" data-i18n="services.search.resultsTitle">Search results</h3>
         <div class="services-grid">
           {% for s in search_results %}
             <article class="service-card">
@@ -448,98 +732,144 @@
                 {% else %}
                   <span data-i18n="services.cards.noImage">Preview coming soon</span>
                 {% endif %}
+                {% if s.category or s.get_active_discount %}
+                  <div class="service-card__tags">
+                    {% if s.category %}<span class="service-card__tag">{{ s.category.name }}</span>{% endif %}
+                    {% with disc=s.get_active_discount %}
+                      {% if disc %}
+                        <span class="service-card__tag service-card__tag--accent" data-i18n="services.cards.tagPopular">Popular</span>
+                      {% endif %}
+                    {% endwith %}
+                  </div>
+                {% endif %}
               </div>
-              <div class="muted">{{ s.category.name }}</div>
-              <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
-              {% if s.description %}<p class="muted">{{ s.description|truncatewords:10 }}</p>{% endif %}
-              <div class="service-meta">
-                {% with disc=s.get_active_discount %}
-                  {% if disc %}
-                    <span class="old">${{ s.base_price|floatformat:2 }}</span>
-                    <strong>${{ s.get_discounted_price|floatformat:2 }}</strong>
-                    <span class="badge">-{{ disc.discount_percent }}%</span>
-                  {% else %}
-                    <strong>${{ s.base_price|floatformat:2 }}</strong>
-                  {% endif %}
-                {% endwith %}
-                <span aria-hidden="true">·</span>
-                <span class="meta-duration" data-i18n="services.units.minutes" data-i18n-vars='{"value":"{{ s.duration_min }}"}'>{{ s.duration_min }} min</span>
+              <div class="service-card__body">
+                <div class="service-card__header">
+                  <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
+                  <span class="service-card__duration" data-i18n="services.units.minutes" data-i18n-vars='{"value":"{{ s.duration_min }}"}'>{{ s.duration_min }} min</span>
+                </div>
+                {% if s.description %}<p class="service-card__desc">{{ s.description|truncatewords:16 }}</p>{% endif %}
+                <div class="service-card__actions">
+                  <div class="service-card__price">
+                    {% with disc=s.get_active_discount %}
+                      {% if disc %}
+                        <span class="old">${{ s.base_price|floatformat:2 }}</span>
+                        <strong>${{ s.get_discounted_price|floatformat:2 }}</strong>
+                        <span class="badge">-{{ disc.discount_percent }}%</span>
+                      {% else %}
+                        <strong>${{ s.base_price|floatformat:2 }}</strong>
+                      {% endif %}
+                    {% endwith %}
+                  </div>
+                  <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
+                </div>
               </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
             </article>
           {% empty %}
             <div class="stub" data-i18n="services.search.noServerResults" data-i18n-vars='{"query":"{{ q|escapejs }}"}'>No results for “{{ q }}”.</div>
           {% endfor %}
         </div>
-        <hr style="margin:2rem 0;border:none;border-top:1px solid var(--lgray)">
+        <hr class="section-divider">
       {% endif %}
 
       {% for c in categories %}
-        <h3 style="margin:1.5rem 0 .75rem;color:var(--green);font-weight:800">{{ c.name }}</h3>
-        <div class="services-grid">
-          {% for s in c.catalog_services %}
-            <article class="service-card">
-              <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
-                {% if s.card_image_url %}
-                  <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
-                {% else %}
-                  <span data-i18n="services.cards.noImage">Preview coming soon</span>
-                {% endif %}
-              </div>
-              <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
-              {% if s.description %}<p class="muted">{{ s.description|truncatewords:10 }}</p>{% endif %}
-              <div class="service-meta">
-                {% with disc=s.get_active_discount %}
-                  {% if disc %}
-                    <span class="old">${{ s.base_price|floatformat:2 }}</span>
-                    <strong>${{ s.get_discounted_price|floatformat:2 }}</strong>
-                    <span class="badge">-{{ disc.discount_percent }}%</span>
+        <section class="category-section">
+          <div class="category-headline">
+            <div>
+              <h3>{{ c.name }}</h3>
+            </div>
+          </div>
+          <div class="services-grid">
+            {% for s in c.catalog_services %}
+              <article class="service-card">
+                <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
+                  {% if s.card_image_url %}
+                    <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
                   {% else %}
-                    <strong>${{ s.base_price|floatformat:2 }}</strong>
+                    <span data-i18n="services.cards.noImage">Preview coming soon</span>
                   {% endif %}
-                {% endwith %}
-                <span aria-hidden="true">·</span>
-                <span class="meta-duration" data-i18n="services.units.minutes" data-i18n-vars='{"value":"{{ s.duration_min }}"}'>{{ s.duration_min }} min</span>
-              </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
-            </article>
-          {% empty %}
-            <div class="stub" data-i18n="services.search.noCategory">No services in this category yet.</div>
-          {% endfor %}
-        </div>
+                  {% if c.name or s.get_active_discount %}
+                    <div class="service-card__tags">
+                      {% if c.name %}<span class="service-card__tag">{{ c.name }}</span>{% endif %}
+                      {% with disc=s.get_active_discount %}
+                        {% if disc %}
+                          <span class="service-card__tag service-card__tag--accent" data-i18n="services.cards.tagPopular">Popular</span>
+                        {% endif %}
+                      {% endwith %}
+                    </div>
+                  {% endif %}
+                </div>
+                <div class="service-card__body">
+                  <div class="service-card__header">
+                    <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
+                    <span class="service-card__duration" data-i18n="services.units.minutes" data-i18n-vars='{"value":"{{ s.duration_min }}"}'>{{ s.duration_min }} min</span>
+                  </div>
+                  {% if s.description %}<p class="service-card__desc">{{ s.description|truncatewords:16 }}</p>{% endif %}
+                  <div class="service-card__actions">
+                    <div class="service-card__price">
+                      {% with disc=s.get_active_discount %}
+                        {% if disc %}
+                          <span class="old">${{ s.base_price|floatformat:2 }}</span>
+                          <strong>${{ s.get_discounted_price|floatformat:2 }}</strong>
+                          <span class="badge">-{{ disc.discount_percent }}%</span>
+                        {% else %}
+                          <strong>${{ s.base_price|floatformat:2 }}</strong>
+                        {% endif %}
+                      {% endwith %}
+                    </div>
+                    <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
+                  </div>
+                </div>
+              </article>
+            {% empty %}
+              <div class="stub" data-i18n="services.search.noCategory">No services in this category yet.</div>
+            {% endfor %}
+          </div>
+        </section>
       {% endfor %}
 
       {% if uncategorized %}
-        <h3 style="margin:1.5rem 0 .75rem;color:var(--green);font-weight:800" data-i18n="services.search.uncategorized">Uncategorized</h3>
-        <div class="services-grid">
-          {% for s in uncategorized %}
-            <article class="service-card">
-              <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
-                {% if s.card_image_url %}
-                  <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
-                {% else %}
-                  <span data-i18n="services.cards.noImage">Preview coming soon</span>
-                {% endif %}
-              </div>
-              <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
-              {% if s.description %}<p class="muted">{{ s.description|truncatewords:10 }}</p>{% endif %}
-              <div class="service-meta">
-                {% with disc=s.get_active_discount %}
-                  {% if disc %}
-                    <span class="old">${{ s.base_price|floatformat:2 }}</span>
-                    <strong>${{ s.get_discounted_price|floatformat:2 }}</strong>
-                    <span class="badge">-{{ disc.discount_percent }}%</span>
+        <section class="category-section">
+          <div class="category-headline">
+            <div>
+              <h3 data-i18n="services.search.uncategorized">Uncategorized</h3>
+            </div>
+          </div>
+          <div class="services-grid">
+            {% for s in uncategorized %}
+              <article class="service-card">
+                <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
+                  {% if s.card_image_url %}
+                    <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
                   {% else %}
-                    <strong>${{ s.base_price|floatformat:2 }}</strong>
+                    <span data-i18n="services.cards.noImage">Preview coming soon</span>
                   {% endif %}
-                {% endwith %}
-                <span aria-hidden="true">·</span>
-                <span class="meta-duration" data-i18n="services.units.minutes" data-i18n-vars='{"value":"{{ s.duration_min }}"}'>{{ s.duration_min }} min</span>
-              </div>
-              <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
-            </article>
-          {% endfor %}
-        </div>
+                </div>
+                <div class="service-card__body">
+                  <div class="service-card__header">
+                    <h3 data-service-name-original="{{ s.name|escape }}">{{ s.name }}</h3>
+                    <span class="service-card__duration" data-i18n="services.units.minutes" data-i18n-vars='{"value":"{{ s.duration_min }}"}'>{{ s.duration_min }} min</span>
+                  </div>
+                  {% if s.description %}<p class="service-card__desc">{{ s.description|truncatewords:16 }}</p>{% endif %}
+                  <div class="service-card__actions">
+                    <div class="service-card__price">
+                      {% with disc=s.get_active_discount %}
+                        {% if disc %}
+                          <span class="old">${{ s.base_price|floatformat:2 }}</span>
+                          <strong>${{ s.get_discounted_price|floatformat:2 }}</strong>
+                          <span class="badge">-{{ disc.discount_percent }}%</span>
+                        {% else %}
+                          <strong>${{ s.base_price|floatformat:2 }}</strong>
+                        {% endif %}
+                      {% endwith %}
+                    </div>
+                    <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
+                  </div>
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        </section>
       {% endif %}
 
       {% if not has_any_services %}
@@ -548,7 +878,7 @@
     </div>
   </main>
 
-  <button type="button" class="floating-cart" id="floatingCart" aria-label="Open cart">
+  <button type="button" class="floating-cart" id="floatingCart" data-i18n-attr="aria-label:services.cart.open">
     <span class="floating-cart__icon" aria-hidden="true">🛒</span>
     <span class="floating-cart__count" id="floatingCartCount">0</span>
   </button>
@@ -584,7 +914,7 @@
                 <input type="date" id="bookMobileDate" name="bookMobileDate">
               </div>
               <div class="book-mobile__times" id="bookMobileTimes"></div>
-              <div class="book-mobile__empty" id="bookMobileEmpty">No availability yet.</div>
+              <div class="book-mobile__empty" id="bookMobileEmpty" data-i18n="services.modal.mobileEmpty">No availability yet.</div>
             </div>
 
             <div class="outlook book-desktop" id="ol">
@@ -772,6 +1102,33 @@
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       const I18N = window.MalvaI18n;
+      const userMenu = document.querySelector('[data-user-menu]');
+      if (userMenu) {
+        const trigger = userMenu.querySelector('[data-user-menu-trigger]');
+        const dropdown = userMenu.querySelector('[data-user-menu-dropdown]');
+        const closeUserMenu = () => {
+          userMenu.classList.remove('is-open');
+          if (trigger) trigger.setAttribute('aria-expanded', 'false');
+        };
+        const toggleUserMenu = () => {
+          const isOpen = userMenu.classList.toggle('is-open');
+          if (trigger) trigger.setAttribute('aria-expanded', String(isOpen));
+        };
+        trigger?.addEventListener('click', (event) => {
+          event.preventDefault();
+          toggleUserMenu();
+        });
+        document.addEventListener('click', (event) => {
+          if (!userMenu.contains(event.target)) {
+            closeUserMenu();
+          }
+        });
+        document.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+            closeUserMenu();
+          }
+        });
+      }
       const resolvedUserId = document.body?.dataset?.autofillUser ? String(document.body.dataset.autofillUser) : 'guest';
       const autofillScriptNode = document.getElementById('autofill-defaults');
       let autofillDefaults = {};
@@ -3237,10 +3594,12 @@ async function confirmPayment(){
       function skeleton(n=8){
         return Array.from({length:n}).map(()=>`
           <article class="service-card">
-            <div class="service-card__img service-card__img--empty skeleton"></div>
-            <div class="skeleton" style="height:18px;margin-top:10px;border-radius:6px;"></div>
-            <div class="skeleton" style="height:14px;margin-top:6px;border-radius:6px;"></div>
-            <div class="skeleton" style="height:36px;margin-top:12px;border-radius:10px;"></div>
+            <div class="service-card__img service-card__img--empty skeleton" aria-hidden="true"></div>
+            <div class="service-card__body">
+              <div class="skeleton" style="height:20px;width:70%;border-radius:.75rem;"></div>
+              <div class="skeleton" style="height:14px;width:90%;border-radius:.75rem;margin-top:.5rem;"></div>
+              <div class="skeleton" style="height:36px;width:140px;border-radius:999px;margin-top:1rem;"></div>
+            </div>
           </article>`).join('');
       }
       function toggleReset(q, cat){
@@ -3273,29 +3632,45 @@ async function confirmPayment(){
         const translatedName = translateServiceNameText(rawName);
         const fallbackImgLabel = translate('services.cards.noImage', null, 'Preview coming soon');
         const imageAlt = s.image_alt || rawName || translate('services.cards.imageAltFallback', null, 'Service preview');
-        const imageBlock = s.image
-          ? `<div class="service-card__img"><img src="${escapeHtml(s.image)}" alt="${escapeHtml(imageAlt)}" loading="lazy"></div>`
-          : `<div class="service-card__img service-card__img--empty" aria-hidden="true">${escapeHtml(fallbackImgLabel)}</div>`;
+        const imageClasses = ['service-card__img'];
+        if (!s.image) imageClasses.push('service-card__img--empty');
+        const imageInner = s.image
+          ? `<img src=\"${escapeHtml(s.image)}\" alt=\"${escapeHtml(imageAlt)}\" loading=\"lazy\">`
+          : `<span>${escapeHtml(fallbackImgLabel)}</span>`;
+        const tags = [];
+        if (s.category) {
+          tags.push(`<span class=\"service-card__tag\">${escapeHtml(s.category)}</span>`);
+        }
+        if (hasDisc) {
+          tags.push(`<span class=\"service-card__tag service-card__tag--accent\">${translate('services.cards.tagPopular', null, 'Popular')}</span>`);
+        }
+        const tagsBlock = tags.length ? `<div class=\"service-card__tags\">${tags.join('')}</div>` : '';
         const priceBlock = hasDisc
-          ? `<span class="old">$${escapeHtml(s.base_price)}</span>
-             <strong>$${escapeHtml(s.price)}</strong>
-             <span class="badge">-${escapeHtml(String(s.discount_percent))}%</span>`
+          ? `<span class=\"old\">$${escapeHtml(s.base_price)}</span><strong>$${escapeHtml(s.price)}</strong><span class=\"badge\">-${escapeHtml(String(s.discount_percent))}%</span>`
           : `<strong>$${escapeHtml(s.price || s.base_price)}</strong>`;
-        const descText = truncateWords(s.description, 10);
-        const desc = descText ? `<p class="muted">${escapeHtml(descText)}</p>` : '';
-        const cat  = s.category ? `<div class="muted">${escapeHtml(s.category)}</div>` : '';
+        const descText = truncateWords(s.description, 16);
+        const desc = descText ? `<p class=\"service-card__desc\">${escapeHtml(descText)}</p>` : '';
         const durationLabel = escapeHtml(formatMinutes(s.duration_min || 0));
         return `
-          <article class="service-card">
-            ${imageBlock}
-            ${cat}
-            <h3 data-service-name-original="${escapeHtml(rawName)}">${escapeHtml(translatedName)}</h3>
-            ${desc}
-            <div class="service-meta">${priceBlock} · <span class="meta-duration">${durationLabel}</span></div>
-            <button class="btn btn--primary book-btn"
-              data-service-id="${escapeHtml(s.id)}"
-              data-service-name="${escapeHtml(rawName)}"
-              data-i18n="services.cards.addToCart">${translate('services.cards.addToCart')}</button>
+          <article class=\"service-card\">
+            <div class=\"${imageClasses.join(' ')}\"${s.image ? '' : ' aria-hidden=\"true\"'}>
+              ${imageInner}
+              ${tagsBlock}
+            </div>
+            <div class=\"service-card__body\">
+              <div class=\"service-card__header\">
+                <h3 data-service-name-original=\"${escapeHtml(rawName)}\">${escapeHtml(translatedName)}</h3>
+                <span class=\"service-card__duration\">${durationLabel}</span>
+              </div>
+              ${desc}
+              <div class=\"service-card__actions\">
+                <div class=\"service-card__price\">${priceBlock}</div>
+                <button class=\"btn btn--primary book-btn\"
+                  data-service-id=\"${escapeHtml(s.id)}\"
+                  data-service-name=\"${escapeHtml(rawName)}\"
+                  data-i18n=\"services.cards.addToCart\">${translate('services.cards.addToCart')}</button>
+              </div>
+            </div>
           </article>`;
       }
       async function fetchServices(q, cat){

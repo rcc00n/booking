@@ -46,24 +46,61 @@
         meta: {
           title: 'Malva Booking — Services'
         },
+        header: {
+          tagline: 'Beauty & Wellness Studio',
+          sendGift: 'Send a gift card',
+          listBusiness: 'List your business',
+          openMenu: 'Open menu',
+          closeMenu: 'Close menu',
+          closeMenuText: 'Close menu',
+          calendar: 'Open calendar shortcuts',
+          notifications: 'Notifications',
+          openCart: 'Open cart'
+        },
         hero: {
-          title: 'Book your appointment in 2 clicks',
-          subtitle: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
-          cta: 'Browse services ↓'
+          badge: 'Luxury wellness',
+          title: 'Our Services',
+          subtitle: 'Book your appointment in 2 clicks',
+          description: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
+          cta: 'Browse services ↓',
+          ctaPrimary: 'Book now',
+          ctaSecondary: 'Explore categories',
+          stats: {
+            clients: {
+              value: '3.2K+',
+              label: 'Happy clients this month'
+            },
+            specialists: {
+              value: '42',
+              label: 'Verified specialists online'
+            },
+            speed: {
+              value: '2 clicks',
+              label: 'Average booking time'
+            }
+          }
         },
         nav: {
           cart: 'Cart',
           clientProfile: 'Client Profile',
-          login: 'Login'
+          login: 'Login',
+          register: 'Create account'
         },
         section: {
           title: 'Services'
         },
         filters: {
+          searchLabel: 'Search service',
+          categoryLabel: 'Category',
           searchPlaceholder: 'Search a service…',
           allCategories: 'All categories',
           submit: 'Search',
           reset: 'Reset'
+        },
+        categories: {
+          title: 'Popular Services',
+          subtitle: 'Discover trending treatments curated by Malva.',
+          all: 'All Services'
         },
         search: {
           liveTitle: 'Search results',
@@ -77,7 +114,10 @@
           loadFailed: 'Failed to load'
         },
         cards: {
-          addToCart: 'Add to cart'
+          addToCart: 'Add to cart',
+          tagPopular: 'Popular',
+          noImage: 'Preview coming soon',
+          imageAltFallback: 'Service preview'
         },
         units: {
           minutes: '{{value}} min'
@@ -98,6 +138,7 @@
           errorLoad: 'Unable to fetch availability',
           noMasters: 'No masters available',
           noAvailability: 'No availability',
+          mobileEmpty: 'No availability yet.',
           success: 'Service added to cart.',
           errorAdd: 'Could not add service to cart',
           errorGeneric: 'Add to cart error'
@@ -107,6 +148,7 @@
           empty: 'Your cart is empty.',
           summary: 'Total: {{total}} · {{duration}}',
           checkout: 'Checkout',
+          open: 'Open cart',
           loadFailed: 'Could not load cart',
           removeSuccess: 'Item removed from cart.',
           removeFailed: 'Failed to remove item',
@@ -124,6 +166,24 @@
           payPartialHint: 'Remaining {{remaining}} will be due later.',
           partialNote: 'Remaining balance will be due in person or later.',
           confirmButton: 'Confirm booking'
+        },
+        userMenu: {
+          open: 'Open user menu',
+          greeting: 'Welcome back',
+          tier: 'Malva Member',
+          profile: 'Profile',
+          appointments: 'Appointments',
+          wallet: 'Wallet',
+          favorites: 'Favorites',
+          giftCard: 'Send a gift card',
+          forms: 'Forms',
+          orders: 'Product orders',
+          settings: 'Settings',
+          language: 'Languages',
+          logout: 'Log out',
+          download: 'Download the app',
+          help: 'Help & support',
+          business: 'For businesses'
         },
         dynamic: {
           names: {
@@ -237,24 +297,61 @@
         meta: {
           title: 'Malva Booking — Услуги'
         },
+        header: {
+          tagline: 'Beauty & Wellness Studio',
+          sendGift: 'Send a gift card',
+          listBusiness: 'List your business',
+          openMenu: 'Open menu',
+          closeMenu: 'Close menu',
+          closeMenuText: 'Close menu',
+          calendar: 'Open calendar shortcuts',
+          notifications: 'Notifications',
+          openCart: 'Open cart'
+        },
         hero: {
+          badge: 'Luxury wellness',
           title: 'Запишитесь за 2 клика',
           subtitle: 'Выберите услугу, мастера и время — остальное сделаем мы.',
-          cta: 'Смотреть услуги ↓'
+          description: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
+          cta: 'Смотреть услуги ↓',
+          ctaPrimary: 'Book now',
+          ctaSecondary: 'Explore categories',
+          stats: {
+            clients: {
+              value: '3.2K+',
+              label: 'Happy clients this month'
+            },
+            specialists: {
+              value: '42',
+              label: 'Verified specialists online'
+            },
+            speed: {
+              value: '2 clicks',
+              label: 'Average booking time'
+            }
+          }
         },
         nav: {
           cart: 'Корзина',
           clientProfile: 'Личный кабинет',
-          login: 'Войти'
+          login: 'Войти',
+          register: 'Create account'
         },
         section: {
           title: 'Услуги'
         },
         filters: {
+          searchLabel: 'Search service',
+          categoryLabel: 'Category',
           searchPlaceholder: 'Найти услугу…',
           allCategories: 'Все категории',
           submit: 'Найти',
           reset: 'Сбросить'
+        },
+        categories: {
+          title: 'Popular Services',
+          subtitle: 'Discover trending treatments curated by Malva.',
+          all: 'All Services'
         },
         search: {
           liveTitle: 'Результаты поиска',
@@ -268,7 +365,10 @@
           loadFailed: 'Не удалось загрузить'
         },
         cards: {
-          addToCart: 'В корзину'
+          addToCart: 'В корзину',
+          tagPopular: 'Popular',
+          noImage: 'Preview coming soon',
+          imageAltFallback: 'Service preview'
         },
         units: {
           minutes: '{{value}} мин'
@@ -289,6 +389,7 @@
           errorLoad: 'Не удалось получить доступные слоты',
           noMasters: 'Нет доступных мастеров',
           noAvailability: 'Слоты недоступны',
+          mobileEmpty: 'No availability yet.',
           success: 'Услуга добавлена в корзину.',
           errorAdd: 'Не удалось добавить услугу в корзину',
           errorGeneric: 'Ошибка добавления в корзину'
@@ -298,12 +399,31 @@
           empty: 'Ваша корзина пуста.',
           summary: 'Итого: {{total}} · {{duration}}',
           checkout: 'Оформить',
+          open: 'Open cart',
           loadFailed: 'Не удалось загрузить корзину',
           removeSuccess: 'Запись удалена из корзины.',
           removeFailed: 'Не удалось удалить запись',
           checkoutFailed: 'Не удалось оформить запись',
           checkoutSuccess: 'Запись создана! Перенаправляем…',
           remove: 'Удалить'
+        },
+        userMenu: {
+          open: 'Open user menu',
+          greeting: 'Welcome back',
+          tier: 'Malva Member',
+          profile: 'Profile',
+          appointments: 'Appointments',
+          wallet: 'Wallet',
+          favorites: 'Favorites',
+          giftCard: 'Send a gift card',
+          forms: 'Forms',
+          orders: 'Product orders',
+          settings: 'Settings',
+          language: 'Languages',
+          logout: 'Log out',
+          download: 'Download the app',
+          help: 'Help & support',
+          business: 'For businesses'
         },
         dynamic: {
           names: {
@@ -417,24 +537,52 @@
         meta: {
           title: 'Malva Booking — सेवाएँ'
         },
+        header: {
+          tagline: 'Beauty & Wellness Studio',
+          sendGift: 'Send a gift card',
+          listBusiness: 'List your business',
+          openMenu: 'Open menu',
+          closeMenu: 'Close menu',
+          closeMenuText: 'Close menu',
+          calendar: 'Open calendar shortcuts',
+          notifications: 'Notifications',
+          openCart: 'Open cart'
+        },
         hero: {
+          badge: 'Luxury wellness',
           title: 'सिर्फ 2 क्लिक में अपॉइंटमेंट बुक करें',
           subtitle: 'सेवा, विशेषज्ञ और समय चुनें — बाकी हम सम्भालेंगे।',
-          cta: 'सेवाएँ देखें ↓'
+          description: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
+          cta: 'सेवाएँ देखें ↓',
+          ctaPrimary: 'Book now',
+          ctaSecondary: 'Explore categories',
+          stats: {
+            clients: { value: '3.2K+', label: 'Happy clients this month' },
+            specialists: { value: '42', label: 'Verified specialists online' },
+            speed: { value: '2 clicks', label: 'Average booking time' }
+          }
         },
         nav: {
           cart: 'कार्ट',
           clientProfile: 'क्लाइंट प्रोफ़ाइल',
-          login: 'लॉग इन'
+          login: 'लॉग इन',
+          register: 'Create account'
         },
         section: {
           title: 'सेवाएँ'
         },
         filters: {
+          searchLabel: 'Search service',
+          categoryLabel: 'Category',
           searchPlaceholder: 'सेवा खोजें…',
           allCategories: 'सभी श्रेणियाँ',
           submit: 'खोजें',
           reset: 'रीसेट'
+        },
+        categories: {
+          title: 'Popular Services',
+          subtitle: 'Discover trending treatments curated by Malva.',
+          all: 'All Services'
         },
         search: {
           liveTitle: 'खोज परिणाम',
@@ -448,7 +596,10 @@
           loadFailed: 'लोड विफल रहा'
         },
         cards: {
-          addToCart: 'कार्ट में जोड़ें'
+          addToCart: 'कार्ट में जोड़ें',
+          tagPopular: 'Popular',
+          noImage: 'Preview coming soon',
+          imageAltFallback: 'Service preview'
         },
         units: {
           minutes: '{{value}} मिनट'
@@ -469,6 +620,7 @@
           errorLoad: 'उपलब्ध स्लॉट लाने में असमर्थ',
           noMasters: 'कोई मास्टर उपलब्ध नहीं है',
           noAvailability: 'स्लॉट उपलब्ध नहीं हैं',
+          mobileEmpty: 'No availability yet.',
           success: 'सेवा कार्ट में जोड़ दी गई है।',
           errorAdd: 'सेवा को कार्ट में जोड़ नहीं सके',
           errorGeneric: 'कार्ट में जोड़ने में त्रुटि'
@@ -478,12 +630,31 @@
           empty: 'आपका कार्ट खाली है।',
           summary: 'कुल: {{total}} · {{duration}}',
           checkout: 'चेकआउट',
+          open: 'Open cart',
           loadFailed: 'कार्ट लोड नहीं हो सका',
           removeSuccess: 'आइटम कार्ट से हटाया गया।',
           removeFailed: 'आइटम हटाया नहीं जा सका',
           checkoutFailed: 'चेकआउट असफल रहा',
           checkoutSuccess: 'अपॉइंटमेंट बन गया! रीडायरेक्ट किया जा रहा है…',
           remove: 'आइटम हटाएँ'
+        },
+        userMenu: {
+          open: 'Open user menu',
+          greeting: 'Welcome back',
+          tier: 'Malva Member',
+          profile: 'Profile',
+          appointments: 'Appointments',
+          wallet: 'Wallet',
+          favorites: 'Favorites',
+          giftCard: 'Send a gift card',
+          forms: 'Forms',
+          orders: 'Product orders',
+          settings: 'Settings',
+          language: 'Languages',
+          logout: 'Log out',
+          download: 'Download the app',
+          help: 'Help & support',
+          business: 'For businesses'
         },
         dynamic: {
           names: {
@@ -597,24 +768,52 @@
         meta: {
           title: 'Malva Booking — Послуги'
         },
+        header: {
+          tagline: 'Beauty & Wellness Studio',
+          sendGift: 'Send a gift card',
+          listBusiness: 'List your business',
+          openMenu: 'Open menu',
+          closeMenu: 'Close menu',
+          closeMenuText: 'Close menu',
+          calendar: 'Open calendar shortcuts',
+          notifications: 'Notifications',
+          openCart: 'Open cart'
+        },
         hero: {
+          badge: 'Luxury wellness',
           title: 'Запишіться за 2 кліки',
           subtitle: 'Обирайте послугу, майстра та час — решту зробимо ми.',
-          cta: 'Переглянути послуги ↓'
+          description: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
+          cta: 'Переглянути послуги ↓',
+          ctaPrimary: 'Book now',
+          ctaSecondary: 'Explore categories',
+          stats: {
+            clients: { value: '3.2K+', label: 'Happy clients this month' },
+            specialists: { value: '42', label: 'Verified specialists online' },
+            speed: { value: '2 clicks', label: 'Average booking time' }
+          }
         },
         nav: {
           cart: 'Кошик',
           clientProfile: 'Кабінет клієнта',
-          login: 'Увійти'
+          login: 'Увійти',
+          register: 'Create account'
         },
         section: {
           title: 'Послуги'
         },
         filters: {
+          searchLabel: 'Search service',
+          categoryLabel: 'Category',
           searchPlaceholder: 'Знайти послугу…',
           allCategories: 'Усі категорії',
           submit: 'Знайти',
           reset: 'Скинути'
+        },
+        categories: {
+          title: 'Popular Services',
+          subtitle: 'Discover trending treatments curated by Malva.',
+          all: 'All Services'
         },
         search: {
           liveTitle: 'Результати пошуку',
@@ -628,7 +827,10 @@
           loadFailed: 'Не вдалося завантажити'
         },
         cards: {
-          addToCart: 'До кошика'
+          addToCart: 'До кошика',
+          tagPopular: 'Popular',
+          noImage: 'Preview coming soon',
+          imageAltFallback: 'Service preview'
         },
         units: {
           minutes: '{{value}} хв'
@@ -649,6 +851,7 @@
           errorLoad: 'Не вдалося отримати доступні слоти',
           noMasters: 'Немає доступних майстрів',
           noAvailability: 'Немає доступних слотів',
+          mobileEmpty: 'No availability yet.',
           success: 'Послугу додано до кошика.',
           errorAdd: 'Не вдалося додати послугу до кошика',
           errorGeneric: 'Помилка додавання до кошика'
@@ -658,12 +861,31 @@
           empty: 'Ваш кошик порожній.',
           summary: 'Разом: {{total}} · {{duration}}',
           checkout: 'Оформити',
+          open: 'Open cart',
           loadFailed: 'Не вдалося завантажити кошик',
           removeSuccess: 'Послугу видалено з кошика.',
           removeFailed: 'Не вдалося видалити послугу',
           checkoutFailed: 'Не вдалося оформити запис',
           checkoutSuccess: 'Запис створено! Перенаправляємо…',
           remove: 'Видалити'
+        },
+        userMenu: {
+          open: 'Open user menu',
+          greeting: 'Welcome back',
+          tier: 'Malva Member',
+          profile: 'Profile',
+          appointments: 'Appointments',
+          wallet: 'Wallet',
+          favorites: 'Favorites',
+          giftCard: 'Send a gift card',
+          forms: 'Forms',
+          orders: 'Product orders',
+          settings: 'Settings',
+          language: 'Languages',
+          logout: 'Log out',
+          download: 'Download the app',
+          help: 'Help & support',
+          business: 'For businesses'
         },
         dynamic: {
           names: {
@@ -778,23 +1000,40 @@
           title: 'Malva Booking — Services'
         },
         hero: {
+          badge: 'Luxury wellness',
           title: 'Réservez votre rendez-vous en 2 clics',
           subtitle: 'Choisissez une prestation, un expert et un horaire — nous nous occupons du reste.',
-          cta: 'Voir les services ↓'
+          description: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
+          cta: 'Voir les services ↓',
+          ctaPrimary: 'Book now',
+          ctaSecondary: 'Explore categories',
+          stats: {
+            clients: { value: '3.2K+', label: 'Happy clients this month' },
+            specialists: { value: '42', label: 'Verified specialists online' },
+            speed: { value: '2 clicks', label: 'Average booking time' }
+          }
         },
         nav: {
           cart: 'Panier',
           clientProfile: 'Espace client',
-          login: 'Connexion'
+          login: 'Connexion',
+          register: 'Create account'
         },
         section: {
           title: 'Services'
         },
         filters: {
+          searchLabel: 'Search service',
+          categoryLabel: 'Category',
           searchPlaceholder: 'Rechercher un service…',
           allCategories: 'Toutes les catégories',
           submit: 'Rechercher',
           reset: 'Réinitialiser'
+        },
+        categories: {
+          title: 'Popular Services',
+          subtitle: 'Discover trending treatments curated by Malva.',
+          all: 'All Services'
         },
         search: {
           liveTitle: 'Résultats de recherche',
@@ -808,7 +1047,10 @@
           loadFailed: 'Chargement impossible'
         },
         cards: {
-          addToCart: 'Ajouter au panier'
+          addToCart: 'Ajouter au panier',
+          tagPopular: 'Popular',
+          noImage: 'Preview coming soon',
+          imageAltFallback: 'Service preview'
         },
         units: {
           minutes: '{{value}} min'
@@ -829,6 +1071,7 @@
           errorLoad: 'Impossible de récupérer les disponibilités',
           noMasters: 'Aucun praticien disponible',
           noAvailability: 'Aucune disponibilité',
+          mobileEmpty: 'No availability yet.',
           success: 'Service ajouté au panier.',
           errorAdd: 'Impossible d’ajouter le service au panier',
           errorGeneric: 'Erreur lors de l’ajout au panier'
@@ -838,12 +1081,31 @@
           empty: 'Votre panier est vide.',
           summary: 'Total : {{total}} · {{duration}}',
           checkout: 'Valider',
+          open: 'Open cart',
           loadFailed: 'Impossible de charger le panier',
           removeSuccess: 'Élément retiré du panier.',
           removeFailed: 'Impossible de retirer l’élément',
           checkoutFailed: 'Impossible de finaliser la réservation',
           checkoutSuccess: 'Rendez-vous créé ! Redirection…',
           remove: 'Retirer l’élément'
+        },
+        userMenu: {
+          open: 'Open user menu',
+          greeting: 'Welcome back',
+          tier: 'Malva Member',
+          profile: 'Profile',
+          appointments: 'Appointments',
+          wallet: 'Wallet',
+          favorites: 'Favorites',
+          giftCard: 'Send a gift card',
+          forms: 'Forms',
+          orders: 'Product orders',
+          settings: 'Settings',
+          language: 'Languages',
+          logout: 'Log out',
+          download: 'Download the app',
+          help: 'Help & support',
+          business: 'For businesses'
         },
         dynamic: {
           names: {
@@ -957,24 +1219,52 @@
         meta: {
           title: 'Malva Booking — الخدمات'
         },
+        header: {
+          tagline: 'Beauty & Wellness Studio',
+          sendGift: 'Send a gift card',
+          listBusiness: 'List your business',
+          openMenu: 'Open menu',
+          closeMenu: 'Close menu',
+          closeMenuText: 'Close menu',
+          calendar: 'Open calendar shortcuts',
+          notifications: 'Notifications',
+          openCart: 'Open cart'
+        },
         hero: {
+          badge: 'Luxury wellness',
           title: 'احجز موعدك خلال خطوتين',
           subtitle: 'اختر الخدمة، الخبير، والوقت — ونحن سنتولى الباقي.',
-          cta: 'استعراض الخدمات ↓'
+          description: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
+          cta: 'استعراض الخدمات ↓',
+          ctaPrimary: 'Book now',
+          ctaSecondary: 'Explore categories',
+          stats: {
+            clients: { value: '3.2K+', label: 'Happy clients this month' },
+            specialists: { value: '42', label: 'Verified specialists online' },
+            speed: { value: '2 clicks', label: 'Average booking time' }
+          }
         },
         nav: {
           cart: 'السلة',
           clientProfile: 'حساب العميل',
-          login: 'تسجيل الدخول'
+          login: 'تسجيل الدخول',
+          register: 'Create account'
         },
         section: {
           title: 'الخدمات'
         },
         filters: {
+          searchLabel: 'Search service',
+          categoryLabel: 'Category',
           searchPlaceholder: 'ابحث عن خدمة…',
           allCategories: 'كل الفئات',
           submit: 'بحث',
           reset: 'إعادة التعيين'
+        },
+        categories: {
+          title: 'Popular Services',
+          subtitle: 'Discover trending treatments curated by Malva.',
+          all: 'All Services'
         },
         search: {
           liveTitle: 'نتائج البحث',
@@ -988,7 +1278,10 @@
           loadFailed: 'فشل التحميل'
         },
         cards: {
-          addToCart: 'أضف إلى السلة'
+          addToCart: 'أضف إلى السلة',
+          tagPopular: 'Popular',
+          noImage: 'Preview coming soon',
+          imageAltFallback: 'Service preview'
         },
         units: {
           minutes: '{{value}} دقيقة'
@@ -1009,6 +1302,7 @@
           errorLoad: 'تعذر جلب المواعيد المتاحة',
           noMasters: 'لا يوجد خبراء متاحون',
           noAvailability: 'لا توجد مواعيد متاحة',
+          mobileEmpty: 'No availability yet.',
           success: 'تمت إضافة الخدمة إلى السلة.',
           errorAdd: 'تعذر إضافة الخدمة إلى السلة',
           errorGeneric: 'خطأ أثناء الإضافة إلى السلة'
@@ -1018,12 +1312,31 @@
           empty: 'سلتك فارغة.',
           summary: 'الإجمالي: {{total}} · {{duration}}',
           checkout: 'إتمام الحجز',
+          open: 'Open cart',
           loadFailed: 'تعذر تحميل السلة',
           removeSuccess: 'تمت إزالة العنصر من السلة.',
           removeFailed: 'تعذر إزالة العنصر',
           checkoutFailed: 'تعذر إتمام الحجز',
           checkoutSuccess: 'تم إنشاء الموعد! سيتم تحويلك…',
           remove: 'إزالة العنصر'
+        },
+        userMenu: {
+          open: 'Open user menu',
+          greeting: 'Welcome back',
+          tier: 'Malva Member',
+          profile: 'Profile',
+          appointments: 'Appointments',
+          wallet: 'Wallet',
+          favorites: 'Favorites',
+          giftCard: 'Send a gift card',
+          forms: 'Forms',
+          orders: 'Product orders',
+          settings: 'Settings',
+          language: 'Languages',
+          logout: 'Log out',
+          download: 'Download the app',
+          help: 'Help & support',
+          business: 'For businesses'
         },
         dynamic: {
           names: {
