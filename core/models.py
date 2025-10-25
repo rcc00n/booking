@@ -1673,6 +1673,25 @@ class Product(models.Model):
     name = models.CharField(max_length=200, unique=True)
     sku = models.CharField(max_length=64, blank=True, null=True, unique=True)
     description = models.TextField(blank=True)
+    measure_type = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Unit type used by the supplier (e.g. ml, g, pack).",
+    )
+    measure_value = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Package size or quantity as provided by the supplier.",
+    )
+    brand = models.CharField(max_length=120, blank=True)
+    supplier = models.CharField(max_length=120, blank=True)
+    cost_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Internal cost per unit.",
+    )
     price = models.DecimalField(
         max_digits=10,
         decimal_places=2,

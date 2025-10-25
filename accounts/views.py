@@ -43,12 +43,16 @@ from core.models import (
 )
 from core.services.intake_assignments import ensure_universal_assignments_for_profile
 from core.services.pricing import get_available_prepayment_percents
+from core.services.product_import import import_products_from_file, ProductImportError
 
 from .forms import (
     AccountPasswordResetForm,
     AccountSetPasswordForm,
     ClientRegistrationForm,
-    ClientProfileForm, HealthConditionsForm, ProductSaleForm,
+    ClientProfileForm,
+    HealthConditionsForm,
+    ProductImportForm,
+    ProductSaleForm,
 )
 
 from .emails import start_or_resend_verification, MAX_ATTEMPTS, ResendNotAllowed, RESEND_COOLDOWN_SEC
@@ -373,15 +377,21 @@ class ProductSalesView(RoleRequiredMixin, TemplateView):
             raise PermissionDenied("User profile is required to record product sales.")
         return profile
 
-    def _build_form(self, data=None) -> ProductSaleForm:
+    def _build_sale_form(self, data=None) -> ProductSaleForm:
         profile = getattr(self.request.user, "userprofile", None)
         return ProductSaleForm(data=data, employee_profile=profile)
+
+    def _build_import_form(self, data=None, files=None) -> ProductImportForm:
+        return ProductImportForm(data=data, files=files)
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
 
-        form = kwargs.get("form") or self._build_form()
-        ctx["form"] = form
+        sale_form = kwargs.get("sale_form") or self._build_sale_form()
+        import_form = kwargs.get("import_form") or self._build_import_form()
+        ctx["sale_form"] = sale_form
+        ctx["form"] = sale_form  # backwards compatibility for template snippets
+        ctx["import_form"] = import_form
 
         inventory_qs = Product.objects.select_related("category").order_by("name")
         ctx["inventory"] = inventory_qs
@@ -416,27 +426,34 @@ class ProductSalesView(RoleRequiredMixin, TemplateView):
         return ctx
 
     def post(self, request, *args, **kwargs):
+        action = request.POST.get("action") or "record-sale"
+        if action == "import-products":
+            return self._handle_import(request)
+        return self._handle_sale(request)
+
+    def _handle_sale(self, request):
         try:
             profile = self._employee_profile()
         except PermissionDenied as exc:
             messages.error(request, str(exc))
             return redirect("product-sales")
 
-        form = self._build_form(data=request.POST)
-        if form.is_valid():
+        sale_form = self._build_sale_form(data=request.POST)
+        import_form = self._build_import_form()
+        if sale_form.is_valid():
             try:
-                sale = form.save(employee_profile=profile)
+                sale = sale_form.save(employee_profile=profile)
             except ValidationError as exc:
                 if hasattr(exc, "message_dict"):
                     for field, messages_list in exc.message_dict.items():
                         for msg in messages_list:
-                            if field in form.fields:
-                                form.add_error(field, msg)
+                            if field in sale_form.fields:
+                                sale_form.add_error(field, msg)
                             else:
-                                form.add_error(None, msg)
+                                sale_form.add_error(None, msg)
                 else:
                     for msg in getattr(exc, "messages", [str(exc)]):
-                        form.add_error(None, msg)
+                        sale_form.add_error(None, msg)
             else:
                 messages.success(
                     request,
@@ -444,7 +461,48 @@ class ProductSalesView(RoleRequiredMixin, TemplateView):
                 )
                 return redirect("product-sales")
 
-        return self.render_to_response(self.get_context_data(form=form), status=400)
+        return self.render_to_response(
+            self.get_context_data(sale_form=sale_form, import_form=import_form),
+            status=400,
+        )
+
+    def _handle_import(self, request):
+        sale_form = self._build_sale_form()
+        import_form = self._build_import_form(data=request.POST, files=request.FILES)
+        if not import_form.is_valid():
+            return self.render_to_response(
+                self.get_context_data(sale_form=sale_form, import_form=import_form),
+                status=400,
+            )
+
+        uploaded = import_form.cleaned_data["import_file"]
+        try:
+            result = import_products_from_file(uploaded)
+        except ProductImportError as exc:
+            import_form.add_error("import_file", str(exc))
+            return self.render_to_response(
+                self.get_context_data(sale_form=sale_form, import_form=import_form),
+                status=400,
+            )
+
+        if result.created or result.updated:
+            messages.success(
+                request,
+                f"Imported {result.created} new products and updated {result.updated}.",
+            )
+        else:
+            messages.info(request, "No products were imported. The file did not contain new data.")
+
+        if result.errors:
+            preview = "; ".join(
+                f"Row {msg.row_number}: {msg.message}"
+                for msg in result.errors[:3]
+            )
+            if len(result.errors) > 3:
+                preview += f" (+{len(result.errors) - 3} more rows)"
+            messages.warning(request, f"Some rows were skipped: {preview}")
+
+        return redirect("product-sales")
 
 
 # =========================

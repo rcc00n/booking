@@ -4405,6 +4405,9 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
     list_display = (
         "name",
         "category",
+        "sku",
+        "brand",
+        "supplier",
         "price",
         "quantity_in_stock",
         "low_stock_indicator",
@@ -4412,12 +4415,19 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
         "updated_at",
     )
     list_filter = ("is_active", "category", LowStockFilter)
-    search_fields = ("name", "sku")
+    search_fields = ("name", "sku", "brand", "supplier")
     ordering = ("name",)
     readonly_fields = ("created_at", "updated_at")
     fieldsets = (
-        (None, {"fields": ("name", "sku", "category", "description", "is_active")}),
-        ("Pricing & Inventory", {"fields": ("price", "quantity_in_stock", "low_stock_threshold")}),
+        (
+            None,
+            {"fields": ("name", "sku", "category", "brand", "supplier", "description", "is_active")},
+        ),
+        ("Measure", {"fields": ("measure_type", "measure_value")}),
+        (
+            "Pricing & Inventory",
+            {"fields": ("cost_price", "price", "quantity_in_stock", "low_stock_threshold")},
+        ),
         ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
     )
 
@@ -4433,6 +4443,11 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "SKU",
             "Category",
             "Description",
+            "Measure Type",
+            "Measure Value",
+            "Brand",
+            "Supplier",
+            "Cost Price",
             "Price",
             "Quantity In Stock",
             "Low Stock Threshold",
@@ -4448,6 +4463,11 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 product.sku or "",
                 product.category.name if product.category else "",
                 product.description,
+                product.measure_type,
+                product.measure_value,
+                product.brand,
+                product.supplier,
+                product.cost_price,
                 product.price,
                 product.quantity_in_stock,
                 product.low_stock_threshold,
@@ -4463,8 +4483,8 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "Products",
             headers,
             rows,
-            money_cols={6},
-            datetime_cols={11, 12},
+            money_cols={10, 11},
+            datetime_cols={16, 17},
         )
 
     def changelist_view(self, request, extra_context=None):
