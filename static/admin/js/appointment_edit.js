@@ -45,6 +45,22 @@
     const totalDisplay = document.getElementById("appt-total");
     const taxRowDisplay = document.getElementById("appt-tax-row");
     const gstLabelDisplay = document.getElementById("gst-label");
+    const feeDisplay = document.getElementById("appt-fee");
+    const feeRowDisplay = document.getElementById("appt-fee-row");
+    const CARD_FEE_PERCENT = Number(parseJSON("card-fee-percent", "0"));
+    const CARD_FEE_FIXED = Number(parseJSON("card-fee-fixed", "0"));
+    let cardFeeApplied = false;
+    function initialFeeAppliedState() {
+        const payButton = document.getElementById("pay-btn");
+        if (payButton && typeof payButton.dataset.feeApplied !== "undefined") {
+            return payButton.dataset.feeApplied === "true";
+        }
+        const cfg = window.APPOINTMENT_PAY || {};
+        if (typeof cfg.feeApplied !== "undefined") {
+            return !!cfg.feeApplied;
+        }
+        return false;
+    }
     if (taxRowDisplay && !GST_ENABLED) {
         taxRowDisplay.classList.add("ab-hidden");
     }
@@ -83,6 +99,18 @@
         }
         select.value = val;
     }
+    function ensureUiOption(selectEl, value, label) {
+        if (!selectEl) return;
+        const val = String(value ?? "");
+        if (!val) return;
+        const exists = Array.from(selectEl.options).some(o => o.value === val);
+        if (!exists) {
+            const opt = document.createElement("option");
+            opt.value = val;
+            opt.textContent = label || val;
+            selectEl.appendChild(opt);
+        }
+    }
     function roundCurrency(value) {
         return Math.round((Number(value) || 0) * 100) / 100;
     }
@@ -97,6 +125,18 @@
     function money(value) {
         const amount = Number(value || 0);
         return `${CURRENCY_SYMBOL}${amount.toFixed(2)}`;
+    }
+    function moneySigned(value) {
+        const numeric = Number(value || 0);
+        if (Math.abs(numeric) < 0.005) {
+            return money(0);
+        }
+        const sign = numeric < 0 ? "-" : "";
+        return `${sign}${money(Math.abs(numeric))}`;
+    }
+    function parseAmount(value) {
+        const num = Number.parseFloat(value);
+        return Number.isFinite(num) ? num : 0;
     }
     const GST_LABEL = `GST ${formatPercent(GST_PERCENT)}%`;
     function populateMasters(uiSelect) {
@@ -134,25 +174,74 @@
     function updateRowSummary(row) {
         const priceInput = row.querySelector('input[name$="-unit_price"]');
         const deleteInput = row.querySelector('input[name$="-DELETE"]');
+        const discountInput = row.querySelector('input[name$="-manual_discount_percent"]');
         const isDeleted = !!(deleteInput && deleteInput.checked);
-        const datasetValue = row.dataset.finalPrice ? Number(row.dataset.finalPrice) : 0;
-        const rawValue = priceInput && priceInput.value !== '' ? Number(priceInput.value) : NaN;
-        const subtotal = isDeleted ? 0 : roundCurrency(Number.isFinite(rawValue) ? rawValue : datasetValue);
-        row.dataset.finalPrice = String(subtotal.toFixed(2));
-        const taxable = !isDeleted && GST_ENABLED && row.dataset.taxable === "1";
-        const tax = taxable ? roundCurrency(subtotal * GST_PERCENT / 100) : 0;
-        const total = roundCurrency(subtotal + tax);
+        const hasSnapshot = row.dataset.hasPricing === "1";
+        const isDirty = row.dataset.pricingDirty === "1";
+
+        let baseAmount = roundCurrency(parseAmount(row.dataset.basePrice));
+        if (!baseAmount) {
+            baseAmount = roundCurrency(parseAmount(row.dataset.finalPrice));
+            row.dataset.basePrice = baseAmount.toFixed(2);
+        }
+
+        const storedFinal = roundCurrency(parseAmount(row.dataset.finalPrice));
+        const storedTax = roundCurrency(parseAmount(row.dataset.taxAmount));
+
+        let taxable = !isDeleted && GST_ENABLED && row.dataset.taxable === "1";
+        if (hasSnapshot && !isDeleted && storedTax > 0) {
+            taxable = true;
+            row.dataset.taxable = "1";
+        }
+
+        let subtotal;
+        let tax;
+
+        if (hasSnapshot && !isDirty && !isDeleted) {
+            subtotal = storedFinal;
+            tax = taxable ? storedTax : 0;
+        } else {
+            const rawValue = priceInput && priceInput.value !== '' ? Number(priceInput.value) : NaN;
+            subtotal = isDeleted ? 0 : roundCurrency(Number.isFinite(rawValue) ? rawValue : storedFinal);
+            tax = taxable ? roundCurrency(subtotal * GST_PERCENT / 100) : 0;
+            row.dataset.finalPrice = subtotal.toFixed(2);
+            row.dataset.taxAmount = tax.toFixed(2);
+        }
+
+        let discountAmount = roundCurrency(Math.abs(parseAmount(row.dataset.discountAmount)));
+        if (!(hasSnapshot && !isDirty && !isDeleted)) {
+            let computedDiscount = baseAmount > subtotal ? roundCurrency(baseAmount - subtotal) : 0;
+            if (!computedDiscount && discountInput) {
+                const manualPercent = Number.parseFloat(discountInput.value || "0");
+                if (Number.isFinite(manualPercent) && manualPercent > 0 && !isDeleted) {
+                    computedDiscount = roundCurrency(baseAmount * (manualPercent / 100));
+                    subtotal = roundCurrency(baseAmount - computedDiscount);
+                    tax = taxable ? roundCurrency(subtotal * GST_PERCENT / 100) : 0;
+                    row.dataset.finalPrice = subtotal.toFixed(2);
+                    row.dataset.taxAmount = tax.toFixed(2);
+                }
+            }
+            discountAmount = computedDiscount;
+        }
+        row.dataset.discountAmount = discountAmount.toFixed(2);
 
         const subtotalEl = row.querySelector('.js-item-subtotal');
         if (subtotalEl) subtotalEl.textContent = money(subtotal);
+        const baseEl = row.querySelector('.js-item-base');
+        if (baseEl) baseEl.textContent = money(baseAmount);
+        const discountEl = row.querySelector('.js-item-discount');
+        if (discountEl) discountEl.textContent = moneySigned(-discountAmount);
         const taxRowEl = row.querySelector('.js-item-tax-row');
-        if (taxRowEl) taxRowEl.classList.toggle('ab-hidden', !taxable);
+        if (taxRowEl) taxRowEl.classList.toggle('ab-hidden', !(taxable && (subtotal > 0 || tax > 0)));
         const taxLabelEl = row.querySelector('.js-item-tax-label');
         if (taxLabelEl) taxLabelEl.textContent = GST_LABEL;
         const taxEl = row.querySelector('.js-item-tax');
         if (taxEl) taxEl.textContent = money(tax);
-        const totalEl = row.querySelector('.js-item-total');
-        if (totalEl) totalEl.textContent = money(total);
+       const total = roundCurrency(subtotal + tax);
+       const totalEl = row.querySelector('.js-item-total');
+       if (totalEl) totalEl.textContent = money(total);
+        const tagsEl = row.querySelector('.js-item-tags');
+        if (tagsEl) tagsEl.style.display = row.dataset.pricingDirty === "1" ? "none" : "";
 
         return { subtotal, tax, total };
     }
@@ -186,30 +275,75 @@
         return { subtotal, tax, total };
     }
 
-function recomputeAllTotals() {
+    function recomputeAllTotals() {
         let subtotalSum = 0;
         let taxSum = 0;
+        let baseSum = 0;
+        let discountSum = 0;
+        let productSubtotal = 0;
+
         $$('.ab-item', itemsContainer).forEach(row => {
             const { subtotal, tax } = updateRowSummary(row);
             subtotalSum += subtotal;
             taxSum += tax;
+
+            const hasSnapshot = row.dataset.hasPricing === "1" && row.dataset.pricingDirty !== "1";
+            const baseAmount = roundCurrency(parseAmount(row.dataset.basePrice));
+            const discountAmount = roundCurrency(parseAmount(row.dataset.discountAmount));
+
+            if (hasSnapshot) {
+                baseSum += baseAmount;
+                discountSum += discountAmount;
+            } else {
+                const effectiveBase = baseAmount || subtotal;
+                baseSum += effectiveBase;
+                discountSum += discountAmount || (effectiveBase > subtotal ? roundCurrency(effectiveBase - subtotal) : 0);
+            }
         });
+
         if (salesContainer) {
             $$('.ps-item', salesContainer).forEach(row => {
                 const { subtotal, tax } = updateSaleSummary(row);
                 subtotalSum += subtotal;
                 taxSum += tax;
+                productSubtotal += subtotal;
             });
         }
+
         subtotalSum = roundCurrency(subtotalSum);
         taxSum = roundCurrency(taxSum);
-        const totalSum = roundCurrency(subtotalSum + taxSum);
+        const preFeeTotal = roundCurrency(subtotalSum + taxSum);
+        let processingFee = 0;
+        if (cardFeeApplied && preFeeTotal > 0 && (CARD_FEE_PERCENT > 0 || CARD_FEE_FIXED > 0)) {
+            processingFee = roundCurrency((preFeeTotal * CARD_FEE_PERCENT) + CARD_FEE_FIXED);
+        }
+        const totalSum = roundCurrency(preFeeTotal + processingFee);
 
         if (subtotalDisplay) subtotalDisplay.textContent = money(subtotalSum);
         if (taxDisplay) taxDisplay.textContent = money(taxSum);
-        if (totalDisplay) totalDisplay.textContent = money(totalSum);
-        if (taxRowDisplay) taxRowDisplay.classList.toggle('ab-hidden', !GST_ENABLED);
+        if (totalDisplay) {
+            totalDisplay.textContent = money(totalSum);
+            totalDisplay.dataset.totalAmount = totalSum.toFixed(2);
+        }
+        if (taxRowDisplay) taxRowDisplay.classList.toggle('ab-hidden', taxSum === 0);
         if (gstLabelDisplay) gstLabelDisplay.textContent = GST_LABEL;
+        if (feeDisplay) feeDisplay.textContent = money(processingFee);
+        if (feeRowDisplay) feeRowDisplay.style.display = processingFee > 0 ? "" : "none";
+
+        const baseDisplay = document.getElementById('appt-base-subtotal');
+        if (baseDisplay) baseDisplay.textContent = money(baseSum);
+        const discountDisplay = document.getElementById('appt-discount-total');
+        if (discountDisplay) discountDisplay.textContent = moneySigned(-discountSum);
+        const productDisplay = document.getElementById('appt-product-subtotal');
+        if (productDisplay) {
+            productDisplay.textContent = money(productSubtotal);
+            const productLine = productDisplay.closest('.ab-summary-line');
+            if (productLine) productLine.style.display = productSubtotal > 0.004 ? "" : "none";
+        }
+        if (discountDisplay) {
+            const discountLine = discountDisplay.closest('.ab-summary-line');
+            if (discountLine) discountLine.style.display = discountSum > 0.004 ? "" : "none";
+        }
     }
     // disabled поля не уезжают в POST — подложим hidden-клон
     function readValueFor(el) {
@@ -289,6 +423,13 @@ function recomputeAllTotals() {
         const delWrap      = $(".js-del-wrap", row);
         const roBadge      = $(".js-ro-badge", row);
         row.dataset.taxable = "0";
+        row.dataset.pricingDirty = row.dataset.hasPricing === "1" ? "0" : "1";
+        row.dataset.finalPrice = roundCurrency(parseAmount(row.dataset.finalPrice)).toFixed(2);
+        row.dataset.taxAmount = roundCurrency(parseAmount(row.dataset.taxAmount)).toFixed(2);
+        row.dataset.basePrice = roundCurrency(parseAmount(row.dataset.basePrice)).toFixed(2);
+        row.dataset.discountAmount = roundCurrency(parseAmount(row.dataset.discountAmount)).toFixed(2);
+
+        const markDirty = () => { row.dataset.pricingDirty = "1"; };
 
         const syncTaxableMeta = () => {
             const opt = uiSvc && uiSvc.selectedOptions ? uiSvc.selectedOptions[0] : null;
@@ -303,7 +444,11 @@ function recomputeAllTotals() {
             durationInput.dataset.auto = '1';
         }
         if (durationInput) {
-            durationInput.addEventListener('input', () => { durationInput.dataset.auto = '0'; });
+            durationInput.addEventListener('input', () => {
+                durationInput.dataset.auto = '0';
+                markDirty();
+                recomputeAllTotals();
+            });
         }
         if (discountInput) {
             discountInput.addEventListener('change', () => {
@@ -311,15 +456,19 @@ function recomputeAllTotals() {
                 if (Number.isNaN(val)) return;
                 if (val < 0) discountInput.value = '0';
                 if (val > 100) discountInput.value = '100';
+                markDirty();
                 recomputeAllTotals();
             });
         }
         if (deleteInputToggle) {
-            deleteInputToggle.addEventListener('change', recomputeAllTotals);
+            deleteInputToggle.addEventListener('change', () => {
+                markDirty();
+                recomputeAllTotals();
+            });
         }
         if (nativePrice) {
-            nativePrice.addEventListener('input', recomputeAllTotals);
-            nativePrice.addEventListener('change', recomputeAllTotals);
+            nativePrice.addEventListener('input', () => { markDirty(); recomputeAllTotals(); });
+            nativePrice.addEventListener('change', () => { markDirty(); recomputeAllTotals(); });
         }
 
         // не трогаем значение master у существующих строк; просто отражаем его в UI
@@ -328,10 +477,14 @@ function recomputeAllTotals() {
         if (IS_MASTER && uiMaster) uiMaster.disabled = true;
 
         // услуги исходя из мастер-id
+        const nativeSvcLabel = nativeSvc?.selectedOptions?.[0]?.textContent || "";
         const effectiveMasterId = (nativeMaster ? nativeMaster.value : (uiMaster ? uiMaster.value : ""));
         populateServices(uiSvc, effectiveMasterId);
-        if (nativeSvc && nativeSvc.value) uiSvc.value = String(nativeSvc.value);
-        const initialOpt = uiSvc.selectedOptions?.[0];
+        if (nativeSvc && uiSvc && nativeSvc.value) {
+            ensureUiOption(uiSvc, nativeSvc.value, nativeSvcLabel);
+            uiSvc.value = String(nativeSvc.value);
+        }
+        const initialOpt = uiSvc?.selectedOptions?.[0];
         if (durationInput && (!durationInput.value || durationInput.dataset.auto === '1')) {
             const initialTotal = initialOpt && initialOpt.dataset ? (initialOpt.dataset.totalDuration || initialOpt.dataset.duration || '') : '';
             if (initialTotal) {
@@ -341,11 +494,9 @@ function recomputeAllTotals() {
         }
         mirrorOptions(nativeSvc, uiSvc);
 
-
-// после того как uiSvc.value задан — протолкнём в native
-
-        const label = uiSvc.selectedOptions?.[0]?.textContent || "";
-        setSelectValueEnsuringOption(nativeSvc, uiSvc.value, label);
+        // после того как uiSvc.value задан — протолкнём в native
+        const label = uiSvc?.selectedOptions?.[0]?.textContent || nativeSvcLabel;
+        setSelectValueEnsuringOption(nativeSvc, uiSvc ? uiSvc.value : "", label);
         syncTaxableMeta();
         updateRowSummary(row);
 
@@ -353,15 +504,26 @@ function recomputeAllTotals() {
 // при изменении сервиса пользователем: и в native опции/значение
         uiSvc.addEventListener("change", () => {
             mirrorOptions(nativeSvc, uiSvc);
-            const label = uiSvc.selectedOptions?.[0]?.textContent || "";
-            setSelectValueEnsuringOption(nativeSvc, uiSvc.value, label);
-            const opt = uiSvc.selectedOptions?.[0];
-            const totalDur = opt && opt.dataset ? (opt.dataset.totalDuration || opt.dataset.duration || "") : "";
-            if (durationInput) {
-                if (!durationInput.value || durationInput.dataset.auto === '1') {
-                    durationInput.value = totalDur || '';
-                    if (totalDur) {
-                        durationInput.dataset.auto = '1';
+        const label = uiSvc.selectedOptions?.[0]?.textContent || "";
+        setSelectValueEnsuringOption(nativeSvc, uiSvc.value, label);
+        const opt = uiSvc.selectedOptions?.[0];
+        const totalDur = opt && opt.dataset ? (opt.dataset.totalDuration || opt.dataset.duration || "") : "";
+        const newBase = opt && opt.dataset ? roundCurrency(parseAmount(opt.dataset.price)) : 0;
+        row.dataset.basePrice = newBase.toFixed(2);
+        row.dataset.finalPrice = newBase.toFixed(2);
+        row.dataset.discountAmount = "0.00";
+        row.dataset.taxAmount = "0.00";
+        row.dataset.hasPricing = "0";
+        row.dataset.pricingDirty = "1";
+        const priceField = row.querySelector('input[name$="-unit_price"]');
+        if (priceField) {
+            priceField.value = newBase > 0 ? newBase.toFixed(2) : "";
+        }
+        if (durationInput) {
+            if (!durationInput.value || durationInput.dataset.auto === '1') {
+                durationInput.value = totalDur || '';
+                if (totalDur) {
+                    durationInput.dataset.auto = '1';
                     }
                 }
             }
@@ -370,6 +532,7 @@ function recomputeAllTotals() {
                 populatePromos(uiPromo, uiSvc.value);
             }
             syncTaxableMeta();
+            markDirty();
             recomputeAllTotals();
         });
         // промокоды (UI остаётся disabled по умолчанию, включим ниже для «моих»)
@@ -396,16 +559,25 @@ function recomputeAllTotals() {
                     populatePromos(uiPromo, uiSvc.value);
                     if (nativePromo) nativePromo.value = uiPromo.value;
                     syncTaxableMeta();
+                    markDirty();
                     recomputeAllTotals();
                 });
 
                 // промо в нативу
                 if (nativePromo) {
-                    uiPromo.addEventListener("change", () => { nativePromo.value = uiPromo.value; });
+                    uiPromo.addEventListener("change", () => {
+                        nativePromo.value = uiPromo.value;
+                        markDirty();
+                        recomputeAllTotals();
+                    });
                 }
                 if (promoForceUI) {
                     const nativeForce = $(".native-promocode input[name$='-force_apply']", row);
-                    promoForceUI.addEventListener("change", () => { if (nativeForce) nativeForce.checked = !!promoForceUI.checked; });
+                    promoForceUI.addEventListener("change", () => {
+                        if (nativeForce) nativeForce.checked = !!promoForceUI.checked;
+                        markDirty();
+                        recomputeAllTotals();
+                    });
                 }
             } else {
                 // ЧУЖАЯ строка: всё делаем read-only
@@ -463,6 +635,8 @@ function recomputeAllTotals() {
                 if (uiSvc) uiSvc.value = "";
                 if (nativePromo) nativePromo.value = "";
                 if (uiPromo) { uiPromo.value = ""; uiPromo.disabled = true; }
+                markDirty();
+                recomputeAllTotals();
             });
             uiSvc.disabled = false;
             uiSvc.addEventListener("change", () => {
@@ -478,10 +652,24 @@ function recomputeAllTotals() {
                     }
                 }
                 populatePromos(uiPromo, uiSvc.value);
+                markDirty();
+                recomputeAllTotals();
             });
             if (nativePromo) {
                 uiPromo.disabled = false;
-                uiPromo.addEventListener("change", () => { nativePromo.value = uiPromo.value; });
+                uiPromo.addEventListener("change", () => {
+                    nativePromo.value = uiPromo.value;
+                    markDirty();
+                    recomputeAllTotals();
+                });
+            }
+            if (promoForceUI) {
+                const nativeForce = $(".native-promocode input[name$='-force_apply']", row);
+                promoForceUI.addEventListener("change", () => {
+                    if (nativeForce) nativeForce.checked = !!promoForceUI.checked;
+                    markDirty();
+                    recomputeAllTotals();
+                });
             }
         }
     }
@@ -713,6 +901,301 @@ function recomputeAllTotals() {
         initSaleRow(node);
     }
 
+    function initPayMenu() {
+        const cfg = window.APPOINTMENT_PAY || {};
+        const payBtn = document.getElementById("pay-btn");
+        const menu = document.getElementById("pay-menu");
+        if (!payBtn || !menu) return;
+
+        const csrfToken = (document.querySelector('input[name="csrfmiddlewaretoken"]') || {}).value || "";
+        const getAppointmentId = () => {
+            const raw = (payBtn.dataset.appointmentId || cfg.appointmentId || "").trim();
+            if (!raw || raw.toLowerCase() === "none") return "";
+            return raw;
+        };
+        const getAddPaymentUrl = () => payBtn.dataset.paymentAddUrl || cfg.addPaymentUrl || "";
+        const getTerminalStartUrl = () => payBtn.dataset.terminalStartUrl || cfg.terminalStartUrl || "";
+        const getTerminalConnUrl = () => payBtn.dataset.terminalConnUrl || cfg.terminalConnUrl || "";
+        const getVerifyUrl = () => payBtn.dataset.paymentVerifyUrl || cfg.verifyUrl || "";
+        const currentTotalAmount = () => {
+            if (totalDisplay && totalDisplay.dataset.totalAmount) {
+                return totalDisplay.dataset.totalAmount;
+            }
+            if (cfg.totalAmount && cfg.totalAmount !== "None") {
+                return cfg.totalAmount;
+            }
+            if (!totalDisplay) return "";
+            const raw = (totalDisplay.textContent || "").replace(/[^\d.,-]/g, "");
+            return raw.replace(",", ".");
+        };
+        const getOutstandingAmount = () => {
+            const raw =
+                payBtn.dataset.amountDue ||
+                cfg.outstandingAmount ||
+                "";
+            if (raw && String(raw).toLowerCase() !== "none") {
+                return raw;
+            }
+            return currentTotalAmount();
+        };
+
+        const requireSavedAppointment = () => {
+            const apptId = getAppointmentId();
+            if (!apptId) {
+                alert("Please save the appointment first.");
+                return null;
+            }
+            return apptId;
+        };
+
+        const showMenu = (visible) => {
+            menu.hidden = !visible;
+        };
+
+        payBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            showMenu(menu.hidden);
+        });
+
+        document.addEventListener("click", (event) => {
+            if (!menu.contains(event.target) && !payBtn.contains(event.target)) {
+                showMenu(false);
+            }
+        });
+
+        function navigateToPaymentAdd(params) {
+            const apptId = requireSavedAppointment();
+            if (!apptId) return;
+            const base = getAddPaymentUrl();
+            if (!base) {
+                alert("Payment form is unavailable.");
+                return;
+            }
+            try {
+                const url = new URL(base, window.location.origin);
+                const query = {
+                    appointment: apptId,
+                    amount: getOutstandingAmount(),
+                    ...params,
+                };
+                Object.entries(query).forEach(([key, value]) => {
+                    if (value !== undefined && value !== null && String(value).length > 0) {
+                        url.searchParams.set(key, value);
+                    }
+                });
+                window.location.href = url.toString();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function startTerminalPayment() {
+            const apptId = requireSavedAppointment();
+            if (!apptId) throw new Error("Please save the appointment first.");
+            const url = getTerminalStartUrl();
+            if (!url) {
+                throw new Error("Terminal payment endpoint is unavailable.");
+            }
+            const response = await fetch(url, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Accept": "application/json",
+                    "X-CSRFToken": csrfToken,
+                },
+            });
+            let payload = {};
+            try {
+                payload = await response.json();
+            } catch (err) {
+                console.error("Failed to parse terminal start payload", err);
+            }
+            if (!response.ok || payload.ok === false) {
+                throw new Error(payload.error || "Failed to start terminal payment.");
+            }
+            if (!payload.client_secret || !payload.payment_intent_id) {
+                throw new Error("Incomplete terminal payment response.");
+            }
+            if (payload.outstanding) {
+                payBtn.dataset.amountDue = String(payload.outstanding);
+            } else if (payload.amount) {
+                payBtn.dataset.amountDue = String(payload.amount);
+            }
+            return payload;
+        }
+
+        async function getConnectionToken() {
+            const url = getTerminalConnUrl();
+            if (!url) {
+                throw new Error("Terminal connection endpoint is unavailable.");
+            }
+            const response = await fetch(url, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Accept": "application/json" },
+            });
+            let payload = {};
+            try {
+                payload = await response.json();
+            } catch (err) {
+                console.error("Failed to parse connection token payload", err);
+            }
+            if (!response.ok || !payload.secret) {
+                throw new Error(payload.error || "Unable to fetch connection token.");
+            }
+            return payload.secret;
+        }
+
+        let terminalInstance = null;
+        let readerConnected = false;
+        let paymentInFlight = false;
+
+        async function discoverAndConnect(terminal) {
+            const discover = async (options = {}) => {
+                const discovery = await terminal.discoverReaders({
+                    discoveryMethod: "internet",
+                    ...options,
+                });
+                if (discovery.error) {
+                    throw discovery.error;
+                }
+                return discovery.discoveredReaders || [];
+            };
+
+            let readers = await discover();
+            if (!readers.length) {
+                readers = await discover({ simulated: true });
+            }
+            if (!readers.length) {
+                throw new Error("No Stripe Terminal readers found. Connect a reader or enable the simulator.");
+            }
+            const connectResult = await terminal.connectReader(readers[0]);
+            if (connectResult.error) {
+                throw connectResult.error;
+            }
+            return connectResult.reader;
+        }
+
+        async function ensureTerminalConnected() {
+            if (!window.StripeTerminal) {
+                throw new Error("StripeTerminal SDK is not loaded.");
+            }
+            if (!terminalInstance) {
+                terminalInstance = window.StripeTerminal.create({
+                    onFetchConnectionToken: () => getConnectionToken(),
+                    onUnexpectedReaderDisconnect: () => {
+                        readerConnected = false;
+                        alert("Reader disconnected. Please reconnect before collecting payment.");
+                    },
+                });
+            }
+            if (!readerConnected) {
+                await discoverAndConnect(terminalInstance);
+                readerConnected = true;
+            }
+            return terminalInstance;
+        }
+
+        function applyFeePreview(serverAmount) {
+            cardFeeApplied = true;
+            payBtn.dataset.feeApplied = "true";
+            if (typeof serverAmount !== "undefined" && serverAmount !== null) {
+                payBtn.dataset.amountDue = String(serverAmount);
+            }
+            try {
+                recomputeAllTotals();
+            } catch (err) {
+                console.warn("Failed to recompute totals", err);
+            }
+            if (!totalDisplay || typeof serverAmount === "undefined") {
+                return;
+            }
+            const numeric = Number(serverAmount);
+            if (!Number.isNaN(numeric)) {
+                totalDisplay.textContent = money(numeric);
+                totalDisplay.dataset.totalAmount = numeric.toFixed(2);
+            }
+        }
+
+        async function processTerminalPayment(clientSecret) {
+            const terminal = await ensureTerminalConnected();
+            const collect = await terminal.collectPaymentMethod(clientSecret);
+            if (collect.error) {
+                throw collect.error;
+            }
+            const processed = await terminal.processPayment(collect.paymentIntent);
+            if (processed.error) {
+                throw processed.error;
+            }
+            return processed.paymentIntent;
+        }
+
+        async function verifyPayment(paymentIntentId) {
+            const verifyUrl = getVerifyUrl();
+            if (!verifyUrl || !paymentIntentId) {
+                return;
+            }
+            try {
+                const response = await fetch(verifyUrl, {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "X-CSRFToken": csrfToken,
+                    },
+                    body: JSON.stringify({ payment_intent_id: paymentIntentId }),
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || `Verify failed (${response.status})`);
+                }
+            } catch (error) {
+                console.warn("Verify failed (webhook will still update):", error);
+            }
+        }
+
+        menu.addEventListener("click", async (event) => {
+            const target = event.target.closest("[data-pay]");
+            if (!target) return;
+            event.preventDefault();
+            showMenu(false);
+            const mode = target.getAttribute("data-pay");
+            if (mode === "cash" || mode === "etransfer") {
+                navigateToPaymentAdd({ method_hint: mode, status_hint: "succeeded" });
+                return;
+            }
+            if (mode === "card-credit" || mode === "card-debit") {
+                const outstandingRaw = getOutstandingAmount();
+                const outstandingValue = parseFloat(outstandingRaw || "0");
+                if (!outstandingRaw || Number.isNaN(outstandingValue) || outstandingValue <= 0) {
+                    alert("Appointment has no outstanding balance to charge.");
+                    return;
+                }
+                if (paymentInFlight) {
+                    alert("A terminal payment is already in progress.");
+                    return;
+                }
+                paymentInFlight = true;
+                const prevDisabled = payBtn.disabled;
+                payBtn.disabled = true;
+                try {
+                    const session = await startTerminalPayment();
+                    applyFeePreview(session.amount);
+                    await processTerminalPayment(session.client_secret);
+                    await verifyPayment(session.payment_intent_id);
+                    window.location.reload();
+                } catch (error) {
+                    console.error(error);
+                    alert(error && error.message ? error.message : "Terminal payment failed");
+                } finally {
+                    paymentInFlight = false;
+                    payBtn.disabled = prevDisabled;
+                }
+            }
+        });
+    }
+
     // вкладки
     function initTabs() {
         const tabs = $$(".tab");
@@ -748,6 +1231,7 @@ function recomputeAllTotals() {
         if (appointmentClientSelect) {
             appointmentClientSelect.addEventListener("change", refreshSaleClientDefaultFromAppointment);
         }
+        cardFeeApplied = initialFeeAppliedState();
         initExistingRows();
         initExistingSales();
         recomputeAllTotals();
@@ -789,6 +1273,7 @@ function recomputeAllTotals() {
             });
             mo.observe(container, { childList: true, subtree: true });
         }
+        initPayMenu();
     });
 
 })();

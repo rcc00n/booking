@@ -55,6 +55,45 @@ def ensure_payment_status(name: str) -> PaymentStatus:
     return status
 
 
+def get_total_received_for_appointment(appointment: Appointment | None) -> Decimal:
+    """
+    Sum the received amounts for all succeeded payments tied to the appointment.
+    Falls back to gross amount when amount_received is not populated.
+    """
+    if appointment is None:
+        return Decimal("0.00")
+
+    total = Decimal("0.00")
+    succeeded = (
+        Payment.objects.filter(appointment=appointment, status__iexact="succeeded")
+        .values_list("amount_received", "amount")
+    )
+    for amount_received, amount in succeeded:
+        value = amount_received or Decimal("0.00")
+        if value <= Decimal("0.00"):
+            value = amount or Decimal("0.00")
+        total += value
+    return total.quantize(Decimal("0.01"))
+
+
+def get_outstanding_amount(appointment: Appointment | None) -> Decimal:
+    """
+    Return the remaining balance for an appointment (grand total minus payments received).
+    """
+    if appointment is None:
+        return Decimal("0.00")
+
+    if hasattr(appointment, "total_with_tax"):
+        total = Decimal(appointment.total_with_tax or Decimal("0.00"))
+    else:
+        total = Decimal(getattr(appointment, "final_price", Decimal("0.00")) or Decimal("0.00"))
+    received = get_total_received_for_appointment(appointment)
+    remaining = total - received
+    if remaining <= Decimal("0.00"):
+        return Decimal("0.00")
+    return remaining.quantize(Decimal("0.01"))
+
+
 def _base_metadata(appointment: Appointment) -> dict[str, str]:
     user = appointment.client.user if appointment.client else None
     meta = {
@@ -112,6 +151,15 @@ def create_or_update_payment_intent(
             "Payments handled offline" if (total > Decimal("0.00") and not payments_enabled)
             else "No payment required"
         )
+        metadata = {"note": note}
+        if appointment:
+            fee_value = getattr(appointment, "card_processing_fee", None) or Decimal("0.00")
+            try:
+                fee_minor = _to_minor_units(Decimal(fee_value))
+            except Exception:
+                fee_minor = 0
+            if fee_minor:
+                metadata["card_processing_fee_minor"] = str(fee_minor)
         with transaction.atomic():
             payment = Payment.objects.create(
                 appointment=appointment,
@@ -120,7 +168,7 @@ def create_or_update_payment_intent(
                 method=method,
                 status="succeeded",
                 amount_received=amount_received,
-                metadata={"note": note},
+                metadata=metadata,
             )
             paid_status = ensure_payment_status("Paid")
             appointment.payment_status = paid_status
@@ -178,6 +226,26 @@ def create_or_update_payment_intent(
     _apply_intent(payment, intent, amount_decimal=total)
     _set_appointment_status_from_intent(appointment, intent.status)
     return PaymentIntentBundle(payment=payment, intent=intent)
+
+
+def create_or_update_terminal_intent(
+    appointment: Appointment,
+    *,
+    amount: Decimal | None = None,
+    currency: str | None = None,
+) -> PaymentIntentBundle:
+    """
+    Create or update a Stripe Terminal PaymentIntent ensuring card-present method types.
+    Delegates to create_or_update_payment_intent so downstream persistence stays consistent.
+    """
+    pm_types = ["card_present", "interac_present"]
+    return create_or_update_payment_intent(
+        appointment,
+        amount=amount,
+        currency=currency,
+        payment_method_types=pm_types,
+        allow_reuse_existing=True,
+    )
 
 
 def _apply_intent(

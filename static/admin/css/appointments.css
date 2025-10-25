@@ -681,5 +681,14 @@ html, body {
     box-shadow:0 1px 0 rgba(0,0,0,.04);
     user-select:none; text-decoration:none;
 }
+.badge-icon{
+    width:14px;
+    height:14px;
+    display:block;
+    object-fit:contain;
+}
 .badge--promo{ background:#ff7b92; color:#fff; }
+.badge--paid{ background:#dcfce7; border:1px solid #16a34a; color:#166534; }
+.badge--partial{ background:#fff7ed; border:1px solid #f59e0b; color:#92400e; }
 .badge--health{ background:#eefbf3; color:#0f5132; border-color:#b7e4c7; }
+.badge--note{ background:#eef2ff; border:1px solid #93c5fd; color:#1e3a8a; }

@@ -22,6 +22,7 @@ from core.models import (
     ServiceMaster,
     UserProfile,
 )
+from core.tests.utils import assign_service_room
 
 
 class ServiceActiveStateTests(TestCase):
@@ -54,6 +55,8 @@ class ServiceActiveStateTests(TestCase):
             duration_min=45,
             is_active=False,
         )
+        assign_service_room(cls.active_service, room_name="Active Room")
+        assign_service_room(cls.inactive_service, room_name="Inactive Room")
 
         ServiceMaster.objects.create(service=cls.active_service, master=cls.master_profile)
         ServiceMaster.objects.create(service=cls.inactive_service, master=cls.master_profile)

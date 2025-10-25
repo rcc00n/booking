@@ -233,13 +233,13 @@
       <h2>Register a sale</h2>
       <form method="post" novalidate>
         {% csrf_token %}
-        {% if form.non_field_errors %}
+        {% if sale_form.non_field_errors %}
           <div class="error-text" style="margin-bottom: 12px;">
-            {{ form.non_field_errors|join:", " }}
+            {{ sale_form.non_field_errors|join:", " }}
           </div>
         {% endif %}
         <div class="form-grid">
-          {% for field in form %}
+          {% for field in sale_form %}
             <div class="form-field{% if field.errors %} has-error{% endif %}{% if field.field.widget.input_type == 'textarea' %} form-field--wide{% endif %}">
               <label for="{{ field.id_for_label }}">{{ field.label }}</label>
               {{ field }}
@@ -254,6 +254,39 @@
         </div>
         <div class="submit-row">
           <button type="submit">Save sale</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Import products</h2>
+      <form method="post" enctype="multipart/form-data" novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="action" value="import-products">
+        {% if import_form.non_field_errors %}
+          <div class="error-text" style="margin-bottom: 12px;">
+            {{ import_form.non_field_errors|join:", " }}
+          </div>
+        {% endif %}
+        <div class="form-grid">
+          {% for field in import_form %}
+            <div class="form-field{% if field.errors %} has-error{% endif %}">
+              <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% if field.help_text %}
+                <p class="help-text">{{ field.help_text }}</p>
+              {% endif %}
+              {% for error in field.errors %}
+                <p class="error-text">{{ error }}</p>
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+        <p class="help-text" style="margin-top: -8px;">
+          Expected columns: Product name, SKU, Description, Measure Type, Measure Value, Cost price, Full price, Category, Brand, Supplier, Total Stock.
+        </p>
+        <div class="submit-row">
+          <button type="submit">Upload file</button>
         </div>
       </form>
     </div>
@@ -290,6 +323,10 @@
               <th>Product</th>
               <th>Category</th>
               <th>SKU</th>
+              <th>Measure</th>
+              <th>Brand</th>
+              <th>Supplier</th>
+              <th>Cost price</th>
               <th>Retail price</th>
               <th>In stock</th>
               <th>Low stock threshold</th>
@@ -307,6 +344,22 @@
                   {% endif %}
                 </td>
                 <td>{{ product.sku|default:"—" }}</td>
+                <td>
+                  {% if product.measure_value or product.measure_type %}
+                    {{ product.measure_value|default:"" }}{% if product.measure_value and product.measure_type %} {% endif %}{{ product.measure_type|default:"" }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ product.brand|default:"—" }}</td>
+                <td>{{ product.supplier|default:"—" }}</td>
+                <td>
+                  {% if product.cost_price is not None %}
+                    ${{ product.cost_price|floatformat:2 }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
                 <td>${{ product.price|floatformat:2 }}</td>
                 <td>{{ product.quantity_in_stock }}</td>
                 <td>

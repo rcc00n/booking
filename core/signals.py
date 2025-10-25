@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Dict, Any, List, Tuple
 import logging
+from decimal import Decimal
 
 from .utils.sms import send_sms
 from django.conf import settings
@@ -26,6 +27,7 @@ from .models import (
     ClientIntakeForm,
 )
 from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
+from core.services.payments import get_total_received_for_appointment
 from core.services.intake_assignments import (
     ensure_universal_assignments_for_form,
     ensure_universal_assignments_for_profile,
@@ -525,13 +527,23 @@ from django.apps import apps
 from django.db import transaction
 
 def ensure_payment_statuses(sender, **kwargs):
-    PaymentStatus = apps.get_model('core', 'PaymentStatus')
-    defaults = ["Not Paid", "Pending", "Paid", "Failed"]
+    PaymentStatus = apps.get_model("core", "PaymentStatus")
+    Appointment = apps.get_model("core", "Appointment")
+    defaults = ["Not Paid", "Pending", "Partially paid", "Paid", "Failed"]
     with transaction.atomic():
         for name in defaults:
-            PaymentStatus.objects.get_or_create(name=name)
+            existing = PaymentStatus.objects.filter(name=name).order_by("id")
+            if existing.exists():
+                primary = existing.first()
+                duplicates = list(existing[1:])
+                if duplicates:
+                    duplicate_ids = [dup.pk for dup in duplicates]
+                    Appointment.objects.filter(payment_status_id__in=duplicate_ids).update(payment_status=primary)
+                    PaymentStatus.objects.filter(pk__in=duplicate_ids).delete()
+            else:
+                PaymentStatus.objects.create(name=name)
 
-    PaymentMethod = apps.get_model('core', 'PaymentMethod')
+    PaymentMethod = apps.get_model("core", "PaymentMethod")
     with transaction.atomic():
         for name in ("Stripe", "Cash", "Manual", "Credit card", "Debit card"):
             PaymentMethod.objects.get_or_create(name=name)
@@ -558,6 +570,63 @@ def ensure_user_profile(sender, instance, created, **kwargs):
         UserProfile.objects.get_or_create(user=instance, defaults={"phone": None})
 
 post_save.connect(ensure_user_profile, sender=get_user_model())
+
+
+def _payment_method_name(payment: Payment) -> str:
+    method = getattr(payment, "method", None)
+    name = getattr(method, "name", "") if method else ""
+    return (name or "").strip().lower()
+
+
+def _normalize_decimal(value) -> Decimal:
+    if isinstance(value, Decimal):
+        try:
+            return value.quantize(Decimal("0.01"))
+        except Exception:
+            return Decimal("0.00")
+    if value in (None, "", "null"):
+        return Decimal("0.00")
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"))
+    except Exception:
+        return Decimal("0.00")
+
+
+def _ensure_amount_received(payment: Payment) -> None:
+    if _normalize_decimal(getattr(payment, "amount_received", None)) > Decimal("0.00"):
+        return
+
+    previous_flag = getattr(payment, "_skip_receipt_signal", False)
+    payment._skip_receipt_signal = True
+    try:
+        payment.amount_received = _normalize_decimal(getattr(payment, "amount", None))
+        payment.save(update_fields=["amount_received"])
+    finally:
+        payment._skip_receipt_signal = previous_flag
+
+
+def _appointment_grand_total(appointment) -> Decimal:
+    if not appointment:
+        return Decimal("0.00")
+    try:
+        from core.services.pricing import get_appointment_grand_total  # noqa
+
+        return get_appointment_grand_total(appointment)
+    except Exception:
+        fallback = getattr(appointment, "total_with_tax", None)
+        if fallback is None:
+            fallback = getattr(appointment, "final_price", None)
+        return _normalize_decimal(fallback)
+
+
+def _update_payment_status(appointment, total_received: Decimal, grand_total: Decimal) -> None:
+    if not appointment:
+        return
+    target_name = "Paid" if total_received >= grand_total else "Partially paid"
+    status_obj, _ = PaymentStatus.objects.get_or_create(name=target_name)
+    if appointment.payment_status_id != status_obj.id:
+        appointment.payment_status = status_obj
+        appointment.save(update_fields=["payment_status"])
 
 
 @receiver(pre_save, sender=Payment)
@@ -588,20 +657,30 @@ def trigger_receipt_pipeline(sender, instance: Payment, created: bool, **kwargs)
     if getattr(instance, "_skip_receipt_signal", False):
         return
 
-    if instance.status != "succeeded":
+    status = (instance.status or "").lower()
+    if status != "succeeded":
         return
+
+    previous_status = getattr(instance, "_previous_status", None)
+    method_name = _payment_method_name(instance)
+    appointment = getattr(instance, "appointment", None)
+
+    if method_name != "stripe":
+        _ensure_amount_received(instance)
+        grand_total = _appointment_grand_total(appointment)
+        total_received = get_total_received_for_appointment(appointment)
+        _update_payment_status(appointment, total_received, grand_total)
 
     if created and getattr(instance, "stripe_payment_intent_id", None):
         return
 
-    previous_status = getattr(instance, "_previous_status", None)
     if not created and previous_status == "succeeded":
         return
 
     if instance.receipt_sent_at:
         return
 
-    if not instance.appointment_id:
+    if not appointment:
         return
 
     payment_id = str(instance.pk)

@@ -12,7 +12,13 @@ from django.conf import settings
 from django.conf.urls.static import static
 from core.autocomplete import ServiceAutocomplete
 from django.views.generic import RedirectView, TemplateView
-from core.views import service_search, service_price, service_promocodes_api
+from core.views import (
+    service_search,
+    service_price,
+    service_promocodes_api,
+    terminal_connection_token,
+    api_terminal_start,
+)
 from core.payments.stripe_api import stripe_webhook
 from core.admin import stats_view
 from accounts.views import health_view, health_edit
@@ -47,6 +53,12 @@ urlpatterns = [
         "legal/data-processing/",
         TemplateView.as_view(template_name="legal/data_processing.html"),
         name="legal-data-processing",
+    ),
+    path("api/terminal/connection_token/", terminal_connection_token, name="terminal-conn-token"),
+    path(
+        "api/appointment/<uuid:appt_id>/terminal/start/",
+        api_terminal_start,
+        name="api-terminal-start",
     ),
 ]
 

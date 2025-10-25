@@ -65,8 +65,7 @@ class ServiceAdminListTests(TestCase):
         )
         master_profile, _ = UserProfile.objects.get_or_create(user=master_user, defaults={"phone": "+15550123456"})
         room = MasterRoom.objects.create(room="Room 1")
-        self.active_service.room = room
-        self.active_service.save(update_fields=["room"])
+        self.active_service.allowed_rooms.add(room)
         master = MasterProfile.objects.create(user=master_profile)
         ServiceMaster.objects.create(master=master, service=self.active_service)
 

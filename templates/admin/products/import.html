@@ -1,0 +1,55 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{{ changelist_url|default:'#' }}">
+      {{ opts.verbose_name_plural|capfirst }}
+    </a>
+    &rsaquo; Import products
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h1 style="margin-bottom: 0.5rem;">Import products</h1>
+    <p class="help">
+      Upload a CSV or XLSX that contains the following columns (case-insensitive order): Product name, SKU, Description,
+      Measure Type, Measure Value, Cost price, Full price, Category, Brand, Supplier, Total Stock.
+    </p>
+    <form method="post" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+      {{ form.media }}
+      {% if form.non_field_errors %}
+        <div class="alert alert-danger">
+          {% for error in form.non_field_errors %}
+            <div>{{ error }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+      <fieldset class="module aligned">
+        {% for field in form %}
+          <div class="form-row{% if field.errors %} errors{% endif %}">
+            {{ field.label_tag }}
+            <div class="field-box">
+              {{ field }}
+              {% if field.help_text %}
+                <p class="help">{{ field.help_text }}</p>
+              {% endif %}
+              {% for error in field.errors %}
+                <div class="error">{{ error }}</div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endfor %}
+      </fieldset>
+      <div class="submit-row">
+        <input type="submit" class="default" value="Upload file">
+        <a class="button" href="{{ changelist_url|default:'#' }}">
+          Cancel
+        </a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

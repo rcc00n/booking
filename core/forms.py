@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from decimal import Decimal, InvalidOperation
 
 from dal import autocomplete
 from django import forms
@@ -272,7 +273,16 @@ class AppointmentAdminForm(forms.ModelForm):
             "client",
             "start_time",
             "payment_status",    # NOTE: если есть
+            "notes",
         )
+        widgets = {
+            "notes": forms.Textarea(
+                attrs={
+                    "rows": 6,
+                    "placeholder": "Visible to staff only",
+                }
+            ),
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -307,6 +317,11 @@ class AppointmentAdminForm(forms.ModelForm):
             self.fields["promocode"].queryset = qs
             self.fields["promocode"].required = False
             self.fields["promocode"].help_text = "Выберите действующий промокод (опционально)."
+
+        notes_field = self.fields.get("notes")
+        if notes_field:
+            existing_class = notes_field.widget.attrs.get("class", "")
+            notes_field.widget.attrs["class"] = f"{existing_class} ab-textarea".strip()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -346,7 +361,20 @@ class AppointmentItemInlineForm(forms.ModelForm):
             service = Service.objects.filter(pk=service).first()
         service_field = self.fields.get("service")
         if service_field:
-            service_field.queryset = _services_for_selection()
+            current_service_id = None
+            if getattr(self.instance, "service_id", None):
+                current_service_id = self.instance.service_id
+            elif "service" in self.initial:
+                current_service_id = self.initial["service"]
+            if isinstance(current_service_id, Service):
+                current_service_id = current_service_id.pk
+            elif hasattr(current_service_id, "pk"):
+                current_service_id = current_service_id.pk
+            include_ids = [current_service_id] if current_service_id else None
+            service_field.queryset = _services_for_selection(
+                include_ids=include_ids,
+                include_inactive_ids=True,
+            )
         if "unit_price" in self.fields:
             has_price_initial = self.initial.get("unit_price") or getattr(self.instance, "unit_price", None)
             if not has_price_initial and service and getattr(service, "base_price", None) is not None:
@@ -698,6 +726,94 @@ class UserImportRowForm(forms.Form):
         if UserProfile.objects.filter(phone=phone).exists():
             raise forms.ValidationError("Phone already exists.")
         return phone
+
+
+PRODUCT_IMPORT_SUPPORTED_EXTENSIONS = (".csv", ".xlsx", ".xlsm")
+
+
+class ProductImportUploadForm(forms.Form):
+    import_file = forms.FileField(
+        label="Inventory file",
+        help_text="Upload CSV or XLSX using the supplier format.",
+    )
+
+    def clean_import_file(self):
+        uploaded = self.cleaned_data["import_file"]
+        filename = (uploaded.name or "").lower()
+        if not any(filename.endswith(ext) for ext in PRODUCT_IMPORT_SUPPORTED_EXTENSIONS):
+            raise forms.ValidationError("Unsupported file type. Upload CSV or XLSX.")
+        uploaded.seek(0)
+        return uploaded
+
+
+def _coerce_cell_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
+def _parse_decimal_value(value: str):
+    text = _coerce_cell_value(value)
+    if not text:
+        return None
+    sanitized = re.sub(r"[^\d,.\-]", "", text)
+    if sanitized.count(",") == 1 and sanitized.count(".") == 0:
+        sanitized = sanitized.replace(",", ".")
+    else:
+        sanitized = sanitized.replace(",", "")
+    try:
+        decimal_value = Decimal(sanitized)
+    except (InvalidOperation, ValueError) as exc:
+        raise forms.ValidationError("Enter a valid number.") from exc
+    if decimal_value < Decimal("0.00"):
+        raise forms.ValidationError("Value cannot be negative.")
+    return decimal_value
+
+
+def _parse_stock_value(value: str):
+    text = _coerce_cell_value(value)
+    if not text:
+        return None
+    sanitized = re.sub(r"[^\d,.\-]", "", text)
+    sanitized = sanitized.replace(",", "")
+    try:
+        if "." in sanitized:
+            decimal_value = Decimal(sanitized)
+            if decimal_value != decimal_value.quantize(Decimal("1")):
+                raise forms.ValidationError("Enter a whole number.")
+            number = int(decimal_value)
+        else:
+            number = int(sanitized)
+    except (InvalidOperation, ValueError) as exc:
+        raise forms.ValidationError("Enter a whole number.") from exc
+    if number < 0:
+        raise forms.ValidationError("Total stock cannot be negative.")
+    return number
+
+
+class ProductImportRowForm(forms.Form):
+    name = forms.CharField(max_length=200)
+    sku = forms.CharField(max_length=64, required=False)
+    description = forms.CharField(required=False)
+    measure_type = forms.CharField(max_length=64, required=False)
+    measure_value = forms.CharField(max_length=64, required=False)
+    brand = forms.CharField(max_length=120, required=False)
+    supplier = forms.CharField(max_length=120, required=False)
+    cost_price = forms.CharField(required=False)
+    full_price = forms.CharField(required=False)
+    category = forms.CharField(max_length=150, required=False)
+    total_stock = forms.CharField(required=False)
+
+    def clean_cost_price(self):
+        return _parse_decimal_value(self.cleaned_data.get("cost_price"))
+
+    def clean_full_price(self):
+        return _parse_decimal_value(self.cleaned_data.get("full_price"))
+
+    def clean_total_stock(self):
+        return _parse_stock_value(self.cleaned_data.get("total_stock"))
 # -----------------------------
 # Custom User Change Form
 # -----------------------------

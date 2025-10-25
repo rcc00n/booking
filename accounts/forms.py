@@ -463,8 +463,6 @@ class HealthConditionsForm(forms.Form):
             "surgeries": join_csv(data.get("surgeries")),
             "notes": data.get("notes", ""),
         })
-
-
 # -----------------------------
 # Retail sales
 # -----------------------------

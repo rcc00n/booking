@@ -86,6 +86,19 @@
             font-size: 13px;
         }
 
+        .key-value-table td {
+            text-align: left;
+        }
+
+        .key-value-table td:first-child {
+            width: 35%;
+            font-weight: 600;
+        }
+
+        .key-value-table td:last-child {
+            text-align: left;
+        }
+
         .footer {
             margin-top: 40px;
             border-top: 1px solid #ddd;
@@ -118,7 +131,7 @@
 
     <div class="section">
         <h2>Client</h2>
-        <table>
+        <table class="key-value-table">
             <tr>
                 <td>Name</td>
                 <td>{{ client_contact.name|default:"" }}</td>
@@ -137,7 +150,7 @@
     {% if appointment %}
     <div class="section">
         <h2>Appointment</h2>
-        <table>
+        <table class="key-value-table">
             <tr>
                 <td>Date &amp; Time</td>
                 <td>
@@ -197,7 +210,8 @@
                                 {% endif %}
                             </td>
                             <td style="text-align: right;">
-                                {{ item.price|floatformat:2 }} {{ totals.currency }}
+                                {{ item.display_price|default:item.base_price|floatformat:2 }} {{ totals.currency }}
+                                
                             </td>
                         </tr>
                     {% endfor %}
@@ -213,23 +227,59 @@
     <div class="totals">
         <table>
             <tr>
-                <td>Subtotal</td>
-                <td style="text-align: right;">{{ totals.subtotal|floatformat:2 }} {{ totals.currency }}</td>
+                <td>Subtotal (before discounts)</td>
+                <td style="text-align: right;">{{ totals.base_subtotal|floatformat:2 }} {{ totals.currency }}</td>
             </tr>
             <tr>
                 <td>Discounts</td>
-                <td style="text-align: right;">{{ totals.discount_total|floatformat:2 }} {{ totals.currency }}</td>
+                <td style="text-align: right;">-{{ totals.discount_total|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            <tr>
+                <td>Subtotal (after discounts)</td>
+                <td style="text-align: right;">{{ totals.subtotal|floatformat:2 }} {{ totals.currency }}</td>
             </tr>
             <tr>
                 <td>Taxes</td>
                 <td style="text-align: right;">{{ totals.tax_total|floatformat:2 }} {{ totals.currency }}</td>
             </tr>
             <tr>
-                <td>Total Paid</td>
-                <td style="text-align: right;">{{ totals.total|floatformat:2 }} {{ totals.currency }}</td>
+                <td>Service fee</td>
+                <td style="text-align: right;">{{ totals.service_fee|floatformat:2 }} {{ totals.currency }}</td>
             </tr>
+            <tr>
+                <td>Processing fee (Stripe)</td>
+                <td style="text-align: right;">{{ totals.processing_fee|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            <tr>
+                <td>Appointment Total</td>
+                <td style="text-align: right;">{{ totals.grand_total|default_if_none:0|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            <tr>
+                <td>Received to date</td>
+                <td style="text-align: right;">{{ totals.received_to_date|default_if_none:0|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            <tr>
+                <td>Balance due</td>
+                <td style="text-align: right;">{{ totals.balance_due|default_if_none:0|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            {% if totals.overpaid_amount|default_if_none:0 > 0 %}
+            <tr>
+                <td>Overpaid</td>
+                <td style="text-align: right;">{{ totals.overpaid_amount|default_if_none:0|floatformat:2 }} {{ totals.currency }}</td>
+            </tr>
+            {% endif %}
         </table>
     </div>
+    {% with summary=totals.summary %}
+        {% if summary.discount_tags %}
+            <p class="text-muted">
+                Discounts applied:
+                {% for tag, count in summary.discount_tags.items %}
+                    {{ tag|title }}{% if not forloop.last %}, {% endif %}
+                {% endfor %}.
+            </p>
+        {% endif %}
+    {% endwith %}
 
     <div class="footer">
         <div>

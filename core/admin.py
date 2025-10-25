@@ -1,6 +1,6 @@
 ﻿from bisect import bisect_left
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import Dict, Any, List, Sequence, Iterable, Tuple, Optional
 from dataclasses import dataclass, field
@@ -28,7 +28,8 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 from datetime import date, timedelta, time as time_cls
 from django.contrib.admin.views.decorators import staff_member_required
-from django.http import HttpRequest, HttpResponse, Http404, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, Http404, HttpResponseRedirect, HttpResponseBadRequest
+from django.templatetags.static import static
 from django.contrib.auth.models import Permission
 from django.db.models.functions import Coalesce, Concat, Greatest
 from django.db.models import DecimalField, Value
@@ -47,13 +48,22 @@ from .filters import *
 from .models import *
 from core.models import Notification
 from .forms import *
+from .forms import ProductImportUploadForm
 from .validators import *
 from core.services.user_import import (
     import_users_from_file,
     UserImportError,
     UserImportSchemaError,
 )
+from core.services.product_import import import_products_from_file, ProductImportError
+from core.services.pricing import compute_appointment_pricing, PricingComputationError
+from core.services import payments as payment_services
+from core.utils.fees import CARD_PROCESSING_PERCENT, CARD_PROCESSING_FIXED, card_processing_fee
 from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
+
+PAID_BADGE_ICON_URL = static("admin/icons/paid.png")
+PARTIAL_BADGE_ICON_URL = static("admin/icons/partially-paid.png")
+NOTES_BADGE_ICON_URL = static("admin/icons/message.png")
 
 # -----------------------------
 # Custom filter for filtering users by Role
@@ -640,49 +650,14 @@ class ExportXlsxMixin:
 
     # Экшен: 1 строка = 1 Appointment Item
     def export_appointment_items_xlsx(self, request, queryset):
-        qs = self._qs_for_export(request, queryset)
-        headers = [
-            "Appointment ID",
-            "Item ID",
-            "Item Start",
-            "Service",
-            "Master",
-            "Quantity",
-            "Unit Price",
-            "Service Discount",
-            "Promocode",
-            "Final Price",
-            "Client",
-            "Appointment Status",
-            "Payment Status",
-            "Personal Discount (Appointment)",
-        ]
-        rows = []
-        for appt in qs:
-            items = getattr(appt, "appointmentitem_set").all()
-            for it in items:
-                rows.append([
-                    str(getattr(appt, "pk", "")),
-                    str(getattr(it, "pk", "")),
-                    self._to_naive_dt(getattr(it, "start_time", None)),
-                    self._safe_str(getattr(getattr(it, "service", None), "name", getattr(it, "service", ""))),
-                    self._safe_str(getattr(getattr(it, "master", None), "short_name",
-                                           getattr(getattr(getattr(it, "master", None), "user", None), "username", ""))),
-                    getattr(it, "quantity", 1),
-                    self._as_decimal(getattr(it, "unit_price", None)),
-                    self._safe_str(getattr(getattr(it, "service_discount", None), "name", getattr(it, "service_discount", ""))),
-                    self._safe_str(getattr(getattr(it, "promocode", None), "code", getattr(it, "promocode", ""))),
-                    self._as_decimal(getattr(it, "final_price", None)),
-                    self._client_name(getattr(appt, "client", None)),
-                    self._safe_str(getattr(appt, "status", "")),
-                    self._safe_str(getattr(appt, "payment_status", "")),
-                    getattr(appt, "personal_discount", None),
-                ])
-
-        # Item Start = 3 (datetime), Unit Price = 7, Final Price = 10 (денежные)
+        dataset = self._appointment_item_export_dataset(self._qs_for_export(request, queryset))
         return self._xlsx_response(
-            "appointment_items.xlsx", "Items", headers, rows,
-            money_cols={7, 10}, datetime_cols={3}
+            "appointment_items.xlsx",
+            "Items",
+            dataset["headers"],
+            dataset["rows"],
+            money_cols=dataset["money_cols"],
+            datetime_cols=dataset["datetime_cols"],
         )
 
     export_appointment_items_xlsx.short_description = "Export Appointment Items (XLSX, 1 row per item)"
@@ -697,7 +672,22 @@ class ExportXlsxMixin:
         Полная выгрузка текущего списка (как в changelist, с учетом фильтров).
         По умолчанию — 1 строка = 1 объект self.model с его ._meta.fields.
         """
-        queryset = self.get_queryset(request)
+        queryset = self._qs_for_export(request)
+        model_meta = getattr(getattr(self, "model", None), "_meta", None)
+        model_name = getattr(model_meta, "model_name", "").lower() if model_meta else ""
+
+        if model_name == "appointment":
+            dataset = self._appointment_item_export_dataset(queryset)
+            filename = f"{self.model._meta.model_name}.xlsx"
+            return self._xlsx_response(
+                filename,
+                "Export",
+                dataset["headers"],
+                dataset["rows"],
+                money_cols=dataset["money_cols"],
+                datetime_cols=dataset["datetime_cols"],
+            )
+
         fields = [f.name for f in self.model._meta.fields]
         headers = fields
         rows = ([self._xlsx_safe(getattr(obj, f)) for f in fields] for obj in queryset)
@@ -708,15 +698,240 @@ class ExportXlsxMixin:
         Оптимизация выборки для экшенов по встречам и их позициям.
         Переопредели под свою модель при необходимости.
         """
-        qs = (queryset or self.get_queryset(request)).select_related(
-            "client",
-        ).prefetch_related(
-            "appointmentitem_set__service",
-            "appointmentitem_set__master",
-            "appointmentitem_set__promocode",
-            "appointmentitem_set__service_discount",
+        qs = (queryset or self.get_queryset(request))
+
+        model_meta = getattr(getattr(self, "model", None), "_meta", None)
+        model_name = getattr(model_meta, "model_name", "").lower() if model_meta else ""
+        if model_name != "appointment":
+            return qs
+
+        qs = qs.select_related("client__user")
+
+        item_qs = AppointmentItem.objects.select_related(
+            "service",
+            "service__category",
+            "master__user__user",
+        ).order_by("start_time")
+
+        history_qs = (
+            AppointmentStatusHistory.objects
+            .select_related("status", "set_by__user", "cancellation_reason")
+            .order_by("-set_at")
         )
-        return qs
+
+        payment_qs = Payment.objects.select_related("method")
+
+        return qs.prefetch_related(
+            Prefetch("items", queryset=item_qs, to_attr="_export_items"),
+            Prefetch(
+                "appointmentstatushistory_set",
+                queryset=history_qs,
+                to_attr="_export_status_history",
+            ),
+            Prefetch("payments", queryset=payment_qs, to_attr="_export_payments"),
+        )
+
+    def _appointment_item_export_dataset(self, qs):
+        """
+        Построение набора данных для XLSX с 1 строкой на AppointmentItem.
+        """
+        headers = [
+            "Appt. ref.",
+            "Client",
+            "Team member",
+            "Status",
+            "Created date",
+            "Scheduled date",
+            "Cancelled date",
+            "Category",
+            "Service",
+            "Duration (mins)",
+            "Appt. slot",
+            "Created by",
+            "Cancelled by",
+            "Net sales",
+            "Cancellation reason",
+            "Fees charged",
+            "Upfront payments",
+        ]
+
+        card_method_keywords = ("card", "credit", "debit", "terminal", "stripe")
+
+        def person_label(entity):
+            if entity is None:
+                return ""
+            user_obj = None
+            candidate = getattr(entity, "user", None)
+            if candidate is not None:
+                nested = getattr(candidate, "user", None)
+                user_obj = nested or candidate
+            elif hasattr(entity, "get_full_name"):
+                name = entity.get_full_name()
+                if name:
+                    return name
+                return getattr(entity, "username", "") or ""
+            if user_obj is None:
+                return ""
+            full_name = user_obj.get_full_name()
+            if full_name:
+                return full_name
+            return getattr(user_obj, "username", "") or ""
+
+        def localize_dt(value):
+            if not value:
+                return None
+            try:
+                return localtime(value)
+            except Exception:
+                return value
+
+        def to_excel_dt(value):
+            dt = localize_dt(value)
+            if isinstance(dt, datetime) and is_aware(dt):
+                return dt.replace(tzinfo=None)
+            return dt
+
+        def coalesce_decimal(*values):
+            for candidate in values:
+                if candidate in (None, ""):
+                    continue
+                if isinstance(candidate, Decimal):
+                    return candidate.quantize(TWOPLACES)
+                try:
+                    return Decimal(candidate).quantize(TWOPLACES)
+                except (InvalidOperation, TypeError, ValueError):
+                    continue
+            return Decimal("0.00")
+
+        def derive_status_bundle(appt):
+            status_name = getattr(getattr(appt, "status", None), "name", None)
+            history = getattr(appt, "_export_status_history", None)
+            if history is None:
+                history = list(
+                    appt.appointmentstatushistory_set.select_related(
+                        "status", "set_by__user", "cancellation_reason"
+                    ).order_by("-set_at")
+                )
+            cancelled_dt = None
+            cancelled_by = ""
+            cancel_reason = ""
+            if history:
+                latest = history[0]
+                if not status_name:
+                    status_name = getattr(getattr(latest, "status", None), "name", None)
+                for entry in history:
+                    entry_status = (getattr(getattr(entry, "status", None), "name", "") or "").lower()
+                    if entry_status in {"cancelled", "canceled"}:
+                        cancelled_dt = getattr(entry, "set_at", None)
+                        cancelled_by = person_label(getattr(entry, "set_by", None))
+                        cancel_reason = getattr(getattr(entry, "cancellation_reason", None), "name", "") or ""
+                        break
+            return status_name or "New", cancelled_dt, cancelled_by, cancel_reason
+
+        def uses_card_fee(appt):
+            if getattr(appt, "apply_card_processing_fee", False):
+                return True
+            payments = getattr(appt, "_export_payments", None)
+            if payments is None:
+                payments = appt.payments.select_related("method").all()
+            for payment in payments:
+                method_name = (getattr(getattr(payment, "method", None), "name", "") or "").lower()
+                if any(keyword in method_name for keyword in card_method_keywords):
+                    return True
+            return False
+
+        def iter_items(appt):
+            items = getattr(appt, "_export_items", None)
+            if items is not None:
+                return items
+            return appt.items.select_related(
+                "service",
+                "service__category",
+                "master__user__user",
+            ).order_by("start_time")
+
+        def short_reference(appt):
+            value = getattr(appt, "id", None) or getattr(appt, "pk", None)
+            if not value:
+                return ""
+            hex_value = getattr(value, "hex", None)
+            if hex_value:
+                return hex_value[:8].upper()
+            return str(value).replace("-", "")[:8].upper()
+
+        rows = []
+        for appt in qs:
+            status_name, cancelled_dt, cancelled_by, cancel_reason = derive_status_bundle(appt)
+            created_by_display = person_label(getattr(appt, "created_by", None))
+            client_display = person_label(getattr(appt, "client", None))
+            fee_applicable = uses_card_fee(appt)
+            appt_ref = short_reference(appt)
+            created_dt = to_excel_dt(getattr(appt, "created_at", None))
+
+            for item in iter_items(appt):
+                service = getattr(item, "service", None)
+                category = getattr(getattr(service, "category", None), "name", "") if service else ""
+                service_name = getattr(service, "name", "") or ""
+                duration_override = getattr(item, "duration_override_min", None)
+                if duration_override is not None:
+                    duration_minutes = int(duration_override)
+                    buffer_minutes = 0
+                else:
+                    base_duration = getattr(service, "duration_min", None) if service else None
+                    duration_minutes = int(base_duration or 0)
+                    buffer_minutes = int(getattr(service, "extra_time_min", 0) or 0) if service else 0
+                slot_minutes = duration_minutes + buffer_minutes
+
+                start_dt_local = localize_dt(getattr(item, "start_time", None))
+                scheduled_dt = to_excel_dt(getattr(item, "start_time", None))
+                end_dt_local = start_dt_local + timedelta(minutes=slot_minutes) if start_dt_local else None
+                appt_slot = ""
+                if start_dt_local and end_dt_local:
+                    appt_slot = f"{start_dt_local.strftime('%H:%M:%S')}-{end_dt_local.strftime('%H:%M:%S')}"
+
+                net_sales = coalesce_decimal(
+                    getattr(item, "final_price", None),
+                    getattr(item, "unit_price", None),
+                    getattr(service, "base_price", None) if service else None,
+                )
+                tax_component = None
+                try:
+                    tax_component = getattr(item, "tax_amount", None)
+                except Exception:
+                    tax_component = None
+                if tax_component not in (None, ""):
+                    net_sales = (net_sales + coalesce_decimal(tax_component)).quantize(TWOPLACES)
+                fees_charged = Decimal("0.00")
+                if fee_applicable:
+                    fees_charged = (net_sales * CARD_PROCESSING_PERCENT + CARD_PROCESSING_FIXED).quantize(TWOPLACES)
+                upfront_payments = Decimal("0.00")
+
+                rows.append([
+                    appt_ref,
+                    client_display,
+                    person_label(getattr(item, "master", None)),
+                    status_name,
+                    created_dt,
+                    scheduled_dt,
+                    to_excel_dt(cancelled_dt),
+                    category or "",
+                    service_name,
+                    duration_minutes,
+                    appt_slot,
+                    created_by_display,
+                    cancelled_by,
+                    net_sales,
+                    cancel_reason,
+                    fees_charged,
+                    upfront_payments,
+                ])
+
+        return {
+            "headers": headers,
+            "rows": rows,
+            "money_cols": {14, 16, 17},
+            "datetime_cols": {5, 6, 7},
+        }
 
     # ============ НИЗКИЙ УРОВЕНЬ (XLSX) ============
 
@@ -1831,7 +2046,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
     ordering = ("-start_time",)
     autocomplete=["promocode",]
-    readonly_fields = ("final_price", "discount_source", "personal_discount_percent", "computed_total_readonly", "items_preview",)
+    readonly_fields = ("final_price", "card_processing_fee", "discount_source", "personal_discount_percent", "computed_total_readonly", "items_preview",)
 
     fieldsets = (
         (None, {
@@ -1842,8 +2057,10 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "status",             # если есть
                 "payment_status",     # если есть
                 "personal_discount",  # если есть
+                "card_processing_fee",
                 "computed_total_readonly",
                 "items_preview",
+                "notes",
             )
         }),
     )
@@ -1895,6 +2112,34 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             data.setdefault("master", mp)
 
         return data
+
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        extra_context = extra_context or {}
+        obj = None
+        if object_id:
+            obj = self.get_object(request, object_id)
+
+        def _safe_reverse(name, *, kwargs=None):
+            try:
+                return reverse(name, kwargs=kwargs) if kwargs else reverse(name)
+            except NoReverseMatch:
+                return ""
+
+        extra_context.setdefault("terminal_conn_token_url", _safe_reverse("terminal-conn-token"))
+        if obj:
+            extra_context.setdefault(
+                "terminal_start_url",
+                _safe_reverse("api-terminal-start", kwargs={"appt_id": obj.pk}),
+            )
+            extra_context.setdefault(
+                "payment_verify_url",
+                _safe_reverse("api-payment-verify", kwargs={"appt_id": obj.pk}),
+            )
+        else:
+            extra_context.setdefault("terminal_start_url", "")
+            extra_context.setdefault("payment_verify_url", "")
+
+        return super().changeform_view(request, object_id, form_url, extra_context)
 
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
 
@@ -2010,6 +2255,82 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             else:
                 promos_global.append(payload)
 
+        appointment_pricing_snapshot = None
+        item_pricing_map: Dict[str, Any] = {}
+        if obj:
+            try:
+                appointment_pricing_snapshot = compute_appointment_pricing(obj)
+            except PricingComputationError:
+                appointment_pricing_snapshot = None
+
+        if appointment_pricing_snapshot:
+            ctx["appointment_pricing_snapshot"] = appointment_pricing_snapshot
+            if items_inline is not None:
+                lookup = {
+                    item_data.get("id"): item_data
+                    for item_data in appointment_pricing_snapshot.get("items", [])
+                    if item_data.get("id")
+                }
+                mapped: Dict[str, Any] = {}
+                for form in items_inline.formset.forms:
+                    inst_pk = getattr(form.instance, "pk", None)
+                    if inst_pk:
+                        data = lookup.get(str(inst_pk))
+                        if data:
+                            mapped[form.prefix] = data
+                item_pricing_map = mapped
+            ctx["item_pricing_map"] = item_pricing_map
+            ctx["currency_code"] = appointment_pricing_snapshot.get("currency") or getattr(settings, "CURRENCY_CODE", "CAD")
+            ctx["currency_symbol"] = appointment_pricing_snapshot.get("currency_symbol") or "CA$"
+        else:
+            ctx["item_pricing_map"] = {}
+            currency_code_current = ctx.get("currency_code") or getattr(settings, "CURRENCY_CODE", "CAD")
+            ctx["currency_symbol"] = {
+                "cad": "CA$",
+                "usd": "$",
+            }.get(str(currency_code_current).lower(), f"{str(currency_code_current).upper()} ")
+
+        paid_total = Decimal("0.00")
+        if obj:
+            paid_agg = obj.payments.filter(status="succeeded").aggregate(
+                total=Coalesce(
+                    Sum(
+                        F("amount_received") - F("amount_refunded"),
+                        output_field=DecimalField(max_digits=12, decimal_places=2),
+                    ),
+                    Value(Decimal("0.00")),
+                )
+            )
+            paid_total = Decimal(paid_agg.get("total") or Decimal("0.00")).quantize(TWOPLACES)
+        ctx["paid_total"] = paid_total
+
+        appointment_total_amount = Decimal("0.00")
+        if obj:
+            if appointment_pricing_snapshot:
+                totals_payload = appointment_pricing_snapshot.get("totals") or {}
+                total_value = (
+                    totals_payload.get("grand_total")
+                    or totals_payload.get("final_price_recorded")
+                    or totals_payload.get("pre_fee_total")
+                    or Decimal("0.00")
+                )
+                appointment_total_amount = Decimal(str(total_value))
+            else:
+                appointment_total_amount = Decimal(getattr(obj, "final_price", Decimal("0.00")) or Decimal("0.00"))
+        ctx["appointment_total_amount"] = appointment_total_amount.quantize(TWOPLACES)
+        outstanding_amount = (appointment_total_amount - paid_total).quantize(TWOPLACES)
+        if outstanding_amount < Decimal("0.00"):
+            outstanding_amount = Decimal("0.00")
+        ctx["appointment_outstanding_amount"] = outstanding_amount
+
+        ctx["card_fee_percent"] = str(CARD_PROCESSING_PERCENT)
+        ctx["card_fee_fixed"] = str(CARD_PROCESSING_FIXED)
+
+        try:
+            ctx["payment_add_url"] = reverse("admin:core_payment_add")
+        except NoReverseMatch:
+            ctx["payment_add_url"] = ""
+
         intake_forms_overview: List[Dict[str, Any]] = []
         intake_required_ids: List[str] = []
         notifications = []
@@ -2065,8 +2386,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "current_master_id": mp.id if mp else None,
             "gst_percent": str(getattr(settings, "GST_PERCENT", Decimal("5.0"))),
             "gst_enabled": getattr(settings, "GST_ENABLED", True),
-            "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
         })
+        ctx.setdefault("currency_code", getattr(settings, "CURRENCY_CODE", "CAD"))
+        ctx.setdefault("currency_symbol", {
+            "cad": "CA$",
+            "usd": "$",
+        }.get(str(ctx["currency_code"]).lower(), f"{str(ctx['currency_code']).upper()} "))
         ctx["notifications"] = notifications
         return super().render_change_form(request, ctx, add=add, change=change, form_url=form_url, obj=obj)
 
@@ -2209,7 +2534,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             return (("Client", {"fields": ("client",)}),)
         # на редактировании — ваша стандартная форма
         return (
-            (None, {"fields": ("client", "start_time", "payment_status")}),
+            (None, {"fields": ("client", "start_time", "payment_status", "notes")}),
             ("Totals", {"fields": ("final_price", "discount_source", "personal_discount_percent"),
                         "classes": ("collapse",)}),
         )
@@ -2227,9 +2552,62 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 self.admin_site.admin_view(self.custom_create_view),
                 name="core_appointment_custom_create",
             ),
-
+            path(
+                "api/appointment/<uuid:appointment_id>/enable-card-fee/",
+                self.admin_site.admin_view(self.enable_card_fee_view),
+                name="core_appointment_enable_card_fee",
+            ),
         ]
         return custom + urls
+
+    def enable_card_fee_view(self, request, appointment_id):
+        if request.method != "POST":
+            return HttpResponseBadRequest("POST required")
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+
+        appointment = get_object_or_404(Appointment, pk=appointment_id)
+
+        try:
+            snapshot = compute_appointment_pricing(appointment)
+        except PricingComputationError:
+            appointment.recompute_totals(save=True)
+            snapshot = compute_appointment_pricing(appointment)
+
+        totals = snapshot.get("totals") or {}
+        pre_fee_raw = totals.get("pre_fee_total") or totals.get("final_subtotal") or Decimal("0.00")
+        try:
+            pre_fee_total = Decimal(pre_fee_raw)
+        except Exception:
+            pre_fee_total = Decimal("0.00")
+        if pre_fee_total < Decimal("0.00"):
+            pre_fee_total = Decimal("0.00")
+
+        paid_total = payment_services.get_total_received_for_appointment(appointment)
+        current_total = Decimal(appointment.final_price or Decimal("0.00"))
+        outstanding_due = (current_total - paid_total).quantize(TWOPLACES)
+
+        if outstanding_due <= Decimal("0.00"):
+            fee = Decimal("0.00")
+        else:
+            fee = card_processing_fee(outstanding_due).quantize(TWOPLACES)
+
+        existing_fee = Decimal(getattr(appointment, "card_processing_fee", Decimal("0.00")) or Decimal("0.00"))
+        total_fee = (existing_fee + fee).quantize(TWOPLACES)
+
+        appointment.apply_card_processing_fee = True
+        appointment.card_processing_fee = total_fee
+        appointment.final_price = (pre_fee_total + total_fee).quantize(TWOPLACES)
+        appointment.save(update_fields=["apply_card_processing_fee", "card_processing_fee", "final_price"])
+
+        return JsonResponse(
+            {
+                "ok": True,
+                "fee": f"{total_fee:.2f}",
+                "grand_total": f"{appointment.final_price or Decimal('0.00'):.2f}",
+                "apply_card_processing_fee": True,
+            }
+        )
 
 
     def _calendar_date_for_obj(self, obj) -> str | None:
@@ -3134,7 +3512,15 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         appointments = AppointmentItem.objects.select_related(
             'appointment__client', 'service', 'master'
-        ).prefetch_related('appointment__items__service', 'appointment__product_sales')
+        ).prefetch_related(
+            'appointment__items__service',
+            'appointment__product_sales',
+            Prefetch(
+                'appointment__payments',
+                queryset=Payment.objects.filter(status="succeeded").only("amount_received", "amount_refunded", "status"),
+                to_attr='prefetched_succeeded_payments',
+            ),
+        )
 
         start_of_day = make_aware(datetime.combine(selected_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(selected_date, datetime.max.time()))
@@ -3267,14 +3653,13 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
     Admin interface for payments.
     """
     list_display = (
-        'appointment',
-        'amount',
-        'status',
-        'method',
-        'receipt_column',
-        'email_sent_column',
-        'livemode',
-        'created_at',
+        "appointment",
+        "services_done_column",
+        "amount",
+        "status",
+        "method",
+        "receipt_column",
+        "created_at",
     )
     list_filter = (
         "method",
@@ -3304,6 +3689,46 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
         'stripe_charge_id', 'created_at',
     ]
     actions = ["action_generate_receipts", "action_send_receipts"]
+
+    def get_changeform_initial_data(self, request):
+        initial = super().get_changeform_initial_data(request)
+        appointment_id = request.GET.get("appointment")
+        amount = request.GET.get("amount")
+        method_hint = (request.GET.get("method_hint") or "").lower()
+        status_hint = (request.GET.get("status_hint") or "").strip().lower()
+
+        if appointment_id:
+            try:
+                initial["appointment"] = Appointment.objects.get(pk=appointment_id)
+            except Appointment.DoesNotExist:
+                pass
+
+        if amount:
+            try:
+                initial["amount"] = Decimal(amount)
+            except (InvalidOperation, TypeError, ValueError):
+                pass
+
+        if method_hint:
+            normalized = method_hint.replace("-", "").replace("_", "")
+            if normalized == "cash":
+                target_name = "Cash"
+            elif "transfer" in normalized:
+                target_name = "E-transfer"
+            else:
+                target_name = None
+
+            if target_name:
+                method = PaymentMethod.objects.filter(name__iexact=target_name).first()
+                if method:
+                    initial["method"] = method
+
+        if status_hint:
+            valid_statuses = {choice[0] for choice in Payment.STRIPE_STATUS_CHOICES}
+            if status_hint in valid_statuses:
+                initial["status"] = status_hint
+
+        return initial
 
     def get_fields(self, request, obj=None):
         fields = list(super().get_fields(request, obj))
@@ -3346,11 +3771,27 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
             return format_html('<a href="{}" target="_blank">Stripe</a>', obj.receipt_url)
         return "—"
 
-    @admin.display(description="Email sent", ordering="receipt_sent_at")
-    def email_sent_column(self, obj):
-        if obj.receipt_sent_at:
-            return localtime(obj.receipt_sent_at).strftime("%Y-%m-%d %H:%M")
-        return "—"
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related("appointment", "method")
+        item_qs = AppointmentItem.objects.select_related("service").order_by("start_time")
+        return qs.prefetch_related(
+            Prefetch("appointment__items", queryset=item_qs, to_attr="_admin_prefetched_items")
+        )
+
+    @admin.display(description="Services", ordering="appointment__items__service__name")
+    def services_done_column(self, obj):
+        appointment = getattr(obj, "appointment", None)
+        if appointment is None:
+            return "-"
+        items = getattr(appointment, "_admin_prefetched_items", None)
+        if items is None:
+            items = appointment.items.select_related("service").all()
+        names = [
+            getattr(getattr(item, "service", None), "name", "") or ""
+            for item in items
+            if getattr(getattr(item, "service", None), "name", "")
+        ]
+        return ", ".join(dict.fromkeys(names)) if names else "-"
 
     @admin.display(description="Resend receipt")
     def resend_receipt_action(self, obj):
@@ -3450,10 +3891,24 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     change_list_template = "admin/service/changelist_table.html"
     change_form_template = "admin/service/change_form.html"
-    list_display = ('name', 'base_price', 'category', 'room', 'duration_min', 'is_taxable', 'is_active', 'image_admin_thumb')
+    list_display = (
+        'name',
+        'base_price',
+        'category',
+        'allowed_rooms_display',
+        'duration_min',
+        'is_taxable',
+        'is_active',
+        'image_admin_thumb',
+    )
     search_fields = ('name',)
-    list_filter = ('is_active', 'is_taxable', 'category', 'room')
-    filter_horizontal = ("pre_appointment_forms",)
+    list_filter = (
+        'is_active',
+        'is_taxable',
+        'category',
+        ('allowed_rooms', admin.RelatedOnlyFieldListFilter),
+    )
+    filter_horizontal = ("pre_appointment_forms", "allowed_rooms")
     readonly_fields = ("image_preview",)
     list_per_page = 10
     fieldsets = (
@@ -3462,7 +3917,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "name",
                 "description",
                 "category",
-                "room",
+                "allowed_rooms",
                 "is_active",
                 "is_taxable",
                 "base_price",
@@ -3482,7 +3937,16 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
         }),
     )
     actions = ["mark_active", "mark_inactive"]
-    export_fields = ['name', 'description','base_price', 'category', 'room', 'duration_min', 'extra_time_min', 'is_taxable']
+    export_fields = [
+        'name',
+        'description',
+        'base_price',
+        'category',
+        'allowed_rooms_display',
+        'duration_min',
+        'extra_time_min',
+        'is_taxable',
+    ]
 
     @admin.action(description="Mark selected services as active")
     def mark_active(self, request, queryset):
@@ -3492,11 +3956,21 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     def mark_inactive(self, request, queryset):
         queryset.update(is_active=False)
 
+    @admin.display(description="Rooms")
+    def allowed_rooms_display(self, obj):
+        cache = getattr(obj, "_prefetched_objects_cache", {})
+        rooms = cache.get("allowed_rooms")
+        if rooms is None:
+            rooms = list(obj.allowed_rooms.all())
+        labels = ", ".join(filter(None, (r.room for r in rooms)))
+        return labels or "—"
+
     def get_queryset(self, request):
         qs = (
             super()
             .get_queryset(request)
             .select_related("category")
+            .prefetch_related("allowed_rooms")
         )
 
         category_value = getattr(request, "_svc_category_filter", None)
@@ -3544,7 +4018,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 with transaction.atomic():
                     service_model = self.model
                     base_name = original.name
-                    new_name = base_name
+                    new_name = base_name + "- Copy"
 
                     manager = service_model._default_manager
                     if manager.filter(name=new_name).exclude(pk=original.pk).exists():
@@ -3564,13 +4038,13 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                         duration_min=original.duration_min,
                         extra_time_min=original.extra_time_min,
                         category=original.category,
-                        room=original.room,
                         image=original.image,
                         image_alt_text=original.image_alt_text,
                         is_active=getattr(original, "is_active", True),
                     )
                     clone.save()
                     clone.pre_appointment_forms.set(original.pre_appointment_forms.all())
+                    clone.allowed_rooms.set(original.allowed_rooms.all())
             except Exception:
                 messages.error(request, _("Could not duplicate service."))
             else:
@@ -3963,9 +4437,13 @@ class ProductCategoryAdmin(admin.ModelAdmin):
 
 
 class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
+    import_template_name = "admin/products/import.html"
     list_display = (
         "name",
         "category",
+        "sku",
+        "brand",
+        "supplier",
         "price",
         "quantity_in_stock",
         "low_stock_indicator",
@@ -3973,18 +4451,76 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
         "updated_at",
     )
     list_filter = ("is_active", "category", LowStockFilter)
-    search_fields = ("name", "sku")
+    search_fields = ("name", "sku", "brand", "supplier")
     ordering = ("name",)
     readonly_fields = ("created_at", "updated_at")
     fieldsets = (
-        (None, {"fields": ("name", "sku", "category", "description", "is_active")}),
-        ("Pricing & Inventory", {"fields": ("price", "quantity_in_stock", "low_stock_threshold")}),
+        (
+            None,
+            {"fields": ("name", "sku", "category", "brand", "supplier", "description", "is_active")},
+        ),
+        ("Measure", {"fields": ("measure_type", "measure_value")}),
+        (
+            "Pricing & Inventory",
+            {"fields": ("cost_price", "price", "quantity_in_stock", "low_stock_threshold")},
+        ),
         ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
     )
 
     @admin.display(description="Low stock", boolean=True)
     def low_stock_indicator(self, obj):
         return obj.is_low_on_stock
+
+    def get_urls(self):
+        urls = super().get_urls()
+        opts = self.model._meta
+        custom = [
+            path(
+                "import/",
+                self.admin_site.admin_view(self.import_products_view),
+                name=f"{opts.app_label}_{opts.model_name}_import",
+            ),
+        ]
+        return custom + urls
+
+    def import_products_view(self, request):
+        form = ProductImportUploadForm(request.POST or None, request.FILES or None)
+        changelist_url = reverse(f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist")
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "form": form,
+            "title": "Import products",
+            "changelist_url": changelist_url,
+        }
+
+        if request.method == "POST" and form.is_valid():
+            uploaded = form.cleaned_data["import_file"]
+            try:
+                result = import_products_from_file(uploaded)
+            except ProductImportError as exc:
+                form.add_error("import_file", str(exc))
+            else:
+                if result.created or result.updated:
+                    messages.success(
+                        request,
+                        f"Imported {result.created} new products and updated {result.updated}.",
+                    )
+                else:
+                    messages.info(request, "No products were imported. The file did not contain new data.")
+
+                if result.errors:
+                    preview = "; ".join(
+                        f"Row {msg.row_number}: {msg.message}"
+                        for msg in result.errors[:3]
+                    )
+                    if len(result.errors) > 3:
+                        preview += f" (+{len(result.errors) - 3} more rows)"
+                    messages.warning(request, f"Some rows were skipped: {preview}")
+
+                return HttpResponseRedirect(changelist_url)
+
+        return TemplateResponse(request, self.import_template_name, context)
 
     def _export_all_xlsx_view(self, request):
         queryset = self.get_queryset(request).select_related("category")
@@ -3994,6 +4530,11 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "SKU",
             "Category",
             "Description",
+            "Measure Type",
+            "Measure Value",
+            "Brand",
+            "Supplier",
+            "Cost Price",
             "Price",
             "Quantity In Stock",
             "Low Stock Threshold",
@@ -4009,6 +4550,11 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 product.sku or "",
                 product.category.name if product.category else "",
                 product.description,
+                product.measure_type,
+                product.measure_value,
+                product.brand,
+                product.supplier,
+                product.cost_price,
                 product.price,
                 product.quantity_in_stock,
                 product.low_stock_threshold,
@@ -4024,8 +4570,8 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "Products",
             headers,
             rows,
-            money_cols={6},
-            datetime_cols={11, 12},
+            money_cols={10, 11},
+            datetime_cols={16, 17},
         )
 
     def changelist_view(self, request, extra_context=None):
@@ -4038,6 +4584,14 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
             extra_context["export_label"] = "📤 Export XLSX"
         except NoReverseMatch:
             extra_context.setdefault("export_url", None)
+
+        try:
+            import_url = reverse(f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_import")
+            extra_context["import_url"] = import_url
+            extra_context["import_label"] = "📥 Import products"
+        except NoReverseMatch:
+            extra_context.setdefault("import_url", None)
+
         return super().changelist_view(request, extra_context=extra_context)
 
 
@@ -5348,6 +5902,28 @@ def get_price_html(service):
 
 
 
+def _compute_paid_total(appointment_obj):
+    paid_total_value = Decimal("0.00")
+    prefetched = getattr(appointment_obj, "prefetched_succeeded_payments", None)
+    if prefetched is not None:
+        payments_iterable = prefetched
+    else:
+        payments_rel = getattr(appointment_obj, "payments", None)
+        if payments_rel is None:
+            return paid_total_value.quantize(TWOPLACES)
+        try:
+            payments_iterable = payments_rel.all()
+        except AttributeError:
+            payments_iterable = payments_rel or []
+    for payment in payments_iterable or []:
+        if getattr(payment, "status", "") != "succeeded":
+            continue
+        amount_received = getattr(payment, "amount_received", Decimal("0.00")) or Decimal("0.00")
+        amount_refunded = getattr(payment, "amount_refunded", Decimal("0.00")) or Decimal("0.00")
+        paid_total_value += Decimal(amount_received) - Decimal(amount_refunded)
+    return paid_total_value.quantize(TWOPLACES)
+
+
 def createTable(selected_date, time_pointer, end_time, slot_times, items, masters, availabilities):
     """
     items: QuerySet[AppointmentItem] с select_related('appointment__client','service','master')
@@ -5358,7 +5934,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
     MASTER_COLORS = dict(zip(master_ids, cycle(COLOR_PALETTE)))
 
     # ───── badges для позиции ───────────────────────────────────────────────────
-    def _corner_badges_for_item(item):
+    def _corner_badges_for_item(item, meta):
         # скидка: если установлен промокод/персональная скидка на уровне позиции
         promo_html = ""
         base = item.unit_price if getattr(item, "unit_price", None) is not None else item.service.base_price
@@ -5391,15 +5967,40 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         health_html = ""
         show_flag, flag_url, flag_title = _health_flag_info(item.appointment)
 
+        payment_html = ""
+        paid_total = meta.get("paid_total_decimal")
+        grand_total = meta.get("grand_total_decimal")
+        eps = Decimal("0.01")
+        if paid_total is not None and grand_total is not None and (grand_total >= eps or paid_total >= eps):
+            if paid_total >= grand_total - eps:
+                payment_html = (
+                    f"<span class='badge badge--paid'>"
+                    f"<img src=\"{PAID_BADGE_ICON_URL}\" alt=\"Paid\" class=\"badge-icon\" height=\"24\" />"
+                    f"</span>"
+                )
+            elif paid_total >= eps and paid_total < grand_total - eps:
+                payment_html = (
+                    f"<span class='badge badge--partial'>"
+                    f"<img src=\"{PARTIAL_BADGE_ICON_URL}\" alt=\"Partially paid\" class=\"badge-icon\" height=\"24\"/>"
+                    f"</span>"
+                )
+
         if show_flag:
             ico = "⚕️"
             health_html = (
                 f'<a class="badge badge--health" href="{flag_url}" title="{flag_title}">{ico}</a>'
                 if flag_url else f'<span class="badge badge--health" title="{flag_title}">{ico}</span>'
             )
-        if not promo_html and not health_html:
+        note_html = ""
+        if meta.get("has_note"):
+            note_html = (
+                f"<span class='badge badge--note'>"
+                f"<img src=\"{NOTES_BADGE_ICON_URL}\" alt=\"Notes present\" class=\"badge-icon\" height=\"24\"/>"
+                f"</span>")
+        badges_html = "".join(filter(None, [promo_html, payment_html, health_html, note_html]))
+        if not badges_html:
             return ""
-        return f"<div class='corner-badges'>{promo_html}{health_html}</div>"
+        return f"<div class='corner-badges'>{badges_html}</div>"
 
     # ───── вспомогательные ──────────────────────────────────────────────────────
     def _item_meta(item, master_obj):
@@ -5447,6 +6048,11 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             grand_total = service_total_with_tax + products_total_with_tax
         grand_total = grand_total.quantize(TWOPLACES)
 
+        paid_total_cached = getattr(appointment_obj, "_cached_paid_total", None)
+        if paid_total_cached is None:
+            paid_total_cached = _compute_paid_total(appointment_obj)
+            setattr(appointment_obj, "_cached_paid_total", paid_total_cached)
+
         has_discount = bool(getattr(appointment_obj, "discount_source", ""))
         if not has_discount and base_price_decimal > Decimal("0.00"):
             if (base_price_decimal - service_discounted_subtotal) >= Decimal("0.01"):
@@ -5454,6 +6060,8 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
 
         client = appointment_obj.client
         client_label = client.get_full_name() or client.user.username
+        notes_value = getattr(appointment_obj, "notes", "") or ""
+        has_note = bool(str(notes_value).strip())
 
         return {
             "s_local": s_local,
@@ -5473,12 +6081,16 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "products_total_raw": f"{products_total_with_tax:.2f}",
             "has_discount": has_discount,
             "phone": escape(getattr(client, "phone", "") or ""),
+            "grand_total_decimal": grand_total,
+            "paid_total_decimal": paid_total_cached,
+            "paid_total_raw": f"{paid_total_cached:.2f}",
+            "has_note": has_note,
         }
 
     def _cell_html_item(item, meta, show_cancelled=False):
         cancelled_suffix = " (Cancelled)" if show_cancelled else ""
         opacity = ".7" if show_cancelled else "1"
-        corner = _corner_badges_for_item(item)
+        corner = _corner_badges_for_item(item, meta)
         footer = f"<div class='cell-mini-footer'>{meta['items_count']} services</div>" if meta.get('items_count', 1) > 1 else ""
         return f"""
         {corner}
@@ -5519,6 +6131,8 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "products_total_raw": meta.get("products_total_raw", "0.00"),
             "has_discount": meta.get("has_discount", False),
             "items_count": meta["items_count"],
+            "paid_total_raw": meta.get("paid_total_raw", "0.00"),
+            "has_note": meta.get("has_note", False),
         }
 
     def _make_unavail_cell(kind, rowsp, colspan, avail_id, reason, from_s, to_s, until_s):
@@ -5824,6 +6438,66 @@ def _corner_badges_html(appt, appt_promocode):
     if appt_promocode or appt.final_price != appt.service.base_price:
         promo_html = "<span class='badge badge--promo' title='Applied discount'>%</span>"
 
+    paid_total = getattr(appt, "_cached_paid_total", None)
+    if paid_total is None:
+        paid_total = _compute_paid_total(appt)
+        setattr(appt, "_cached_paid_total", paid_total)
+
+    final_price = getattr(appt, "final_price", None)
+    grand_total = Decimal(final_price or Decimal("0.00"))
+    if final_price is None:
+        service_discounted_subtotal = Decimal("0.00")
+        service_tax_total = Decimal("0.00")
+        items_rel = getattr(appt, "items", None)
+        if items_rel is not None:
+            try:
+                items_iterable = items_rel.all()
+            except AttributeError:
+                items_iterable = items_rel or []
+            for appt_item in items_iterable or []:
+                final_val = getattr(appt_item, "final_price", None)
+                if final_val is None:
+                    if appt_item.unit_price is not None:
+                        final_val = appt_item.unit_price
+                    else:
+                        final_val = getattr(appt_item.service, "base_price", Decimal("0.00"))
+                service_discounted_subtotal += Decimal(final_val or Decimal("0.00"))
+                service_tax_total += Decimal(getattr(appt_item, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+        service_discounted_subtotal = service_discounted_subtotal.quantize(TWOPLACES)
+        service_tax_total = service_tax_total.quantize(TWOPLACES)
+
+        products_total_with_tax = Decimal("0.00")
+        product_sales_rel = getattr(appt, "product_sales", None)
+        if product_sales_rel is not None:
+            try:
+                product_sales_iterable = product_sales_rel.all()
+            except AttributeError:
+                product_sales_iterable = product_sales_rel or []
+            for sale in product_sales_iterable or []:
+                subtotal = Decimal(getattr(sale, "total_amount", Decimal("0.00")) or Decimal("0.00"))
+                tax_amount = Decimal(getattr(sale, "tax_amount", Decimal("0.00")) or Decimal("0.00"))
+                products_total_with_tax += subtotal + tax_amount
+        products_total_with_tax = products_total_with_tax.quantize(TWOPLACES)
+        grand_total = (service_discounted_subtotal + service_tax_total + products_total_with_tax).quantize(TWOPLACES)
+    else:
+        grand_total = grand_total.quantize(TWOPLACES)
+
+    payment_html = ""
+    eps = Decimal("0.01")
+    if grand_total is not None and (grand_total >= eps or paid_total >= eps):
+            if paid_total >= grand_total - eps:
+                payment_html = (
+                    f"<span class='badge badge--paid'>"
+                    f"<img src=\"{PAID_BADGE_ICON_URL}\" alt=\"Paid\" class=\"badge-icon\" />"
+                    f"</span>"
+                )
+            elif paid_total >= eps and paid_total < grand_total - eps:
+                payment_html = (
+                    f"<span class='badge badge--partial'>"
+                    f"<img src=\"{PARTIAL_BADGE_ICON_URL}\" alt=\"Partially paid\" class=\"badge-icon\" />"
+                    f"</span>"
+                )
+
     # здоровье
     show_flag, flag_url, flag_title = _health_flag_info(appt)
     health_html = ""
@@ -5834,10 +6508,15 @@ def _corner_badges_html(appt, appt_promocode):
         else:
             health_html = f'<span class="badge badge--health" title="{flag_title}">{ico}</span>'
 
-    if not promo_html and not health_html:
+    note_html = ""
+    note_value = getattr(appt, "notes", "") or ""
+    if str(note_value).strip():
+        note_html = "<span class='badge badge--note' title='Internal note'>??</span>"
+    badges_html = "".join(filter(None, [promo_html, payment_html, health_html, note_html]))
+    if not badges_html:
         return ""
 
-    return f"<div class='corner-badges'>{promo_html}{health_html}</div>"
+    return f"<div class='corner-badges'>{badges_html}</div>"
 
 # core/admin.py
 from django.db import connection

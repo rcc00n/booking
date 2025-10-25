@@ -1,6 +1,7 @@
 # core/services/booking.py
 from __future__ import annotations
 from datetime import datetime, timedelta, time
+from decimal import Decimal
 from typing import List, Dict, Optional, Tuple
 
 from django.db.models import Q, OuterRef, Subquery
@@ -219,6 +220,10 @@ def create_appointment_from_cart_items(
         )
         appt.full_clean()
         appt.save()
+
+        # Client-side appointments (cart checkout) should include card fees.
+        appt.apply_card_processing_fee = True
+        appt.card_processing_fee = Decimal("0.00")
 
         for cart_item in items:
             item = AppointmentItem(
