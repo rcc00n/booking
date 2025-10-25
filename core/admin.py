@@ -4485,11 +4485,13 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
     def import_products_view(self, request):
         form = ProductImportUploadForm(request.POST or None, request.FILES or None)
+        changelist_url = reverse(f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist")
         context = {
             **self.admin_site.each_context(request),
             "opts": self.model._meta,
             "form": form,
             "title": "Import products",
+            "changelist_url": changelist_url,
         }
 
         if request.method == "POST" and form.is_valid():
@@ -4516,7 +4518,6 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
                         preview += f" (+{len(result.errors) - 3} more rows)"
                     messages.warning(request, f"Some rows were skipped: {preview}")
 
-                changelist_url = reverse(f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist")
                 return HttpResponseRedirect(changelist_url)
 
         return TemplateResponse(request, self.import_template_name, context)

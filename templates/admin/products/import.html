@@ -4,7 +4,7 @@
 {% block breadcrumbs %}
   <div class="breadcrumbs">
     <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
-    &rsaquo; <a href="{% url 'admin:%s_%s_changelist' opts.app_label opts.model_name %}">
+    &rsaquo; <a href="{{ changelist_url|default:'#' }}">
       {{ opts.verbose_name_plural|capfirst }}
     </a>
     &rsaquo; Import products
@@ -46,7 +46,7 @@
       </fieldset>
       <div class="submit-row">
         <input type="submit" class="default" value="Upload file">
-        <a class="button" href="{% url 'admin:%s_%s_changelist' opts.app_label opts.model_name %}">
+        <a class="button" href="{{ changelist_url|default:'#' }}">
           Cancel
         </a>
       </div>
