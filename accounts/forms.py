@@ -19,7 +19,6 @@ from core.models import (
 )
 from core.forms import _normalize_phone
 from core.validators import clean_ab_postal_code
-from core.services.product_import import SUPPORTED_EXTENSIONS as PRODUCT_IMPORT_EXTENSIONS
 
 
 # ---------- Registration ----------
@@ -464,26 +463,9 @@ class HealthConditionsForm(forms.Form):
             "surgeries": join_csv(data.get("surgeries")),
             "notes": data.get("notes", ""),
         })
-
-
 # -----------------------------
 # Retail sales
 # -----------------------------
-
-class ProductImportForm(forms.Form):
-    import_file = forms.FileField(
-        label="Inventory file",
-        help_text="Upload CSV or XLSX with columns like Product name, SKU, Category, etc.",
-    )
-
-    def clean_import_file(self):
-        uploaded = self.cleaned_data["import_file"]
-        filename = uploaded.name.lower()
-        if not any(filename.endswith(ext) for ext in PRODUCT_IMPORT_EXTENSIONS):
-            raise forms.ValidationError("Unsupported file type. Upload CSV or XLSX.")
-        uploaded.seek(0)
-        return uploaded
-
 
 class ProductSaleForm(forms.Form):
     product = forms.ModelChoiceField(

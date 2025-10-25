@@ -44,6 +44,7 @@ from core.models import (
 from core.services.intake_assignments import ensure_universal_assignments_for_profile
 from core.services.pricing import get_available_prepayment_percents
 from core.services.product_import import import_products_from_file, ProductImportError
+from core.forms import ProductImportUploadForm
 
 from .forms import (
     AccountPasswordResetForm,
@@ -51,7 +52,6 @@ from .forms import (
     ClientRegistrationForm,
     ClientProfileForm,
     HealthConditionsForm,
-    ProductImportForm,
     ProductSaleForm,
 )
 
@@ -381,8 +381,8 @@ class ProductSalesView(RoleRequiredMixin, TemplateView):
         profile = getattr(self.request.user, "userprofile", None)
         return ProductSaleForm(data=data, employee_profile=profile)
 
-    def _build_import_form(self, data=None, files=None) -> ProductImportForm:
-        return ProductImportForm(data=data, files=files)
+    def _build_import_form(self, data=None, files=None) -> ProductImportUploadForm:
+        return ProductImportUploadForm(data=data, files=files)
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)

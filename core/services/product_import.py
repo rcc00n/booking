@@ -42,8 +42,6 @@ class ProductImportResult:
         self.skipped += 1
 
 
-SUPPORTED_EXTENSIONS = (".csv", ".xlsx", ".xlsm")
-
 NORMALIZED_HEADERS = {
     "productname": "name",
     "name": "name",

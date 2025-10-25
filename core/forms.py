@@ -728,6 +728,24 @@ class UserImportRowForm(forms.Form):
         return phone
 
 
+PRODUCT_IMPORT_SUPPORTED_EXTENSIONS = (".csv", ".xlsx", ".xlsm")
+
+
+class ProductImportUploadForm(forms.Form):
+    import_file = forms.FileField(
+        label="Inventory file",
+        help_text="Upload CSV or XLSX using the supplier format.",
+    )
+
+    def clean_import_file(self):
+        uploaded = self.cleaned_data["import_file"]
+        filename = (uploaded.name or "").lower()
+        if not any(filename.endswith(ext) for ext in PRODUCT_IMPORT_SUPPORTED_EXTENSIONS):
+            raise forms.ValidationError("Unsupported file type. Upload CSV or XLSX.")
+        uploaded.seek(0)
+        return uploaded
+
+
 def _coerce_cell_value(value):
     if value is None:
         return ""

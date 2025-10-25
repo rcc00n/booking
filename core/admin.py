@@ -48,12 +48,14 @@ from .filters import *
 from .models import *
 from core.models import Notification
 from .forms import *
+from .forms import ProductImportUploadForm
 from .validators import *
 from core.services.user_import import (
     import_users_from_file,
     UserImportError,
     UserImportSchemaError,
 )
+from core.services.product_import import import_products_from_file, ProductImportError
 from core.services.pricing import compute_appointment_pricing, PricingComputationError
 from core.services import payments as payment_services
 from core.utils.fees import CARD_PROCESSING_PERCENT, CARD_PROCESSING_FIXED, card_processing_fee
@@ -4435,6 +4437,7 @@ class ProductCategoryAdmin(admin.ModelAdmin):
 
 
 class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
+    import_template_name = "admin/products/import.html"
     list_display = (
         "name",
         "category",
@@ -4467,6 +4470,56 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
     @admin.display(description="Low stock", boolean=True)
     def low_stock_indicator(self, obj):
         return obj.is_low_on_stock
+
+    def get_urls(self):
+        urls = super().get_urls()
+        opts = self.model._meta
+        custom = [
+            path(
+                "import/",
+                self.admin_site.admin_view(self.import_products_view),
+                name=f"{opts.app_label}_{opts.model_name}_import",
+            ),
+        ]
+        return custom + urls
+
+    def import_products_view(self, request):
+        form = ProductImportUploadForm(request.POST or None, request.FILES or None)
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "form": form,
+            "title": "Import products",
+        }
+
+        if request.method == "POST" and form.is_valid():
+            uploaded = form.cleaned_data["import_file"]
+            try:
+                result = import_products_from_file(uploaded)
+            except ProductImportError as exc:
+                form.add_error("import_file", str(exc))
+            else:
+                if result.created or result.updated:
+                    messages.success(
+                        request,
+                        f"Imported {result.created} new products and updated {result.updated}.",
+                    )
+                else:
+                    messages.info(request, "No products were imported. The file did not contain new data.")
+
+                if result.errors:
+                    preview = "; ".join(
+                        f"Row {msg.row_number}: {msg.message}"
+                        for msg in result.errors[:3]
+                    )
+                    if len(result.errors) > 3:
+                        preview += f" (+{len(result.errors) - 3} more rows)"
+                    messages.warning(request, f"Some rows were skipped: {preview}")
+
+                changelist_url = reverse(f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist")
+                return HttpResponseRedirect(changelist_url)
+
+        return TemplateResponse(request, self.import_template_name, context)
 
     def _export_all_xlsx_view(self, request):
         queryset = self.get_queryset(request).select_related("category")
@@ -4530,6 +4583,14 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
             extra_context["export_label"] = "📤 Export XLSX"
         except NoReverseMatch:
             extra_context.setdefault("export_url", None)
+
+        try:
+            import_url = reverse(f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_import")
+            extra_context["import_url"] = import_url
+            extra_context["import_label"] = "📥 Import products"
+        except NoReverseMatch:
+            extra_context.setdefault("import_url", None)
+
         return super().changelist_view(request, extra_context=extra_context)
 
 
