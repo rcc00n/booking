@@ -49,6 +49,11 @@
     }
     img{max-width:100%;display:block}
     a{color:inherit;text-decoration:none;transition:color .2s ease}
+    .sr-only{
+      position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+      clip:rect(0,0,0,0);white-space:nowrap;border:0;
+    }
+    .mobile-close{display:none;}
     .container{width:var(--container);margin-inline:auto;padding-inline:1.25rem}
 
     /* =========================
@@ -106,7 +111,6 @@
     }
     .mobile-nav-btn:active{transform:scale(.94);}
     .header-actions{display:flex;align-items:center;gap:1rem;margin-left:auto;}
-    .nav-links{display:flex;align-items:center;gap:.5rem;}
     .nav-link{
       padding:.42rem .9rem;border-radius:999px;font-weight:600;color:var(--muted);
       border:1px solid transparent;
@@ -231,7 +235,9 @@
     .service-card{
       background:var(--surface);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column;
       border:1px solid rgba(16,54,38,.06);box-shadow:var(--shadow-card);height:100%;transition:transform .2s ease, box-shadow .2s ease;
+      cursor:pointer;
     }
+    .service-card:focus-visible{outline:2.5px solid color-mix(in srgb,var(--gold) 70%,#fff);outline-offset:4px}
     .service-card:hover{transform:translateY(-4px);box-shadow:0 30px 70px rgba(15,47,35,.15);}
     .service-card__img{position:relative;aspect-ratio:5/3;background:var(--surface-muted);}
     .service-card__img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
@@ -324,6 +330,48 @@
     .payment-option__body{display:flex;flex-direction:column;gap:.2rem}
     .payment-option__title{font-weight:600;color:var(--green-dark)}
     .payment-option__meta{font-size:.85rem;color:var(--muted)}
+
+    /* =========================
+       Service detail modal
+       ========================= */
+    .service-detail{padding:0;overflow:hidden;display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:0}
+    .service-detail__media{position:relative;background:linear-gradient(135deg,var(--green-dark),#274535);min-height:360px;display:flex;align-items:flex-end;justify-content:flex-start;padding:1.5rem}
+    .service-detail__image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+    .service-detail__image[hidden]{display:none}
+    .service-detail__image--empty{position:relative;z-index:1;color:rgba(255,255,255,.82);font-size:1rem;font-weight:600}
+    .service-detail__badge{position:absolute;top:1.2rem;left:1.2rem;background:rgba(255,255,255,.12);color:#fff;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;padding:.35rem .95rem;border-radius:999px;font-weight:700;backdrop-filter:blur(12px)}
+    .service-detail__body{padding:2rem 2.25rem;display:flex;flex-direction:column;gap:1.5rem}
+    .service-detail__top{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}
+    .service-detail__eyebrow{font-size:.85rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+    .service-detail__title{font:900 2rem/1.1 var(--font-heading);color:var(--green-dark);margin:0}
+    .service-detail__description{color:var(--muted);font-size:1rem;line-height:1.6}
+    .service-detail__meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;border:1px solid rgba(32,64,41,.12);border-radius:1rem;padding:1rem}
+    .service-detail__meta-label{font-size:.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+    .service-detail__meta-value{display:block;font:700 1.1rem/1.3 var(--font-heading);color:var(--green-dark);margin-top:.25rem}
+    .service-detail__meta-hint{display:block;font-size:.82rem;color:var(--muted);margin-top:.15rem}
+    .service-detail__price{display:flex;flex-direction:column;gap:.25rem}
+    .service-detail__price-values{display:flex;align-items:center;gap:.5rem}
+    .service-detail__price-old{color:#9aa0a0;text-decoration:line-through;font-weight:600}
+    .service-detail__price-current{font:800 1.35rem/1 var(--font-heading);color:var(--green-dark)}
+    .service-detail__discount{display:inline-flex;align-items:center;gap:.25rem;background:rgba(199,155,73,.12);color:var(--gold);border-radius:999px;padding:.2rem .7rem;font-size:.85rem;font-weight:700}
+    .service-detail__lists{display:flex;flex-direction:column;gap:1.25rem}
+    .service-detail__list-title{font:700 .9rem/1 var(--font-heading);color:var(--green-dark);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.45rem}
+    .service-detail__list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.4rem}
+    .service-detail__list li{display:flex;gap:.4rem;align-items:flex-start;font-size:.95rem;color:var(--muted)}
+    .service-detail__list li::before{content:'•';color:var(--gold);font-weight:900;line-height:1}
+    .service-detail__actions{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:auto}
+    .service-detail__actions .btn{flex:1 1 auto;min-width:180px}
+    .service-detail__forms-count{font-size:.85rem;color:var(--muted);margin-top:.2rem}
+    @media(max-width:1100px){
+      .service-detail{grid-template-columns:1fr}
+      .service-detail__media{min-height:260px}
+    }
+    @media(max-width:640px){
+      .service-detail__body{padding:1.5rem}
+      .service-detail__title{font-size:1.65rem}
+      .service-detail__actions{flex-direction:column}
+      .service-detail__actions .btn{width:100%}
+    }
     .payment-partial-note{font-size:.85rem;color:var(--muted);margin-top:-.35rem;margin-bottom:.25rem}
     .payment-form{display:flex;flex-direction:column;gap:1rem}
     .payment-fieldset{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.85rem}
@@ -523,12 +571,9 @@
               data-i18n-attr="aria-label:services.header.openMenu">☰</button>
       <nav class="header-actions" data-menu-drawer>
         <button type="button" class="mobile-close" data-menu-close data-i18n-attr="aria-label:services.header.closeMenu">
-          ✕ <span data-i18n="services.header.closeMenuText">Close menu</span>
+          <span aria-hidden="true">✕</span>
+          <span class="sr-only" data-i18n="services.header.closeMenuText">Close menu</span>
         </button>
-        <div class="nav-links">
-          <a href="#services" class="nav-link" data-i18n="services.header.sendGift">Send a gift card</a>
-          <a href="#services" class="nav-link nav-link--pill" data-i18n="services.header.listBusiness">List your business</a>
-        </div>
         <div class="header-controls">
           <div class="lang-picker" data-i18n-attr="aria-label:common.language">
             <label for="langSelect" class="lang-picker__label" data-i18n="common.language">Language</label>
@@ -582,11 +627,11 @@
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3z"/><path d="M16 11h4v4h-4z"/></svg>
                       <span data-i18n="services.userMenu.wallet">Wallet</span>
                     </a>
-                    <a href="#services" class="user-menu__link">
+                    <a href="{% url 'dashboard' %}#favorites" class="user-menu__link">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m5 12 5 5 9-10"/></svg>
                       <span data-i18n="services.userMenu.favorites">Favorites</span>
                     </a>
-                    <a href="#services" class="user-menu__link">
+                    <a href="{% url 'dashboard' %}#gift" class="user-menu__link">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h16M4 12a4 4 0 0 1 0-8h12a4 4 0 0 1 0 8m-16 0a4 4 0 0 0 0 8h12a4 4 0 0 0 0-8"/></svg>
                       <span data-i18n="services.userMenu.giftCard">Send a gift card</span>
                     </a>
@@ -602,10 +647,10 @@
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 15.5a3.5 3.5 0 1 0-3.5-3.5 3.5 3.5 0 0 0 3.5 3.5z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 1-2.54 0 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 1 0-2.54 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 1 2.54 0 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 1 0 2.54 1.65 1.65 0 0 0-.6 1z"/></svg>
                       <span data-i18n="services.userMenu.settings">Settings</span>
                     </a>
-                    <div class="user-menu__link">
+                    <a href="{% url 'dashboard' %}#languages" class="user-menu__link">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
                       <span data-i18n="services.userMenu.language">Languages</span>
-                    </div>
+                    </a>
                     <form method="post" action="{% url 'logout' %}" class="user-menu__link user-menu__link--danger">
                       {% csrf_token %}
                       <button type="submit" style="all:unset;display:flex;align-items:center;gap:.6rem;cursor:pointer;">
@@ -725,7 +770,9 @@
         <h3 class="section-heading" data-i18n="services.search.resultsTitle">Search results</h3>
         <div class="services-grid">
           {% for s in search_results %}
-            <article class="service-card">
+            <article class="service-card" data-service-card role="button" tabindex="0" aria-label="View details for {{ s.name }}"
+                     data-i18n-attr="aria-label:services.detail.openLabel"
+                     data-i18n-vars='{"name":"{{ s.name|escapejs }}"}'>
               <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
                 {% if s.card_image_url %}
                   <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
@@ -764,6 +811,7 @@
                   <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
                 </div>
               </div>
+              <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
             </article>
           {% empty %}
             <div class="stub" data-i18n="services.search.noServerResults" data-i18n-vars='{"query":"{{ q|escapejs }}"}'>No results for “{{ q }}”.</div>
@@ -781,7 +829,9 @@
           </div>
           <div class="services-grid">
             {% for s in c.catalog_services %}
-              <article class="service-card">
+              <article class="service-card" data-service-card role="button" tabindex="0" aria-label="View details for {{ s.name }}"
+                       data-i18n-attr="aria-label:services.detail.openLabel"
+                       data-i18n-vars='{"name":"{{ s.name|escapejs }}"}'>
                 <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
                   {% if s.card_image_url %}
                     <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
@@ -805,21 +855,22 @@
                     <span class="service-card__duration" data-i18n="services.units.minutes" data-i18n-vars='{"value":"{{ s.duration_min }}"}'>{{ s.duration_min }} min</span>
                   </div>
                   {% if s.description %}<p class="service-card__desc">{{ s.description|truncatewords:16 }}</p>{% endif %}
-                  <div class="service-card__actions">
-                    <div class="service-card__price">
-                      {% with disc=s.get_active_discount %}
-                        {% if disc %}
-                          <span class="old">${{ s.base_price|floatformat:2 }}</span>
-                          <strong>${{ s.get_discounted_price|floatformat:2 }}</strong>
-                          <span class="badge">-{{ disc.discount_percent }}%</span>
-                        {% else %}
-                          <strong>${{ s.base_price|floatformat:2 }}</strong>
-                        {% endif %}
-                      {% endwith %}
-                    </div>
-                    <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
+                <div class="service-card__actions">
+                  <div class="service-card__price">
+                    {% with disc=s.get_active_discount %}
+                      {% if disc %}
+                        <span class="old">${{ s.base_price|floatformat:2 }}</span>
+                        <strong>${{ s.get_discounted_price|floatformat:2 }}</strong>
+                        <span class="badge">-{{ disc.discount_percent }}%</span>
+                      {% else %}
+                        <strong>${{ s.base_price|floatformat:2 }}</strong>
+                      {% endif %}
+                    {% endwith %}
                   </div>
+                  <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
                 </div>
+              </div>
+              <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
               </article>
             {% empty %}
               <div class="stub" data-i18n="services.search.noCategory">No services in this category yet.</div>
@@ -837,7 +888,9 @@
           </div>
           <div class="services-grid">
             {% for s in uncategorized %}
-              <article class="service-card">
+              <article class="service-card" data-service-card role="button" tabindex="0" aria-label="View details for {{ s.name }}"
+                       data-i18n-attr="aria-label:services.detail.openLabel"
+                       data-i18n-vars='{"name":"{{ s.name|escapejs }}"}'>
                 <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
                   {% if s.card_image_url %}
                     <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
@@ -866,6 +919,7 @@
                     <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
                   </div>
                 </div>
+                <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
               </article>
             {% endfor %}
           </div>
@@ -884,6 +938,67 @@
   </button>
 
   <footer class="site-footer" data-i18n="services.footer.copy">© 2025 Malva Booking</footer>
+
+  <!-- ===== Modal: service detail ===== -->
+  <div class="modal" id="serviceDetailModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="serviceDetailName">
+    <div class="modal__dialog service-detail">
+      <div class="service-detail__media">
+        <span class="service-detail__badge" id="serviceDetailBadge" data-i18n="services.detail.badgeFeatured">Signature</span>
+        <img id="serviceDetailImage" class="service-detail__image" alt="" hidden loading="lazy">
+        <div class="service-detail__image service-detail__image--empty" id="serviceDetailImageEmpty" data-i18n="services.detail.imageEmpty">Preview coming soon</div>
+      </div>
+      <div class="service-detail__body">
+        <div class="service-detail__top">
+          <div>
+            <span class="service-detail__eyebrow" id="serviceDetailCategoryLabel" data-i18n="services.detail.unknownCategory">Uncategorized</span>
+            <h2 class="service-detail__title" id="serviceDetailName">Service</h2>
+          </div>
+          <button class="modal__close" id="serviceDetailClose" aria-label="Close" data-i18n-attr="aria-label:common.close">×</button>
+        </div>
+        <p class="service-detail__description" id="serviceDetailDescription" data-i18n="services.detail.descriptionFallback">We will publish the description soon.</p>
+        <div class="service-detail__meta">
+          <div>
+            <span class="service-detail__meta-label" data-i18n="services.detail.durationLabel">Duration</span>
+            <strong class="service-detail__meta-value" id="serviceDetailDuration">60 min</strong>
+            <small class="service-detail__meta-hint" id="serviceDetailExtra" hidden></small>
+          </div>
+          <div>
+            <span class="service-detail__meta-label" data-i18n="services.detail.categoryLabel">Category</span>
+            <strong class="service-detail__meta-value" id="serviceDetailCategory">Facials</strong>
+          </div>
+          <div class="service-detail__price">
+            <span class="service-detail__meta-label" data-i18n="services.detail.priceLabel">Investment</span>
+            <div class="service-detail__price-values">
+              <span class="service-detail__price-old" id="serviceDetailPriceOld" hidden>$0.00</span>
+              <span class="service-detail__price-current" id="serviceDetailPriceCurrent">$0.00</span>
+            </div>
+            <span class="service-detail__discount" id="serviceDetailDiscount" hidden>10% off today</span>
+          </div>
+        </div>
+
+        <div class="service-detail__lists">
+          <div>
+            <div class="service-detail__list-title" data-i18n="services.detail.formsLabel">Required forms</div>
+            <ul class="service-detail__list" id="serviceDetailFormsList"></ul>
+            <p class="service-detail__forms-count" id="serviceDetailFormsFootnote" data-i18n="services.detail.formsEmpty">No forms required before the visit.</p>
+          </div>
+          <div>
+            <div class="service-detail__list-title" data-i18n="services.detail.highlightsTitle">What to expect</div>
+            <ul class="service-detail__list">
+              <li data-i18n="services.detail.highlightCare">Personal concierge care from our front-desk team.</li>
+              <li data-i18n="services.detail.highlightProducts">Sterile tools & lab-tested professional formulas.</li>
+              <li data-i18n="services.detail.highlightPlan">Personalized plan and follow-up guidance after the visit.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="service-detail__actions">
+          <button class="btn btn--primary" id="serviceDetailBook" data-i18n="services.detail.ctaPrimary">Book this service</button>
+          <button class="btn btn--ghost" id="serviceDetailDismiss" data-i18n="services.detail.ctaSecondary">Back to catalog</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- ===== Modal: booking ===== -->
   <div class="modal" id="bookModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="bookTitle" data-initial-focus="#bookTitle">
@@ -1425,6 +1540,31 @@
           el.textContent = translateServiceNameText(original) || original;
         });
       };
+      const servicePayloadCache = new WeakMap();
+      const readServicePayload = (card) => {
+        if (!card) return null;
+        if (servicePayloadCache.has(card)) return servicePayloadCache.get(card);
+        const script = card.querySelector('.service-card__payload');
+        if (!script) return null;
+        try {
+          const payload = JSON.parse(script.textContent || '{}');
+          servicePayloadCache.set(card, payload);
+          return payload;
+        } catch (err) {
+          console.warn('[mainmenu] Failed to parse service payload', err);
+          return null;
+        }
+      };
+      const formatPriceDisplay = (value) => {
+        if (value === null || value === undefined || value === '') {
+          return '$0.00';
+        }
+        const num = Number(value);
+        if (!Number.isNaN(num)) {
+          return `$${num.toFixed(2)}`;
+        }
+        return typeof value === 'string' && value.trim() ? value : '$0.00';
+      };
 
       const menuToggle = document.querySelector('[data-menu-toggle]');
       const menuClose = document.querySelector('[data-menu-close]');
@@ -1525,6 +1665,24 @@
       const paymentOptionGroup=document.getElementById('paymentOptionGroup');
       const paymentPartialNote=document.getElementById('paymentPartialNote');
       const paymentMessage=document.getElementById('paymentMessage');
+      const detailModal=document.getElementById('serviceDetailModal');
+      const detailImage=document.getElementById('serviceDetailImage');
+      const detailImageEmpty=document.getElementById('serviceDetailImageEmpty');
+      const detailBadge=document.getElementById('serviceDetailBadge');
+      const detailName=document.getElementById('serviceDetailName');
+      const detailCategory=document.getElementById('serviceDetailCategory');
+      const detailCategoryLabel=document.getElementById('serviceDetailCategoryLabel');
+      const detailDescription=document.getElementById('serviceDetailDescription');
+      const detailDuration=document.getElementById('serviceDetailDuration');
+      const detailExtra=document.getElementById('serviceDetailExtra');
+      const detailPriceOld=document.getElementById('serviceDetailPriceOld');
+      const detailPriceCurrent=document.getElementById('serviceDetailPriceCurrent');
+      const detailDiscount=document.getElementById('serviceDetailDiscount');
+      const detailFormsList=document.getElementById('serviceDetailFormsList');
+      const detailFormsFootnote=document.getElementById('serviceDetailFormsFootnote');
+      const detailBook=document.getElementById('serviceDetailBook');
+      const detailClose=document.getElementById('serviceDetailClose');
+      const detailDismiss=document.getElementById('serviceDetailDismiss');
       const inputName=document.getElementById('paymentName');
       const inputEmail=document.getElementById('paymentEmail');
       const inputAddress1=document.getElementById('paymentAddress1');
@@ -2967,6 +3125,139 @@ async function confirmPayment(){
         locale: getLocale(),
         selectedDate: null,
       };
+      let activeServiceDetail = null;
+
+      function hydrateServiceDetail(payload){
+        if (!payload) return;
+        const resolvedName = translateServiceNameText(payload.name) || payload.name || translate('common.service', null, 'Service');
+        if (detailName) {
+          detailName.textContent = resolvedName;
+        }
+        const categoryFallback = translate('services.detail.unknownCategory', null, 'Uncategorized');
+        const categoryLabel = payload.category || categoryFallback;
+        if (detailCategory) {
+          clearTextKey(detailCategory);
+          detailCategory.textContent = categoryLabel;
+        }
+        if (detailCategoryLabel) {
+          clearTextKey(detailCategoryLabel);
+          detailCategoryLabel.textContent = categoryLabel;
+        }
+        if (detailDescription) {
+          if (payload.description) {
+            clearTextKey(detailDescription);
+            detailDescription.textContent = payload.description;
+          } else {
+            setTextKey(detailDescription, 'services.detail.descriptionFallback');
+          }
+        }
+        if (detailDuration) {
+          detailDuration.textContent = formatMinutes(payload.duration_min || 0);
+        }
+        if (detailExtra) {
+          const extra = Number(payload.extra_time_min || 0);
+          if (extra > 0) {
+            detailExtra.hidden = false;
+            setTextKey(detailExtra, 'services.detail.metaExtraTime', { value: String(extra) }, `+${extra} min prep time`);
+          } else {
+            detailExtra.hidden = true;
+            clearTextKey(detailExtra);
+          }
+        }
+        if (detailPriceCurrent) {
+          detailPriceCurrent.textContent = formatPriceDisplay(payload.price || payload.base_price);
+        }
+        if (detailPriceOld) {
+          const hasDiscount = Number(payload.discount_percent || 0) > 0;
+          if (hasDiscount) {
+            detailPriceOld.hidden = false;
+            detailPriceOld.textContent = formatPriceDisplay(payload.base_price);
+          } else {
+            detailPriceOld.hidden = true;
+          }
+        }
+        if (detailDiscount) {
+          const percentValue = Number(payload.discount_percent || 0);
+          if (percentValue > 0) {
+            detailDiscount.hidden = false;
+            setTextKey(detailDiscount, 'services.detail.discountLabel', { value: String(percentValue) }, `${percentValue}% off today`);
+          } else {
+            detailDiscount.hidden = true;
+            clearTextKey(detailDiscount);
+          }
+        }
+        if (detailFormsList) {
+          detailFormsList.innerHTML = '';
+          const forms = Array.isArray(payload.forms) ? payload.forms.filter((form) => form && form.name) : [];
+          if (forms.length) {
+            detailFormsList.style.display = '';
+            forms.forEach((form) => {
+              const item = document.createElement('li');
+              item.textContent = form.name;
+              detailFormsList.appendChild(item);
+            });
+            if (detailFormsFootnote) {
+              const key = forms.length === 1 ? 'services.detail.formsSingular' : 'services.detail.formsPlural';
+              setTextKey(detailFormsFootnote, key, { count: String(forms.length) });
+            }
+          } else {
+            detailFormsList.style.display = 'none';
+            if (detailFormsFootnote) {
+              setTextKey(detailFormsFootnote, 'services.detail.formsEmpty');
+            }
+          }
+        }
+        if (detailImage) {
+          if (payload.image) {
+            detailImage.hidden = false;
+            detailImage.src = payload.image;
+            detailImage.alt = translate('services.detail.imageAlt', { name: resolvedName }, `Preview for ${resolvedName}`);
+            if (detailImageEmpty) {
+              detailImageEmpty.style.display = 'none';
+            }
+          } else {
+            detailImage.hidden = true;
+            detailImage.removeAttribute('src');
+            if (detailImageEmpty) {
+              detailImageEmpty.style.display = 'block';
+            }
+          }
+        }
+        if (detailBadge) {
+          detailBadge.style.display = 'inline-flex';
+        }
+      }
+
+      function openServiceDetail(card, triggerEl){
+        if (!detailModal || !card) return;
+        const payload = readServicePayload(card);
+        if (!payload) return;
+        activeServiceDetail = {
+          payload,
+          trigger: triggerEl instanceof HTMLElement ? triggerEl : card,
+        };
+        hydrateServiceDetail(payload);
+        openModalElement(detailModal, {
+          trigger: activeServiceDetail.trigger,
+          initialFocusSelector:'#serviceDetailBook',
+          onRequestClose:(opts)=>closeServiceDetail(opts),
+        });
+      }
+
+      function closeServiceDetail(arg){
+        let options = {};
+        if(arg && typeof arg === 'object'){
+          if(typeof arg.preventDefault === 'function'){
+            arg.preventDefault();
+          }else{
+            options = arg;
+          }
+        }
+        if(detailModal){
+          closeModalElement(detailModal, options);
+        }
+        activeServiceDetail = null;
+      }
 
       // ===== open/close =====
       function openModal(serviceId, serviceName, triggerEl){
@@ -3470,14 +3761,48 @@ async function confirmPayment(){
 
       // ===== wire up =====
       document.addEventListener('click',(e)=>{
-        const btn=e.target.closest('.book-btn'); if(btn){
+        if (e.defaultPrevented) return;
+        if (typeof e.button === 'number' && e.button !== 0) return;
+        const target = e.target;
+        if (!(target instanceof Element)) return;
+        const btn=target.closest('.book-btn');
+        if(btn){
           openModal(btn.dataset.serviceId, btn.dataset.serviceName || translate('common.service', null, 'Service'), btn);
+          return;
         }
+        const card = target.closest('[data-service-card]');
+        if(card && !target.closest('.service-card__payload')){
+          openServiceDetail(card, card);
+        }
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.defaultPrevented) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        if (target.closest('.book-btn')) return;
+        const card = target.closest('[data-service-card]');
+        if (!card) return;
+        event.preventDefault();
+        openServiceDetail(card, card);
       });
       btnClose.addEventListener('click',closeModal);
       btnCancel.addEventListener('click',closeModal);
       modal.addEventListener('click',(e)=>{ if(e.target===modal) closeModal(); });
       btnSubmit.addEventListener('click',addToCart);
+      if(detailClose){ detailClose.addEventListener('click', closeServiceDetail); }
+      if(detailDismiss){ detailDismiss.addEventListener('click', closeServiceDetail); }
+      if(detailModal){ detailModal.addEventListener('click',(event)=>{ if(event.target===detailModal) closeServiceDetail(); }); }
+      if(detailBook){
+        detailBook.addEventListener('click', ()=>{
+          if(!activeServiceDetail || !activeServiceDetail.payload) return;
+          const ctx = activeServiceDetail;
+          closeServiceDetail();
+          window.setTimeout(()=>{
+            openModal(ctx.payload.id, ctx.payload.name || translate('common.service', null, 'Service'), ctx.trigger || detailBook);
+          }, 150);
+        });
+      }
 
       if(cartBtn){
         cartBtn.addEventListener('click', openCartModal);
@@ -3629,7 +3954,7 @@ async function confirmPayment(){
       function cardHTML(s){
         const hasDisc = Number.isFinite(+s.discount_percent) && +s.discount_percent > 0;
         const rawName = s.name || '';
-        const translatedName = translateServiceNameText(rawName);
+        const translatedName = translateServiceNameText(rawName) || rawName || translate('common.service', null, 'Service');
         const fallbackImgLabel = translate('services.cards.noImage', null, 'Preview coming soon');
         const imageAlt = s.image_alt || rawName || translate('services.cards.imageAltFallback', null, 'Service preview');
         const imageClasses = ['service-card__img'];
@@ -3651,8 +3976,28 @@ async function confirmPayment(){
         const descText = truncateWords(s.description, 16);
         const desc = descText ? `<p class=\"service-card__desc\">${escapeHtml(descText)}</p>` : '';
         const durationLabel = escapeHtml(formatMinutes(s.duration_min || 0));
+        const ariaLabel = translate('services.detail.openLabel', { name: rawName }, `View details for ${rawName}`);
+        const payload = {
+          id: String(s.id || ''),
+          name: rawName,
+          category: s.category || '',
+          description: (s.description || '').trim(),
+          duration_min: Number(s.duration_min || 0),
+          extra_time_min: Number(s.extra_time_min || 0),
+          base_price: s.base_price || s.price || '',
+          price: s.price || s.base_price || '',
+          discount_percent: s.discount_percent ?? null,
+          image: s.image || '',
+          image_alt: imageAlt || '',
+          forms: Array.isArray(s.forms) ? s.forms.map((form) => ({
+            id: form.id || '',
+            name: form.name || '',
+            slug: form.slug || '',
+          })) : [],
+        };
+        const payloadScript = `<script type=\"application/json\" class=\"service-card__payload\">${escapeHtml(JSON.stringify(payload))}</script>`;
         return `
-          <article class=\"service-card\">
+          <article class=\"service-card\" data-service-card role=\"button\" tabindex=\"0\" aria-label=\"${escapeHtml(ariaLabel)}\" data-i18n-attr=\"aria-label:services.detail.openLabel\" data-i18n-vars='${escapeHtml(JSON.stringify({ name: rawName }))}'>
             <div class=\"${imageClasses.join(' ')}\"${s.image ? '' : ' aria-hidden=\"true\"'}>
               ${imageInner}
               ${tagsBlock}
@@ -3671,6 +4016,7 @@ async function confirmPayment(){
                   data-i18n=\"services.cards.addToCart\">${translate('services.cards.addToCart')}</button>
               </div>
             </div>
+            ${payloadScript}
           </article>`;
       }
       async function fetchServices(q, cat){
