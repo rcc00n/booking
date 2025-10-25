@@ -14,6 +14,7 @@ from core.models import (
     ServiceMaster,
     UserProfile,
 )
+from core.tests.utils import assign_service_room
 from core.admin import CustomUserAdmin
 from django.contrib.admin.sites import AdminSite
 from django.test import RequestFactory
@@ -82,6 +83,7 @@ class IntakeFormBuilderTests(TestCase):
             base_price="120.00",
             duration_min=60,
         )
+        assign_service_room(service, room_name="Intake Preview Room")
         service.pre_appointment_forms.add(self.form)
 
         prefetched_service = Service.objects.prefetch_related("pre_appointment_forms").get(pk=service.pk)
@@ -111,6 +113,7 @@ class IntakeFormManageViewTests(TestCase):
             base_price="100.00",
             duration_min=60,
         )
+        assign_service_room(self.service, room_name="Intake Manage Room")
 
         ServiceMaster.objects.create(service=self.service, master=self.master_profile)
 

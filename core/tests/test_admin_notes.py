@@ -19,6 +19,7 @@ from core.models import (
     Service,
     UserProfile,
 )
+from core.tests.utils import assign_service_room
 
 
 class AppointmentNotesFeatureTests(TestCase):
@@ -59,6 +60,7 @@ class AppointmentNotesFeatureTests(TestCase):
             duration_min=60,
             extra_time_min=0,
         )
+        assign_service_room(cls.service, room_name="Notes Room")
 
     def test_notes_field_defaults_to_blank(self):
         appointment = Appointment.objects.create(

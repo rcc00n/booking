@@ -708,7 +708,6 @@ class ExportXlsxMixin:
         item_qs = AppointmentItem.objects.select_related(
             "service",
             "service__category",
-            "service__room",
             "master__user__user",
         ).order_by("start_time")
 
@@ -846,7 +845,6 @@ class ExportXlsxMixin:
             return appt.items.select_related(
                 "service",
                 "service__category",
-                "service__room",
                 "master__user__user",
             ).order_by("start_time")
 
@@ -3891,10 +3889,24 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     """
     change_list_template = "admin/service/changelist_table.html"
     change_form_template = "admin/service/change_form.html"
-    list_display = ('name', 'base_price', 'category', 'room', 'duration_min', 'is_taxable', 'is_active', 'image_admin_thumb')
+    list_display = (
+        'name',
+        'base_price',
+        'category',
+        'allowed_rooms_display',
+        'duration_min',
+        'is_taxable',
+        'is_active',
+        'image_admin_thumb',
+    )
     search_fields = ('name',)
-    list_filter = ('is_active', 'is_taxable', 'category', 'room')
-    filter_horizontal = ("pre_appointment_forms",)
+    list_filter = (
+        'is_active',
+        'is_taxable',
+        'category',
+        ('allowed_rooms', admin.RelatedOnlyFieldListFilter),
+    )
+    filter_horizontal = ("pre_appointment_forms", "allowed_rooms")
     readonly_fields = ("image_preview",)
     list_per_page = 10
     fieldsets = (
@@ -3903,7 +3915,7 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 "name",
                 "description",
                 "category",
-                "room",
+                "allowed_rooms",
                 "is_active",
                 "is_taxable",
                 "base_price",
@@ -3923,7 +3935,16 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
         }),
     )
     actions = ["mark_active", "mark_inactive"]
-    export_fields = ['name', 'description','base_price', 'category', 'room', 'duration_min', 'extra_time_min', 'is_taxable']
+    export_fields = [
+        'name',
+        'description',
+        'base_price',
+        'category',
+        'allowed_rooms_display',
+        'duration_min',
+        'extra_time_min',
+        'is_taxable',
+    ]
 
     @admin.action(description="Mark selected services as active")
     def mark_active(self, request, queryset):
@@ -3933,11 +3954,21 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
     def mark_inactive(self, request, queryset):
         queryset.update(is_active=False)
 
+    @admin.display(description="Rooms")
+    def allowed_rooms_display(self, obj):
+        cache = getattr(obj, "_prefetched_objects_cache", {})
+        rooms = cache.get("allowed_rooms")
+        if rooms is None:
+            rooms = list(obj.allowed_rooms.all())
+        labels = ", ".join(filter(None, (r.room for r in rooms)))
+        return labels or "—"
+
     def get_queryset(self, request):
         qs = (
             super()
             .get_queryset(request)
             .select_related("category")
+            .prefetch_related("allowed_rooms")
         )
 
         category_value = getattr(request, "_svc_category_filter", None)
@@ -4005,13 +4036,13 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                         duration_min=original.duration_min,
                         extra_time_min=original.extra_time_min,
                         category=original.category,
-                        room=original.room,
                         image=original.image,
                         image_alt_text=original.image_alt_text,
                         is_active=getattr(original, "is_active", True),
                     )
                     clone.save()
                     clone.pre_appointment_forms.set(original.pre_appointment_forms.all())
+                    clone.allowed_rooms.set(original.allowed_rooms.all())
             except Exception:
                 messages.error(request, _("Could not duplicate service."))
             else:

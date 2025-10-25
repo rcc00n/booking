@@ -6,7 +6,7 @@ from django.db import models, transaction
 from django.contrib.auth.models import User
 import uuid
 from django.core.exceptions import ValidationError
-from datetime import timedelta, time
+from datetime import datetime, timedelta, time
 import os
 from importlib import import_module
 
@@ -455,12 +455,10 @@ class Service(models.Model):
         help_text="Accessible text for the service image; defaults to the service name."
     )
     category = models.ForeignKey(ServiceCategory, on_delete=models.CASCADE, blank=True, null=True)
-    room = models.ForeignKey(
+    allowed_rooms = models.ManyToManyField(
         "core.MasterRoom",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
         related_name="services",
+        blank=True,
     )
     # prepayment_option = models.ForeignKey(PrepaymentOption, on_delete=models.CASCADE, blank=True, null=True)
     base_price = models.DecimalField(max_digits=10, decimal_places=2)
@@ -1303,6 +1301,15 @@ class AppointmentItem(models.Model):
         validators=[MinValueValidator(1)],
         help_text="Custom duration in minutes for this appointment only"
     )
+    room = models.ForeignKey(
+        "core.MasterRoom",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        editable=False,
+        related_name="appointment_items",
+    )
+    end_time = models.DateTimeField(null=True, blank=True)
     manual_discount_percent = models.PositiveSmallIntegerField(
         default=0,
         blank=True,
@@ -1316,8 +1323,9 @@ class AppointmentItem(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["master", "start_time"]),
-            models.Index(fields=["service", "start_time"]),
+            models.Index(fields=["master", "start_time"], name="appt_master_start_idx"),
+            models.Index(fields=["service", "start_time"], name="appt_service_start_idx"),
+            models.Index(fields=["room", "start_time"], name="appt_room_start_idx"),
         ]
     def __str__(self):
         return f"{self.appointment.client} for {self.service} at {self.start_time}"
@@ -1331,11 +1339,13 @@ class AppointmentItem(models.Model):
         extra = service.extra_time_min or 0
         return int((service.duration_min or 0) + extra)
 
-    @property
-    def end_time(self):
-        if not self.start_time:
+    def compute_end_time(self) -> datetime | None:
+        if not self.start_time or not getattr(self, "service", None):
             return None
-        return self.start_time + timedelta(minutes=self.duration_min)
+        base = getattr(self.service, "duration_min", 0) or 0
+        extra = getattr(self.service, "extra_time_min", 0) or 0
+        dur_min = int(self.duration_override_min or (base + extra))
+        return self.start_time + timedelta(minutes=dur_min)
 
     @staticmethod
     def _to_decimal(val):
@@ -1450,12 +1460,14 @@ class AppointmentItem(models.Model):
         return getattr(appt, "start_time", None)
 
     def clean(self):
-        # === 0) Базовые вычисления: старт/длительность/конец ===
+        super().clean()
         start_dt = self._resolve_start_dt()
 
         service_obj = getattr(self, "service", None)
         if service_obj is None and self.service_id:
-            service_obj = Service.objects.filter(pk=self.service_id).select_related("category").first()
+            service_obj = (
+                Service.objects.filter(pk=self.service_id).select_related("category").first()
+            )
             if service_obj is not None:
                 self.service = service_obj
         validate_service_is_active(service_obj)
@@ -1464,16 +1476,25 @@ class AppointmentItem(models.Model):
         if start_dt and start_dt.time() > time(23, 59):
             raise ValidationError({"start_time": "Время начала не может быть позже 23:59."})
 
+        if start_dt and self.service_id:
+            self.end_time = self.compute_end_time()
+        else:
+            self.end_time = None
+
         # До ключевых атрибутов — выходим тихо
         if not self.master or not self.service or not start_dt:
             return
 
         total_min = self.duration_min
-        this_end = start_dt + timedelta(minutes=total_min)
+        this_end = self.end_time or (start_dt + timedelta(minutes=total_min))
 
         # === 1) Пересечения для этого мастера по предметному времени (AppointmentItem.start_time) ===
         # Исключаем отменённые аппы (если статус «Cancelled» существует)
-        cancelled_status = apps.get_model(self._meta.app_label, "AppointmentStatus").objects.filter(name="Cancelled").first()
+        cancelled_status = (
+            apps.get_model(self._meta.app_label, "AppointmentStatus")
+            .objects.filter(name="Cancelled")
+            .first()
+        )
 
         overlapping_qs = type(self).objects.filter(
             master=self.master,
@@ -1544,36 +1565,46 @@ class AppointmentItem(models.Model):
                         f"({work_end_dt.strftime('%H:%M')})."
                     )
                 })
-        # === 3) Ensure a room is not double-booked when both services use the same room ===
-        room_id = None
-        service = getattr(self, "service", None)
-        if service is not None:
-            room_id = getattr(service, "room_id", None)
-        elif self.service_id:
-            room_id = Service.objects.filter(pk=self.service_id).values_list("room_id", flat=True).first()
 
-        if room_id:
-            room_overlap_qs = type(self).objects.filter(
-                service__room_id=room_id,
-                start_time__lt=this_end,
-                start_time__gt=start_dt - timedelta(hours=24),
+        # === 3) Комнатная вместимость ===
+        allowed_room_ids = set(self.service.allowed_rooms.values_list("pk", flat=True))
+        if not allowed_room_ids:
+            raise ValidationError({"service": "Service must be assigned to at least one room."})
+
+        if self.room_id:
+            if self.room_id not in allowed_room_ids:
+                raise ValidationError({"room": "Service can't be performed in the selected room."})
+        else:
+            from .utils import pick_free_room
+
+            room_candidate = pick_free_room(self.service, start_dt, this_end)
+            if room_candidate is None:
+                raise ValidationError("All rooms for this service are busy at this time.")
+            self.room = room_candidate
+
+        room_overlap_qs = type(self).objects.filter(
+            room_id=self.room_id,
+            start_time__lt=this_end,
+            start_time__gt=start_dt - timedelta(hours=24),
+        )
+        if self.pk:
+            room_overlap_qs = room_overlap_qs.exclude(pk=self.pk)
+        if cancelled_status:
+            room_overlap_qs = room_overlap_qs.exclude(
+                appointment__appointmentstatushistory__status=cancelled_status
             )
-            if self.pk:
-                room_overlap_qs = room_overlap_qs.exclude(pk=self.pk)
-            if cancelled_status:
-                room_overlap_qs = room_overlap_qs.exclude(
-                    appointment__appointmentstatushistory__status=cancelled_status
-                )
 
-            for other in room_overlap_qs.select_related("service", "appointment", "master"):
-                if not other.start_time:
-                    continue
+        for other in room_overlap_qs.select_related("service", "appointment", "master"):
+            if not other.start_time:
+                continue
+            other_end = getattr(other, "end_time", None)
+            if other_end is None:
                 other_total = other.duration_min if hasattr(other, "duration_min") else 0
                 other_end = other.start_time + timedelta(minutes=other_total)
-                if start_dt < other_end and this_end > other.start_time:
-                    raise ValidationError({
-                        "start_time": "This room is currently used by another service for the selected time."
-                    })
+            if start_dt < other_end and this_end > other.start_time:
+                raise ValidationError({
+                    "start_time": "This room is currently used by another service for the selected time."
+                })
 
 # === 4) Недоступность мастера (time off / vacation / blocked) ===
         # Поддержим несколько возможных имён модели и полей, чтобы не «падать», если схема немного отличается.
@@ -1619,9 +1650,13 @@ class AppointmentItem(models.Model):
             if 'unit_price' in (kwargs.get('update_fields') or []):
                 self.unit_price_overridden = True
 
-        # Пересчёт позиционной цены (service/promocode)
-        # self._compute_item_pricing()
-        super().save(*args, **kwargs)
+        if self.service_id and self.start_time:
+            self.end_time = self.compute_end_time()
+
+        self.full_clean()
+
+        with transaction.atomic():
+            super().save(*args, **kwargs)
 
 
 

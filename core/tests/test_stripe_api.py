@@ -22,6 +22,7 @@ from core.models import (
     ServiceCategory,
     ServiceMaster,
 )
+from core.tests.utils import assign_service_room
 from core.payments.stripe_api import _ensure_appointment_from_cart
 
 
@@ -75,6 +76,7 @@ class StripeWebhookTests(TestCase):
             duration_min=30,
             category=category,
         )
+        assign_service_room(self.service, room_name="Stripe Webhook Room")
         ServiceMaster.objects.create(service=self.service, master=self.master_profile)
 
         cart = BookingCart.for_user(self.profile)
@@ -285,6 +287,7 @@ class StripeFinalizeCartTests(TestCase):
             duration_min=30,
             category=category,
         )
+        assign_service_room(self.service, room_name="Stripe Finalize Room")
         ServiceMaster.objects.create(service=self.service, master=self.master_profile)
 
     def _next_available_start(self):

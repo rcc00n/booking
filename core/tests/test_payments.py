@@ -25,6 +25,7 @@ from core.models import (
     ServiceDiscount,
     ServiceMaster,
 )
+from core.tests.utils import assign_service_room
 from core.services import payments as payment_services
 from core.services.booking import create_appointment_from_cart_items
 from core.services.pricing import compute_cart_pricing, compute_partial_charge
@@ -92,6 +93,7 @@ class CartTestMixin:
             duration_min=60,
             extra_time_min=0,
         )
+        assign_service_room(service, room_name=f"{name} Room")
         ServiceMaster.objects.create(service=service, master=self.master_profile)
         return service
 

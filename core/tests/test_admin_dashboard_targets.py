@@ -14,6 +14,7 @@ from core.models import (
     Service,
     UserProfile,
 )
+from core.tests.utils import assign_service_room
 
 
 class AdminDashboardTargetsTests(TestCase):
@@ -26,6 +27,7 @@ class AdminDashboardTargetsTests(TestCase):
             base_price=Decimal("100.00"),
             duration_min=60,
         )
+        assign_service_room(self.service, room_name="Sales Suite")
 
     def _create_master(self, username: str, target_amount: Decimal | None) -> tuple:
         user = self.user_model.objects.create_user(

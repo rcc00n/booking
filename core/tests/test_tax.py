@@ -19,6 +19,7 @@ from core.models import (
     Payment,
     PaymentMethod,
 )
+from core.tests.utils import assign_service_room
 from core.services.pricing import compute_appointment_pricing
 from core.admin import PaymentAdmin
 
@@ -37,12 +38,14 @@ class AppointmentTaxTests(TestCase):
         self.payment_status = PaymentStatus.objects.create(name="Not Paid")
 
     def _create_service(self, *, is_taxable: bool) -> Service:
-        return Service.objects.create(
+        service = Service.objects.create(
             name="Service",
             base_price=Decimal("100.00"),
             duration_min=60,
             is_taxable=is_taxable,
         )
+        assign_service_room(service, room_name=f"Tax Service {'T' if is_taxable else 'NT'}")
+        return service
 
     def _create_appointment(self) -> Appointment:
         return Appointment.objects.create(
@@ -147,6 +150,7 @@ class AppointmentPricingSnapshotTests(TestCase):
             duration_min=60,
             is_taxable=True,
         )
+        assign_service_room(service, room_name="Pricing Snapshot Room")
 
         appointment = Appointment.objects.create(
             client=self.client_profile,
@@ -204,6 +208,7 @@ class AdminPayFlowTests(TestCase):
             duration_min=60,
             is_taxable=True,
         )
+        assign_service_room(self.service, room_name="Admin PayFlow Room")
 
     def _build_appointment(self) -> Appointment:
         appointment = Appointment.objects.create(
