@@ -3639,14 +3639,13 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
     Admin interface for payments.
     """
     list_display = (
-        'appointment',
-        'amount',
-        'status',
-        'method',
-        'receipt_column',
-        'email_sent_column',
-        'livemode',
-        'created_at',
+        "appointment",
+        "services_done_column",
+        "amount",
+        "status",
+        "method",
+        "receipt_column",
+        "created_at",
     )
     list_filter = (
         "method",
@@ -3758,11 +3757,27 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
             return format_html('<a href="{}" target="_blank">Stripe</a>', obj.receipt_url)
         return "—"
 
-    @admin.display(description="Email sent", ordering="receipt_sent_at")
-    def email_sent_column(self, obj):
-        if obj.receipt_sent_at:
-            return localtime(obj.receipt_sent_at).strftime("%Y-%m-%d %H:%M")
-        return "—"
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related("appointment", "method")
+        item_qs = AppointmentItem.objects.select_related("service").order_by("start_time")
+        return qs.prefetch_related(
+            Prefetch("appointment__items", queryset=item_qs, to_attr="_admin_prefetched_items")
+        )
+
+    @admin.display(description="Services", ordering="appointment__items__service__name")
+    def services_done_column(self, obj):
+        appointment = getattr(obj, "appointment", None)
+        if appointment is None:
+            return "-"
+        items = getattr(appointment, "_admin_prefetched_items", None)
+        if items is None:
+            items = appointment.items.select_related("service").all()
+        names = [
+            getattr(getattr(item, "service", None), "name", "") or ""
+            for item in items
+            if getattr(getattr(item, "service", None), "name", "")
+        ]
+        return ", ".join(dict.fromkeys(names)) if names else "-"
 
     @admin.display(description="Resend receipt")
     def resend_receipt_action(self, obj):
