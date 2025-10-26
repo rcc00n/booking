@@ -603,41 +603,29 @@
                       <small data-i18n="services.userMenu.tier">Malva Member</small>
                     </div>
                     <div class="user-menu__list">
-                      <a href="{% url 'dashboard' %}" class="user-menu__link">
+                      <a href="{% url 'dashboard' %}#overview" class="user-menu__link">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Z"/><path d="M19 21a7 7 0 0 0-14 0"/></svg>
-                        <span data-i18n="services.userMenu.profile">Profile</span>
+                        <span>Overview</span>
                       </a>
                       <a href="{% url 'client_appointments' %}" class="user-menu__link">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 10h18M8 2v4M16 2v4"/></svg>
                         <span data-i18n="services.userMenu.appointments">Appointments</span>
                       </a>
-                      <a href="{% url 'dashboard' %}#wallet" class="user-menu__link">
+                      <a href="{% url 'dashboard' %}#billing" class="user-menu__link">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3z"/><path d="M16 11h4v4h-4z"/></svg>
-                        <span data-i18n="services.userMenu.wallet">Wallet</span>
-                      </a>
-                      <a href="{% url 'dashboard' %}#favorites" class="user-menu__link">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m5 12 5 5 9-10"/></svg>
-                        <span data-i18n="services.userMenu.favorites">Favorites</span>
-                      </a>
-                      <a href="{% url 'dashboard' %}#gift" class="user-menu__link">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h16M4 12a4 4 0 0 1 0-8h12a4 4 0 0 1 0 8m-16 0a4 4 0 0 0 0 8h12a4 4 0 0 0 0-8"/></svg>
-                        <span data-i18n="services.userMenu.giftCard">Send a gift card</span>
+                        <span>Billing & payments</span>
                       </a>
                       <a href="{% url 'client-intake-forms' %}" class="user-menu__link">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 2h12v20H6z"/><path d="M9 6h6M9 10h6M9 14h3"/></svg>
                         <span data-i18n="services.userMenu.forms">Forms</span>
                       </a>
-                      <a href="{% url 'dashboard' %}#orders" class="user-menu__link">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h12l3 7H3z"/><path d="m3 10 1.7 9.59A2 2 0 0 0 6.69 21h10.62a2 2 0 0 0 1.99-1.41L21 10"/></svg>
-                        <span data-i18n="services.userMenu.orders">Product orders</span>
-                      </a>
                       <a href="{% url 'dashboard' %}#settings" class="user-menu__link">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 15.5a3.5 3.5 0 1 0-3.5-3.5 3.5 3.5 0 0 0 3.5 3.5z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 1-2.54 0 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 1 0-2.54 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 1 2.54 0 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 1 0 2.54 1.65 1.65 0 0 0-.6 1z"/></svg>
                         <span data-i18n="services.userMenu.settings">Settings</span>
                       </a>
-                      <a href="{% url 'dashboard' %}#languages" class="user-menu__link">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
-                        <span data-i18n="services.userMenu.language">Languages</span>
+                      <a href="{% url 'dashboard' %}#support" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M9.09 9a3 3 0 0 1 5.82 1c0 2-3 2-3 4"/><path d="M12 17h.01"/></svg>
+                        <span>Support</span>
                       </a>
                       <form method="post" action="{% url 'logout' %}" class="user-menu__link user-menu__link--danger">
                         {% csrf_token %}
@@ -796,7 +784,7 @@
                       {% endif %}
                     {% endwith %}
                   </div>
-                  <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
+                  <button type="button" class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
                 </div>
               </div>
               <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
@@ -855,7 +843,7 @@
                       {% endif %}
                     {% endwith %}
                   </div>
-                  <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
+                  <button type="button" class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
                 </div>
               </div>
               <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
@@ -904,7 +892,7 @@
                         {% endif %}
                       {% endwith %}
                     </div>
-                    <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
+                  <button type="button" class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
                   </div>
                 </div>
                 <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
@@ -1204,7 +1192,13 @@
   {{ autofill_defaults|json_script:"autofill-defaults" }}
   <script>
     document.addEventListener('DOMContentLoaded', () => {
+      try {
       const I18N = window.MalvaI18n;
+      const bind = (node, event, handler, options) => {
+        if (node) {
+          node.addEventListener(event, handler, options);
+        }
+      };
       const getNestedValue = (source, path) => {
         if (!source || !Array.isArray(path) || path.length === 0) {
           return source;
@@ -1465,10 +1459,30 @@
         }
         return fallback !== undefined ? fallback : key;
       };
+      const bindBookButtons = (root) => {
+        const scope = root instanceof Element ? root : document;
+        scope.querySelectorAll('.book-btn').forEach((btn) => {
+          if (!(btn instanceof HTMLElement)) return;
+          if (btn.tagName === 'BUTTON' && !btn.type) {
+            btn.type = 'button';
+          }
+          if (btn.dataset.bookBound === '1') return;
+          btn.dataset.bookBound = '1';
+          btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const serviceId = btn.dataset.serviceId;
+            if (!serviceId) {
+              console.warn('[services] Missing service id on book button', btn);
+              return;
+            }
+            const serviceName = btn.dataset.serviceName || translate('common.service', null, 'Service');
+            openModal(serviceId, serviceName, btn);
+          });
+        });
+      };
       const defaultPrepaymentPercent = Number('{{ default_prepayment_percent|default:100 }}') || 100;
       const stripePublicKey = "{{ stripe_public_key|default:''|escapejs }}";
-      console.log("Public Key: ");
-      console.log(stripePublicKey);
       let stripeClient = null;
       let stripeElements = null;
       let stripeCardElement = null;
@@ -1552,6 +1566,7 @@
         cards.forEach((card) => {
           if (card.dataset.cardBound === '1') return;
           card.dataset.cardBound = '1';
+          bindBookButtons(card);
           card.addEventListener('click', (event) => {
             if (event.defaultPrevented) return;
             const target = event.target;
@@ -2440,8 +2455,6 @@
 
       function ensureStripe(){
         if (!stripePublicKey) return null;
-        console.log("window.Stripe: ");
-        console.log(window.Stripe);
         if (!window.Stripe) return null;
         if (!stripeClient){
           stripeClient = window.Stripe(stripePublicKey);
@@ -3817,11 +3830,11 @@ async function confirmPayment(){
         resetSelection();
         await renderWindow();
       }
-      olPrev.addEventListener('click', ()=>shiftWindow(-WINDOW_DAYS));
-      olNext.addEventListener('click', ()=>shiftWindow(WINDOW_DAYS));
-      olToday.addEventListener('click', async ()=>{ baseStart = new Date(); baseStart.setHours(0,0,0,0); await renderWindow(); });
+      bind(olPrev,'click', ()=>shiftWindow(-WINDOW_DAYS));
+      bind(olNext,'click', ()=>shiftWindow(WINDOW_DAYS));
+      bind(olToday,'click', async ()=>{ baseStart = new Date(); baseStart.setHours(0,0,0,0); await renderWindow(); });
 
-      elMaster.addEventListener('change', async ()=>{
+      bind(elMaster,'change', async ()=>{
         current.masterId = Number(elMaster.value);
         current.slot = null; btnSubmit.disabled = true;
         summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
@@ -3871,20 +3884,10 @@ async function confirmPayment(){
       }
 
       // ===== wire up =====
-      document.addEventListener('click',(e)=>{
-        if (e.defaultPrevented) return;
-        if (typeof e.button === 'number' && e.button !== 0) return;
-        const target = e.target;
-        if (!(target instanceof Element)) return;
-        const btn=target.closest('.book-btn');
-        if(btn){
-          openModal(btn.dataset.serviceId, btn.dataset.serviceName || translate('common.service', null, 'Service'), btn);
-        }
-      });
-      btnClose.addEventListener('click',closeModal);
-      btnCancel.addEventListener('click',closeModal);
-      modal.addEventListener('click',(e)=>{ if(e.target===modal) closeModal(); });
-      btnSubmit.addEventListener('click',addToCart);
+      bind(btnClose,'click',closeModal);
+      bind(btnCancel,'click',closeModal);
+      bind(modal,'click',(e)=>{ if(e.target===modal) closeModal(); });
+      bind(btnSubmit,'click',addToCart);
       if(detailClose){ detailClose.addEventListener('click', closeServiceDetail); }
       if(detailDismiss){ detailDismiss.addEventListener('click', closeServiceDetail); }
       if(detailModal){ detailModal.addEventListener('click',(event)=>{ if(event.target===detailModal) closeServiceDetail(); }); }
@@ -4105,7 +4108,7 @@ async function confirmPayment(){
               ${desc}
               <div class=\"service-card__actions\">
                 <div class=\"service-card__price\">${priceBlock}</div>
-                <button class=\"btn btn--primary book-btn\"
+                <button type=\"button\" class=\"btn btn--primary book-btn\"
                   data-service-id=\"${escapeHtml(s.id)}\"
                   data-service-name=\"${escapeHtml(rawName)}\"
                   data-i18n=\"services.cards.addToCart\">${translate('services.cards.addToCart')}</button>
@@ -4152,6 +4155,7 @@ async function confirmPayment(){
           }
           if (liveGrid) liveGrid.innerHTML = items.map(cardHTML).join('');
           bindServiceCardInteractions(liveGrid);
+          bindBookButtons(liveGrid);
           applyServiceNameTranslations(liveGrid);
           queueRefresh();
         }catch(e){
@@ -4209,7 +4213,11 @@ async function confirmPayment(){
       window.DEBUG_checkoutCart = checkoutCart;
       const serverContentNode = document.getElementById('serverContent');
       bindServiceCardInteractions(serverContentNode);
+      bindBookButtons(serverContentNode);
       applyServiceNameTranslations(serverContentNode);
+    } catch (err) {
+      console.error('[services] Failed to initialize booking UI', err);
+    }
     });
   </script>
 </body>

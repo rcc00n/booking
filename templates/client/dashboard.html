@@ -355,7 +355,7 @@
                   <p class="text-sm text-[#4D4D4D]">
                     <span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span> · {{ a.master.get_full_name }}
                   </p>
-                  <p class="text-xs text-[#4D4D4D]/80 mt-1" data-i18n="dashboard.appointment.paymentLabel" data-i18n-vars='{"status":"{{ a.payment_status.name|default:"Pending" }}"}'>Payment: {{ a.payment_status.name|default:"Pending" }}</p>
+                  <p class="text-xs text-[#4D4D4D]/80 mt-1">Payment status: {{ a.payment_status.name|default:"Pending" }}</p>
                   <div class="mt-2 flex gap-4 text-sm">
                     <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
                        data-appt-id="{{ a.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>

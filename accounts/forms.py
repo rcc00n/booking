@@ -304,15 +304,15 @@ class AccountSetPasswordForm(SetPasswordForm):
 
 # ---------- Profile edit ----------
 class ClientProfileForm(forms.Form):
-    first_name = forms.CharField(required=False, max_length=150, label="Имя")
-    last_name  = forms.CharField(required=False, max_length=150, label="Фамилия")
-    email      = forms.EmailField(required=True, label="E-mail")
-    phone      = forms.CharField(required=True, max_length=20, label="Телефон")
-    birth_date = forms.DateField(required=False, input_formats=["%Y-%m-%d"], label="Дата рождения")
+    first_name = forms.CharField(required=False, max_length=150, label="First name")
+    last_name  = forms.CharField(required=False, max_length=150, label="Last name")
+    email      = forms.EmailField(required=True, label="Email")
+    phone      = forms.CharField(required=True, max_length=20, label="Phone")
+    birth_date = forms.DateField(required=False, input_formats=["%Y-%m-%d"], label="Birth date")
 
     # --- NEW: редактирование доп. полей профиля ---
     address = forms.CharField(
-        required=False, label="Адрес",
+        required=False, label="Address",
         widget=forms.Textarea(attrs={"rows": 2})
     )
     postal_code = forms.CharField(
@@ -325,7 +325,7 @@ class ClientProfileForm(forms.Form):
         choices=[("", "— Select —")] + list(HowHeard.choices)
     )
     email_marketing_consent = forms.BooleanField(
-        required=False, label="Согласен получать новости и предложения на e-mail"
+        required=False, label="I agree to receive updates by email"
     )
 
     def __init__(self, *args, **kwargs):
@@ -373,7 +373,7 @@ class ClientProfileForm(forms.Form):
     def clean_email(self):
         email = (self.cleaned_data.get("email") or "").lower().strip()
         if CustomUserDisplay.objects.filter(email__iexact=email).exclude(pk=self.user.pk).exists():
-            raise ValidationError("Этот e-mail уже используется.")
+            raise ValidationError("This email is already in use.")
         return email
 
     def clean_phone(self):
@@ -386,12 +386,12 @@ class ClientProfileForm(forms.Form):
             parsed = phonenumbers.parse(raw, None)
             phone_e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
         except phonenumbers.NumberParseException:
-            raise ValidationError("Неверный формат телефона.")
+            raise ValidationError("Invalid phone format.")
         # уникальность среди профилей, исключая текущего пользователя
         qs = UserProfile.objects.filter(phone=phone_e164)
         qs = qs.exclude(user=self.user)
         if qs.exists():
-            raise ValidationError("Этот телефон уже используется.")
+            raise ValidationError("This phone number is already in use.")
         return phone_e164
 
     def clean_birth_date(self):
