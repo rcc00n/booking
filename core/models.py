@@ -1172,6 +1172,9 @@ class Appointment(models.Model):
 
         # Внутренняя функция проверки одного айтема,
         # почти та же логика, что в AppointmentItem.clean
+        service_room_usage = {}
+        service_allowed_rooms = {}
+
         def validate_item(it: "AppointmentItem"):
             # старт от Appointment
             start_dt = getattr(it, "start_time", None) or self.start_time
@@ -1256,6 +1259,26 @@ class Appointment(models.Model):
                         f"({work_end_dt.strftime('%H:%M')}) "
                         f"для мастера {getattr(it.master, 'display_name', it.master)}."
                     )
+
+            # Резервируем комнаты на уровне текущего Appointment, чтобы не превышать вместимость
+            service_obj = getattr(it, "service", None)
+            service_pk = getattr(service_obj, "pk", None) or getattr(it, "service_id", None)
+            if not service_pk:
+                return
+
+            if service_pk not in service_allowed_rooms:
+                service_allowed_rooms[service_pk] = list(service_obj.allowed_rooms.values_list("pk", flat=True))
+            allowed_room_ids = service_allowed_rooms[service_pk]
+            if not allowed_room_ids:
+                errors.setdefault("service", []).append("Service must be assigned to at least one room.")
+                return
+
+            allocations = service_room_usage.setdefault(service_pk, [])
+            overlaps = sum(1 for exist_start, exist_end in allocations if start_dt < exist_end and this_end > exist_start)
+            if overlaps >= len(allowed_room_ids):
+                errors.setdefault("start_time", []).append("All rooms for this service are busy at this time.")
+                return
+            allocations.append((start_dt, this_end))
 
         # Прогоняем все айтемы текущего Appointment
         for it in items:
