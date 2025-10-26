@@ -1213,6 +1213,7 @@
         return current;
       };
       const bodyDataset = document.body && document.body.dataset ? document.body.dataset : null;
+      const serverContentNode = document.getElementById('serverContent');
       const userMenu = document.querySelector('[data-user-menu]');
       if (userMenu) {
         const trigger = userMenu.querySelector('[data-user-menu-trigger]');
@@ -1470,7 +1471,6 @@
           btn.dataset.bookBound = '1';
           btn.addEventListener('click', (event) => {
             event.preventDefault();
-            event.stopPropagation();
             const serviceId = btn.dataset.serviceId;
             if (!serviceId) {
               console.warn('[services] Missing service id on book button', btn);
@@ -1591,6 +1591,9 @@
           });
         });
       };
+      bindServiceCardInteractions(serverContentNode);
+      bindBookButtons(serverContentNode);
+      applyServiceNameTranslations(serverContentNode);
       const servicePayloadCache = new WeakMap();
       const readServicePayload = (card) => {
         if (!card) return null;
@@ -3997,7 +4000,7 @@ async function confirmPayment(){
       const resetLink = document.querySelector('[data-reset-link]');
       const liveTitle = document.getElementById('liveTitle');
       const liveGrid  = document.getElementById('liveGrid');
-      const serverContent = document.getElementById('serverContent');
+      const serverContent = serverContentNode;
 
       const SEARCH_DELAY = 250;
       let searchTimer = null;
@@ -4211,10 +4214,6 @@ async function confirmPayment(){
         });
       }
       window.DEBUG_checkoutCart = checkoutCart;
-      const serverContentNode = document.getElementById('serverContent');
-      bindServiceCardInteractions(serverContentNode);
-      bindBookButtons(serverContentNode);
-      applyServiceNameTranslations(serverContentNode);
     } catch (err) {
       console.error('[services] Failed to initialize booking UI', err);
     }
