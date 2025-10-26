@@ -3392,17 +3392,44 @@ async function confirmPayment(){
       // ===== availability by day/master =====
       async function fetchAvailability(dayISO, masterId){
         const params = new URLSearchParams({ service: current.serviceId, date: dayISO });
-        if (masterId) params.set('master', masterId);
+        const normalizedMasterId = (() => {
+          if (masterId === 0) return "0";
+          if (masterId === null || masterId === undefined) return "";
+          if (typeof masterId === "number" && Number.isFinite(masterId)) {
+            return String(masterId);
+          }
+          const str = String(masterId).trim();
+          return str;
+        })();
+        if (normalizedMasterId) {
+          params.set('master', normalizedMasterId);
+        }
         const r = await fetch(`${apiAvail}?${params.toString()}`, {credentials:'same-origin'});
         if(!r.ok) throw new Error(translate('services.modal.errorLoad'));
         const data = await r.json();
 
+        // API responds with `masters` when no master filter is provided and `slots` when a master is specified.
+        const masterList = Array.isArray(data.masters) ? data.masters : [];
         let slots = [];
-        if (masterId){
-          const m = (data.masters||[]).find(x => Number(x.id)===Number(masterId));
-          slots = m ? (m.slots||[]) : [];
-        }else{
-          slots = (data.masters && data.masters[0] && data.masters[0].slots) ? data.masters[0].slots : [];
+        if (normalizedMasterId) {
+          if (Array.isArray(data.slots) && data.slots.length) {
+            slots = data.slots;
+          } else {
+            const match = masterList.find((entry) => String(entry.id) === normalizedMasterId);
+            if (match && Array.isArray(match.slots)) {
+              slots = match.slots;
+            }
+          }
+        }
+        if (!normalizedMasterId) {
+          const preferred = masterList.find((entry) => Array.isArray(entry.slots) && entry.slots.length);
+          const fallback = preferred || masterList[0];
+          if (fallback && Array.isArray(fallback.slots)) {
+            slots = fallback.slots;
+          }
+        }
+        if (!slots.length && Array.isArray(data.slots)) {
+          slots = data.slots;
         }
 
         const set = new Set(); const map = new Map();
