@@ -1191,8 +1191,9 @@
 
   {{ autofill_defaults|json_script:"autofill-defaults" }}
   <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      try {
+    (function(){
+      const initMainmenuInteractions = () => {
+        try {
       const I18N = window.MalvaI18n;
       const bind = (node, event, handler, options) => {
         if (node) {
@@ -1460,6 +1461,16 @@
         }
         return fallback !== undefined ? fallback : key;
       };
+      const openBookingFlowFromButton = (btn) => {
+        if (!(btn instanceof HTMLElement)) return;
+        const serviceId = btn.dataset.serviceId;
+        if (!serviceId) {
+          console.warn('[services] Missing service id on book button', btn);
+          return;
+        }
+        const serviceName = btn.dataset.serviceName || translate('common.service', null, 'Service');
+        openModal(serviceId, serviceName, btn);
+      };
       const bindBookButtons = (root) => {
         const scope = root instanceof Element ? root : document;
         scope.querySelectorAll('.book-btn').forEach((btn) => {
@@ -1471,13 +1482,8 @@
           btn.dataset.bookBound = '1';
           btn.addEventListener('click', (event) => {
             event.preventDefault();
-            const serviceId = btn.dataset.serviceId;
-            if (!serviceId) {
-              console.warn('[services] Missing service id on book button', btn);
-              return;
-            }
-            const serviceName = btn.dataset.serviceName || translate('common.service', null, 'Service');
-            openModal(serviceId, serviceName, btn);
+            event.stopPropagation();
+            openBookingFlowFromButton(btn);
           });
         });
       };
@@ -4213,11 +4219,28 @@ async function confirmPayment(){
           }
         });
       }
+      document.addEventListener('click', (event) => {
+        if (event.defaultPrevented) return;
+        if (typeof event.button === 'number' && event.button !== 0) return;
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const btn = target.closest('.book-btn');
+        if (!btn) return;
+        if (btn.dataset.bookBound === '1') return;
+        event.preventDefault();
+        openBookingFlowFromButton(btn);
+      });
       window.DEBUG_checkoutCart = checkoutCart;
     } catch (err) {
       console.error('[services] Failed to initialize booking UI', err);
     }
-    });
+      };
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initMainmenuInteractions, { once: true });
+      } else {
+        initMainmenuInteractions();
+      }
+    })();
   </script>
 </body>
 </html>
