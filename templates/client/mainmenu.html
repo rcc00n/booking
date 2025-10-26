@@ -583,80 +583,82 @@
           </button>
           {% if user.is_authenticated %}
             {% with user_display=request.user.get_full_name|default:request.user.username %}
-              <div class="user-menu" data-user-menu>
-                <button type="button"
-                        class="user-menu__trigger"
-                        data-user-menu-trigger
-                        aria-expanded="false"
-                        data-i18n-attr="aria-label:services.userMenu.open">
-                  <span class="user-menu__avatar">{{ user_display|default:user.username|slice:":1"|upper }}</span>
-                  <span class="user-menu__label">
-                    <span class="user-menu__greeting" data-i18n="services.userMenu.greeting">Welcome back</span>
-                    <strong>{{ user_display }}</strong>
-                  </span>
-                </button>
-                <div class="user-menu__dropdown" data-user-menu-dropdown>
-                  <div class="user-menu__header">
-                    <strong>{{ user_display }}</strong>
-                    <small data-i18n="services.userMenu.tier">Malva Member</small>
-                  </div>
-                  <div class="user-menu__list">
-                    <a href="{% url 'dashboard' %}" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Z"/><path d="M19 21a7 7 0 0 0-14 0"/></svg>
-                      <span data-i18n="services.userMenu.profile">Profile</span>
-                    </a>
-                    <a href="{% url 'client_appointments' %}" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 10h18M8 2v4M16 2v4"/></svg>
-                      <span data-i18n="services.userMenu.appointments">Appointments</span>
-                    </a>
-                    <a href="{% url 'dashboard' %}#wallet" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3z"/><path d="M16 11h4v4h-4z"/></svg>
-                      <span data-i18n="services.userMenu.wallet">Wallet</span>
-                    </a>
-                    <a href="{% url 'dashboard' %}#favorites" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m5 12 5 5 9-10"/></svg>
-                      <span data-i18n="services.userMenu.favorites">Favorites</span>
-                    </a>
-                    <a href="{% url 'dashboard' %}#gift" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h16M4 12a4 4 0 0 1 0-8h12a4 4 0 0 1 0 8m-16 0a4 4 0 0 0 0 8h12a4 4 0 0 0 0-8"/></svg>
-                      <span data-i18n="services.userMenu.giftCard">Send a gift card</span>
-                    </a>
-                    <a href="{% url 'client-intake-forms' %}" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 2h12v20H6z"/><path d="M9 6h6M9 10h6M9 14h3"/></svg>
-                      <span data-i18n="services.userMenu.forms">Forms</span>
-                    </a>
-                    <a href="{% url 'dashboard' %}#orders" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h12l3 7H3z"/><path d="m3 10 1.7 9.59A2 2 0 0 0 6.69 21h10.62a2 2 0 0 0 1.99-1.41L21 10"/></svg>
-                      <span data-i18n="services.userMenu.orders">Product orders</span>
-                    </a>
-                    <a href="{% url 'dashboard' %}#settings" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 15.5a3.5 3.5 0 1 0-3.5-3.5 3.5 3.5 0 0 0 3.5 3.5z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 1-2.54 0 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 1 0-2.54 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 1 2.54 0 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 1 0 2.54 1.65 1.65 0 0 0-.6 1z"/></svg>
-                      <span data-i18n="services.userMenu.settings">Settings</span>
-                    </a>
-                    <a href="{% url 'dashboard' %}#languages" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
-                      <span data-i18n="services.userMenu.language">Languages</span>
-                    </a>
-                    <form method="post" action="{% url 'logout' %}" class="user-menu__link user-menu__link--danger">
-                      {% csrf_token %}
-                      <button type="submit" style="all:unset;display:flex;align-items:center;gap:.6rem;cursor:pointer;">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>
-                        <span data-i18n="services.userMenu.logout">Log out</span>
-                      </button>
-                    </form>
-                  </div>
-                  <div class="user-menu__footer">
-                    <a href="#download" class="user-menu__footer-link" data-i18n="services.userMenu.download">Download the app</a>
-                    <a href="#help" class="user-menu__footer-link" data-i18n="services.userMenu.help">Help & support</a>
-                    <a href="#business" class="user-menu__footer-link" data-i18n="services.userMenu.business">For businesses</a>
+              <div class="header-auth header-auth--authenticated">
+                <a href="{% url 'dashboard' %}" class="btn btn--ghost header-auth__cta">My account</a>
+                <div class="user-menu" data-user-menu>
+                  <button type="button"
+                          class="user-menu__trigger"
+                          data-user-menu-trigger
+                          aria-expanded="false"
+                          data-i18n-attr="aria-label:services.userMenu.open">
+                    <span class="user-menu__avatar">{{ user_display|default:user.username|slice:":1"|upper }}</span>
+                    <span class="user-menu__label">
+                      <span class="user-menu__greeting" data-i18n="services.userMenu.greeting">Welcome back</span>
+                      <strong>{{ user_display }}</strong>
+                    </span>
+                  </button>
+                  <div class="user-menu__dropdown" data-user-menu-dropdown>
+                    <div class="user-menu__header">
+                      <strong>{{ user_display }}</strong>
+                      <small data-i18n="services.userMenu.tier">Malva Member</small>
+                    </div>
+                    <div class="user-menu__list">
+                      <a href="{% url 'dashboard' %}" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Z"/><path d="M19 21a7 7 0 0 0-14 0"/></svg>
+                        <span data-i18n="services.userMenu.profile">Profile</span>
+                      </a>
+                      <a href="{% url 'client_appointments' %}" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 10h18M8 2v4M16 2v4"/></svg>
+                        <span data-i18n="services.userMenu.appointments">Appointments</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#wallet" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3z"/><path d="M16 11h4v4h-4z"/></svg>
+                        <span data-i18n="services.userMenu.wallet">Wallet</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#favorites" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m5 12 5 5 9-10"/></svg>
+                        <span data-i18n="services.userMenu.favorites">Favorites</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#gift" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h16M4 12a4 4 0 0 1 0-8h12a4 4 0 0 1 0 8m-16 0a4 4 0 0 0 0 8h12a4 4 0 0 0 0-8"/></svg>
+                        <span data-i18n="services.userMenu.giftCard">Send a gift card</span>
+                      </a>
+                      <a href="{% url 'client-intake-forms' %}" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 2h12v20H6z"/><path d="M9 6h6M9 10h6M9 14h3"/></svg>
+                        <span data-i18n="services.userMenu.forms">Forms</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#orders" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h12l3 7H3z"/><path d="m3 10 1.7 9.59A2 2 0 0 0 6.69 21h10.62a2 2 0 0 0 1.99-1.41L21 10"/></svg>
+                        <span data-i18n="services.userMenu.orders">Product orders</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#settings" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 15.5a3.5 3.5 0 1 0-3.5-3.5 3.5 3.5 0 0 0 3.5 3.5z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 1-2.54 0 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 1 0-2.54 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 1 2.54 0 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 1 0 2.54 1.65 1.65 0 0 0-.6 1z"/></svg>
+                        <span data-i18n="services.userMenu.settings">Settings</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#languages" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+                        <span data-i18n="services.userMenu.language">Languages</span>
+                      </a>
+                      <form method="post" action="{% url 'logout' %}" class="user-menu__link user-menu__link--danger">
+                        {% csrf_token %}
+                        <button type="submit" style="all:unset;display:flex;align-items:center;gap:.6rem;cursor:pointer;">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>
+                          <span data-i18n="services.userMenu.logout">Log out</span>
+                        </button>
+                      </form>
+                    </div>
+                    <div class="user-menu__footer">
+                      <a href="#download" class="user-menu__footer-link" data-i18n="services.userMenu.download">Download the app</a>
+                      <a href="#help" class="user-menu__footer-link" data-i18n="services.userMenu.help">Help & support</a>
+                      <a href="#business" class="user-menu__footer-link" data-i18n="services.userMenu.business">For businesses</a>
+                    </div>
                   </div>
                 </div>
               </div>
             {% endwith %}
           {% else %}
             <div class="header-auth">
-              <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="btn btn--ghost" data-i18n="services.nav.login">Login</a>
-              <a href="{% url 'register' %}" class="btn btn--primary" data-i18n="services.nav.register">Create account</a>
+              <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="btn btn--ghost header-auth__cta">Login / Account</a>
             </div>
           {% endif %}
         </div>
@@ -1542,6 +1544,36 @@
           const original = el.getAttribute('data-service-name-original') || el.textContent;
           if (!original) return;
           el.textContent = translateServiceNameText(original) || original;
+        });
+      };
+      const bindServiceCardInteractions = (root) => {
+        const scope = root instanceof Element ? root : document;
+        const cards = scope.querySelectorAll('[data-service-card]');
+        cards.forEach((card) => {
+          if (card.dataset.cardBound === '1') return;
+          card.dataset.cardBound = '1';
+          card.addEventListener('click', (event) => {
+            if (event.defaultPrevented) return;
+            const target = event.target;
+            if (target instanceof Element && target.closest('.book-btn')) {
+              return;
+            }
+            if (target instanceof Element && target.closest('.service-card__payload')) {
+              return;
+            }
+            event.preventDefault();
+            openServiceDetail(card, card);
+          });
+          card.addEventListener('keydown', (event) => {
+            if (event.defaultPrevented) return;
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            const target = event.target;
+            if (target instanceof Element && target.closest('.book-btn')) {
+              return;
+            }
+            event.preventDefault();
+            openServiceDetail(card, card);
+          });
         });
       };
       const servicePayloadCache = new WeakMap();
@@ -3820,23 +3852,7 @@ async function confirmPayment(){
         const btn=target.closest('.book-btn');
         if(btn){
           openModal(btn.dataset.serviceId, btn.dataset.serviceName || translate('common.service', null, 'Service'), btn);
-          return;
         }
-        const card = target.closest('[data-service-card]');
-        if(card && !target.closest('.service-card__payload')){
-          openServiceDetail(card, card);
-        }
-      });
-      document.addEventListener('keydown', (event) => {
-        if (event.defaultPrevented) return;
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        const target = event.target;
-        if (!(target instanceof Element)) return;
-        if (target.closest('.book-btn')) return;
-        const card = target.closest('[data-service-card]');
-        if (!card) return;
-        event.preventDefault();
-        openServiceDetail(card, card);
       });
       btnClose.addEventListener('click',closeModal);
       btnCancel.addEventListener('click',closeModal);
@@ -4108,6 +4124,7 @@ async function confirmPayment(){
             return;
           }
           if (liveGrid) liveGrid.innerHTML = items.map(cardHTML).join('');
+          bindServiceCardInteractions(liveGrid);
           applyServiceNameTranslations(liveGrid);
           queueRefresh();
         }catch(e){
@@ -4163,7 +4180,9 @@ async function confirmPayment(){
         });
       }
       window.DEBUG_checkoutCart = checkoutCart;
-      applyServiceNameTranslations(document.getElementById('serverContent'));
+      const serverContentNode = document.getElementById('serverContent');
+      bindServiceCardInteractions(serverContentNode);
+      applyServiceNameTranslations(serverContentNode);
     });
   </script>
 </body>

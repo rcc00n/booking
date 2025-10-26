@@ -53,6 +53,7 @@ from .forms import (
     ClientProfileForm,
     HealthConditionsForm,
     ProductSaleForm,
+    ClientLoginForm,
 )
 
 from .emails import start_or_resend_verification, MAX_ATTEMPTS, ResendNotAllowed, RESEND_COOLDOWN_SEC
@@ -128,6 +129,7 @@ class RoleBasedLoginView(LoginView):
       • Client → mainmenu
     """
     template_name = "registration/login.html"
+    form_class = ClientLoginForm
 
     def get_success_url(self):
         user = self.request.user
