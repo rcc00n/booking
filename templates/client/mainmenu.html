@@ -1192,7 +1192,23 @@
   {{ autofill_defaults|json_script:"autofill-defaults" }}
   <script>
     (function(){
+      let bookButtonHandlerBound = false;
+      function handleGlobalBookButtonClick(event){
+        if (event.defaultPrevented) return;
+        if (typeof event.button === 'number' && event.button !== 0) return;
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const btn = target.closest('.book-btn');
+        if (!btn) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openBookingFlowFromButton(btn);
+      }
       const initMainmenuInteractions = () => {
+        if (!bookButtonHandlerBound) {
+          document.addEventListener('click', handleGlobalBookButtonClick);
+          bookButtonHandlerBound = true;
+        }
         try {
       const I18N = window.MalvaI18n;
       const bind = (node, event, handler, options) => {
@@ -1404,40 +1420,48 @@
         return hydrated;
       };
       if (paymentFormEl) {
-        if (autofillApi) {
-          autofillApi.attach(paymentFormEl, { userId: resolvedUserId });
-          const storedPayment = autofillApi.load('payment', { userId: resolvedUserId });
-          const hasStoredPayment = storedPayment && Object.keys(storedPayment.values || {}).length > 0;
-          if (!hasStoredPayment) {
-            const hydrated = hydratePaymentFromProfile(true);
-            if (!hydrated && paymentDefaults && Object.keys(paymentDefaults).length) {
-              persistPaymentContact(paymentDefaults, { immediate: true });
+        try {
+          if (autofillApi) {
+            autofillApi.attach(paymentFormEl, { userId: resolvedUserId });
+            const storedPayment = autofillApi.load('payment', { userId: resolvedUserId });
+            const hasStoredPayment = storedPayment && Object.keys(storedPayment.values || {}).length > 0;
+            if (!hasStoredPayment) {
+              const hydrated = hydratePaymentFromProfile(true);
+              if (!hydrated && paymentDefaults && Object.keys(paymentDefaults).length) {
+                persistPaymentContact(paymentDefaults, { immediate: true });
+              }
             }
+          } else if (Object.keys(profileDefaults).length) {
+            hydratePaymentFromProfile(false);
           }
-        } else if (Object.keys(profileDefaults).length) {
-          hydratePaymentFromProfile(false);
-        }
-        if (paymentEndpoint) {
-          const eventType = (field) => (field && (field.tagName === 'SELECT' || field.type === 'checkbox' || field.type === 'radio') ? 'change' : 'input');
-          Object.values(paymentFields).forEach((field) => {
-            if (!field) return;
-            field.addEventListener(eventType(field), () => {
-              const payload = collectPaymentValues();
-              persistPaymentContact(payload);
+          if (paymentEndpoint) {
+            const eventType = (field) => (field && (field.tagName === 'SELECT' || field.type === 'checkbox' || field.type === 'radio') ? 'change' : 'input');
+            Object.values(paymentFields).forEach((field) => {
+              if (!field) return;
+              field.addEventListener(eventType(field), () => {
+                const payload = collectPaymentValues();
+                persistPaymentContact(payload);
+              });
             });
-          });
+          }
+        } catch (err) {
+          console.error('[services] Payment autofill failed', err);
         }
       }
       if (autofillApi && paymentEndpoint) {
-        autofillApi.subscribe(({ group, userId, state }) => {
-          if (group !== 'payment') return;
-          if (String(userId || 'guest') !== resolvedUserId) return;
-          const values = (state && state.values) || (state && state.state && state.state.values) || {};
-          if (!Object.keys(values).length) {
-            return;
-          }
-          persistPaymentContact(values, { immediate: true });
-        });
+        try {
+          autofillApi.subscribe(({ group, userId, state }) => {
+            if (group !== 'payment') return;
+            if (String(userId || 'guest') !== resolvedUserId) return;
+            const values = (state && state.values) || (state && state.state && state.state.values) || {};
+            if (!Object.keys(values).length) {
+              return;
+            }
+            persistPaymentContact(values, { immediate: true });
+          });
+        } catch (err) {
+          console.error('[services] Payment autofill subscription failed', err);
+        }
       }
       let refreshPending = false;
       const queueRefresh = () => {
@@ -1450,7 +1474,7 @@
           I18N.refresh({ silent: true });
         });
       };
-      const translate = (key, vars, fallback) => {
+      function translate(key, vars, fallback) {
         if (!key) return fallback || '';
         if (I18N) {
           try {
@@ -1460,8 +1484,8 @@
           }
         }
         return fallback !== undefined ? fallback : key;
-      };
-      const openBookingFlowFromButton = (btn) => {
+      }
+      function openBookingFlowFromButton(btn){
         if (!(btn instanceof HTMLElement)) return;
         const serviceId = btn.dataset.serviceId;
         if (!serviceId) {
@@ -1470,23 +1494,7 @@
         }
         const serviceName = btn.dataset.serviceName || translate('common.service', null, 'Service');
         openModal(serviceId, serviceName, btn);
-      };
-      const bindBookButtons = (root) => {
-        const scope = root instanceof Element ? root : document;
-        scope.querySelectorAll('.book-btn').forEach((btn) => {
-          if (!(btn instanceof HTMLElement)) return;
-          if (btn.tagName === 'BUTTON' && !btn.type) {
-            btn.type = 'button';
-          }
-          if (btn.dataset.bookBound === '1') return;
-          btn.dataset.bookBound = '1';
-          btn.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            openBookingFlowFromButton(btn);
-          });
-        });
-      };
+      }
       const defaultPrepaymentPercent = Number('{{ default_prepayment_percent|default:100 }}') || 100;
       const stripePublicKey = "{{ stripe_public_key|default:''|escapejs }}";
       let stripeClient = null;
@@ -1572,7 +1580,6 @@
         cards.forEach((card) => {
           if (card.dataset.cardBound === '1') return;
           card.dataset.cardBound = '1';
-          bindBookButtons(card);
           card.addEventListener('click', (event) => {
             if (event.defaultPrevented) return;
             const target = event.target;
@@ -1598,7 +1605,6 @@
         });
       };
       bindServiceCardInteractions(serverContentNode);
-      bindBookButtons(serverContentNode);
       applyServiceNameTranslations(serverContentNode);
       const servicePayloadCache = new WeakMap();
       const readServicePayload = (card) => {
@@ -4164,7 +4170,6 @@ async function confirmPayment(){
           }
           if (liveGrid) liveGrid.innerHTML = items.map(cardHTML).join('');
           bindServiceCardInteractions(liveGrid);
-          bindBookButtons(liveGrid);
           applyServiceNameTranslations(liveGrid);
           queueRefresh();
         }catch(e){
@@ -4226,8 +4231,8 @@ async function confirmPayment(){
         if (!(target instanceof Element)) return;
         const btn = target.closest('.book-btn');
         if (!btn) return;
-        if (btn.dataset.bookBound === '1') return;
         event.preventDefault();
+        event.stopPropagation();
         openBookingFlowFromButton(btn);
       });
       window.DEBUG_checkoutCart = checkoutCart;
