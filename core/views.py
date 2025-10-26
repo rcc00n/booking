@@ -161,18 +161,23 @@ def api_availability(request):
     master_obj = get_object_or_404(MasterProfile, pk=master_id) if master_id else None
     slots_map = get_available_slots(service, day_dt, master=master_obj)
 
-    masters_qs = [master_obj] if master_obj else list(get_service_masters(service))
     resp = {
         "service": {"id": str(service.pk), "name": service.name, "duration": service.duration_min},
         "date": date_str,
-        "masters": []
     }
-    for m in masters_qs:
-        resp["masters"].append({
-            "id": m.id,
-            "name": m.user.get_full_name() or m.user.username,
-            "slots": [s.isoformat() for s in slots_map.get(m.id, [])]
-        })
+
+    if master_obj:
+        resp["slots"] = [s.isoformat() for s in slots_map.get(master_obj.id, [])]
+    else:
+        masters_qs = list(get_service_masters(service))
+        resp["masters"] = [
+            {
+                "id": m.id,
+                "name": m.user.get_full_name() or m.user.username,
+                "slots": [s.isoformat() for s in slots_map.get(m.id, [])],
+            }
+            for m in masters_qs
+        ]
     from django.http import JsonResponse
     return JsonResponse(resp)
 

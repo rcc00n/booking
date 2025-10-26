@@ -1,8 +1,11 @@
 import hashlib
+import json
 from decimal import Decimal, InvalidOperation
 
 from django import template
 from django.utils.formats import number_format
+from django.utils.html import strip_tags
+from django.utils.safestring import mark_safe
 
 from core.utils.admin_perms import is_master
 
@@ -118,3 +121,87 @@ def changelist_page_url(context, page_number):
     if query_string:
         return f"{request.path}?{query_string}"
     return request.path
+
+
+def _format_decimal(value):
+    if value is None:
+        return "0"
+    if isinstance(value, Decimal):
+        return format(value.quantize(Decimal("0.01")))
+    try:
+        return format(Decimal(str(value)).quantize(Decimal("0.01")))
+    except (InvalidOperation, TypeError, ValueError):
+        return "0"
+
+
+@register.filter
+def service_payload(service):
+    """
+    Build a serializable payload with the metadata we need on the catalog cards.
+    """
+    if not service:
+        return {}
+    try:
+        discount = service.get_active_discount()
+    except Exception:
+        discount = None
+
+    description = strip_tags(getattr(service, "description", "") or "").strip()
+    price = service.get_discounted_price() if discount else getattr(service, "base_price", None)
+
+    forms = []
+    forms_source = []
+    get_forms = getattr(service, "active_forms", None)
+    if callable(get_forms):
+        try:
+            forms_source = list(get_forms())
+        except Exception:
+            forms_source = []
+    if not forms_source:
+        prefetched = getattr(service, "_prefetched_objects_cache", {})
+        if prefetched and "pre_appointment_forms" in prefetched:
+            forms_source = prefetched["pre_appointment_forms"]
+        else:
+            manager = getattr(service, "pre_appointment_forms", None)
+            if hasattr(manager, "all"):
+                forms_source = list(manager.all())
+            else:
+                forms_source = []
+
+    for form in forms_source or []:
+        forms.append(
+            {
+                "id": str(getattr(form, "id", "")),
+                "name": getattr(form, "name", "") or "",
+                "slug": getattr(form, "slug", "") or "",
+            }
+        )
+
+    payload = {
+        "id": str(getattr(service, "pk", "")),
+        "name": getattr(service, "name", "") or "",
+        "category": getattr(getattr(service, "category", None), "name", "") or "",
+        "description": description,
+        "duration_min": getattr(service, "duration_min", 0) or 0,
+        "extra_time_min": getattr(service, "extra_time_min", 0) or 0,
+        "base_price": _format_decimal(getattr(service, "base_price", None)),
+        "price": _format_decimal(price),
+        "discount_percent": getattr(discount, "discount_percent", None),
+        "image": getattr(service, "card_image_url", None) or "",
+        "image_alt": getattr(service, "card_image_alt", None) or (getattr(service, "name", "") or ""),
+        "forms": forms,
+    }
+    return payload
+
+
+@register.filter
+def as_json(value):
+    """
+    Serialize the provided value into JSON that is safe to embed inside <script type="application/json"> tags.
+    """
+    try:
+        data = json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        data = json.dumps(str(value), ensure_ascii=False)
+    data = data.replace("</", "<\\/")
+    return mark_safe(data)

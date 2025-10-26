@@ -119,6 +119,29 @@
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
         },
+        detail: {
+          badgeFeatured: 'Signature',
+          imageEmpty: 'Preview coming soon',
+          unknownCategory: 'Uncategorized',
+          descriptionFallback: 'We will publish the description soon.',
+          durationLabel: 'Duration',
+          categoryLabel: 'Category',
+          priceLabel: 'Investment',
+          discountLabel: '{{value}}% off today',
+          formsLabel: 'Required forms',
+          formsEmpty: 'No forms required before the visit.',
+          formsSingular: '{{count}} form to complete before arrival.',
+          formsPlural: '{{count}} forms to complete before arrival.',
+          highlightsTitle: 'What to expect',
+          highlightCare: 'Personal concierge care from our front-desk team.',
+          highlightProducts: 'Sterile tools and lab-tested professional formulas.',
+          highlightPlan: 'Personalized at-home plan after your visit.',
+          ctaPrimary: 'Book this service',
+          ctaSecondary: 'Back to catalog',
+          metaExtraTime: '+{{value}} min prep time',
+          imageAlt: 'Preview for {{name}}',
+          openLabel: 'View details for {{name}}'
+        },
         units: {
           minutes: '{{value}} min'
         },
@@ -370,6 +393,29 @@
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
         },
+        detail: {
+          badgeFeatured: 'Signature',
+          imageEmpty: 'Preview coming soon',
+          unknownCategory: 'Uncategorized',
+          descriptionFallback: 'We will publish the description soon.',
+          durationLabel: 'Duration',
+          categoryLabel: 'Category',
+          priceLabel: 'Investment',
+          discountLabel: '{{value}}% off today',
+          formsLabel: 'Required forms',
+          formsEmpty: 'No forms required before the visit.',
+          formsSingular: '{{count}} form to complete before arrival.',
+          formsPlural: '{{count}} forms to complete before arrival.',
+          highlightsTitle: 'What to expect',
+          highlightCare: 'Personal concierge care from our front-desk team.',
+          highlightProducts: 'Sterile tools and lab-tested professional formulas.',
+          highlightPlan: 'Personalized at-home plan after your visit.',
+          ctaPrimary: 'Book this service',
+          ctaSecondary: 'Back to catalog',
+          metaExtraTime: '+{{value}} min prep time',
+          imageAlt: 'Preview for {{name}}',
+          openLabel: 'View details for {{name}}'
+        },
         units: {
           minutes: '{{value}} мин'
         },
@@ -600,6 +646,29 @@
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
+        },
+        detail: {
+          badgeFeatured: 'Signature',
+          imageEmpty: 'Preview coming soon',
+          unknownCategory: 'Uncategorized',
+          descriptionFallback: 'We will publish the description soon.',
+          durationLabel: 'Duration',
+          categoryLabel: 'Category',
+          priceLabel: 'Investment',
+          discountLabel: '{{value}}% off today',
+          formsLabel: 'Required forms',
+          formsEmpty: 'No forms required before the visit.',
+          formsSingular: '{{count}} form to complete before arrival.',
+          formsPlural: '{{count}} forms to complete before arrival.',
+          highlightsTitle: 'What to expect',
+          highlightCare: 'Personal concierge care from our front-desk team.',
+          highlightProducts: 'Sterile tools and lab-tested professional formulas.',
+          highlightPlan: 'Personalized at-home plan after your visit.',
+          ctaPrimary: 'Book this service',
+          ctaSecondary: 'Back to catalog',
+          metaExtraTime: '+{{value}} min prep time',
+          imageAlt: 'Preview for {{name}}',
+          openLabel: 'View details for {{name}}'
         },
         units: {
           minutes: '{{value}} मिनट'
@@ -832,6 +901,29 @@
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
         },
+        detail: {
+          badgeFeatured: 'Signature',
+          imageEmpty: 'Preview coming soon',
+          unknownCategory: 'Uncategorized',
+          descriptionFallback: 'We will publish the description soon.',
+          durationLabel: 'Duration',
+          categoryLabel: 'Category',
+          priceLabel: 'Investment',
+          discountLabel: '{{value}}% off today',
+          formsLabel: 'Required forms',
+          formsEmpty: 'No forms required before the visit.',
+          formsSingular: '{{count}} form to complete before arrival.',
+          formsPlural: '{{count}} forms to complete before arrival.',
+          highlightsTitle: 'What to expect',
+          highlightCare: 'Personal concierge care from our front-desk team.',
+          highlightProducts: 'Sterile tools and lab-tested professional formulas.',
+          highlightPlan: 'Personalized at-home plan after your visit.',
+          ctaPrimary: 'Book this service',
+          ctaSecondary: 'Back to catalog',
+          metaExtraTime: '+{{value}} min prep time',
+          imageAlt: 'Preview for {{name}}',
+          openLabel: 'View details for {{name}}'
+        },
         units: {
           minutes: '{{value}} хв'
         },
@@ -1051,6 +1143,29 @@
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
+        },
+        detail: {
+          badgeFeatured: 'Signature',
+          imageEmpty: 'Preview coming soon',
+          unknownCategory: 'Uncategorized',
+          descriptionFallback: 'We will publish the description soon.',
+          durationLabel: 'Duration',
+          categoryLabel: 'Category',
+          priceLabel: 'Investment',
+          discountLabel: '{{value}}% off today',
+          formsLabel: 'Required forms',
+          formsEmpty: 'No forms required before the visit.',
+          formsSingular: '{{count}} form to complete before arrival.',
+          formsPlural: '{{count}} forms to complete before arrival.',
+          highlightsTitle: 'What to expect',
+          highlightCare: 'Personal concierge care from our front-desk team.',
+          highlightProducts: 'Sterile tools and lab-tested professional formulas.',
+          highlightPlan: 'Personalized at-home plan after your visit.',
+          ctaPrimary: 'Book this service',
+          ctaSecondary: 'Back to catalog',
+          metaExtraTime: '+{{value}} min prep time',
+          imageAlt: 'Preview for {{name}}',
+          openLabel: 'View details for {{name}}'
         },
         units: {
           minutes: '{{value}} min'
@@ -1282,6 +1397,29 @@
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
+        },
+        detail: {
+          badgeFeatured: 'Signature',
+          imageEmpty: 'Preview coming soon',
+          unknownCategory: 'Uncategorized',
+          descriptionFallback: 'We will publish the description soon.',
+          durationLabel: 'Duration',
+          categoryLabel: 'Category',
+          priceLabel: 'Investment',
+          discountLabel: '{{value}}% off today',
+          formsLabel: 'Required forms',
+          formsEmpty: 'No forms required before the visit.',
+          formsSingular: '{{count}} form to complete before arrival.',
+          formsPlural: '{{count}} forms to complete before arrival.',
+          highlightsTitle: 'What to expect',
+          highlightCare: 'Personal concierge care from our front-desk team.',
+          highlightProducts: 'Sterile tools and lab-tested professional formulas.',
+          highlightPlan: 'Personalized at-home plan after your visit.',
+          ctaPrimary: 'Book this service',
+          ctaSecondary: 'Back to catalog',
+          metaExtraTime: '+{{value}} min prep time',
+          imageAlt: 'Preview for {{name}}',
+          openLabel: 'View details for {{name}}'
         },
         units: {
           minutes: '{{value}} دقيقة'

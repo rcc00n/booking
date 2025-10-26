@@ -53,6 +53,7 @@ from .forms import (
     ClientProfileForm,
     HealthConditionsForm,
     ProductSaleForm,
+    ClientLoginForm,
 )
 
 from .emails import start_or_resend_verification, MAX_ATTEMPTS, ResendNotAllowed, RESEND_COOLDOWN_SEC
@@ -128,6 +129,7 @@ class RoleBasedLoginView(LoginView):
       • Client → mainmenu
     """
     template_name = "registration/login.html"
+    form_class = ClientLoginForm
 
     def get_success_url(self):
         user = self.request.user
@@ -260,6 +262,8 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         ctx["profile"] = profile
         ctx["now"] = now
         ctx["profile_form"] = ClientProfileForm(user=user)
+        ctx["support_email"] = getattr(settings, "BUSINESS_SUPPORT_EMAIL", getattr(settings, "DEFAULT_FROM_EMAIL", "support@malvabooking.com"))
+        ctx["business_phone"] = getattr(settings, "BUSINESS_PHONE", "")
 
         ctx["autofill_defaults"] = _serialize_for_json(build_autofill_defaults(user))
 
@@ -343,7 +347,7 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         if form.is_valid():
             form.save()
             messages.success(request, "Профиль обновлён.")
-            return redirect(reverse("dashboard") + "#profile")
+            return redirect(reverse("dashboard") + "#overview")
 
         ctx = self.get_context_data()
         ctx["profile_form"] = form

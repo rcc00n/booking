@@ -18,6 +18,10 @@
   <style>
     :root{
       --free:#1F5C3A; --busy:#D32F2F; --grid:#E6E7E7; --today:#FAFDFB; --chip:#F3F7F5;
+      --dash-bg-1:#f8fbf8; --dash-bg-2:#edf3ee;
+      --dash-card:#ffffff; --dash-ink:#0f2c22; --dash-muted:#6f7d73;
+      --dash-border:rgba(15,63,45,.12); --dash-shadow:0 35px 80px rgba(15,47,35,.12);
+      --dash-accent:#0f7a5b; --dash-accent-soft:#e0f3ea;
     }
     .ol2{display:flex;flex-direction:column;border:1px solid var(--grid);border-radius:.75rem;background:#fff;overflow:visible}
     .ol2__toolbar{display:flex;align-items:center;justify-content:space-between;padding:.5rem .75rem;border-bottom:1px solid var(--grid)}
@@ -37,18 +41,52 @@
     .chip--busy{color:#fff;background:var(--busy);opacity:.92}
     .chip--sel{background:var(--free)!important;color:#fff;border-color:var(--free)!important;box-shadow:0 0 0 2px color-mix(in srgb, var(--free) 20%, transparent)}
     @media (max-width: 900px){ .ol2__wrap{max-height:50vh} }
-    .lang-picker{display:flex;flex-direction:column;gap:.35rem;color:#DAD3C1;font-size:.72rem;opacity:.95}
-    .lang-picker__label{font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
-    .lang-picker__select{appearance:none;background:rgba(255,255,255,.12);color:#111;border:1px solid rgba(255,255,255,.25);padding:.35rem .65rem;border-radius:.5rem;font-weight:600;cursor:pointer}
-    .lang-picker__select:focus{outline:2px solid #AF9525;outline-offset:2px}
+    body.dashboard-body{
+      min-height:100vh;
+      background:radial-gradient(circle at 85% 0, rgba(15,63,45,.14), transparent 48%), linear-gradient(180deg, var(--dash-bg-1) 0%, var(--dash-bg-2) 100%);
+      color:var(--dash-ink);
+      font-family:'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .lang-picker{display:flex;flex-direction:column;gap:.35rem;color:var(--dash-muted);font-size:.78rem;}
+    .lang-picker__label{font-weight:700;letter-spacing:.08em;text-transform:uppercase;}
+    .lang-picker__select{appearance:none;background:#fff;border:1px solid var(--dash-border);color:var(--dash-ink);padding:.45rem .85rem;border-radius:.9rem;font-weight:600;cursor:pointer;box-shadow:0 12px 24px rgba(15,63,45,.12);}
+    .lang-picker__select:focus{outline:2px solid var(--dash-accent);outline-offset:2px;}
 
-    .dashboard-shell{--sidebar-width:16rem;}
-    .dashboard-sidebar{width:var(--sidebar-width);}
-    .dashboard-content{padding:2rem;}
+    .dashboard-shell{min-height:100vh;display:flex;gap:2rem;padding:2rem clamp(1rem,4vw,3rem) 3rem;max-width:1440px;margin:0 auto;}
+    .dashboard-sidebar{width:320px;background:var(--dash-card);color:var(--dash-ink);border-radius:28px;border:1px solid var(--dash-border);box-shadow:var(--dash-shadow);padding:1.75rem 1.5rem 1.25rem;display:flex;flex-direction:column;gap:1.5rem;position:sticky;top:1.5rem;height:fit-content;max-height:calc(100vh - 3rem);}
+    .sidebar-brand{display:flex;align-items:center;gap:.85rem;font-weight:800;font-size:1.15rem;}
+    .sidebar-brand .mark{width:44px;height:44px;border-radius:16px;background:var(--dash-accent);color:#fff;display:grid;place-items:center;font-weight:800;box-shadow:0 22px 40px rgba(15,63,45,.35);}
+    .sidebar-profile{display:flex;align-items:center;gap:.85rem;}
+    .sidebar-profile__avatar{width:54px;height:54px;border-radius:18px;background:var(--dash-ink);color:#fff;display:grid;place-items:center;font-weight:700;font-size:1.15rem;box-shadow:0 18px 38px rgba(15,47,35,.25);}
+    .sidebar-profile__meta strong{display:block;font-size:1.1rem;}
+    .sidebar-profile__meta small{display:block;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--dash-muted);}
+    .account-tag{display:inline-flex;align-items:center;gap:.35rem;padding:.25rem .75rem;border-radius:999px;background:var(--dash-accent-soft);color:var(--dash-accent);font-weight:600;font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;}
+    .account-menu{display:flex;flex-direction:column;gap:.35rem;}
+    .account-menu__link{display:flex;align-items:center;gap:.85rem;padding:.65rem .85rem;border-radius:1rem;font-weight:600;color:var(--dash-ink);transition:.2s;border:1px solid transparent;}
+    .account-menu__link small{display:block;font-size:.78rem;color:var(--dash-muted);font-weight:500;}
+    .account-menu__icon{width:38px;height:38px;border-radius:1rem;background:var(--dash-accent-soft);color:var(--dash-accent);display:grid;place-items:center;font-size:1rem;}
+    .account-menu__link:hover{background:var(--dash-accent-soft);border-color:var(--dash-border);}
+    .account-menu__link.is-active{background:var(--dash-accent);color:#fff;border-color:var(--dash-accent);box-shadow:0 24px 45px rgba(15,63,45,.22);}
+    .account-menu__link.is-active small{color:rgba(255,255,255,.85);}
+    .account-menu__link.is-active .account-menu__icon{background:rgba(255,255,255,.25);color:#fff;}
+    .account-menu__meta{flex:1;}
+    .account-menu__badge{margin-left:auto;padding:.1rem .65rem;border-radius:999px;font-size:.75rem;font-weight:700;background:var(--dash-accent-soft);color:var(--dash-accent);}
+    .account-menu__link.is-active .account-menu__badge{background:#fff;color:var(--dash-accent);}
+    .sidebar-footer{margin-top:auto;padding-top:1rem;border-top:1px solid var(--dash-border);display:flex;flex-direction:column;gap:.35rem;font-size:.9rem;color:var(--dash-muted);}
+    .sidebar-footer a{color:inherit;}
+    .sidebar-close{display:none;}
+
+    .dashboard-main{flex:1;display:flex;flex-direction:column;}
+    .dashboard-content{padding:0 0 2.5rem;}
     .dashboard-heading{letter-spacing:.01em;}
-    .tab-card{border-radius:1.5rem;}
+    .dashboard-mobile-bar{display:none;}
+    .tab-card{border-radius:1.5rem;border:1px solid var(--dash-border);box-shadow:0 25px 50px rgba(15,47,35,.08);background:var(--dash-card);}
     .appointments-list{display:grid;gap:1rem;}
-    .table-label{display:none;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#204029;font-size:.75rem;}
+    .table-label{display:none;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--dash-muted);font-size:.72rem;}
+    .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;}
+    .stat-chip{border-radius:1rem;padding:1rem 1.1rem;background:var(--dash-card);border:1px solid var(--dash-border);box-shadow:0 18px 40px rgba(15,47,35,.08);display:flex;flex-direction:column;gap:.2rem;}
+    .stat-chip strong{font-size:1.8rem;color:var(--dash-ink);}
+    .stat-chip span{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--dash-muted);}
 
     .rs-mobile-days{display:flex;gap:.5rem;overflow-x:auto;padding:.4rem 0;margin-top:.35rem;scrollbar-width:thin;}
     .rs-mobile-days::-webkit-scrollbar{height:6px}
@@ -66,61 +104,60 @@
     @media (max-width:480px){ .rs-mobile-times{grid-template-columns:1fr;} }
 
     @media (max-width:1023px){
-      body{background:#F7F6F1;}
-      .dashboard-shell{min-height:100dvh;display:flex;flex-direction:column;}
-      .dashboard-sidebar{position:fixed;top:0;left:0;bottom:0;z-index:50;width:min(calc(100vw - 3rem),18rem);transform:translateX(-100%);transition:transform .3s ease-in-out;padding-bottom:2rem;overflow-y:auto;background:#204029;box-shadow:0 16px 40px rgba(8,24,16,.4);}
+      .dashboard-shell{flex-direction:column;padding:1.25rem;}
+      .dashboard-sidebar{position:fixed;top:0;left:0;bottom:0;width:min(calc(100vw - 2.5rem),320px);transform:translateX(-100%);border-radius:0;max-height:none;z-index:60;box-shadow:0 45px 80px rgba(0,0,0,.35);background:var(--dash-card);}
       body.nav-open .dashboard-sidebar{transform:translateX(0);}
-      .dashboard-backdrop{position:fixed;inset:0;background:rgba(12,24,18,.55);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:40;}
+      .dashboard-backdrop{position:fixed;inset:0;background:rgba(6,20,13,.6);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:50;}
       body.nav-open .dashboard-backdrop{opacity:1;pointer-events:auto;}
-      .dashboard-mobile-bar{position:sticky;top:0;z-index:30;background:rgba(247,246,241,.95);backdrop-filter:blur(12px);border-bottom:1px solid rgba(32,64,41,.08);padding:.85rem 1rem;display:flex;align-items:center;justify-content:space-between;gap:.85rem;}
-      .dashboard-mobile-bar__btn{display:inline-flex;align-items:center;justify-content:center;width:2.6rem;height:2.6rem;border-radius:.9rem;border:1px solid rgba(32,64,41,.18);background:#fff;color:#204029;font-size:1.25rem;line-height:1;box-shadow:0 8px 20px rgba(32,64,41,.12);} 
+      .dashboard-mobile-bar{position:sticky;top:0;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border-radius:1.25rem;padding:.65rem 1rem;margin-bottom:1rem;border:1px solid rgba(15,63,45,.12);display:flex;align-items:center;gap:.75rem;box-shadow:0 18px 40px rgba(15,47,35,.15);}
+      .dashboard-mobile-bar__btn{display:inline-flex;align-items:center;justify-content:center;width:2.6rem;height:2.6rem;border-radius:.85rem;border:1px solid rgba(32,64,41,.18);background:#fff;color:#204029;font-size:1.25rem;line-height:1;box-shadow:0 8px 20px rgba(32,64,41,.12);} 
       .dashboard-mobile-bar__btn:active{transform:scale(.96);}
       .dashboard-mobile-user{display:flex;align-items:center;gap:.55rem;font-weight:600;color:#204029;}
       .dashboard-mobile-user span.badge{display:inline-flex;align-items:center;justify-content:center;width:2.2rem;height:2.2rem;border-radius:999px;background:#204029;color:#DAD3C1;font-weight:800;letter-spacing:.04em;}
       .dashboard-mobile-user small{display:block;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:#4D4D4D;opacity:.75;}
-      .dashboard-content{padding:1.5rem 1rem 2.5rem;}
-      .sidebar-close{display:flex;align-items:center;gap:.5rem;margin:0 1.5rem 1rem;font-size:.95rem;color:#DAD3C1;background:rgba(255,255,255,.08);border-radius:.75rem;padding:.6rem .8rem;border:1px solid rgba(255,255,255,.15);cursor:pointer;font-weight:600;}
+      .dashboard-content{padding:0 0 2rem;}
+      .sidebar-close{display:flex;align-items:center;gap:.5rem;margin:0 1rem 1rem;font-size:.95rem;color:var(--dash-ink);background:rgba(15,63,45,.1);border-radius:.85rem;padding:.55rem .8rem;border:1px solid rgba(15,63,45,.15);cursor:pointer;font-weight:600;}
       .sidebar-close span{font-size:1.1rem;}
       .tab-card{border-radius:1.25rem;}
     }
 
     @media (max-width:768px){
       .dashboard-heading{font-size:clamp(1.75rem,5vw,2.35rem);}
-      .dashboard-content{padding:1.25rem 1rem 2.5rem;}
       .appointments-list > div{flex-direction:column;align-items:flex-start;gap:.85rem;}
       .appointments-list .appt-actions{width:100%;justify-content:flex-end;}
       .recent-table{display:block;width:100%;border-collapse:separate;border-spacing:0;}
       .recent-table thead{display:none;}
       .recent-table tbody{display:grid;gap:1rem;}
-      .recent-table tr{display:grid;gap:.6rem;padding:1.15rem 1rem;border:1px solid #DAD3C1;border-radius:1.25rem;background:#fff;box-shadow:0 14px 32px rgba(32,64,41,.08);} 
+      .recent-table tr{display:grid;gap:.6rem;padding:1.15rem 1rem;border:1px solid var(--dash-border);border-radius:1.25rem;background:var(--dash-card);box-shadow:0 14px 32px rgba(32,64,41,.08);} 
       .recent-table td{display:flex;flex-direction:column;align-items:flex-start;gap:.35rem;padding:0!important;}
       .recent-table td .table-label{display:block;}
-      .recent-table td .table-value{font-size:.95rem;color:#4D4D4D;}
-      .recent-table td:first-child .table-value{font-weight:700;color:#204029;}
+      .recent-table td .table-value{font-size:.95rem;color:var(--dash-ink);}
+      .recent-table td:first-child .table-value{font-weight:700;color:var(--dash-ink);}
       .tab-card{padding:1.2rem 1rem;}
     }
 
     @media (min-width:1024px){
-      .dashboard-shell{display:flex;flex-direction:row;min-height:100vh;}
-      .dashboard-sidebar{position:static;transform:none!important;box-shadow:0 0 40px rgba(18,36,26,.25);}
+      .dashboard-shell{flex-direction:row;}
+      .dashboard-sidebar{position:sticky;transform:none!important;}
       .dashboard-backdrop{display:none!important;}
       .dashboard-mobile-bar{display:none;}
-      .dashboard-content{padding:2.5rem;}
+      .dashboard-content{padding:0;}
     }
 
     @media (hover:none){
-      .sidebar-link:hover{background:rgba(27,54,38,.92);}
+      .account-menu__link:hover{background:var(--dash-accent-soft);border-color:var(--dash-border);}
     }
   </style>
 </head>
-<body class="h-full bg-[#F7F6F1] text-[#4D4D4D]" data-autofill-user="{{ request.user.pk }}" data-autofill-payment-endpoint="{% url 'api-autofill-payment' %}">
+<body class="dashboard-body" data-autofill-user="{{ request.user.pk }}" data-autofill-payment-endpoint="{% url 'api-autofill-payment' %}">
 <div class="dashboard-backdrop" data-nav-backdrop></div>
 <div class="dashboard-shell">
 
   <!-- ▸▸ SIDEBAR ◂◂ -->
-  <aside class="dashboard-sidebar bg-[#204029] text-[#DAD3C1] shadow-xl flex flex-col">
-    <div class="p-6 font-extrabold text-xl tracking-wide flex items-center gap-2">
-      <span class="text-[#AF9525]">MB</span> <span data-i18n="common.brand">Malva Booking</span>
+  <aside class="dashboard-sidebar flex flex-col">
+    <div class="sidebar-brand">
+      <span class="mark">MB</span>
+      <span data-i18n="common.brand">Malva Booking</span>
     </div>
 
     <button type="button" class="sidebar-close lg:hidden" data-nav-close aria-label="Close menu" data-i18n-attr="aria-label:common.close">
@@ -128,56 +165,104 @@
       <span data-i18n="common.close">Close</span>
     </button>
 
-    <div class="px-6 pb-4">
-      <div class="lang-picker" data-i18n-attr="aria-label:common.language">
-        <label for="dashLangSelect" class="lang-picker__label" data-i18n="common.language">Language</label>
-        <select id="dashLangSelect" class="lang-picker__select" data-lang-switch></select>
+    {% with user_display=request.user.get_full_name|default:request.user.username %}
+      <div class="sidebar-profile">
+        <span class="sidebar-profile__avatar">{{ user_display|slice:":1"|upper }}</span>
+        <div class="sidebar-profile__meta">
+          <small data-i18n="services.userMenu.greeting">Welcome back</small>
+          <strong>{{ user_display }}</strong>
+        </div>
       </div>
+    {% endwith %}
+    <span class="account-tag" data-i18n="services.userMenu.tier">Malva Member</span>
+
+    <div class="lang-picker" data-i18n-attr="aria-label:common.language">
+      <label for="dashLangSelect" class="lang-picker__label" data-i18n="common.language">Language</label>
+      <select id="dashLangSelect" class="lang-picker__select" data-lang-switch></select>
     </div>
 
-    <div class="flex-1 overflow-y-auto px-3">
-      <nav id="sidebar" class="space-y-1 text-sm pb-4">
-        <a href="#" data-tab="dashboard"
-           class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-          🏠 <span data-i18n="dashboard.nav.overview">Overview</span>
-        </a>
-        <a href="#" data-tab="appointments"
-           class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-          📅 <span data-i18n="dashboard.nav.appointments">Appointments</span>
-        </a>
-        <a href="#" data-tab="files"
-           class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-          📂 <span data-i18n="dashboard.nav.files">Files</span>
-        </a>
-        <a href="#" data-tab="notifications"
-           class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-          🔔 <span data-i18n="dashboard.nav.notifications">Notifications</span>
-        </a>
-        <a href="#" data-tab="profile"
-           class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-          👤 <span data-i18n="dashboard.nav.profile">Profile</span>
-        </a>
-        <a href="#" data-tab="autofill"
-           class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-          ✨ <span>Autofill</span>
-        </a>
+    <nav id="sidebar" class="account-menu" aria-label="Account menu">
+      <a href="#" data-tab="overview" class="account-menu__link">
+        <span class="account-menu__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 11h16M4 16h10"/><path d="M12 7h8"/><path d="M6 7h.01"/><path d="M8 7h.01"/><path d="M10 7h.01"/><path d="M4 21h16a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1Z"/></svg>
+        </span>
+        <div class="account-menu__meta">
+          <span>Overview</span>
+          <small>Insights & quick actions</small>
+        </div>
+      </a>
+      <a href="#" data-tab="appointments" class="account-menu__link">
+        <span class="account-menu__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 10h18M8 2v4M16 2v4"/></svg>
+        </span>
+        <div class="account-menu__meta">
+          <span data-i18n="services.userMenu.appointments">Appointments</span>
+          <small>Upcoming & history</small>
+        </div>
+        {% with count=upcoming_appointments|length %}
+          {% if count %}
+            <span class="account-menu__badge">{{ count }}</span>
+          {% endif %}
+        {% endwith %}
+      </a>
+      <a href="#" data-tab="billing" class="account-menu__link">
+        <span class="account-menu__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3z"/><path d="M16 11h4v4h-4z"/><path d="M3 7l2-4h13"/></svg>
+        </span>
+        <div class="account-menu__meta">
+          <span>Billing & payments</span>
+          <small>Wallet & saved details</small>
+        </div>
+        {% with billing=autofill_defaults.payment %}
+          {% if not billing.name %}
+            <span class="account-menu__badge">Setup</span>
+          {% endif %}
+        {% endwith %}
+      </a>
+      <a href="#" data-tab="forms" class="account-menu__link">
+        <span class="account-menu__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 2h12v20H6z"/><path d="M9 6h6M9 10h6M9 14h3"/></svg>
+        </span>
+        <div class="account-menu__meta">
+          <span data-i18n="services.userMenu.forms">Forms</span>
+          <small>Intake & updates</small>
+        </div>
+        {% if pending_intake_assignments %}
+          <span class="account-menu__badge">{{ pending_intake_assignments }}</span>
+        {% endif %}
+      </a>
+      <a href="#" data-tab="settings" class="account-menu__link">
+        <span class="account-menu__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 15.5a3.5 3.5 0 1 0-3.5-3.5 3.5 3.5 0 0 0 3.5 3.5z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 1-2.54 0 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 1 0-2.54 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 1 2.54 0 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 1 0 2.54 1.65 1.65 0 0 0-.6 1z"/></svg>
+        </span>
+        <div class="account-menu__meta">
+          <span data-i18n="services.userMenu.settings">Settings</span>
+          <small>Preferences & privacy</small>
+        </div>
+      </a>
+      <a href="#" data-tab="support" class="account-menu__link">
+        <span class="account-menu__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.09 9a3 3 0 0 1 5.82 1c0 2-3 2-3 4"/><path d="M12 17h.01"/></svg>
+        </span>
+        <div class="account-menu__meta">
+          <span>Support</span>
+          <small>Help & resources</small>
+        </div>
+      </a>
+    </nav>
 
-        <a href="/accounts/"
-           class="mt-1 flex items-center gap-3 px-3 py-2 rounded-md border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white transition">
-          ⬅️ <span data-i18n="dashboard.nav.back">Back to Home</span>
-        </a>
-
-        <div class="my-3 border-t border-white/10"></div>
-      </nav>
+    <div class="sidebar-footer">
+      <a href="#download" data-i18n="services.userMenu.download">Download the app</a>
+      <a href="#help" data-i18n="services.userMenu.help">Help & support</a>
+      <a href="#business" data-i18n="services.userMenu.business">For businesses</a>
     </div>
 
-    <form method="post" action="{% url 'logout' %}" class="px-3 pb-6 mt-auto">
+    <form method="post" action="{% url 'logout' %}">
       {% csrf_token %}
       <button type="submit"
-              class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-md
-                     text-[#DAD3C1] border-l-4 border-transparent hover:bg-[#1b3626] hover:text-white
-                     focus:outline-none focus:ring-2 focus:ring-[#AF9525] transition">
-        🚪 <span data-i18n="dashboard.nav.signOut">Sign out</span>
+              class="w-full flex items-center gap-2 justify-center rounded-xl py-3 font-semibold text-white bg-[#b94b45] hover:bg-[#a03c37] transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#b94b45]">
+        <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>
+        <span data-i18n="dashboard.nav.signOut">Sign out</span>
       </button>
     </form>
   </aside>
@@ -201,38 +286,70 @@
 
     <div class="dashboard-content flex-1 overflow-y-auto">
 
-    <!-- DASHBOARD -->
-    <section id="tab-dashboard" class="tab">
-      {% if request.user.first_name %}
-        <h1 class="dashboard-heading text-3xl sm:text-4xl font-extrabold mb-8 text-[#204029]" data-i18n="dashboard.greetingNamed" data-i18n-vars='{"name":"{{ request.user.first_name|escapejs }}"}'>Hello, {{ request.user.first_name }}!</h1>
-      {% else %}
-        <h1 class="dashboard-heading text-3xl sm:text-4xl font-extrabold mb-8 text-[#204029]" data-i18n="dashboard.greetingAnon" data-i18n-vars='{"username":"{{ request.user.username|escapejs }}"}'>Hello, {{ request.user.username }}!</h1>
-      {% endif %}
+    <!-- OVERVIEW -->
+    <section id="tab-overview" class="tab">
+      <div class="tab-card p-8 bg-gradient-to-br from-white via-[#f8fbf8] to-[#eef6f1] border border-white/50 shadow-[0_35px_80px_rgba(15,47,35,.12)] mb-8">
+        <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <span class="account-tag mb-3">Luxury wellness</span>
+            {% if request.user.first_name %}
+              <h1 class="dashboard-heading text-3xl sm:text-4xl font-extrabold text-[#1b392c]" data-i18n="dashboard.greetingNamed" data-i18n-vars='{"name":"{{ request.user.first_name|escapejs }}"}'>Hello, {{ request.user.first_name }}!</h1>
+            {% else %}
+              <h1 class="dashboard-heading text-3xl sm:text-4xl font-extrabold text-[#1b392c]" data-i18n="dashboard.greetingAnon" data-i18n-vars='{"username":"{{ request.user.username|escapejs }}"}'>Hello, {{ request.user.username }}!</h1>
+            {% endif %}
+            <p class="text-[#4D4D4D]/80 max-w-2xl mt-3" data-i18n="services.hero.subtitle">Pick a service, a specialist, and a time — we’ll handle the rest.</p>
+          </div>
+          <div class="flex flex-wrap gap-3">
+            <a href="/accounts/#services"
+               class="inline-flex items-center justify-center px-5 py-3 rounded-full text-white bg-[#1f5f44] shadow-lg shadow-[#1f5f44]/30 hover:bg-[#194f39]"
+               data-i18n="dashboard.book">Book now</a>
+            <a href="/accounts/#categories"
+               class="inline-flex items-center justify-center px-5 py-3 rounded-full border border-[#1f5f44]/30 text-[#1f5f44] hover:bg-white">
+              Explore categories
+            </a>
+          </div>
+        </div>
+        <div class="stat-grid mt-6">
+          <div class="stat-chip">
+            <span data-i18n="dashboard.upcomingTitle">Upcoming appointments</span>
+            <strong>{{ upcoming_appointments|length }}</strong>
+          </div>
+          <div class="stat-chip">
+            <span data-i18n="dashboard.recentTitle">Completed visits</span>
+            <strong>{{ recent_appointments|length }}</strong>
+          </div>
+          <div class="stat-chip">
+            <span data-i18n="dashboard.forms.pending">Forms outstanding</span>
+            <strong>{{ pending_intake_assignments|default:0 }}</strong>
+          </div>
+        </div>
+      </div>
 
       {% if pending_intake_assignments %}
-        <div class="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-900 shadow-sm">
-          <div class="font-semibold">Action needed: we still need your intake form.</div>
-          <div class="text-sm text-amber-800/80">Complete {{ pending_intake_assignments }} form{{ pending_intake_assignments|pluralize }} before your next visit.</div>
-          <a href="{% url 'client-intake-forms' %}" class="inline-flex items-center gap-2 rounded-lg bg-[#AF9525] px-4 py-2 text-white shadow hover:bg-[#9b8521]">Complete now</a>
+        <div class="tab-card p-5 border border-amber-200 bg-amber-50 text-amber-900 mb-6 flex flex-wrap items-center gap-3">
+          <div class="font-semibold" data-i18n="dashboard.forms.actionNeeded">Action needed: we still need your intake form.</div>
+          <div class="text-sm text-amber-900/80" data-i18n="dashboard.forms.complete" data-i18n-vars='{"count":"{{ pending_intake_assignments }}"}'>Complete {{ pending_intake_assignments }} form{{ pending_intake_assignments|pluralize }} before your next visit.</div>
+          <a href="{% url 'client-intake-forms' %}" class="inline-flex items-center gap-2 rounded-full bg-[#1f5f44] px-4 py-2 text-white shadow hover:bg-[#194f39]" data-i18n="dashboard.forms.completeCta">Complete now</a>
         </div>
       {% elif total_intake_assignments %}
-        <div class="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-emerald-900 shadow-sm">
-          <div class="font-semibold">All required forms are on file.</div>
-          <div class="text-sm text-emerald-800/80">Need to make changes? Update your answers anytime.</div>
-          <a href="{% url 'client-intake-forms' %}" class="inline-flex items-center gap-2 rounded-lg border border-emerald-300 px-4 py-2 text-emerald-900 hover:bg-emerald-100">Review forms</a>
+        <div class="tab-card p-5 border border-emerald-200 bg-emerald-50 text-emerald-900 mb-6 flex flex-wrap items-center gap-3">
+          <div class="font-semibold" data-i18n="dashboard.forms.upToDate">All required forms are on file.</div>
+          <div class="text-sm text-emerald-900/80" data-i18n="dashboard.forms.review">Need to make changes? Update your answers anytime.</div>
+          <a href="{% url 'client-intake-forms' %}" class="inline-flex items-center gap-2 rounded-full border border-emerald-300 px-4 py-2 text-emerald-900 hover:bg-emerald-100" data-i18n="dashboard.forms.reviewCta">Review forms</a>
         </div>
       {% endif %}
 
-      <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        <!-- Upcoming appointments -->
-        <div class="tab-card bg-white shadow p-6 border border-[#DAD3C1]">
-          <h2 class="text-lg font-semibold mb-4" data-i18n="dashboard.upcomingTitle">Upcoming appointments</h2>
-
+      <div class="grid gap-6 xl:grid-cols-3">
+        <article class="tab-card p-6 flex flex-col gap-4">
+          <div class="flex items-center justify-between gap-4">
+            <h2 class="text-lg font-semibold text-[#1b392c]" data-i18n="dashboard.upcomingTitle">Upcoming appointments</h2>
+            <a href="#" class="text-sm text-[#1f5f44] font-semibold" data-tab-jump="appointments">View all</a>
+          </div>
           {% if upcoming_appointments %}
             <ul class="space-y-4 max-h-64 overflow-y-auto pr-1">
               {% for a in upcoming_appointments %}
                 <li data-appt-id="{{ a.id }}">
-                  <p class="font-semibold text-[#204029]">
+                  <p class="font-semibold text-[#1b392c]">
                     {{ a.start_time|localtime|date:"d M Y, H:i" }}
                   </p>
                   <p class="text-sm text-[#4D4D4D]">
@@ -242,7 +359,7 @@
                   <div class="mt-2 flex gap-4 text-sm">
                     <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
                        data-appt-id="{{ a.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>
-                    <a href="#" class="appt-reschedule text-[#AF9525] hover:opacity-90 underline-offset-4 hover:underline"
+                    <a href="#" class="appt-reschedule text-[#1f5f44] hover:opacity-90 underline-offset-4 hover:underline font-semibold"
                        data-appt-id="{{ a.id }}" data-service-id="{{ a.service.id }}" data-i18n="dashboard.appointment.reschedule">Reschedule</a>
                   </div>
                 </li>
@@ -251,26 +368,27 @@
           {% else %}
             <p class="text-[#4D4D4D]/70" data-i18n="dashboard.upcomingEmpty">No upcoming appointments.</p>
           {% endif %}
-        </div>
+        </article>
 
-        <!-- Stats -->
-        <div class="tab-card bg-white shadow p-6 md:col-span-2 border border-[#DAD3C1]">
-          <h2 class="text-lg font-semibold mb-4" data-i18n="dashboard.statsTitle">Stats</h2>
+        <article class="tab-card p-6 xl:col-span-2">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-[#1b392c]" data-i18n="dashboard.statsTitle">Stats</h2>
+            <span class="text-sm text-[#4D4D4D]/70">Last 6 months</span>
+          </div>
           <canvas id="stats_chart"
                   data-labels="{{ chart_labels|join:',' }}"
                   data-data="{{ chart_data|join:',' }}"
                   class="w-full h-56"></canvas>
-        </div>
+        </article>
       </div>
 
-      <!-- Recent appointments -->
-      <div class="tab-card bg-white shadow p-6 mt-8 border border-[#DAD3C1]">
-        <h2 class="text-lg font-semibold mb-4" data-i18n="dashboard.recentTitle">Recent appointments</h2>
+      <div class="tab-card p-6 mt-8">
+        <h2 class="text-lg font-semibold mb-4 text-[#1b392c]" data-i18n="dashboard.recentTitle">Recent appointments</h2>
         {% if recent_appointments %}
           <div class="overflow-x-auto">
             <table class="recent-table min-w-full text-sm">
               <thead>
-                <tr class="text-left bg-[#DAD3C1] text-[#204029]">
+                <tr class="text-left bg-[#dfe7de] text-[#1b392c]">
                   <th class="py-2 pl-3 pr-4 rounded-l-lg" data-i18n="dashboard.table.date">Date</th>
                   <th class="py-2 pr-4" data-i18n="dashboard.table.service">Service</th>
                   <th class="py-2 pr-4" data-i18n="dashboard.table.master">Master</th>
@@ -315,69 +433,15 @@
           <p class="text-[#4D4D4D]/70" data-i18n="dashboard.recentEmpty">No completed appointments yet.</p>
         {% endif %}
       </div>
-    </section>
 
-    <!-- APPOINTMENTS -->
-    <section id="tab-appointments" class="tab hidden">
-      <div class="flex items-center flex-wrap gap-3 mb-6">
-        <h2 class="text-2xl font-semibold text-[#204029]" data-i18n="dashboard.myTitle">My appointments</h2>
-        <a href="/accounts/#services"
-           class="ml-auto px-4 py-2 rounded-lg text-white bg-[#AF9525] hover:bg-[#9b8521] shadow" data-i18n="dashboard.book">
-          + Book
-        </a>
-      </div>
-
-      {% if appointments %}
-        <div class="appointments-list grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {% for a in appointments %}
-            <div class="tab-card bg-white shadow border border-[#DAD3C1] p-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between
-                        {% if a.start_time < now %}opacity-70{% endif %}" data-appt-id="{{ a.id }}">
-              <div class="appt-main">
-                <p class="font-medium text-[#204029] appt-dt">{{ a.start_time|localtime|date:"d M Y, H:i" }}</p>
-                <p class="text-sm text-[#4D4D4D]"><span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span> · {{ a.master.get_full_name }}</p>
-              </div>
-
-              {% if a.start_time >= now %}
-                <div class="flex gap-3 text-sm appt-actions sm:justify-end">
-                  <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
-                     data-appt-id="{{ a.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>
-                  <a href="#" class="appt-reschedule text-[#AF9525] hover:opacity-90 underline-offset-4 hover:underline"
-                     data-appt-id="{{ a.id }}" data-service-id="{{ a.service.id }}" data-i18n="dashboard.appointment.reschedule">Reschedule</a>
-                </div>
-              {% else %}
-                <span class="text-xs text-[#4D4D4D]/70" data-i18n="dashboard.appointment.completed">Completed</span>
-              {% endif %}
-            </div>
-          {% endfor %}
+      {% if messages %}
+        <div class="mt-8 tab-card border border-emerald-200 bg-emerald-50 text-emerald-900 px-5 py-4 text-sm font-medium">
+          {% for m in messages %}{{ m }}{% endfor %}
         </div>
-      {% else %}
-        <p class="text-[#4D4D4D]/70" data-i18n="dashboard.myEmpty">No appointments.</p>
       {% endif %}
-    </section>
-
-    <!-- FILES -->
-    <section id="tab-files" class="tab hidden">
-      <h2 class="text-2xl font-semibold mb-6 text-[#204029]" data-i18n="dashboard.filesTitle">Files</h2>
-      <p class="text-[#4D4D4D]/70" data-i18n="dashboard.comingSoon">Coming soon.</p>
-    </section>
-
-    <!-- NOTIFICATIONS -->
-    <section id="tab-notifications" class="tab hidden">
-      <h2 class="text-2xl font-semibold mb-6 text-[#204029]" data-i18n="dashboard.notificationsTitle">Notifications</h2>
-      <p class="text-[#4D4D4D]/70" data-i18n="dashboard.comingSoon">Coming soon.</p>
-    </section>
-
-    <!-- PROFILE -->
-    {% if messages %}
-      <div class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-sm">
-        {% for m in messages %}{{ m }}{% endfor %}
-      </div>
-    {% endif %}
-    <section id="tab-profile" class="tab hidden">
-      <h2 class="text-2xl font-semibold mb-6 text-[#204029]" data-i18n="dashboard.profileTitle">Profile</h2>
 
       {% if profile_form.errors %}
-        <div class="mb-4 rounded-lg border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm">
+        <div class="mt-8 tab-card border border-red-200 bg-red-50 text-red-800 px-5 py-4 text-sm">
           <ul class="list-disc ms-5">
             {% for field, errs in profile_form.errors.items %}
               {% for e in errs %}
@@ -388,7 +452,11 @@
         </div>
       {% endif %}
 
-      <form method="post" class="tab-card bg-white shadow p-6 border border-[#DAD3C1]" data-autofill-group="profile">
+      <form method="post" class="tab-card p-6 mt-8" data-autofill-group="profile">
+        <div class="mb-6">
+          <h2 class="text-2xl font-semibold text-[#1b392c]" data-i18n="dashboard.profileTitle">Profile</h2>
+          <p class="text-sm text-[#4D4D4D]/80">Update your personal details to keep bookings seamless.</p>
+        </div>
         {% csrf_token %}
         <div class="grid md:grid-cols-2 gap-6">
           <div>
@@ -486,104 +554,194 @@
             <textarea
                    name="{{ profile_form.address.html_name }}"
                    id="{{ profile_form.address.id_for_label }}"
-                   rows="2"
-                   class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
-                   autocomplete="street-address"
-                   data-autofill-key="address">{% if profile_form.address.value %}{{ profile_form.address.value }}{% endif %}</textarea>
-            {% if profile_form.address.errors %}
-              <p class="mt-1 text-sm text-red-600">{{ profile_form.address.errors.0 }}</p>
-            {% endif %}
-          </div>
 
-          <div>
-            <label class="block text-sm font-medium" for="{{ profile_form.how_heard.id_for_label }}">How did you hear about us?</label>
-            {% with current=profile_form.how_heard.value|default_if_none:'' %}
-              <select name="{{ profile_form.how_heard.html_name }}"
-                      id="{{ profile_form.how_heard.id_for_label }}"
-                      class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
-                      data-autofill-key="how_heard">
-                {% for value, label in profile_form.fields.how_heard.choices %}
-                  <option value="{{ value }}" {% if value == current %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-            {% endwith %}
-            {% if profile_form.how_heard.errors %}
-              <p class="mt-1 text-sm text-red-600">{{ profile_form.how_heard.errors.0 }}</p>
-            {% endif %}
-          </div>
-
-          <div class="md:col-span-2">
-            <label class="flex items-start gap-3 text-sm">
-              <input type="checkbox"
-                     name="{{ profile_form.email_marketing_consent.html_name }}"
-                     id="{{ profile_form.email_marketing_consent.id_for_label }}"
-                     class="mt-1 h-4 w-4 rounded border-[#DEDEDE] text-[#204029] focus:ring-[#AF9525]"
-                     data-autofill-key="email_marketing_consent"
-                     {% if profile_form.email_marketing_consent.value %}checked{% endif %}>
-              <span class="text-[#4D4D4D]">
-                {{ profile_form.email_marketing_consent.label }}
-              </span>
-            </label>
-            {% if profile_form.email_marketing_consent.errors %}
-              <p class="mt-1 text-sm text-red-600">{{ profile_form.email_marketing_consent.errors.0 }}</p>
-            {% endif %}
-          </div>
-
-          <div class="md:col-span-2 flex justify-end">
-            <button type="submit" class="px-6 py-2 bg-[#204029] text-white rounded-lg hover:bg-[#1b3626]" data-i18n="dashboard.form.save">
-              Save changes
-            </button>
-          </div>
+    <!-- APPOINTMENTS -->
+    <section id="tab-appointments" class="tab hidden">
+      <div class="flex flex-wrap items-center gap-3 mb-6">
+        <div>
+          <p class="uppercase text-xs tracking-[0.2em] text-[#4D4D4D]/70">Schedule</p>
+          <h2 class="text-2xl font-semibold text-[#1b392c]" data-i18n="dashboard.myTitle">My appointments</h2>
         </div>
-      </form>
+        <a href="/accounts/#services"
+           class="ml-auto inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-white bg-[#1f5f44] hover:bg-[#194f39] shadow"
+           data-i18n="dashboard.book">
+          + Book
+        </a>
+      </div>
+
+      {% if appointments %}
+        <div class="appointments-list grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {% for a in appointments %}
+            <div class="tab-card p-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between {% if a.start_time < now %}opacity-70{% endif %}"
+                 data-appt-id="{{ a.id }}">
+              <div class="appt-main">
+                <p class="font-medium text-[#1b392c] appt-dt">{{ a.start_time|localtime|date:"d M Y, H:i" }}</p>
+                <p class="text-sm text-[#4D4D4D]"><span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span> · {{ a.master.get_full_name }}</p>
+              </div>
+
+              {% if a.start_time >= now %}
+                <div class="flex gap-3 text-sm appt-actions sm:justify-end">
+                  <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
+                     data-appt-id="{{ a.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>
+                  <a href="#" class="appt-reschedule text-[#1f5f44] hover:opacity-90 underline-offset-4 hover:underline"
+                     data-appt-id="{{ a.id }}" data-service-id="{{ a.service.id }}" data-i18n="dashboard.appointment.reschedule">Reschedule</a>
+                </div>
+              {% else %}
+                <span class="text-xs text-[#4D4D4D]/70" data-i18n="dashboard.appointment.completed">Completed</span>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="text-[#4D4D4D]/70" data-i18n="dashboard.myEmpty">No appointments.</p>
+      {% endif %}
     </section>
 
-    <section id="tab-autofill" class="tab hidden">
-      <h2 class="text-2xl font-semibold mb-3 text-[#204029]">Autofill</h2>
-      <p class="mb-6 text-sm text-[#4D4D4D]/70 max-w-3xl">
-        Keep your frequently used details synced between your account and this device. Your profile stays on our secure servers,
-        while device autofill uses local storage so you can complete forms in a couple of clicks.
-      </p>
+    <!-- BILLING -->
+    <section id="tab-billing" class="tab hidden">
+      <div class="tab-card p-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
+        <div>
+          <p class="uppercase text-xs tracking-[0.2em] text-[#4D4D4D]/70">Wallet</p>
+          <h2 class="text-2xl font-semibold text-[#1b392c]">Balance & billing</h2>
+          <p class="text-sm text-[#4D4D4D]/80">Store your payment details for lightning-fast checkout.</p>
+        </div>
+        <div class="text-4xl font-extrabold text-[#1f5f44]">—</div>
+      </div>
 
+      <article class="tab-card p-6 flex flex-col gap-4" data-payment-account-card>
+        <div>
+          <h3 class="text-lg font-semibold text-[#1b392c]">Billing details saved to your account</h3>
+          <p class="text-sm text-[#4D4D4D]/70">We reuse these fields across invoices and checkout on every device.</p>
+        </div>
+        {% with billing=autofill_defaults.payment %}
+          <dl class="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm" data-payment-account-list>
+            <div>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Billing name</dt>
+              <dd class="text-[#1b392c]" data-payment-account-field="name">{{ billing.name|default:"—" }}</dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Email</dt>
+              <dd class="text-[#1b392c] break-words" data-payment-account-field="email">{{ billing.email|default:"—" }}</dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Phone</dt>
+              <dd class="text-[#1b392c]" data-payment-account-field="phone">{{ billing.phone|default:"—" }}</dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Postal code</dt>
+              <dd class="text-[#1b392c]" data-payment-account-field="postal_code">{{ billing.postal_code|default:"—" }}</dd>
+            </div>
+            <div class="sm:col-span-2">
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Address</dt>
+              <dd class="text-[#1b392c] whitespace-pre-line" data-payment-account-field="address">
+                {% if billing.address_line1 or billing.address_line2 %}
+                  {% if billing.address_line1 %}{{ billing.address_line1 }}{% endif %}
+                  {% if billing.address_line2 %}\n{{ billing.address_line2 }}{% endif %}
+                {% else %}
+                  —
+                {% endif %}
+              </dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">City</dt>
+              <dd class="text-[#1b392c]" data-payment-account-field="city">{{ billing.city|default:"—" }}</dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Province / State</dt>
+              <dd class="text-[#1b392c]" data-payment-account-field="state">{{ billing.state|default:"—" }}</dd>
+            </div>
+            <div>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Country</dt>
+              <dd class="text-[#1b392c]" data-payment-account-field="country">{{ billing.country|default:"—" }}</dd>
+            </div>
+          </dl>
+          <p class="text-xs text-[#4D4D4D]/60" data-payment-account-updated>
+            {% if billing.updated_at %}
+              Updated {{ billing.updated_at }}
+            {% else %}
+              Not updated yet.
+            {% endif %}
+          </p>
+          <div class="flex flex-wrap gap-3 pt-2">
+            <button type="button"
+                    class="px-4 py-2 bg-[#1f5f44] text-white rounded-lg hover:bg-[#194f39] transition"
+                    data-autofill-sync-account="payment">
+              Sync this device to account
+            </button>
+            <button type="button"
+                    class="px-4 py-2 border border-[#1f5f44]/30 text-[#1f5f44] rounded-lg hover:border-[#1f5f44]"
+                    data-autofill-clear-account="payment">
+              Clear account copy
+            </button>
+          </div>
+        {% endwith %}
+      </article>
+    </section>
+
+
+    <!-- FORMS -->
+    <section id="tab-forms" class="tab hidden">
+      <div class="tab-card p-6 flex flex-col gap-5">
+        <h2 class="text-2xl font-semibold text-[#1b392c]">Forms & questionnaires</h2>
+        <p class="text-[#4D4D4D]/80">We use these forms to tailor every appointment. Update them anytime to keep your preferences fresh.</p>
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div class="rounded-2xl border border-[#1f5f44]/25 p-4">
+            <p class="text-xs uppercase tracking-[0.2em] text-[#4D4D4D]/70">Pending</p>
+            <p class="text-4xl font-bold text-[#1f5f44]">{{ pending_intake_assignments|default:0 }}</p>
+          </div>
+          <div class="rounded-2xl border border-[#1f5f44]/25 p-4">
+            <p class="text-xs uppercase tracking-[0.2em] text-[#4D4D4D]/70">Submitted</p>
+            <p class="text-4xl font-bold text-[#1f5f44]">{{ total_intake_assignments|default:0 }}</p>
+          </div>
+        </div>
+        <a href="{% url 'client-intake-forms' %}" class="inline-flex items-center gap-2 self-start px-5 py-2.5 rounded-full border border-[#1f5f44] text-[#1f5f44] hover:bg-[#1f5f44] hover:text-white transition">
+          Open forms
+        </a>
+      </div>
+    </section>
+
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab hidden">
       <div class="grid gap-6 xl:grid-cols-2">
-        <article class="tab-card bg-white border border-[#DAD3C1] shadow-sm rounded-2xl p-6 flex flex-col gap-4">
+        <article class="tab-card p-6 flex flex-col gap-4">
           <div>
-            <h3 class="text-lg font-semibold text-[#204029]">Account profile</h3>
-            <p class="text-sm text-[#4D4D4D]/70">This is the information saved in your Malva account.</p>
+            <h3 class="text-lg font-semibold text-[#1b392c]">Account profile (server copy)</h3>
+            <p class="text-sm text-[#4D4D4D]/70">These details live securely in your Malva account.</p>
           </div>
           {% with defaults=autofill_defaults.profile %}
             <dl class="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Name</dt>
-                <dd class="text-[#204029]">{{ defaults.first_name }} {{ defaults.last_name }}</dd>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Name</dt>
+                <dd class="text-[#1b392c]">{{ defaults.first_name }} {{ defaults.last_name }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Phone</dt>
-                <dd class="text-[#204029]">{{ defaults.phone|default:"—" }}</dd>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Phone</dt>
+                <dd class="text-[#1b392c]">{{ defaults.phone|default:"—" }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Email</dt>
-                <dd class="text-[#204029] break-words">{{ defaults.email|default:"—" }}</dd>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Email</dt>
+                <dd class="text-[#1b392c] break-words">{{ defaults.email|default:"—" }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Birth date</dt>
-                <dd class="text-[#204029]">{{ defaults.birth_date|default:"—" }}</dd>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Birth date</dt>
+                <dd class="text-[#1b392c]">{{ defaults.birth_date|default:"—" }}</dd>
               </div>
               <div class="sm:col-span-2">
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Address</dt>
-                <dd class="text-[#204029] whitespace-pre-line">{{ defaults.address|default:"—" }}</dd>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Address</dt>
+                <dd class="text-[#1b392c] whitespace-pre-line">{{ defaults.address|default:"—" }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Postal code</dt>
-                <dd class="text-[#204029]">{{ defaults.postal_code|default:"—" }}</dd>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Postal code</dt>
+                <dd class="text-[#1b392c]">{{ defaults.postal_code|default:"—" }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">How heard</dt>
-                <dd class="text-[#204029]">{{ defaults.how_heard|default:"—" }}</dd>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">How heard</dt>
+                <dd class="text-[#1b392c]">{{ defaults.how_heard|default:"—" }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Marketing consent</dt>
-                <dd class="text-[#204029]">
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Marketing consent</dt>
+                <dd class="text-[#1b392c]">
                   {% if defaults.email_marketing_consent %}Subscribed{% else %}Not subscribed{% endif %}
                 </dd>
               </div>
@@ -591,93 +749,22 @@
           {% endwith %}
           <div class="flex flex-wrap gap-3 pt-2">
             <button type="button"
-                    class="px-4 py-2 bg-[#204029] text-white rounded-lg hover:bg-[#1b3626] transition"
+                    class="px-4 py-2 bg-[#1f5f44] text-white rounded-lg hover:bg-[#194f39] transition"
                     data-autofill-sync="profile">
               Sync profile to this device
             </button>
             <button type="button"
-                    class="px-4 py-2 border border-[#204029]/30 text-[#204029] rounded-lg hover:border-[#204029]"
+                    class="px-4 py-2 border border-[#1f5f44]/30 text-[#1f5f44] rounded-lg hover:border-[#1f5f44]"
                     data-autofill-clear="profile">
               Clear device copy
             </button>
           </div>
         </article>
 
-        <article class="tab-card bg-white border border-[#DAD3C1] shadow-sm rounded-2xl p-6 flex flex-col gap-4" data-payment-account-card>
+        <article class="tab-card p-6 flex flex-col gap-4">
           <div>
-            <h3 class="text-lg font-semibold text-[#204029]">Billing details saved to your account</h3>
-            <p class="text-sm text-[#4D4D4D]/70">We reuse these fields across invoices and checkout on every device.</p>
-          </div>
-          {% with billing=autofill_defaults.payment %}
-            <dl class="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm" data-payment-account-list>
-              <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Billing name</dt>
-                <dd class="text-[#204029]" data-payment-account-field="name">{{ billing.name|default:"—" }}</dd>
-              </div>
-              <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Email</dt>
-                <dd class="text-[#204029] break-words" data-payment-account-field="email">{{ billing.email|default:"—" }}</dd>
-              </div>
-              <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Phone</dt>
-                <dd class="text-[#204029]" data-payment-account-field="phone">{{ billing.phone|default:"—" }}</dd>
-              </div>
-              <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Postal code</dt>
-                <dd class="text-[#204029]" data-payment-account-field="postal_code">{{ billing.postal_code|default:"—" }}</dd>
-              </div>
-              <div class="sm:col-span-2">
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Address</dt>
-                <dd class="text-[#204029] whitespace-pre-line" data-payment-account-field="address">
-                  {% if billing.address_line1 or billing.address_line2 %}
-                    {% if billing.address_line1 %}{{ billing.address_line1 }}{% endif %}
-                    {% if billing.address_line2 %}\n{{ billing.address_line2 }}{% endif %}
-                  {% else %}
-                    —
-                  {% endif %}
-                </dd>
-              </div>
-              <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">City</dt>
-                <dd class="text-[#204029]" data-payment-account-field="city">{{ billing.city|default:"—" }}</dd>
-              </div>
-              <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Province / State</dt>
-                <dd class="text-[#204029]" data-payment-account-field="state">{{ billing.state|default:"—" }}</dd>
-              </div>
-              <div>
-                <dt class="font-semibold text-[#204029]/80 uppercase text-xs tracking-wide">Country</dt>
-                <dd class="text-[#204029]" data-payment-account-field="country">{{ billing.country|default:"—" }}</dd>
-              </div>
-            </dl>
-            <p class="text-xs text-[#4D4D4D]/60" data-payment-account-updated>
-              {% if billing.updated_at %}
-                Updated {{ billing.updated_at }}
-              {% else %}
-                Not updated yet.
-              {% endif %}
-            </p>
-            <div class="flex flex-wrap gap-3 pt-2">
-              <button type="button"
-                      class="px-4 py-2 bg-[#204029] text-white rounded-lg hover:bg-[#1b3626] transition"
-                      data-autofill-sync-account="payment">
-                Sync this device to account
-              </button>
-              <button type="button"
-                      class="px-4 py-2 border border-[#204029]/30 text-[#204029] rounded-lg hover:border-[#204029]"
-                      data-autofill-clear-account="payment">
-                Clear account copy
-              </button>
-            </div>
-          {% endwith %}
-        </article>
-
-        <article class="tab-card bg-white border border-[#DAD3C1] shadow-sm rounded-2xl p-6 flex flex-col gap-4">
-          <div>
-            <h3 class="text-lg font-semibold text-[#204029]">Device autofill</h3>
-            <p class="text-sm text-[#4D4D4D]/70">
-              Saved form data never leaves this browser. Clear it if you are on a shared computer.
-            </p>
+            <h3 class="text-lg font-semibold text-[#1b392c]">Device autofill</h3>
+            <p class="text-sm text-[#4D4D4D]/70">Saved form data never leaves this browser. Clear it if you are on a shared computer.</p>
           </div>
           <div class="rounded-xl border border-[#DAD3C1] bg-[#F7F6F1] p-4" data-autofill-device>
             <div class="text-sm text-[#4D4D4D]/70" data-autofill-empty>No autofill data stored on this device yet.</div>
@@ -689,6 +776,54 @@
                     data-autofill-clear-all>
               Clear all device data
             </button>
+          </div>
+        </article>
+        <article class="tab-card p-6 flex flex-col gap-4 xl:col-span-2">
+          <div>
+            <h3 class="text-lg font-semibold text-[#1b392c]">Language & alerts</h3>
+            <p class="text-sm text-[#4D4D4D]/70">Keep every touchpoint consistent by picking a preferred language.</p>
+          </div>
+          <div class="lang-picker max-w-sm" data-i18n-attr="aria-label:common.language">
+            <label for="dashLangSelectPanel" class="lang-picker__label" data-i18n="common.language">Language</label>
+            <select id="dashLangSelectPanel" class="lang-picker__select" data-lang-switch></select>
+          </div>
+          <p class="text-sm text-[#4D4D4D]/70">Changes apply instantly and sync across all of your signed-in sessions.</p>
+        </article>
+      </div>
+    </section>
+    <!-- SUPPORT -->
+    <section id="tab-support" class="tab hidden">
+      <div class="grid gap-6 xl:grid-cols-2">
+        <article class="tab-card p-6 flex flex-col gap-4">
+          <div>
+            <h2 class="text-2xl font-semibold text-[#1b392c]">Concierge support</h2>
+            <p class="text-sm text-[#4D4D4D]/80">Message our team for scheduling help, account changes, or product guidance.</p>
+          </div>
+          <ul class="space-y-2 text-sm text-[#4D4D4D]/80">
+            <li><strong>Email:</strong> <a href="mailto:{{ support_email }}" class="text-[#1f5f44] hover:underline">{{ support_email }}</a></li>
+            {% if business_phone %}
+              <li><strong>Phone:</strong> <a href="tel:{{ business_phone }}" class="text-[#1f5f44] hover:underline">{{ business_phone }}</a></li>
+            {% endif %}
+            <li><strong>Hours:</strong> Monday–Friday, 9am–6pm</li>
+          </ul>
+          <div class="flex flex-wrap gap-3 pt-2">
+            <a href="/accounts/#services" class="px-5 py-2.5 rounded-full bg-[#1f5f44] text-white hover:bg-[#194f39]">Book another visit</a>
+            <a href="{% url 'client-intake-forms' %}" class="px-5 py-2.5 rounded-full border border-[#1f5f44]/40 text-[#1f5f44] hover:bg-white">Update forms</a>
+          </div>
+        </article>
+        <article class="tab-card p-6 flex flex-col gap-4">
+          <div>
+            <h2 class="text-2xl font-semibold text-[#1b392c]">Resources & downloads</h2>
+            <p class="text-sm text-[#4D4D4D]/80">Keep Malva close with our app and quick-reference guides.</p>
+          </div>
+          <ul class="space-y-2 text-sm text-[#4D4D4D]/80">
+            <li>Step-by-step account walkthroughs</li>
+            <li>Aftercare recommendations from your master</li>
+            <li>Printable receipts and booking confirmations</li>
+          </ul>
+          <div class="flex flex-wrap gap-3">
+            <a href="#download" class="px-5 py-2.5 rounded-full bg-[#AF9525] text-white hover:bg-[#9b8521]">Download the app</a>
+            <a href="#help" class="px-5 py-2.5 rounded-full border border-[#AF9525]/30 text-[#AF9525] hover:bg-white">Visit help center</a>
           </div>
         </article>
       </div>
@@ -817,7 +952,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   };
 
-  const links = document.querySelectorAll('.sidebar-link');
+  const links = document.querySelectorAll('[data-tab]');
   const tabs  = document.querySelectorAll('.tab');
   const bodyEl = document.body;
   const navToggle = document.querySelector('[data-nav-toggle]');
@@ -845,10 +980,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function setActive(link, active) {
-    link.classList.toggle('bg-[#1b3626]', active);
-    link.classList.toggle('text-white', active);
-    link.classList.toggle('border-[#AF9525]', active);
-    link.classList.toggle('border-transparent', !active);
+    link.classList.toggle('is-active', active);
+    link.setAttribute('aria-current', active ? 'page' : 'false');
   }
   function activate(tabName) {
     tabs.forEach(t => t.classList.toggle('hidden', t.id !== 'tab-' + tabName));
@@ -856,8 +989,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* hash-навигация */
-  const allowed = ['dashboard','appointments','files','notifications','profile','autofill'];
-  const initial = allowed.includes(location.hash.replace('#','')) ? location.hash.replace('#','') : 'dashboard';
+  const allowed = ['overview','appointments','billing','forms','settings','support'];
+  const initialHash = location.hash.replace('#','');
+  const initial = allowed.includes(initialHash) ? initialHash : 'overview';
   activate(initial);
   links.forEach(link => link.addEventListener('click', e => {
     e.preventDefault();
@@ -865,6 +999,21 @@ document.addEventListener('DOMContentLoaded', () => {
     history.replaceState(null, '', '#'+link.dataset.tab);
     closeNav();
   }));
+
+  document.querySelectorAll('[data-tab-jump]').forEach((btn) => {
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      const target = btn.getAttribute('data-tab-jump');
+      if (!target || !allowed.includes(target)) return;
+      activate(target);
+      history.replaceState(null, '', '#' + target);
+      closeNav();
+      const section = document.getElementById(`tab-${target}`);
+      if (section) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
 
   const autofillScript = document.getElementById('autofill-defaults');
   let autofillDefaults = {};

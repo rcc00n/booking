@@ -2034,6 +2034,117 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     # NOTE: если хочешь отдельный шаблон для календаря — задай его здесь
     change_list_template = "admin/appointments_calendar.html"  # твой базовый шаблон списка
     change_form_template = "admin/custom_edit_appointment.html"
+
+    @staticmethod
+    def _validate_service_room_capacity(rows, bag):
+        if not rows:
+            return
+
+        service_ids = {row["service_id"] for row in rows if row.get("service_id")}
+        if not service_ids:
+            return
+
+        services = (
+            Service.objects.filter(pk__in=service_ids)
+            .prefetch_related("allowed_rooms")
+        )
+        service_meta = {}
+        for svc in services:
+            allowed_ids = list(svc.allowed_rooms.values_list("pk", flat=True))
+            base_duration = int((svc.duration_min or 0) + (svc.extra_time_min or 0))
+            service_meta[str(svc.pk)] = {
+                "allowed_ids": allowed_ids,
+                "base_duration": base_duration,
+                "intervals": [],
+            }
+
+        for row in rows:
+            sid = row.get("service_id")
+            start = row.get("dt")
+            if not sid or not start:
+                continue
+            meta = service_meta.get(str(sid))
+            if not meta:
+                continue
+            allowed_count = len(meta["allowed_ids"])
+            if allowed_count == 0:
+                bag["items"][row["idx"]]["service"].append("Service must be assigned to at least one room.")
+                continue
+            duration = row.get("duration_override") or meta["base_duration"]
+            if duration is None or duration <= 0:
+                duration = meta["base_duration"]
+            end = start + timedelta(minutes=duration or 0)
+            meta["intervals"].append({"idx": row["idx"], "start": start, "end": end})
+
+        for meta in service_meta.values():
+            allowed_count = len(meta["allowed_ids"])
+            intervals = meta["intervals"]
+            if allowed_count <= 0 or len(intervals) <= allowed_count:
+                continue
+            events = []
+            for entry in intervals:
+                events.append((entry["start"], 1, entry["idx"]))
+                events.append((entry["end"], -1, entry["idx"]))
+            events.sort(key=lambda e: (e[0], 0 if e[1] == 1 else 1))
+            active = 0
+            for _, delta, idx in events:
+                if delta == 1:
+                    active += 1
+                    if active > allowed_count:
+                        bag["items"][idx]["start_time_1"].append("All rooms for this service are busy at this time.")
+                else:
+                    active = max(active - 1, 0)
+
+    @staticmethod
+    def _enforce_room_capacity_for_items(prebuilt_items, row_errs):
+        if not prebuilt_items:
+            return
+
+        service_map = {}
+        for idx, item, _ in prebuilt_items:
+            service = getattr(item, "service", None)
+            if not service:
+                continue
+            meta = service_map.setdefault(
+                service.pk,
+                {
+                    "allowed_ids": list(service.allowed_rooms.values_list("pk", flat=True)),
+                    "intervals": [],
+                },
+            )
+            allowed_ids = meta["allowed_ids"]
+            if not allowed_ids:
+                key = f"items-{idx}-service"
+                row_errs.setdefault(key, []).append("Service must be assigned to at least one room.")
+                continue
+            start = getattr(item, "start_time", None)
+            end = getattr(item, "end_time", None) or item.compute_end_time()
+            if not start or not end:
+                continue
+            meta["intervals"].append((idx, start, end))
+
+        for meta in service_map.values():
+            allowed_count = len(meta["allowed_ids"])
+            if allowed_count <= 0:
+                continue
+            intervals = meta["intervals"]
+            if len(intervals) <= allowed_count:
+                continue
+            events = []
+            for idx, start, end in intervals:
+                events.append((start, 1, idx))
+                events.append((end, -1, idx))
+            events.sort(key=lambda e: (e[0], 0 if e[1] == 1 else 1))
+            active = 0
+            for _, delta, idx in events:
+                if delta == 1:
+                    active += 1
+                    if active > allowed_count:
+                        key = f"items-{idx}-start_time_1"
+                        row_errs.setdefault(key, []).append("All rooms for this service are busy at this time.")
+                else:
+                    active = max(active - 1, 0)
+
     date_hierarchy = "start_time"  # поправь, если поле называется иначе
 
     list_select_related = ("client",)
@@ -2864,8 +2975,9 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                     "version": form.schema_version,
                     "schema": form.normalized_schema(),
                     "updated_at": form.updated_at.isoformat() if form.updated_at else None,
-                }
+            }
             return catalog
+
 
         # ---------------- GET: первичная отрисовка ----------------
         try:
@@ -3139,6 +3251,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "manual_discount": manual_discount,
             })
 
+        self._validate_service_room_capacity(valid_rows, bag)
+
         required_form_ids: set[str] = set()
         for row in valid_rows:
             service_id = row.get("service_id")
@@ -3261,6 +3375,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                             row_errs.setdefault(key, []).extend(msgs)
 
                     # Если хотя бы у одной строки есть ошибки — откатываем и показываем их в форме
+                self._enforce_room_capacity_for_items(prebuilt_items, row_errs)
+
                 if row_errs:
                     raise ValidationError(row_errs)
                 first_start = None

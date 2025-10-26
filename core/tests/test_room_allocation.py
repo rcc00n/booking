@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from collections import defaultdict
+from datetime import datetime, timedelta, time
 
+from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.test import TransactionTestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
+from core.admin import AppointmentAdmin
 from core.models import (
     Appointment,
     AppointmentItem,
     MasterProfile,
+    MasterWorkDay,
     MasterRoom,
     Service,
     UserProfile,
@@ -173,3 +177,226 @@ class RoomAllocationTests(TransactionTestCase):
         moving.start_time = slot_one
         with self.assertRaises(ValidationError):
             moving.full_clean()
+
+
+class ServiceRoomTestMixin:
+    def setUp(self):
+        super().setUp()
+        self.user_model = get_user_model()
+        self.client_profile = self._make_client("clean-client")
+        today = timezone.localdate()
+        current_tz = timezone.get_current_timezone()
+        self.base_start = timezone.make_aware(datetime.combine(today, time(12, 0)), current_tz)
+        self.service = Service.objects.create(
+            name="Clean Service",
+            description="",
+            base_price="75.00",
+            duration_min=60,
+            extra_time_min=0,
+        )
+        self.room_a = MasterRoom.objects.create(room="Clean Room A")
+        self.room_b = MasterRoom.objects.create(room="Clean Room B")
+        self.service.allowed_rooms.set([self.room_a, self.room_b])
+
+    def _make_client(self, username: str) -> UserProfile:
+        user = self.user_model.objects.create_user(
+            username=username,
+            email=f"{username}@example.com",
+            password="pass1234",
+        )
+        profile = getattr(user, "userprofile", None)
+        if profile is None:
+            profile = UserProfile.objects.create(user=user)
+        return profile
+
+    def _make_master(self, username: str) -> MasterProfile:
+        user = self.user_model.objects.create_user(
+            username=username,
+            email=f"{username}@example.com",
+            password="pass1234",
+            first_name=username.title(),
+            last_name="Test",
+        )
+        profile = getattr(user, "userprofile", None)
+        if profile is None:
+            profile = UserProfile.objects.create(user=user)
+        master = MasterProfile.objects.create(user=profile, profession="Tester")
+        self._ensure_workweek(master)
+        return master
+
+    def _ensure_workweek(self, master: MasterProfile, *, start_hour: int = 8, end_hour: int = 20):
+        master.workdays.all().delete()
+        for weekday in range(7):
+            MasterWorkDay.objects.create(
+                master=master,
+                weekday=weekday,
+                start_time=time(start_hour, 0),
+                end_time=time(end_hour, 0),
+            )
+
+    def _appointment(self, start=None) -> Appointment:
+        return Appointment.objects.create(
+            client=self.client_profile,
+            start_time=start or self.base_start,
+        )
+
+    def _create_item(self, appointment, master, start):
+        item = AppointmentItem(
+            appointment=appointment,
+            service=self.service,
+            master=master,
+            start_time=start,
+        )
+        item.full_clean()
+        item.save()
+        return item
+
+    def _start_at(self, hour: int, minute: int = 0):
+        base_date = timezone.localtime(self.base_start).date()
+        naive = datetime.combine(base_date, time(hour, minute))
+        return timezone.make_aware(naive, timezone.get_current_timezone())
+
+
+class AppointmentItemCleanTests(ServiceRoomTestMixin, TestCase):
+
+    def test_clean_assigns_room_when_available(self):
+        master = self._make_master("clean-master")
+        appointment = self._appointment(self.base_start)
+
+        item = AppointmentItem(
+            appointment=appointment,
+            service=self.service,
+            master=master,
+            start_time=self.base_start,
+        )
+        item.full_clean()
+
+        self.assertIsNotNone(item.room)
+        self.assertIn(item.room, {self.room_a, self.room_b})
+
+    def test_clean_raises_when_all_rooms_occupied(self):
+        master_one = self._make_master("clean-master-one")
+        master_two = self._make_master("clean-master-two")
+        master_three = self._make_master("clean-master-three")
+
+        slot = self.base_start
+        self._create_item(self._appointment(slot), master_one, slot)
+        self._create_item(self._appointment(slot), master_two, slot)
+
+        pending = AppointmentItem(
+            appointment=self._appointment(slot),
+            service=self.service,
+            master=master_three,
+            start_time=slot,
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            pending.full_clean()
+        self.assertIn("All rooms", str(ctx.exception))
+
+    def test_clean_blocks_master_overlap(self):
+        master = self._make_master("overlap-master")
+        slot = self.base_start
+        self._create_item(self._appointment(slot), master, slot)
+
+        overlapping = AppointmentItem(
+            appointment=self._appointment(slot + timedelta(minutes=15)),
+            service=self.service,
+            master=master,
+            start_time=slot + timedelta(minutes=15),
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            overlapping.full_clean()
+        self.assertIn("start_time", ctx.exception.message_dict)
+
+    def test_clean_respects_working_hours(self):
+        master = self._make_master("hours-master")
+        self._ensure_workweek(master, start_hour=10, end_hour=18)
+        early_start = self._start_at(8, 0)
+
+        item = AppointmentItem(
+            appointment=self._appointment(early_start),
+            service=self.service,
+            master=master,
+            start_time=early_start,
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            item.full_clean()
+        self.assertIn("start_time", ctx.exception.message_dict)
+
+    def test_appointment_clean_detects_room_overage(self):
+        self.service.allowed_rooms.set([self.room_a])
+        master_one = self._make_master("clean-master-one")
+        master_two = self._make_master("clean-master-two")
+        appt = self._appointment(self.base_start)
+        self._create_item(appt, master_one, self.base_start)
+        conflicting = self._create_item(appt, master_two, self.base_start + timedelta(hours=2))
+        AppointmentItem.objects.filter(pk=conflicting.pk).update(room=None)
+        AppointmentItem.objects.filter(pk=conflicting.pk).update(start_time=self.base_start)
+        appt.refresh_from_db()
+        with self.assertRaises(ValidationError):
+            appt.clean()
+
+
+class AppointmentAdminRoomValidationTests(ServiceRoomTestMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin_view = AppointmentAdmin(Appointment, django_admin.site)
+
+    def _empty_bag(self):
+        return {
+            "__all__": [],
+            "fields": defaultdict(list),
+            "items": defaultdict(lambda: defaultdict(list)),
+            "intake": defaultdict(lambda: defaultdict(list)),
+        }
+
+    def test_helper_flags_overlapping_rows(self):
+        self.service.allowed_rooms.set([self.room_a])
+        start = self.base_start
+        rows = [
+            {"idx": 0, "service_id": str(self.service.pk), "dt": start, "duration_override": None},
+            {"idx": 1, "service_id": str(self.service.pk), "dt": start + timedelta(minutes=15), "duration_override": None},
+        ]
+        bag = self._empty_bag()
+        self.admin_view._validate_service_room_capacity(rows, bag)
+        self.assertIn(
+            "All rooms",
+            " ".join(bag["items"][1]["start_time_1"]),
+        )
+
+    def test_helper_allows_non_overlapping_rows(self):
+        self.service.allowed_rooms.set([self.room_a])
+        start = self.base_start
+        later = start + timedelta(hours=2)
+        rows = [
+            {"idx": 0, "service_id": str(self.service.pk), "dt": start, "duration_override": None},
+            {"idx": 1, "service_id": str(self.service.pk), "dt": later, "duration_override": None},
+        ]
+        bag = self._empty_bag()
+        self.admin_view._validate_service_room_capacity(rows, bag)
+        self.assertFalse(bag["items"])
+
+    def test_enforce_room_capacity_for_items_blocks_conflicts(self):
+        self.service.allowed_rooms.set([self.room_a])
+        appointment = self._appointment(self.base_start)
+        master_one = self._make_master("admin-room-master-one")
+        master_two = self._make_master("admin-room-master-two")
+        item_one = AppointmentItem(
+            appointment=appointment,
+            service=self.service,
+            master=master_one,
+            start_time=self.base_start,
+        )
+        item_two = AppointmentItem(
+            appointment=appointment,
+            service=self.service,
+            master=master_two,
+            start_time=self.base_start,
+        )
+        item_one.full_clean()
+        item_two.full_clean()
+
+        prebuilt = [(0, item_one, ""), (1, item_two, "")]
+        row_errs = {}
+        self.admin_view._enforce_room_capacity_for_items(prebuilt, row_errs)
+        self.assertIn("items-1-start_time_1", row_errs)

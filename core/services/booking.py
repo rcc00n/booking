@@ -1,8 +1,9 @@
 # core/services/booking.py
 from __future__ import annotations
+from collections import defaultdict
 from datetime import datetime, timedelta, time
 from decimal import Decimal
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from django.db.models import Q, OuterRef, Subquery
 from django.utils import timezone
@@ -123,6 +124,67 @@ def _appointment_intervals(master: MasterProfile, day: datetime) -> List[Slot]:
         blocks.append((base_start, base_start + dur))
     return blocks
 
+
+def _room_busy_intervals(room_ids: List[int], day: datetime) -> Dict[int, List[Slot]]:
+    """
+    Построить карту занятых интервалов по комнатам для указанной даты.
+    """
+    if not room_ids:
+        return {}
+
+    window_start = _tz_aware(datetime(day.year, day.month, day.day, 0, 0)) - timedelta(hours=3)
+    window_end = window_start + timedelta(days=1, hours=3)
+
+    cancelled = AppointmentStatus.objects.filter(name__iexact="Cancelled").first()
+    qs = (
+        AppointmentItem.objects
+        .select_related("appointment", "service")
+        .filter(
+            room_id__in=room_ids,
+            start_time__lt=window_end,
+            start_time__gt=window_start - timedelta(hours=24),
+        )
+    )
+    if cancelled:
+        qs = qs.exclude(appointment__appointmentstatushistory__status=cancelled)
+
+    busy: Dict[int, List[Slot]] = {room_id: [] for room_id in room_ids}
+    for item in qs:
+        if item.room_id is None:
+            continue
+        base_start = item.start_time or getattr(item.appointment, "start_time", None)
+        if not base_start:
+            continue
+        duration_min = int(getattr(item, "duration_min", 0) or 0)
+        if not duration_min:
+            service = getattr(item, "service", None)
+            duration_min = int(
+                (getattr(service, "duration_min", 0) or 0) + (getattr(service, "extra_time_min", 0) or 0)
+            )
+        busy_end = base_start + timedelta(minutes=duration_min)
+        if busy_end <= window_start or base_start >= window_end:
+            continue
+        busy.setdefault(item.room_id, []).append((base_start, busy_end))
+
+    for entries in busy.values():
+        entries.sort(key=lambda slot: slot[0])
+    return busy
+
+
+def _room_has_capacity(room_blocks: Dict[int, List[Slot]], room_ids: List[int], start: datetime, end: datetime) -> bool:
+    """
+    Проверяем, достаточно ли свободных комнат для интервала [start, end).
+    """
+    for room_id in room_ids:
+        overlaps = False
+        for busy_start, busy_end in room_blocks.get(room_id, []):
+            if start < busy_end and end > busy_start:
+                overlaps = True
+                break
+        if not overlaps:
+            return True
+    return False
+
 def _timeoff_intervals(master: MasterProfile, day: datetime) -> List[Slot]:
     """
     Интервалы отпусков/перерывов мастера на дату.
@@ -159,8 +221,17 @@ def get_available_slots(
 
     day = day.astimezone(get_current_timezone())
     masters = [master] if master else list(get_service_masters(service))
+    if not masters:
+        return {}
 
-    result: Dict[int, List[datetime]] = {}
+    allowed_room_ids = list(dict.fromkeys(service.allowed_rooms.values_list("pk", flat=True)))
+    result: Dict[int, List[datetime]] = {m.id: [] for m in masters}
+    if not allowed_room_ids or total_minutes <= 0:
+        return result
+
+    room_blocks = _room_busy_intervals(allowed_room_ids, day)
+    duration_delta = timedelta(minutes=total_minutes)
+
     for m in masters:
     #TODO change master work_s work_e accordingly to each day. It is the same for all days now. Needs to be changed to each day separately
 
@@ -171,12 +242,15 @@ def get_available_slots(
         blocks = _appointment_intervals(m, day) + _timeoff_intervals(m, day)
 
         free = _intervals_subtract((work_s, work_e), blocks)
-        slots = _gen_slots_in_intervals(free, total_minutes=total_minutes, step_minutes=step_minutes)
+        raw_slots = _gen_slots_in_intervals(free, total_minutes=total_minutes, step_minutes=step_minutes)
 
-        if slots:
-            result[m.id] = slots
-        else:
-            result[m.id] = []
+        filtered_slots: List[datetime] = []
+        for start in raw_slots:
+            end = start + duration_delta
+            if _room_has_capacity(room_blocks, allowed_room_ids, start, end):
+                filtered_slots.append(start)
+
+        result[m.id] = filtered_slots
     return result
 
 def get_or_create_status(name: str) -> AppointmentStatus:

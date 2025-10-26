@@ -1,4 +1,4 @@
-{% load static %}
+{% load static filters %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -49,6 +49,11 @@
     }
     img{max-width:100%;display:block}
     a{color:inherit;text-decoration:none;transition:color .2s ease}
+    .sr-only{
+      position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+      clip:rect(0,0,0,0);white-space:nowrap;border:0;
+    }
+    .mobile-close{display:none;}
     .container{width:var(--container);margin-inline:auto;padding-inline:1.25rem}
 
     /* =========================
@@ -106,7 +111,6 @@
     }
     .mobile-nav-btn:active{transform:scale(.94);}
     .header-actions{display:flex;align-items:center;gap:1rem;margin-left:auto;}
-    .nav-links{display:flex;align-items:center;gap:.5rem;}
     .nav-link{
       padding:.42rem .9rem;border-radius:999px;font-weight:600;color:var(--muted);
       border:1px solid transparent;
@@ -126,12 +130,6 @@
       background:var(--surface);padding:.45rem .9rem;font-weight:600;color:var(--green-dark);cursor:pointer;
     }
     .cart-bubble{display:inline-flex;align-items:center;justify-content:center;min-width:1.7rem;height:1.7rem;border-radius:999px;background:rgba(255,255,255,.15);font-size:.85rem;font-weight:700;border:1px solid rgba(255,255,255,.35);}
-    .icon-buttons{display:flex;align-items:center;gap:.35rem;}
-    .icon-btn{
-      width:42px;height:42px;border-radius:50%;border:1px solid rgba(16,54,38,.15);
-      background:var(--surface);display:grid;place-items:center;color:var(--icon-color);
-      box-shadow:0 12px 28px rgba(15,47,35,.12);font-size:1rem;cursor:pointer;
-    }
     .cart-button{display:inline-flex;align-items:center;gap:.45rem;padding-inline:1.15rem;}
     .cart-button__icon{font-size:1rem}
     .header-auth{display:flex;align-items:center;gap:.75rem;}
@@ -231,7 +229,9 @@
     .service-card{
       background:var(--surface);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column;
       border:1px solid rgba(16,54,38,.06);box-shadow:var(--shadow-card);height:100%;transition:transform .2s ease, box-shadow .2s ease;
+      cursor:pointer;
     }
+    .service-card:focus-visible{outline:2.5px solid color-mix(in srgb,var(--gold) 70%,#fff);outline-offset:4px}
     .service-card:hover{transform:translateY(-4px);box-shadow:0 30px 70px rgba(15,47,35,.15);}
     .service-card__img{position:relative;aspect-ratio:5/3;background:var(--surface-muted);}
     .service-card__img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
@@ -324,6 +324,48 @@
     .payment-option__body{display:flex;flex-direction:column;gap:.2rem}
     .payment-option__title{font-weight:600;color:var(--green-dark)}
     .payment-option__meta{font-size:.85rem;color:var(--muted)}
+
+    /* =========================
+       Service detail modal
+       ========================= */
+    .service-detail{padding:0;overflow:hidden;display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:0}
+    .service-detail__media{position:relative;background:linear-gradient(135deg,var(--green-dark),#274535);min-height:360px;display:flex;align-items:flex-end;justify-content:flex-start;padding:1.5rem}
+    .service-detail__image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+    .service-detail__image[hidden]{display:none}
+    .service-detail__image--empty{position:relative;z-index:1;color:rgba(255,255,255,.82);font-size:1rem;font-weight:600}
+    .service-detail__badge{position:absolute;top:1.2rem;left:1.2rem;background:rgba(255,255,255,.12);color:#fff;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;padding:.35rem .95rem;border-radius:999px;font-weight:700;backdrop-filter:blur(12px)}
+    .service-detail__body{padding:2rem 2.25rem;display:flex;flex-direction:column;gap:1.5rem}
+    .service-detail__top{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}
+    .service-detail__eyebrow{font-size:.85rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+    .service-detail__title{font:900 2rem/1.1 var(--font-heading);color:var(--green-dark);margin:0}
+    .service-detail__description{color:var(--muted);font-size:1rem;line-height:1.6}
+    .service-detail__meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;border:1px solid rgba(32,64,41,.12);border-radius:1rem;padding:1rem}
+    .service-detail__meta-label{font-size:.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+    .service-detail__meta-value{display:block;font:700 1.1rem/1.3 var(--font-heading);color:var(--green-dark);margin-top:.25rem}
+    .service-detail__meta-hint{display:block;font-size:.82rem;color:var(--muted);margin-top:.15rem}
+    .service-detail__price{display:flex;flex-direction:column;gap:.25rem}
+    .service-detail__price-values{display:flex;align-items:center;gap:.5rem}
+    .service-detail__price-old{color:#9aa0a0;text-decoration:line-through;font-weight:600}
+    .service-detail__price-current{font:800 1.35rem/1 var(--font-heading);color:var(--green-dark)}
+    .service-detail__discount{display:inline-flex;align-items:center;gap:.25rem;background:rgba(199,155,73,.12);color:var(--gold);border-radius:999px;padding:.2rem .7rem;font-size:.85rem;font-weight:700}
+    .service-detail__lists{display:flex;flex-direction:column;gap:1.25rem}
+    .service-detail__list-title{font:700 .9rem/1 var(--font-heading);color:var(--green-dark);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.45rem}
+    .service-detail__list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.4rem}
+    .service-detail__list li{display:flex;gap:.4rem;align-items:flex-start;font-size:.95rem;color:var(--muted)}
+    .service-detail__list li::before{content:'•';color:var(--gold);font-weight:900;line-height:1}
+    .service-detail__actions{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:auto}
+    .service-detail__actions .btn{flex:1 1 auto;min-width:180px}
+    .service-detail__forms-count{font-size:.85rem;color:var(--muted);margin-top:.2rem}
+    @media(max-width:1100px){
+      .service-detail{grid-template-columns:1fr}
+      .service-detail__media{min-height:260px}
+    }
+    @media(max-width:640px){
+      .service-detail__body{padding:1.5rem}
+      .service-detail__title{font-size:1.65rem}
+      .service-detail__actions{flex-direction:column}
+      .service-detail__actions .btn{width:100%}
+    }
     .payment-partial-note{font-size:.85rem;color:var(--muted);margin-top:-.35rem;margin-bottom:.25rem}
     .payment-form{display:flex;flex-direction:column;gap:1rem}
     .payment-fieldset{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.85rem}
@@ -523,24 +565,13 @@
               data-i18n-attr="aria-label:services.header.openMenu">☰</button>
       <nav class="header-actions" data-menu-drawer>
         <button type="button" class="mobile-close" data-menu-close data-i18n-attr="aria-label:services.header.closeMenu">
-          ✕ <span data-i18n="services.header.closeMenuText">Close menu</span>
+          <span aria-hidden="true">✕</span>
+          <span class="sr-only" data-i18n="services.header.closeMenuText">Close menu</span>
         </button>
-        <div class="nav-links">
-          <a href="#services" class="nav-link" data-i18n="services.header.sendGift">Send a gift card</a>
-          <a href="#services" class="nav-link nav-link--pill" data-i18n="services.header.listBusiness">List your business</a>
-        </div>
         <div class="header-controls">
           <div class="lang-picker" data-i18n-attr="aria-label:common.language">
             <label for="langSelect" class="lang-picker__label" data-i18n="common.language">Language</label>
             <select id="langSelect" class="lang-picker__select" data-lang-switch></select>
-          </div>
-          <div class="icon-buttons" aria-hidden="true">
-            <button class="icon-btn" type="button" data-i18n-attr="aria-label:services.header.calendar">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
-            </button>
-            <button class="icon-btn" type="button" data-i18n-attr="aria-label:services.header.notifications">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 6a4 4 0 0 0-4 4v3.5l-.94 2.82A1 1 0 0 0 8.01 18h7.98a1 1 0 0 0 .95-1.68L16 13.5V10a4 4 0 0 0-4-4z"/><path d="M10 18a2 2 0 0 0 4 0"/></svg>
-            </button>
           </div>
           <button type="button"
                   class="btn btn--primary cart-button"
@@ -552,80 +583,82 @@
           </button>
           {% if user.is_authenticated %}
             {% with user_display=request.user.get_full_name|default:request.user.username %}
-              <div class="user-menu" data-user-menu>
-                <button type="button"
-                        class="user-menu__trigger"
-                        data-user-menu-trigger
-                        aria-expanded="false"
-                        data-i18n-attr="aria-label:services.userMenu.open">
-                  <span class="user-menu__avatar">{{ user_display|default:user.username|slice:":1"|upper }}</span>
-                  <span class="user-menu__label">
-                    <span class="user-menu__greeting" data-i18n="services.userMenu.greeting">Welcome back</span>
-                    <strong>{{ user_display }}</strong>
-                  </span>
-                </button>
-                <div class="user-menu__dropdown" data-user-menu-dropdown>
-                  <div class="user-menu__header">
-                    <strong>{{ user_display }}</strong>
-                    <small data-i18n="services.userMenu.tier">Malva Member</small>
-                  </div>
-                  <div class="user-menu__list">
-                    <a href="{% url 'dashboard' %}" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Z"/><path d="M19 21a7 7 0 0 0-14 0"/></svg>
-                      <span data-i18n="services.userMenu.profile">Profile</span>
-                    </a>
-                    <a href="{% url 'client_appointments' %}" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 10h18M8 2v4M16 2v4"/></svg>
-                      <span data-i18n="services.userMenu.appointments">Appointments</span>
-                    </a>
-                    <a href="{% url 'dashboard' %}#wallet" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3z"/><path d="M16 11h4v4h-4z"/></svg>
-                      <span data-i18n="services.userMenu.wallet">Wallet</span>
-                    </a>
-                    <a href="#services" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m5 12 5 5 9-10"/></svg>
-                      <span data-i18n="services.userMenu.favorites">Favorites</span>
-                    </a>
-                    <a href="#services" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h16M4 12a4 4 0 0 1 0-8h12a4 4 0 0 1 0 8m-16 0a4 4 0 0 0 0 8h12a4 4 0 0 0 0-8"/></svg>
-                      <span data-i18n="services.userMenu.giftCard">Send a gift card</span>
-                    </a>
-                    <a href="{% url 'client-intake-forms' %}" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 2h12v20H6z"/><path d="M9 6h6M9 10h6M9 14h3"/></svg>
-                      <span data-i18n="services.userMenu.forms">Forms</span>
-                    </a>
-                    <a href="{% url 'dashboard' %}#orders" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h12l3 7H3z"/><path d="m3 10 1.7 9.59A2 2 0 0 0 6.69 21h10.62a2 2 0 0 0 1.99-1.41L21 10"/></svg>
-                      <span data-i18n="services.userMenu.orders">Product orders</span>
-                    </a>
-                    <a href="{% url 'dashboard' %}#settings" class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 15.5a3.5 3.5 0 1 0-3.5-3.5 3.5 3.5 0 0 0 3.5 3.5z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 1-2.54 0 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 1 0-2.54 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 1 2.54 0 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 1 0 2.54 1.65 1.65 0 0 0-.6 1z"/></svg>
-                      <span data-i18n="services.userMenu.settings">Settings</span>
-                    </a>
-                    <div class="user-menu__link">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
-                      <span data-i18n="services.userMenu.language">Languages</span>
+              <div class="header-auth header-auth--authenticated">
+                <a href="{% url 'dashboard' %}" class="btn btn--ghost header-auth__cta">My account</a>
+                <div class="user-menu" data-user-menu>
+                  <button type="button"
+                          class="user-menu__trigger"
+                          data-user-menu-trigger
+                          aria-expanded="false"
+                          data-i18n-attr="aria-label:services.userMenu.open">
+                    <span class="user-menu__avatar">{{ user_display|default:user.username|slice:":1"|upper }}</span>
+                    <span class="user-menu__label">
+                      <span class="user-menu__greeting" data-i18n="services.userMenu.greeting">Welcome back</span>
+                      <strong>{{ user_display }}</strong>
+                    </span>
+                  </button>
+                  <div class="user-menu__dropdown" data-user-menu-dropdown>
+                    <div class="user-menu__header">
+                      <strong>{{ user_display }}</strong>
+                      <small data-i18n="services.userMenu.tier">Malva Member</small>
                     </div>
-                    <form method="post" action="{% url 'logout' %}" class="user-menu__link user-menu__link--danger">
-                      {% csrf_token %}
-                      <button type="submit" style="all:unset;display:flex;align-items:center;gap:.6rem;cursor:pointer;">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>
-                        <span data-i18n="services.userMenu.logout">Log out</span>
-                      </button>
-                    </form>
-                  </div>
-                  <div class="user-menu__footer">
-                    <a href="#download" class="user-menu__footer-link" data-i18n="services.userMenu.download">Download the app</a>
-                    <a href="#help" class="user-menu__footer-link" data-i18n="services.userMenu.help">Help & support</a>
-                    <a href="#business" class="user-menu__footer-link" data-i18n="services.userMenu.business">For businesses</a>
+                    <div class="user-menu__list">
+                      <a href="{% url 'dashboard' %}" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Z"/><path d="M19 21a7 7 0 0 0-14 0"/></svg>
+                        <span data-i18n="services.userMenu.profile">Profile</span>
+                      </a>
+                      <a href="{% url 'client_appointments' %}" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 10h18M8 2v4M16 2v4"/></svg>
+                        <span data-i18n="services.userMenu.appointments">Appointments</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#wallet" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3z"/><path d="M16 11h4v4h-4z"/></svg>
+                        <span data-i18n="services.userMenu.wallet">Wallet</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#favorites" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m5 12 5 5 9-10"/></svg>
+                        <span data-i18n="services.userMenu.favorites">Favorites</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#gift" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h16M4 12a4 4 0 0 1 0-8h12a4 4 0 0 1 0 8m-16 0a4 4 0 0 0 0 8h12a4 4 0 0 0 0-8"/></svg>
+                        <span data-i18n="services.userMenu.giftCard">Send a gift card</span>
+                      </a>
+                      <a href="{% url 'client-intake-forms' %}" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 2h12v20H6z"/><path d="M9 6h6M9 10h6M9 14h3"/></svg>
+                        <span data-i18n="services.userMenu.forms">Forms</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#orders" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h12l3 7H3z"/><path d="m3 10 1.7 9.59A2 2 0 0 0 6.69 21h10.62a2 2 0 0 0 1.99-1.41L21 10"/></svg>
+                        <span data-i18n="services.userMenu.orders">Product orders</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#settings" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 15.5a3.5 3.5 0 1 0-3.5-3.5 3.5 3.5 0 0 0 3.5 3.5z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 1-2.54 0 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 1 0-2.54 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 1 2.54 0 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 1 0 2.54 1.65 1.65 0 0 0-.6 1z"/></svg>
+                        <span data-i18n="services.userMenu.settings">Settings</span>
+                      </a>
+                      <a href="{% url 'dashboard' %}#languages" class="user-menu__link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+                        <span data-i18n="services.userMenu.language">Languages</span>
+                      </a>
+                      <form method="post" action="{% url 'logout' %}" class="user-menu__link user-menu__link--danger">
+                        {% csrf_token %}
+                        <button type="submit" style="all:unset;display:flex;align-items:center;gap:.6rem;cursor:pointer;">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>
+                          <span data-i18n="services.userMenu.logout">Log out</span>
+                        </button>
+                      </form>
+                    </div>
+                    <div class="user-menu__footer">
+                      <a href="#download" class="user-menu__footer-link" data-i18n="services.userMenu.download">Download the app</a>
+                      <a href="#help" class="user-menu__footer-link" data-i18n="services.userMenu.help">Help & support</a>
+                      <a href="#business" class="user-menu__footer-link" data-i18n="services.userMenu.business">For businesses</a>
+                    </div>
                   </div>
                 </div>
               </div>
             {% endwith %}
           {% else %}
             <div class="header-auth">
-              <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="btn btn--ghost" data-i18n="services.nav.login">Login</a>
-              <a href="{% url 'register' %}" class="btn btn--primary" data-i18n="services.nav.register">Create account</a>
+              <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}" class="btn btn--ghost header-auth__cta">Login / Account</a>
             </div>
           {% endif %}
         </div>
@@ -725,7 +758,9 @@
         <h3 class="section-heading" data-i18n="services.search.resultsTitle">Search results</h3>
         <div class="services-grid">
           {% for s in search_results %}
-            <article class="service-card">
+            <article class="service-card" data-service-card role="button" tabindex="0" aria-label="View details for {{ s.name }}"
+                     data-i18n-attr="aria-label:services.detail.openLabel"
+                     data-i18n-vars='{"name":"{{ s.name|escapejs }}"}'>
               <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
                 {% if s.card_image_url %}
                   <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
@@ -764,6 +799,7 @@
                   <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
                 </div>
               </div>
+              <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
             </article>
           {% empty %}
             <div class="stub" data-i18n="services.search.noServerResults" data-i18n-vars='{"query":"{{ q|escapejs }}"}'>No results for “{{ q }}”.</div>
@@ -781,7 +817,9 @@
           </div>
           <div class="services-grid">
             {% for s in c.catalog_services %}
-              <article class="service-card">
+              <article class="service-card" data-service-card role="button" tabindex="0" aria-label="View details for {{ s.name }}"
+                       data-i18n-attr="aria-label:services.detail.openLabel"
+                       data-i18n-vars='{"name":"{{ s.name|escapejs }}"}'>
                 <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
                   {% if s.card_image_url %}
                     <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
@@ -805,21 +843,22 @@
                     <span class="service-card__duration" data-i18n="services.units.minutes" data-i18n-vars='{"value":"{{ s.duration_min }}"}'>{{ s.duration_min }} min</span>
                   </div>
                   {% if s.description %}<p class="service-card__desc">{{ s.description|truncatewords:16 }}</p>{% endif %}
-                  <div class="service-card__actions">
-                    <div class="service-card__price">
-                      {% with disc=s.get_active_discount %}
-                        {% if disc %}
-                          <span class="old">${{ s.base_price|floatformat:2 }}</span>
-                          <strong>${{ s.get_discounted_price|floatformat:2 }}</strong>
-                          <span class="badge">-{{ disc.discount_percent }}%</span>
-                        {% else %}
-                          <strong>${{ s.base_price|floatformat:2 }}</strong>
-                        {% endif %}
-                      {% endwith %}
-                    </div>
-                    <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
+                <div class="service-card__actions">
+                  <div class="service-card__price">
+                    {% with disc=s.get_active_discount %}
+                      {% if disc %}
+                        <span class="old">${{ s.base_price|floatformat:2 }}</span>
+                        <strong>${{ s.get_discounted_price|floatformat:2 }}</strong>
+                        <span class="badge">-{{ disc.discount_percent }}%</span>
+                      {% else %}
+                        <strong>${{ s.base_price|floatformat:2 }}</strong>
+                      {% endif %}
+                    {% endwith %}
                   </div>
+                  <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
                 </div>
+              </div>
+              <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
               </article>
             {% empty %}
               <div class="stub" data-i18n="services.search.noCategory">No services in this category yet.</div>
@@ -837,7 +876,9 @@
           </div>
           <div class="services-grid">
             {% for s in uncategorized %}
-              <article class="service-card">
+              <article class="service-card" data-service-card role="button" tabindex="0" aria-label="View details for {{ s.name }}"
+                       data-i18n-attr="aria-label:services.detail.openLabel"
+                       data-i18n-vars='{"name":"{{ s.name|escapejs }}"}'>
                 <div class="service-card__img{% if not s.card_image_url %} service-card__img--empty{% endif %}"{% if not s.card_image_url %} aria-hidden="true"{% endif %}>
                   {% if s.card_image_url %}
                     <img src="{{ s.card_image_url }}" alt="{{ s.card_image_alt }}" loading="lazy">
@@ -866,6 +907,7 @@
                     <button class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
                   </div>
                 </div>
+                <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
               </article>
             {% endfor %}
           </div>
@@ -884,6 +926,67 @@
   </button>
 
   <footer class="site-footer" data-i18n="services.footer.copy">© 2025 Malva Booking</footer>
+
+  <!-- ===== Modal: service detail ===== -->
+  <div class="modal" id="serviceDetailModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="serviceDetailName">
+    <div class="modal__dialog service-detail">
+      <div class="service-detail__media">
+        <span class="service-detail__badge" id="serviceDetailBadge" data-i18n="services.detail.badgeFeatured">Signature</span>
+        <img id="serviceDetailImage" class="service-detail__image" alt="" hidden loading="lazy">
+        <div class="service-detail__image service-detail__image--empty" id="serviceDetailImageEmpty" data-i18n="services.detail.imageEmpty">Preview coming soon</div>
+      </div>
+      <div class="service-detail__body">
+        <div class="service-detail__top">
+          <div>
+            <span class="service-detail__eyebrow" id="serviceDetailCategoryLabel" data-i18n="services.detail.unknownCategory">Uncategorized</span>
+            <h2 class="service-detail__title" id="serviceDetailName">Service</h2>
+          </div>
+          <button class="modal__close" id="serviceDetailClose" aria-label="Close" data-i18n-attr="aria-label:common.close">×</button>
+        </div>
+        <p class="service-detail__description" id="serviceDetailDescription" data-i18n="services.detail.descriptionFallback">We will publish the description soon.</p>
+        <div class="service-detail__meta">
+          <div>
+            <span class="service-detail__meta-label" data-i18n="services.detail.durationLabel">Duration</span>
+            <strong class="service-detail__meta-value" id="serviceDetailDuration">60 min</strong>
+            <small class="service-detail__meta-hint" id="serviceDetailExtra" hidden></small>
+          </div>
+          <div>
+            <span class="service-detail__meta-label" data-i18n="services.detail.categoryLabel">Category</span>
+            <strong class="service-detail__meta-value" id="serviceDetailCategory">Facials</strong>
+          </div>
+          <div class="service-detail__price">
+            <span class="service-detail__meta-label" data-i18n="services.detail.priceLabel">Investment</span>
+            <div class="service-detail__price-values">
+              <span class="service-detail__price-old" id="serviceDetailPriceOld" hidden>$0.00</span>
+              <span class="service-detail__price-current" id="serviceDetailPriceCurrent">$0.00</span>
+            </div>
+            <span class="service-detail__discount" id="serviceDetailDiscount" hidden>10% off today</span>
+          </div>
+        </div>
+
+        <div class="service-detail__lists">
+          <div>
+            <div class="service-detail__list-title" data-i18n="services.detail.formsLabel">Required forms</div>
+            <ul class="service-detail__list" id="serviceDetailFormsList"></ul>
+            <p class="service-detail__forms-count" id="serviceDetailFormsFootnote" data-i18n="services.detail.formsEmpty">No forms required before the visit.</p>
+          </div>
+          <div>
+            <div class="service-detail__list-title" data-i18n="services.detail.highlightsTitle">What to expect</div>
+            <ul class="service-detail__list">
+              <li data-i18n="services.detail.highlightCare">Personal concierge care from our front-desk team.</li>
+              <li data-i18n="services.detail.highlightProducts">Sterile tools & lab-tested professional formulas.</li>
+              <li data-i18n="services.detail.highlightPlan">Personalized plan and follow-up guidance after the visit.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="service-detail__actions">
+          <button class="btn btn--primary" id="serviceDetailBook" data-i18n="services.detail.ctaPrimary">Book this service</button>
+          <button class="btn btn--ghost" id="serviceDetailDismiss" data-i18n="services.detail.ctaSecondary">Back to catalog</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- ===== Modal: booking ===== -->
   <div class="modal" id="bookModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="bookTitle" data-initial-focus="#bookTitle">
@@ -935,7 +1038,7 @@
               <span class="lg-free"><i></i> <span data-i18n="common.free">free</span></span>
               <span class="lg-busy"><i></i> <span data-i18n="common.busy">busy</span></span>
             </div>
-            <div class="hint book-desktop" data-i18n="services.modal.legendHint">Прокручивайте горизонтально. Красные слоты показаны как занятые и не кликаются.</div>
+            <div class="hint book-desktop" data-i18n="services.modal.legendHint">Scroll horizontally. Red slots are busy and not clickable.</div>
           </div>
         </div>
 
@@ -1102,6 +1205,20 @@
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       const I18N = window.MalvaI18n;
+      const getNestedValue = (source, path) => {
+        if (!source || !Array.isArray(path) || path.length === 0) {
+          return source;
+        }
+        let current = source;
+        for (let i = 0; i < path.length; i += 1) {
+          if (current === undefined || current === null) {
+            return undefined;
+          }
+          current = current[path[i]];
+        }
+        return current;
+      };
+      const bodyDataset = document.body && document.body.dataset ? document.body.dataset : null;
       const userMenu = document.querySelector('[data-user-menu]');
       if (userMenu) {
         const trigger = userMenu.querySelector('[data-user-menu-trigger]');
@@ -1114,10 +1231,12 @@
           const isOpen = userMenu.classList.toggle('is-open');
           if (trigger) trigger.setAttribute('aria-expanded', String(isOpen));
         };
-        trigger?.addEventListener('click', (event) => {
-          event.preventDefault();
-          toggleUserMenu();
-        });
+        if (trigger) {
+          trigger.addEventListener('click', (event) => {
+            event.preventDefault();
+            toggleUserMenu();
+          });
+        }
         document.addEventListener('click', (event) => {
           if (!userMenu.contains(event.target)) {
             closeUserMenu();
@@ -1129,7 +1248,7 @@
           }
         });
       }
-      const resolvedUserId = document.body?.dataset?.autofillUser ? String(document.body.dataset.autofillUser) : 'guest';
+      const resolvedUserId = bodyDataset && bodyDataset.autofillUser ? String(bodyDataset.autofillUser) : 'guest';
       const autofillScriptNode = document.getElementById('autofill-defaults');
       let autofillDefaults = {};
       if (autofillScriptNode) {
@@ -1143,7 +1262,7 @@
       const autofillApi = window.MalvaAutofill;
       const profileDefaults = autofillDefaults.profile || {};
       const paymentDefaults = autofillDefaults.payment || {};
-      const paymentEndpoint = document.body?.dataset?.autofillPaymentEndpoint || '';
+      const paymentEndpoint = bodyDataset && bodyDataset.autofillPaymentEndpoint ? bodyDataset.autofillPaymentEndpoint : '';
       const csrftoken = (document.cookie.match('(^|;)\\s*csrftoken\\s*=\\s*([^;]+)')||[])[2] || '';
       const paymentAllowedKeys = ['name', 'email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'postal_code', 'country'];
       const paymentFormEl = document.getElementById('paymentForm');
@@ -1195,7 +1314,9 @@
             throw new Error(`HTTP ${resp.status}`);
           }
           const data = await resp.json();
-          autofillDefaults.payment = Object.assign({}, data?.billing_contact || {}, data?.updated_at ? { updated_at: data.updated_at } : {});
+          const billingContact = data && data.billing_contact ? data.billing_contact : {};
+          const updatedMeta = data && data.updated_at ? { updated_at: data.updated_at } : {};
+          autofillDefaults.payment = Object.assign({}, billingContact, updatedMeta);
         } catch (err) {
           console.warn('[mainmenu] Unable to sync payment contact', err);
         }
@@ -1425,6 +1546,61 @@
           el.textContent = translateServiceNameText(original) || original;
         });
       };
+      const bindServiceCardInteractions = (root) => {
+        const scope = root instanceof Element ? root : document;
+        const cards = scope.querySelectorAll('[data-service-card]');
+        cards.forEach((card) => {
+          if (card.dataset.cardBound === '1') return;
+          card.dataset.cardBound = '1';
+          card.addEventListener('click', (event) => {
+            if (event.defaultPrevented) return;
+            const target = event.target;
+            if (target instanceof Element && target.closest('.book-btn')) {
+              return;
+            }
+            if (target instanceof Element && target.closest('.service-card__payload')) {
+              return;
+            }
+            event.preventDefault();
+            openServiceDetail(card, card);
+          });
+          card.addEventListener('keydown', (event) => {
+            if (event.defaultPrevented) return;
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            const target = event.target;
+            if (target instanceof Element && target.closest('.book-btn')) {
+              return;
+            }
+            event.preventDefault();
+            openServiceDetail(card, card);
+          });
+        });
+      };
+      const servicePayloadCache = new WeakMap();
+      const readServicePayload = (card) => {
+        if (!card) return null;
+        if (servicePayloadCache.has(card)) return servicePayloadCache.get(card);
+        const script = card.querySelector('.service-card__payload');
+        if (!script) return null;
+        try {
+          const payload = JSON.parse(script.textContent || '{}');
+          servicePayloadCache.set(card, payload);
+          return payload;
+        } catch (err) {
+          console.warn('[mainmenu] Failed to parse service payload', err);
+          return null;
+        }
+      };
+      const formatPriceDisplay = (value) => {
+        if (value === null || value === undefined || value === '') {
+          return '$0.00';
+        }
+        const num = Number(value);
+        if (!Number.isNaN(num)) {
+          return `$${num.toFixed(2)}`;
+        }
+        return typeof value === 'string' && value.trim() ? value : '$0.00';
+      };
 
       const menuToggle = document.querySelector('[data-menu-toggle]');
       const menuClose = document.querySelector('[data-menu-close]');
@@ -1433,29 +1609,41 @@
 
       const openMenuDrawer = () => {
         document.body.classList.add('nav-open');
-        menuToggle?.setAttribute('aria-expanded', 'true');
+        if (menuToggle) {
+          menuToggle.setAttribute('aria-expanded', 'true');
+        }
       };
       const closeMenuDrawer = () => {
         document.body.classList.remove('nav-open');
-        menuToggle?.setAttribute('aria-expanded', 'false');
+        if (menuToggle) {
+          menuToggle.setAttribute('aria-expanded', 'false');
+        }
       };
 
-      menuToggle?.addEventListener('click', () => {
-        if (document.body.classList.contains('nav-open')) {
-          closeMenuDrawer();
-        } else {
-          openMenuDrawer();
-        }
-      });
-      menuClose?.addEventListener('click', closeMenuDrawer);
-      menuBackdrop?.addEventListener('click', closeMenuDrawer);
-      menuDrawer?.addEventListener('click', (event) => {
-        if (window.innerWidth <= 900 && event.target.closest('a')) {
-          closeMenuDrawer();
-          return;
-        }
-        event.stopPropagation();
-      });
+      if (menuToggle) {
+        menuToggle.addEventListener('click', () => {
+          if (document.body.classList.contains('nav-open')) {
+            closeMenuDrawer();
+          } else {
+            openMenuDrawer();
+          }
+        });
+      }
+      if (menuClose) {
+        menuClose.addEventListener('click', closeMenuDrawer);
+      }
+      if (menuBackdrop) {
+        menuBackdrop.addEventListener('click', closeMenuDrawer);
+      }
+      if (menuDrawer) {
+        menuDrawer.addEventListener('click', (event) => {
+          if (window.innerWidth <= 900 && event.target.closest('a')) {
+            closeMenuDrawer();
+            return;
+          }
+          event.stopPropagation();
+        });
+      }
       window.addEventListener('resize', () => {
         if (window.innerWidth > 900) closeMenuDrawer();
       });
@@ -1525,6 +1713,24 @@
       const paymentOptionGroup=document.getElementById('paymentOptionGroup');
       const paymentPartialNote=document.getElementById('paymentPartialNote');
       const paymentMessage=document.getElementById('paymentMessage');
+      const detailModal=document.getElementById('serviceDetailModal');
+      const detailImage=document.getElementById('serviceDetailImage');
+      const detailImageEmpty=document.getElementById('serviceDetailImageEmpty');
+      const detailBadge=document.getElementById('serviceDetailBadge');
+      const detailName=document.getElementById('serviceDetailName');
+      const detailCategory=document.getElementById('serviceDetailCategory');
+      const detailCategoryLabel=document.getElementById('serviceDetailCategoryLabel');
+      const detailDescription=document.getElementById('serviceDetailDescription');
+      const detailDuration=document.getElementById('serviceDetailDuration');
+      const detailExtra=document.getElementById('serviceDetailExtra');
+      const detailPriceOld=document.getElementById('serviceDetailPriceOld');
+      const detailPriceCurrent=document.getElementById('serviceDetailPriceCurrent');
+      const detailDiscount=document.getElementById('serviceDetailDiscount');
+      const detailFormsList=document.getElementById('serviceDetailFormsList');
+      const detailFormsFootnote=document.getElementById('serviceDetailFormsFootnote');
+      const detailBook=document.getElementById('serviceDetailBook');
+      const detailClose=document.getElementById('serviceDetailClose');
+      const detailDismiss=document.getElementById('serviceDetailDismiss');
       const inputName=document.getElementById('paymentName');
       const inputEmail=document.getElementById('paymentEmail');
       const inputAddress1=document.getElementById('paymentAddress1');
@@ -1803,13 +2009,13 @@
       function rebuildCartSlotIndex(){
         cartSlotsByMaster.clear();
         cartSlotsNoMaster.clear();
-        const items = Array.isArray(cartState?.items) ? cartState.items : [];
+        const items = Array.isArray(cartState && cartState.items) ? cartState.items : [];
         items.forEach((item) => {
-          const iso = item?.start_time;
+          const iso = item ? item.start_time : null;
           if (!iso) return;
           const ts = Date.parse(iso);
           if (!Number.isFinite(ts)) return;
-          const masterId = item?.master?.id;
+          const masterId = getNestedValue(item, ['master', 'id']);
           if (masterId !== undefined && masterId !== null){
             const key = String(masterId);
             if (!cartSlotsByMaster.has(key)){
@@ -1846,7 +2052,7 @@
 
       function updateBookCartPreview(){
         if (!bookCartPreview) return;
-        const items = Array.isArray(cartState?.items) ? cartState.items : [];
+        const items = Array.isArray(cartState && cartState.items) ? cartState.items : [];
         bookCartPreview.innerHTML = '';
 
         if (!items.length){
@@ -1858,7 +2064,7 @@
           return;
         }
 
-        const currency = cartState?.currency || 'cad';
+        const currency = (cartState && cartState.currency) || 'cad';
         if (bookCartEmpty){
           bookCartEmpty.style.display = 'none';
         }
@@ -1868,17 +2074,19 @@
           card.className = 'book-cart-preview__item';
 
           const title = document.createElement('strong');
-          const rawName = item?.service?.name || item?.name || '';
+          const rawName = getNestedValue(item, ['service', 'name']) || getNestedValue(item, ['name']) || '';
           title.textContent = translateServiceNameText(rawName) || rawName || translate('common.service', null, 'Service');
           card.appendChild(title);
 
           const meta = document.createElement('div');
           meta.className = 'book-cart-preview__meta';
-          const masterName = item?.master?.name || translate('services.modal.cartPreviewUnknownMaster', null, 'Any master');
-          const timeLabel = item?.start_time ? fmtDateTime(item.start_time) : translate('common.noTime', null, 'No time');
-          const durationValue = Number.isFinite(item?.duration_min)
+          const masterName = getNestedValue(item, ['master', 'name']) || translate('services.modal.cartPreviewUnknownMaster', null, 'Any master');
+          const slotStart = item ? item.start_time : null;
+          const timeLabel = slotStart ? fmtDateTime(slotStart) : translate('common.noTime', null, 'No time');
+          const hasDirectDuration = item && Number.isFinite(item.duration_min);
+          const durationValue = hasDirectDuration
             ? item.duration_min
-            : ((item?.service?.duration_min || 0) + (item?.service?.extra_time_min || 0));
+            : ((getNestedValue(item, ['service', 'duration_min']) || 0) + (getNestedValue(item, ['service', 'extra_time_min']) || 0));
           const durationText = formatMinutes(durationValue);
           meta.textContent = translate(
             'services.modal.cartPreviewMeta',
@@ -1887,9 +2095,12 @@
           );
           card.appendChild(meta);
 
-          const priceValue = item?.unit_price_display
-            || item?.service?.price_display
-            || (item?.unit_price_decimal ? formatCurrency(item.unit_price_decimal, currency) : '');
+          const unitPriceDisplay = getNestedValue(item, ['unit_price_display']);
+          const servicePriceDisplay = getNestedValue(item, ['service', 'price_display']);
+          const unitPriceDecimal = getNestedValue(item, ['unit_price_decimal']);
+          const priceValue = unitPriceDisplay
+            || servicePriceDisplay
+            || (unitPriceDecimal ? formatCurrency(unitPriceDecimal, currency) : '');
           if (priceValue){
             const price = document.createElement('div');
             price.className = 'book-cart-preview__meta';
@@ -1900,9 +2111,9 @@
           bookCartPreview.appendChild(card);
         });
 
-        const totalDisplay = cartState?.total_display
-          || formatCurrency(cartState?.total_decimal || cartState?.total_price || '0', currency);
-        const durationText = formatMinutes(cartState?.total_duration_min || 0);
+        const totalDisplay = (cartState && cartState.total_display)
+          || formatCurrency((cartState && (cartState.total_decimal || cartState.total_price)) || '0', currency);
+        const durationText = formatMinutes((cartState && cartState.total_duration_min) || 0);
         const totals = document.createElement('div');
         totals.className = 'book-cart-preview__totals';
         totals.textContent = translate(
@@ -1912,10 +2123,10 @@
         );
         bookCartPreview.appendChild(totals);
 
-        const feeMinor = Number(cartState?.processing_fee || 0);
+        const feeMinor = Number((cartState && cartState.processing_fee) || 0);
         if (feeMinor > 0){
-          const feeDisplay = cartState?.processing_fee_display
-            || formatCurrency(cartState?.processing_fee_decimal || (feeMinor / 100), currency);
+          const feeDisplay = (cartState && cartState.processing_fee_display)
+            || formatCurrency((cartState && cartState.processing_fee_decimal) || (feeMinor / 100), currency);
           const feeNote = document.createElement('div');
           feeNote.className = 'book-cart-preview__note';
           feeNote.textContent = translate(
@@ -1977,7 +2188,7 @@
 
       function updatePaymentButtonLabel(){
         if (!paymentConfirm || paymentConfirm.classList.contains('btn--loading')) return;
-        const requiresCard = currentPaymentContext ? Boolean(currentPaymentContext?.payment?.client_secret) : true;
+        const requiresCard = currentPaymentContext ? Boolean(getNestedValue(currentPaymentContext, ['payment', 'client_secret'])) : true;
         if (!requiresCard){
           paymentConfirm.textContent = translate('services.payment.confirmButton', null, 'Confirm booking');
           return;
@@ -1987,11 +2198,11 @@
       }
 
       function renderPaymentSummary(context){
-        const payment = context?.payment || {};
-        const prepayment = context?.prepayment || lastPrepaymentQuote;
+        const payment = context && context.payment ? context.payment : {};
+        const prepayment = context && context.prepayment ? context.prepayment : lastPrepaymentQuote;
         const percent = resolveActivePrepaymentPercent({ payment });
-        const currency = payment.currency || cartState?.currency || 'cad';
-        const amountDecimal = prepayment?.total_decimal || payment.amount || '0';
+        const currency = payment.currency || (cartState && cartState.currency) || 'cad';
+        const amountDecimal = (prepayment && prepayment.total_decimal) || payment.amount || '0';
         const amountText = formatCurrency(amountDecimal, currency);
         if (paymentSummary){
           paymentSummary.textContent = PAYMENT_COPY.summary(amountText, percent);
@@ -2002,9 +2213,9 @@
         if (paymentSummaryLabel){
           paymentSummaryLabel.textContent = PAYMENT_COPY.amountLabel(percent);
         }
-        const feeMinor = Number(prepayment?.processing_fee_minor || 0);
+        const feeMinor = Number((prepayment && prepayment.processing_fee_minor) || 0);
         const feeDisplay = feeMinor > 0
-          ? (prepayment?.processing_fee_decimal
+          ? (prepayment && prepayment.processing_fee_decimal
             ? formatCurrency(prepayment.processing_fee_decimal, currency)
             : formatCurrency(feeMinor / 100, currency))
           : null;
@@ -2097,7 +2308,9 @@
         if (stripeCardElement) {
           stripeCardElement.clear();
         }
-        cardElementWrapper?.classList.remove('is-visible');
+        if (cardElementWrapper) {
+          cardElementWrapper.classList.remove('is-visible');
+        }
         if (paymentFeeLine) {
           paymentFeeLine.style.display = 'none';
         }
@@ -2112,7 +2325,8 @@
         setPaymentOptionLoading(false);
         if (inputCountry) {
           const defaultOption = Array.from(inputCountry.options).find(opt => opt.value === 'CA');
-          inputCountry.value = defaultOption ? 'CA' : (inputCountry.options[0]?.value || '');
+          const fallbackOption = inputCountry.options.length ? inputCountry.options[0].value : '';
+          inputCountry.value = defaultOption ? 'CA' : fallbackOption;
         }
         setPaymentMessage(null);
         setConfirmLoading(false);
@@ -2127,22 +2341,23 @@
       }
 
       const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+      const readFieldValue = (field) => (field && typeof field.value === 'string' ? field.value : '');
 
       function gatherBillingDetails(){
-        const name = (inputName?.value || '').trim();
-        const email = (inputEmail?.value || '').trim();
-        const line1 = (inputAddress1?.value || '').trim();
-        const line2 = (inputAddress2?.value || '').trim();
-        const city = (inputCity?.value || '').trim();
-        const state = (inputState?.value || '').trim();
-        const postal = normalizePostal(inputPostal?.value || '');
-        const country = (inputCountry?.value || '').trim();
+        const name = readFieldValue(inputName).trim();
+        const email = readFieldValue(inputEmail).trim();
+        const line1 = readFieldValue(inputAddress1).trim();
+        const line2Raw = readFieldValue(inputAddress2).trim();
+        const city = readFieldValue(inputCity).trim();
+        const state = readFieldValue(inputState).trim();
+        const postal = normalizePostal(readFieldValue(inputPostal));
+        const country = readFieldValue(inputCountry).trim();
         return {
           name,
           email,
           address: {
             line1,
-            line2: line2 || undefined,
+            line2: line2Raw || undefined,
             city,
             state,
             postal_code: postal,
@@ -2154,7 +2369,7 @@
       function checkPaymentForm(){
         if (!paymentConfirm) return;
         const details = gatherBillingDetails();
-        const requiresCard = Boolean(currentPaymentContext?.payment?.client_secret);
+        const requiresCard = Boolean(getNestedValue(currentPaymentContext, ['payment', 'client_secret']));
         if (!requiresCard){
           paymentConfirm.disabled = false;
           return;
@@ -2348,7 +2563,7 @@ function updateCartUI(data){
         const info=document.createElement('div');
         info.className='cart-item__info';
 
-        const rawName=item?.service?.name || item?.name || '';
+        const rawName=getNestedValue(item, ['service','name']) || getNestedValue(item, ['name']) || '';
         const translatedName=translateServiceNameText(rawName) || translate('common.service', null, 'Service');
         const title=document.createElement('strong');
         title.textContent=translatedName;
@@ -2356,18 +2571,24 @@ function updateCartUI(data){
 
         const meta=document.createElement('div');
         meta.className='cart-item__meta';
-        const masterName=item?.master?.name || '-';
-        const timeLabel=item?.start_time ? fmtDateTime(item.start_time) : translate('common.noTime', null, 'No time');
-        const durationValue = Number.isFinite(item?.duration_min)
+        const masterName=getNestedValue(item, ['master','name']) || '-';
+        const slotIso=item ? item.start_time : null;
+        const timeLabel=slotIso ? fmtDateTime(slotIso) : translate('common.noTime', null, 'No time');
+        const hasDuration=item && Number.isFinite(item.duration_min);
+        const durationValue = hasDuration
           ? item.duration_min
-          : ((item?.service?.duration_min || 0) + (item?.service?.extra_time_min || 0));
+          : ((getNestedValue(item, ['service','duration_min']) || 0) + (getNestedValue(item, ['service','extra_time_min']) || 0));
         meta.textContent = `${masterName} - ${timeLabel} - ${formatMinutes(durationValue)}`;
         info.appendChild(meta);
 
-        const priceValue = item?.unit_price_display
-          || item?.service?.price_display
-          || (item?.unit_price_decimal ? formatCurrency(item.unit_price_decimal, currency) : '')
-          || (item?.service?.price ? formatCurrency(item.service.price, currency) : '');
+        const unitDisplay=getNestedValue(item, ['unit_price_display']);
+        const serviceDisplay=getNestedValue(item, ['service','price_display']);
+        const unitDecimal=getNestedValue(item, ['unit_price_decimal']);
+        const servicePrice=getNestedValue(item, ['service','price']);
+        const priceValue = unitDisplay
+          || serviceDisplay
+          || (unitDecimal ? formatCurrency(unitDecimal, currency) : '')
+          || (servicePrice ? formatCurrency(servicePrice, currency) : '');
         if(priceValue){
           const price=document.createElement('div');
           price.className='cart-item__meta';
@@ -2375,12 +2596,13 @@ function updateCartUI(data){
           info.appendChild(price);
         }
 
-        if(Array.isArray(item?.discounts) && item.discounts.length){
+        const discounts = getNestedValue(item, ['discounts']);
+        if(Array.isArray(discounts) && discounts.length){
           const discountLine=document.createElement('div');
           discountLine.className='cart-item__meta';
-          const discountText=item.discounts.map(d=>{
-            const amount=d.amount_display || formatCurrency(d.amount_decimal || 0, currency);
-            const label=d.label || translate('services.cart.discount', null, 'Discount');
+          const discountText=discounts.map(d=>{
+            const amount=(d && d.amount_display) || formatCurrency((d && d.amount_decimal) || 0, currency);
+            const label=(d && d.label) || translate('services.cart.discount', null, 'Discount');
             return `-${amount} ${label}`.trim();
           }).join(', ');
           discountLine.textContent=discountText;
@@ -2394,9 +2616,9 @@ function updateCartUI(data){
         remove.className='cart-remove';
         remove.dataset.removeId=item.id;
         const img = document.createElement('img');
-        img.src = '../static/admin/icons/delete.svg';      // путь к твоему файлу
-        img.alt = '';                              // пустой alt, если у кнопки будет aria-label
-        img.width = 24;                            // задай размер
+        img.src = '../static/admin/icons/delete.svg';      // path to the remove icon asset
+        img.alt = '';                                      // keep aria-label on button instead of the image
+        img.width = 24;                                    // icon size
         img.height = 24;
         img.decoding = 'async';
         img.loading = 'lazy';
@@ -2449,7 +2671,7 @@ function updateCartUI(data){
   rebuildCartSlotIndex();
   updateBookCartPreview();
   if (modal && modal.classList && modal.classList.contains('modal--open')){
-    const locale = scheduleState?.locale || getLocale();
+    const locale = (scheduleState && scheduleState.locale) || getLocale();
     renderDesktopSchedule(locale);
     renderMobileSchedule(locale);
   }
@@ -2491,21 +2713,21 @@ function updateCartUI(data){
               total: 0,
               total_price: '0.00',
               total_decimal: '0.00',
-              total_display: formatCurrency(0, cartState?.currency || 'cad'),
+              total_display: formatCurrency(0, (cartState && cartState.currency) || 'cad'),
               pre_fee_total: 0,
               pre_fee_total_decimal: '0.00',
-              pre_fee_total_display: formatCurrency(0, cartState?.currency || 'cad'),
+              pre_fee_total_display: formatCurrency(0, (cartState && cartState.currency) || 'cad'),
               processing_fee: 0,
               processing_fee_decimal: '0.00',
-              processing_fee_display: formatCurrency(0, cartState?.currency || 'cad'),
+              processing_fee_display: formatCurrency(0, (cartState && cartState.currency) || 'cad'),
               total_duration_min: 0,
-              currency: cartState?.currency || 'cad'
+              currency: (cartState && cartState.currency) || 'cad'
             };
             clearPrepaymentQuote();
             rebuildCartSlotIndex();
             updateBookCartPreview();
             if (modal && modal.classList && modal.classList.contains('modal--open')){
-              const locale = scheduleState?.locale || getLocale();
+              const locale = (scheduleState && scheduleState.locale) || getLocale();
               renderDesktopSchedule(locale);
               renderMobileSchedule(locale);
             }
@@ -2579,8 +2801,9 @@ function updateCartUI(data){
           prepayment_percent: Number(data.prepayment_percent || defaultPrepaymentPercent),
         };
         const pricing = data.cart || cartState;
-        const appointmentItems = Array.isArray(pricing?.items) ? pricing.items : (Array.isArray(cartState.items) ? cartState.items : []);
-        const primaryStart = appointmentItems.length ? (appointmentItems[0]?.start_time || null) : null;
+        const appointmentItems = Array.isArray(pricing && pricing.items) ? pricing.items : (Array.isArray(cartState.items) ? cartState.items : []);
+        const firstAppointment = appointmentItems.length ? appointmentItems[0] : null;
+        const primaryStart = firstAppointment && firstAppointment.start_time ? firstAppointment.start_time : null;
         return {
           payment,
           prepayment: data.prepayment || null,
@@ -2605,7 +2828,7 @@ function updateCartUI(data){
             cartState.cart_id = context.cart.cart_id;
           }
         }
-        const derivedCurrency = context.cart?.currency || cartState?.currency || 'cad';
+        const derivedCurrency = (context && context.cart && context.cart.currency) || (cartState && cartState.currency) || 'cad';
         applyCartPrepaymentDecorators(context.cart || cartState, derivedCurrency);
       }
 
@@ -2632,7 +2855,8 @@ function updateCartUI(data){
           return;
         }
         const previousPercent = currentPrepaymentPercent;
-        if (nextPercent === previousPercent && currentPaymentContext?.payment?.prepayment_percent === nextPercent){
+        const currentPercent = getNestedValue(currentPaymentContext, ['payment', 'prepayment_percent']);
+        if (nextPercent === previousPercent && currentPercent === nextPercent){
           return;
         }
         currentPrepaymentPercent = nextPercent;
@@ -2645,7 +2869,7 @@ function updateCartUI(data){
             syncPrepaymentInputs(previousPercent);
           }
         }else{
-          applyCartPrepaymentDecorators(cartState, cartState?.currency || 'cad');
+          applyCartPrepaymentDecorators(cartState, (cartState && cartState.currency) || 'cad');
         }
       }
 
@@ -2753,7 +2977,8 @@ function updateCartUI(data){
 
         const appointmentData = context.appointment || {};
         const items = Array.isArray(appointmentData.items) ? appointmentData.items : [];
-        const primaryStart = appointmentData.start_time || items[0]?.start_time;
+        const firstItem = items.length ? items[0] : null;
+        const primaryStart = appointmentData.start_time || (firstItem && firstItem.start_time) || null;
         if (paymentSummaryTime) {
           paymentSummaryTime.textContent = primaryStart ? fmtDateTime(primaryStart) : '—';
         }
@@ -2764,11 +2989,15 @@ function updateCartUI(data){
               const chip = document.createElement('div');
               chip.className = 'payment-panel__chip';
               const title = document.createElement('span');
-              title.textContent = it?.service?.name || 'Service';
+              title.textContent = getNestedValue(it, ['service', 'name']) || 'Service';
               const meta = document.createElement('div');
               meta.className = 'payment-panel__meta';
-              const masterName = it?.master?.name || it?.master?.user?.full_name || it?.master?.user?.username || 'Master';
-              const slot = it?.start_time ? fmtDateTime(it.start_time) : 'Scheduled';
+              const masterName = getNestedValue(it, ['master', 'name'])
+                || getNestedValue(it, ['master', 'user', 'full_name'])
+                || getNestedValue(it, ['master', 'user', 'username'])
+                || 'Master';
+              const slotStart = it && it.start_time ? it.start_time : null;
+              const slot = slotStart ? fmtDateTime(slotStart) : 'Scheduled';
               meta.textContent = `${masterName} · ${slot}`;
               chip.appendChild(title);
               chip.appendChild(meta);
@@ -2787,7 +3016,9 @@ function updateCartUI(data){
         const zeroDue = !Number.isNaN(amountNumeric) && amountNumeric <= 0;
         if (needCard) {
           stripeCardComplete = false;
-          cardElementWrapper?.classList.add('is-visible');
+          if (cardElementWrapper) {
+            cardElementWrapper.classList.add('is-visible');
+          }
           const stripe = ensureStripe();
           if (!stripe) {
             setPaymentMessage('error', PAYMENT_COPY.missingKey);
@@ -2798,14 +3029,20 @@ function updateCartUI(data){
             paymentConfirm.disabled = !stripe;
             paymentConfirm.textContent = 'Pay now';
           }
-          setTimeout(() => { stripeCardElement?.focus(); }, 120);
+          setTimeout(() => {
+            if (stripeCardElement && typeof stripeCardElement.focus === 'function') {
+              stripeCardElement.focus();
+            }
+          }, 120);
         } else {
           stripeCardComplete = true;
           if (paymentConfirm) {
             paymentConfirm.disabled = false;
             paymentConfirm.textContent = 'Confirm booking';
           }
-          cardElementWrapper?.classList.remove('is-visible');
+          if (cardElementWrapper) {
+            cardElementWrapper.classList.remove('is-visible');
+          }
           if (zeroDue) {
             setPaymentMessage('success', PAYMENT_COPY.noCharge(amountText));
           } else {
@@ -2853,7 +3090,7 @@ function updateCartUI(data){
 async function confirmPayment(){
         if (!currentPaymentContext || !currentPaymentContext.payment) return;
         const { payment } = currentPaymentContext;
-        const cartId = currentPaymentContext?.cart?.cart_id || null;
+        const cartId = getNestedValue(currentPaymentContext, ['cart', 'cart_id']) || null;
         const stripe = ensureStripe();
         const requiresCard = Boolean(payment.client_secret);
         if (requiresCard && !stripe){
@@ -2967,6 +3204,139 @@ async function confirmPayment(){
         locale: getLocale(),
         selectedDate: null,
       };
+      let activeServiceDetail = null;
+
+      function hydrateServiceDetail(payload){
+        if (!payload) return;
+        const resolvedName = translateServiceNameText(payload.name) || payload.name || translate('common.service', null, 'Service');
+        if (detailName) {
+          detailName.textContent = resolvedName;
+        }
+        const categoryFallback = translate('services.detail.unknownCategory', null, 'Uncategorized');
+        const categoryLabel = payload.category || categoryFallback;
+        if (detailCategory) {
+          clearTextKey(detailCategory);
+          detailCategory.textContent = categoryLabel;
+        }
+        if (detailCategoryLabel) {
+          clearTextKey(detailCategoryLabel);
+          detailCategoryLabel.textContent = categoryLabel;
+        }
+        if (detailDescription) {
+          if (payload.description) {
+            clearTextKey(detailDescription);
+            detailDescription.textContent = payload.description;
+          } else {
+            setTextKey(detailDescription, 'services.detail.descriptionFallback');
+          }
+        }
+        if (detailDuration) {
+          detailDuration.textContent = formatMinutes(payload.duration_min || 0);
+        }
+        if (detailExtra) {
+          const extra = Number(payload.extra_time_min || 0);
+          if (extra > 0) {
+            detailExtra.hidden = false;
+            setTextKey(detailExtra, 'services.detail.metaExtraTime', { value: String(extra) }, `+${extra} min prep time`);
+          } else {
+            detailExtra.hidden = true;
+            clearTextKey(detailExtra);
+          }
+        }
+        if (detailPriceCurrent) {
+          detailPriceCurrent.textContent = formatPriceDisplay(payload.price || payload.base_price);
+        }
+        if (detailPriceOld) {
+          const hasDiscount = Number(payload.discount_percent || 0) > 0;
+          if (hasDiscount) {
+            detailPriceOld.hidden = false;
+            detailPriceOld.textContent = formatPriceDisplay(payload.base_price);
+          } else {
+            detailPriceOld.hidden = true;
+          }
+        }
+        if (detailDiscount) {
+          const percentValue = Number(payload.discount_percent || 0);
+          if (percentValue > 0) {
+            detailDiscount.hidden = false;
+            setTextKey(detailDiscount, 'services.detail.discountLabel', { value: String(percentValue) }, `${percentValue}% off today`);
+          } else {
+            detailDiscount.hidden = true;
+            clearTextKey(detailDiscount);
+          }
+        }
+        if (detailFormsList) {
+          detailFormsList.innerHTML = '';
+          const forms = Array.isArray(payload.forms) ? payload.forms.filter((form) => form && form.name) : [];
+          if (forms.length) {
+            detailFormsList.style.display = '';
+            forms.forEach((form) => {
+              const item = document.createElement('li');
+              item.textContent = form.name;
+              detailFormsList.appendChild(item);
+            });
+            if (detailFormsFootnote) {
+              const key = forms.length === 1 ? 'services.detail.formsSingular' : 'services.detail.formsPlural';
+              setTextKey(detailFormsFootnote, key, { count: String(forms.length) });
+            }
+          } else {
+            detailFormsList.style.display = 'none';
+            if (detailFormsFootnote) {
+              setTextKey(detailFormsFootnote, 'services.detail.formsEmpty');
+            }
+          }
+        }
+        if (detailImage) {
+          if (payload.image) {
+            detailImage.hidden = false;
+            detailImage.src = payload.image;
+            detailImage.alt = translate('services.detail.imageAlt', { name: resolvedName }, `Preview for ${resolvedName}`);
+            if (detailImageEmpty) {
+              detailImageEmpty.style.display = 'none';
+            }
+          } else {
+            detailImage.hidden = true;
+            detailImage.removeAttribute('src');
+            if (detailImageEmpty) {
+              detailImageEmpty.style.display = 'block';
+            }
+          }
+        }
+        if (detailBadge) {
+          detailBadge.style.display = 'inline-flex';
+        }
+      }
+
+      function openServiceDetail(card, triggerEl){
+        if (!detailModal || !card) return;
+        const payload = readServicePayload(card);
+        if (!payload) return;
+        activeServiceDetail = {
+          payload,
+          trigger: triggerEl instanceof HTMLElement ? triggerEl : card,
+        };
+        hydrateServiceDetail(payload);
+        openModalElement(detailModal, {
+          trigger: activeServiceDetail.trigger,
+          initialFocusSelector:'#serviceDetailBook',
+          onRequestClose:(opts)=>closeServiceDetail(opts),
+        });
+      }
+
+      function closeServiceDetail(arg){
+        let options = {};
+        if(arg && typeof arg === 'object'){
+          if(typeof arg.preventDefault === 'function'){
+            arg.preventDefault();
+          }else{
+            options = arg;
+          }
+        }
+        if(detailModal){
+          closeModalElement(detailModal, options);
+        }
+        activeServiceDetail = null;
+      }
 
       // ===== open/close =====
       function openModal(serviceId, serviceName, triggerEl){
@@ -3022,17 +3392,44 @@ async function confirmPayment(){
       // ===== availability by day/master =====
       async function fetchAvailability(dayISO, masterId){
         const params = new URLSearchParams({ service: current.serviceId, date: dayISO });
-        if (masterId) params.set('master', masterId);
+        const normalizedMasterId = (() => {
+          if (masterId === 0) return "0";
+          if (masterId === null || masterId === undefined) return "";
+          if (typeof masterId === "number" && Number.isFinite(masterId)) {
+            return String(masterId);
+          }
+          const str = String(masterId).trim();
+          return str;
+        })();
+        if (normalizedMasterId) {
+          params.set('master', normalizedMasterId);
+        }
         const r = await fetch(`${apiAvail}?${params.toString()}`, {credentials:'same-origin'});
         if(!r.ok) throw new Error(translate('services.modal.errorLoad'));
         const data = await r.json();
 
+        // API responds with `masters` when no master filter is provided and `slots` when a master is specified.
+        const masterList = Array.isArray(data.masters) ? data.masters : [];
         let slots = [];
-        if (masterId){
-          const m = (data.masters||[]).find(x => Number(x.id)===Number(masterId));
-          slots = m ? (m.slots||[]) : [];
-        }else{
-          slots = (data.masters && data.masters[0] && data.masters[0].slots) ? data.masters[0].slots : [];
+        if (normalizedMasterId) {
+          if (Array.isArray(data.slots) && data.slots.length) {
+            slots = data.slots;
+          } else {
+            const match = masterList.find((entry) => String(entry.id) === normalizedMasterId);
+            if (match && Array.isArray(match.slots)) {
+              slots = match.slots;
+            }
+          }
+        }
+        if (!normalizedMasterId) {
+          const preferred = masterList.find((entry) => Array.isArray(entry.slots) && entry.slots.length);
+          const fallback = preferred || masterList[0];
+          if (fallback && Array.isArray(fallback.slots)) {
+            slots = fallback.slots;
+          }
+        }
+        if (!slots.length && Array.isArray(data.slots)) {
+          slots = data.slots;
         }
 
         const set = new Set(); const map = new Map();
@@ -3073,9 +3470,12 @@ async function confirmPayment(){
 
       function applySelection(day, iso, locale){
         if (!iso || !day) return;
-        current.masterId = Number(elMaster?.value || current.masterId || 0);
+        const selectedMasterValue = elMaster && elMaster.value !== undefined ? elMaster.value : null;
+        const fallbackMasterId = current.masterId || 0;
+        current.masterId = Number(selectedMasterValue !== null && selectedMasterValue !== '' ? selectedMasterValue : fallbackMasterId);
         current.slot = iso;
-        const masterText = elMaster?.selectedOptions[0]?.text || '';
+        const masterOption = elMaster && elMaster.selectedOptions && elMaster.selectedOptions.length ? elMaster.selectedOptions[0] : null;
+        const masterText = masterOption ? masterOption.text : '';
         const timeText = fmtHM(new Date(iso));
         const dateText = day.toLocaleDateString(locale);
         const summaryVars = { master: masterText, time: timeText, date: dateText };
@@ -3156,7 +3556,7 @@ async function confirmPayment(){
         const days = Array.from({length:WINDOW_DAYS}, (_,i)=>{ const d=new Date(baseStart); d.setDate(d.getDate()+i); return d;});
         const dayStrs=days.map(ymd);
         const dayData = dayStrs.map(ds => availabilityCache.get(ds));
-        const timeRows = buildTimeRows(dayData.map(x=>x?.set));
+        const timeRows = buildTimeRows(dayData.map((x)=> (x ? x.set : null)));
 
         scheduleState.days = days;
         scheduleState.dayData = dayData;
@@ -3259,12 +3659,14 @@ async function confirmPayment(){
             const cell=document.createElement('div');
             cell.className='outlook__cell';
             const data = dayData[idx];
-            const isFree = data?.set?.has(t);
+            const setRef = data && data.set ? data.set : null;
+            const isFree = Boolean(setRef && setRef.has(t));
             const chip=document.createElement('button');
             chip.type='button';
             const displayLabel = fmtHM(fake);
             chip.textContent=displayLabel;
-            const iso = isFree ? data?.iso?.get(t) : null;
+            const isoMap = data && data.iso ? data.iso : null;
+            const iso = isFree && isoMap ? isoMap.get(t) : null;
             const masterKey = getSelectedMasterKey();
             const reservedByCart = isFree && iso ? slotIsInCart(masterKey, iso) : false;
 
@@ -3470,7 +3872,12 @@ async function confirmPayment(){
 
       // ===== wire up =====
       document.addEventListener('click',(e)=>{
-        const btn=e.target.closest('.book-btn'); if(btn){
+        if (e.defaultPrevented) return;
+        if (typeof e.button === 'number' && e.button !== 0) return;
+        const target = e.target;
+        if (!(target instanceof Element)) return;
+        const btn=target.closest('.book-btn');
+        if(btn){
           openModal(btn.dataset.serviceId, btn.dataset.serviceName || translate('common.service', null, 'Service'), btn);
         }
       });
@@ -3478,6 +3885,19 @@ async function confirmPayment(){
       btnCancel.addEventListener('click',closeModal);
       modal.addEventListener('click',(e)=>{ if(e.target===modal) closeModal(); });
       btnSubmit.addEventListener('click',addToCart);
+      if(detailClose){ detailClose.addEventListener('click', closeServiceDetail); }
+      if(detailDismiss){ detailDismiss.addEventListener('click', closeServiceDetail); }
+      if(detailModal){ detailModal.addEventListener('click',(event)=>{ if(event.target===detailModal) closeServiceDetail(); }); }
+      if(detailBook){
+        detailBook.addEventListener('click', ()=>{
+          if(!activeServiceDetail || !activeServiceDetail.payload) return;
+          const ctx = activeServiceDetail;
+          closeServiceDetail();
+          window.setTimeout(()=>{
+            openModal(ctx.payload.id, ctx.payload.name || translate('common.service', null, 'Service'), ctx.trigger || detailBook);
+          }, 150);
+        });
+      }
 
       if(cartBtn){
         cartBtn.addEventListener('click', openCartModal);
@@ -3546,7 +3966,7 @@ async function confirmPayment(){
       if (paymentCardLabel) paymentCardLabel.textContent = 'Card details';
       if (paymentSummary) paymentSummary.textContent = PAYMENT_COPY.summary('$0');
 
-      // UX: Shift+wheel горизонтально
+      // UX: Shift+wheel for horizontal scroll
       if (olWrap){
         olWrap.addEventListener('wheel', (e)=>{
           if (e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
@@ -3629,7 +4049,7 @@ async function confirmPayment(){
       function cardHTML(s){
         const hasDisc = Number.isFinite(+s.discount_percent) && +s.discount_percent > 0;
         const rawName = s.name || '';
-        const translatedName = translateServiceNameText(rawName);
+        const translatedName = translateServiceNameText(rawName) || rawName || translate('common.service', null, 'Service');
         const fallbackImgLabel = translate('services.cards.noImage', null, 'Preview coming soon');
         const imageAlt = s.image_alt || rawName || translate('services.cards.imageAltFallback', null, 'Service preview');
         const imageClasses = ['service-card__img'];
@@ -3651,8 +4071,28 @@ async function confirmPayment(){
         const descText = truncateWords(s.description, 16);
         const desc = descText ? `<p class=\"service-card__desc\">${escapeHtml(descText)}</p>` : '';
         const durationLabel = escapeHtml(formatMinutes(s.duration_min || 0));
+        const ariaLabel = translate('services.detail.openLabel', { name: rawName }, `View details for ${rawName}`);
+        const payload = {
+          id: String(s.id || ''),
+          name: rawName,
+          category: s.category || '',
+          description: (s.description || '').trim(),
+          duration_min: Number(s.duration_min || 0),
+          extra_time_min: Number(s.extra_time_min || 0),
+          base_price: s.base_price || s.price || '',
+          price: s.price || s.base_price || '',
+          discount_percent: (s.discount_percent === undefined || s.discount_percent === null) ? null : s.discount_percent,
+          image: s.image || '',
+          image_alt: imageAlt || '',
+          forms: Array.isArray(s.forms) ? s.forms.map((form) => ({
+            id: form.id || '',
+            name: form.name || '',
+            slug: form.slug || '',
+          })) : [],
+        };
+        const payloadScript = `<script type=\"application/json\" class=\"service-card__payload\">${escapeHtml(JSON.stringify(payload))}</script>`;
         return `
-          <article class=\"service-card\">
+          <article class=\"service-card\" data-service-card role=\"button\" tabindex=\"0\" aria-label=\"${escapeHtml(ariaLabel)}\" data-i18n-attr=\"aria-label:services.detail.openLabel\" data-i18n-vars='${escapeHtml(JSON.stringify({ name: rawName }))}'>
             <div class=\"${imageClasses.join(' ')}\"${s.image ? '' : ' aria-hidden=\"true\"'}>
               ${imageInner}
               ${tagsBlock}
@@ -3671,6 +4111,7 @@ async function confirmPayment(){
                   data-i18n=\"services.cards.addToCart\">${translate('services.cards.addToCart')}</button>
               </div>
             </div>
+            ${payloadScript}
           </article>`;
       }
       async function fetchServices(q, cat){
@@ -3710,6 +4151,7 @@ async function confirmPayment(){
             return;
           }
           if (liveGrid) liveGrid.innerHTML = items.map(cardHTML).join('');
+          bindServiceCardInteractions(liveGrid);
           applyServiceNameTranslations(liveGrid);
           queueRefresh();
         }catch(e){
@@ -3721,8 +4163,8 @@ async function confirmPayment(){
       function scheduleSearch(options = {}){
         const { immediate = false, updateUrl = true } = options;
         const state = {
-          q: qInput?.value?.trim() || '',
-          cat: catSel?.value || '',
+          q: readFieldValue(qInput).trim(),
+          cat: catSel && typeof catSel.value === 'string' ? catSel.value : '',
         };
         toggleReset(state.q, state.cat);
         if (updateUrl) updateLocation(state.q, state.cat);
@@ -3742,7 +4184,7 @@ async function confirmPayment(){
         }
       }
 
-      toggleReset(qInput?.value?.trim() || '', catSel?.value || '');
+      toggleReset(readFieldValue(qInput).trim(), catSel && typeof catSel.value === 'string' ? catSel.value : '');
 
       if (qInput) qInput.addEventListener('input', ()=>scheduleSearch());
       if (catSel) catSel.addEventListener('change', ()=>scheduleSearch({ immediate:true }));
@@ -3758,11 +4200,16 @@ async function confirmPayment(){
           if (qInput) qInput.value = '';
           if (catSel) catSel.value = '';
           scheduleSearch({ immediate:true });
-          document.getElementById('services')?.scrollIntoView({behavior:'smooth', block:'start'});
+          const servicesSection = document.getElementById('services');
+          if (servicesSection && typeof servicesSection.scrollIntoView === 'function') {
+            servicesSection.scrollIntoView({behavior:'smooth', block:'start'});
+          }
         });
       }
       window.DEBUG_checkoutCart = checkoutCart;
-      applyServiceNameTranslations(document.getElementById('serverContent'));
+      const serverContentNode = document.getElementById('serverContent');
+      bindServiceCardInteractions(serverContentNode);
+      applyServiceNameTranslations(serverContentNode);
     });
   </script>
 </body>

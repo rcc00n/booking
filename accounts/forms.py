@@ -187,22 +187,85 @@ class ClientRegistrationForm(UserCreationForm):
 # ---------- Login ----------
 class ClientLoginForm(AuthenticationForm):
     """
-    Один input «identifier»:
-        • username
-        • e-mail
-        • телефон
-    (Шаблон логина у тебя сейчас использует {{ form.username }} и {{ form.password }},
-    так что эту форму подключай только если обновишь шаблон под 'identifier'.)
+    Authentication form that accepts username, email, or phone number in a single field.
     """
-    identifier = forms.CharField(label="E-mail / телефон / логин")
+
+    username = forms.CharField(
+        label="Email or phone",
+        max_length=150,
+        widget=forms.TextInput(
+            attrs={
+                "autocapitalize": "none",
+                "autocomplete": "username",
+                "spellcheck": "false",
+                "placeholder": "you@example.com or +1 555 123 4567",
+            }
+        ),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        username_field = self.fields.get("username")
+        if username_field:
+            username_field.widget.attrs.setdefault("inputmode", "text")
+            username_field.widget.attrs.setdefault("placeholder", "you@example.com or +1 555 123 4567")
+        password_field = self.fields.get("password")
+        if password_field:
+            password_field.widget.attrs.setdefault("autocomplete", "current-password")
+            password_field.widget.attrs.setdefault("placeholder", "Password")
+
+    @staticmethod
+    def _phone_candidate(value: str) -> str | None:
+        if not value:
+            return None
+        try:
+            return _normalize_phone(value)
+        except ValidationError:
+            return None
+
+    def _candidate_identifiers(self, raw: str) -> list[str]:
+        if not raw:
+            return []
+        value = raw.strip()
+        if not value:
+            return []
+
+        stack: list[str] = []
+
+        def _push(val: str | None):
+            if val and val not in stack:
+                stack.append(val)
+
+        _push(value)
+        lowered = value.lower()
+        _push(lowered)
+        collapsed = "".join(ch for ch in value if ch.isalnum() or ch in {"+", "@"})
+        _push(collapsed)
+        digits_only = "".join(ch for ch in value if ch.isdigit())
+        _push(digits_only)
+        phone_candidate = self._phone_candidate(value)
+        _push(phone_candidate)
+        return stack
 
     def clean(self):
-        identifier = self.cleaned_data.get("identifier")
+        identifier = self.cleaned_data.get("username")
         password = self.cleaned_data.get("password")
-        self.user_cache = authenticate(self.request, username=identifier, password=password)
+        if identifier is None or password is None:
+            raise self.get_invalid_login_error()
+
+        self.user_cache = None
+        for candidate in self._candidate_identifiers(identifier):
+            user = authenticate(self.request, username=candidate, password=password)
+            if user is None:
+                continue
+            self.confirm_login_allowed(user)
+            self.user_cache = user
+            break
+
         if self.user_cache is None:
-            raise forms.ValidationError("Неверные учётные данные.")
-        self.confirm_login_allowed(self.user_cache)
+            raise self.get_invalid_login_error()
+
+        self.cleaned_data["username"] = identifier
         return self.cleaned_data
 
 
