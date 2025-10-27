@@ -54,6 +54,7 @@
       clip:rect(0,0,0,0);white-space:nowrap;border:0;
     }
     .mobile-close{display:none;}
+    .mobile-close__label{font-weight:700;}
     .container{width:var(--container);margin-inline:auto;padding-inline:1.25rem}
 
     /* =========================
@@ -83,6 +84,29 @@
     .btn--loading::after{content:'';position:absolute;width:1rem;height:1rem;border:2px solid rgba(255,255,255,.9);border-top-color:transparent;border-radius:999px;right:.75rem;animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg);}}
     .btn--ghost[disabled], .btn--primary[disabled], .btn--outline[disabled]{opacity:.5;cursor:not-allowed}
+    .floating-cart{
+      position:fixed;
+      right:2.5rem;
+      bottom:2rem;
+      display:flex;
+      align-items:center;
+      gap:.4rem;
+      padding:.65rem 1rem;
+      border:none;
+      border-radius:999px;
+      background:var(--green-dark);
+      color:#fff;
+      font-weight:700;
+      box-shadow:0 22px 48px rgba(15,47,35,.35);
+      opacity:0;
+      pointer-events:none;
+      transform:translateY(12px);
+      transition:opacity .2s ease, transform .2s ease;
+      z-index:90;
+    }
+    .floating-cart--visible{opacity:1;pointer-events:auto;transform:translateY(0);}
+    .floating-cart__icon{font-size:1rem;line-height:1;}
+    .floating-cart__count{font-size:1rem;font-weight:800;min-width:1.5rem;text-align:center;}
 
     /* =========================
        Header & hero
@@ -225,7 +249,7 @@
     }
     .category-pill.is-active{background:var(--green-dark);color:#fff;border-color:var(--green-dark);box-shadow:0 10px 24px rgba(18,56,42,.26);}
 
-    .services-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1.5rem;margin-top:1.5rem;}
+    .services-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));gap:1.5rem;margin-top:1.5rem;}
     .service-card{
       background:var(--surface);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column;
       border:1px solid rgba(16,54,38,.06);box-shadow:var(--shadow-card);height:100%;transition:transform .2s ease, box-shadow .2s ease;
@@ -244,8 +268,8 @@
     .service-card__tag--accent{background:rgba(199,155,73,.9);color:#fff;}
     .service-card__body{padding:1.25rem;display:flex;flex-direction:column;gap:.65rem;flex:1;}
     .service-card__header{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;}
-    .service-card__header h3{font-size:1.15rem;font-weight:800;color:var(--ink);}
-    .service-card__duration{font-size:.9rem;color:var(--muted);font-weight:600;}
+    .service-card__header h3{font-size:1.15rem;font-weight:800;color:var(--ink);flex:1;min-width:0;}
+    .service-card__duration{font-size:.9rem;color:var(--muted);font-weight:600;flex-shrink:0;white-space:nowrap;}
     .service-card__desc{font-size:.92rem;color:var(--muted);}
     .service-card__price{display:flex;align-items:center;gap:.4rem;font-weight:700;color:var(--green-dark);}
     .service-card__price .old{font-size:.9rem;color:#9aa0a0;text-decoration:line-through;}
@@ -340,11 +364,14 @@
        ========================= */
     .service-detail{
       padding:0;
-      overflow:hidden;
+      overflow-x:hidden;
+      overflow-y:auto;
       display:grid;
       grid-template-columns:minmax(0,420px) minmax(0,1fr);
       gap:0;
       max-height:calc(100dvh - 2rem);
+      scrollbar-gutter:stable both-edges;
+      -webkit-overflow-scrolling:touch;
     }
     .service-detail__media{
       position:relative;
@@ -415,7 +442,7 @@
     .service-detail__actions .btn{flex:1 1 auto;min-width:180px}
     .service-detail__forms-count{font-size:.85rem;color:var(--muted);margin-top:.2rem}
     @media(max-width:1100px){
-      .service-detail{grid-template-columns:1fr;max-height:none}
+      .service-detail{grid-template-columns:1fr;max-height:none;overflow-y:visible}
       .service-detail__media{min-height:260px}
       .service-detail__body{overflow:visible}
     }
@@ -424,6 +451,11 @@
       .service-detail__title{font-size:1.65rem}
       .service-detail__actions{flex-direction:column}
       .service-detail__actions .btn{width:100%}
+      .service-card__header{flex-direction:column;gap:.35rem;}
+      .service-card__duration{align-self:flex-start;}
+      .service-card__actions{flex-direction:column;align-items:stretch;}
+      .service-card__price{width:100%;justify-content:space-between;gap:.35rem;flex-wrap:wrap;}
+      .service-card__cta{width:100%;}
     }
     .payment-partial-note{font-size:.85rem;color:var(--muted);margin-top:-.35rem;margin-bottom:.25rem}
     .payment-form{display:flex;flex-direction:column;gap:1rem}
@@ -568,26 +600,49 @@
     }
 
     @media (max-width: 900px){
-      body.nav-open{overflow:hidden;}
+      body.nav-open{overflow:hidden;touch-action:none;}
       .container{padding-inline:1rem;}
       .site-header{padding-block:.65rem;}
       .site-header__inner{gap:.9rem;}
       .mobile-nav-btn{display:inline-flex;margin-left:auto;}
       .header-actions{
-        position:fixed;top:0;right:0;bottom:0;width:min(320px,92vw);
-        background:var(--surface);padding:1.75rem 1.5rem 2rem;border-radius:0;
-        transform:translateX(100%);transition:transform .3s ease,opacity .3s ease;
-        opacity:0;display:flex;flex-direction:column;align-items:stretch;gap:1.2rem;
-        box-shadow:-18px 0 35px rgba(0,0,0,.15);z-index:120;margin-left:0;
+        position:fixed;
+        top:0;
+        right:0;
+        bottom:0;
+        width:min(360px,calc(100vw - 1.5rem));
+        max-width:100%;
+        background:var(--surface);
+        padding-top:calc(1.75rem + env(safe-area-inset-top));
+        padding-bottom:calc(2rem + env(safe-area-inset-bottom));
+        padding-inline:1.5rem;
+        border-radius:0;
+        transform:translateX(100%);
+        transition:transform .3s ease,opacity .3s ease;
+        opacity:0;
+        display:flex;
+        flex-direction:column;
+        align-items:stretch;
+        gap:1.25rem;
+        box-shadow:-18px 0 35px rgba(0,0,0,.15);
+        z-index:130;
+        margin-left:0;
+        overflow-y:auto;
+        overscroll-behavior:contain;
+        scrollbar-gutter:stable both-edges;
+        -webkit-overflow-scrolling:touch;
       }
+      .header-actions::-webkit-scrollbar{width:6px;}
+      .header-actions::-webkit-scrollbar-thumb{background:rgba(15,47,35,.2);border-radius:999px;}
       body.nav-open .header-actions{transform:translateX(0);opacity:1;}
       .header-actions::before{content:'';width:72px;height:4px;border-radius:999px;background:rgba(15,47,35,.12);align-self:center;margin-bottom:.75rem;}
       .header-actions .btn{width:100%;justify-content:center;}
       .header-actions .lang-picker{flex-direction:column;align-items:stretch;gap:.5rem;margin-right:0;color:var(--muted);}
       .header-actions .lang-picker__select{width:100%;}
-      .mobile-close{display:inline-flex;align-items:center;gap:.45rem;color:var(--green-dark);background:transparent;border:none;font-size:1rem;font-weight:700;justify-content:flex-start;padding:0;}
-      .mobile-nav-backdrop{position:fixed;top:0;bottom:0;left:0;right:0;background:rgba(15,23,17,.3);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:110;display:none;}
-      body.nav-open .mobile-nav-backdrop{opacity:1;pointer-events:auto;display:block;right:min(320px,92vw);}
+      .mobile-close{display:inline-flex;align-items:center;gap:.5rem;color:var(--green-dark);background:rgba(15,47,35,.06);border:1px solid rgba(15,47,35,.12);font-size:.95rem;font-weight:700;justify-content:flex-start;padding:.45rem .85rem;border-radius:999px;}
+      .mobile-close__label{font-size:.95rem;}
+      .mobile-nav-backdrop{position:fixed;top:0;bottom:0;left:0;right:0;background:rgba(15,23,17,.35);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:110;display:none;}
+      body.nav-open .mobile-nav-backdrop{opacity:1;pointer-events:auto;display:block;}
       .hero{padding:3.5rem 0 2.5rem;}
       .hero__inner{grid-template-columns:1fr;gap:2rem;}
       .filters__grid{grid-template-columns:1fr;}
@@ -596,6 +651,11 @@
       .floating-cart{right:1rem;bottom:1.1rem;}
       body.modal-open .floating-cart,
       body.nav-open .floating-cart{display:none;}
+    }
+
+    @media (prefers-reduced-motion: reduce){
+      .header-actions{transition:none;}
+      .mobile-nav-backdrop{transition:none;}
     }
 
     @media (max-width: 540px){
@@ -620,12 +680,18 @@
       <button type="button"
               class="mobile-nav-btn"
               data-menu-toggle
+              aria-controls="primaryMenu"
               aria-expanded="false"
               data-i18n-attr="aria-label:services.header.openMenu">☰</button>
-      <nav class="header-actions" data-menu-drawer>
+      <nav class="header-actions"
+           id="primaryMenu"
+           data-menu-drawer
+           tabindex="-1"
+           aria-hidden="true"
+           data-i18n-attr="aria-label:services.header.menuLabel">
         <button type="button" class="mobile-close" data-menu-close data-i18n-attr="aria-label:services.header.closeMenu">
           <span aria-hidden="true">✕</span>
-          <span class="sr-only" data-i18n="services.header.closeMenuText">Close menu</span>
+          <span class="mobile-close__label" data-i18n="services.header.closeMenuText">Close menu</span>
         </button>
         <div class="header-controls">
           <div class="lang-picker" data-i18n-attr="aria-label:common.language">
@@ -712,7 +778,7 @@
       </nav>
     </div>
   </header>
-  <div class="mobile-nav-backdrop" data-menu-backdrop></div>
+  <div class="mobile-nav-backdrop" data-menu-backdrop aria-hidden="true"></div>
 
   <!-- hero -->
   <section class="hero">
@@ -982,7 +1048,7 @@
         <img id="serviceDetailImage" class="service-detail__image" alt="" hidden loading="lazy">
         <div class="service-detail__image service-detail__image--empty" id="serviceDetailImageEmpty" data-i18n="services.detail.imageEmpty">Preview coming soon</div>
       </div>
-      <div class="service-detail__body">
+      <div class="service-detail__body" id="serviceDetailBody">
         <div class="service-detail__top">
           <div>
             <span class="service-detail__eyebrow" id="serviceDetailCategoryLabel" data-i18n="services.detail.unknownCategory">Uncategorized</span>
@@ -1675,23 +1741,105 @@
         }
         return typeof value === 'string' && value.trim() ? value : '$0.00';
       };
+      const FOCUSABLE_SELECTORS = 'a[href],area[href],input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),button:not([disabled]),summary,[tabindex]:not([tabindex="-1"]),[contenteditable="true"]';
 
       const menuToggle = document.querySelector('[data-menu-toggle]');
       const menuClose = document.querySelector('[data-menu-close]');
       const menuDrawer = document.querySelector('[data-menu-drawer]');
       const menuBackdrop = document.querySelector('[data-menu-backdrop]');
 
+      const navScrollLock = {
+        active: false,
+        y: 0,
+        previous: {
+          position: '',
+          top: '',
+          width: '',
+        },
+      };
+      const lockMenuScroll = () => {
+        if (navScrollLock.active) return;
+        navScrollLock.active = true;
+        navScrollLock.y = window.scrollY || document.documentElement.scrollTop || 0;
+        navScrollLock.previous.position = document.body.style.position || '';
+        navScrollLock.previous.top = document.body.style.top || '';
+        navScrollLock.previous.width = document.body.style.width || '';
+        document.body.style.position = 'fixed';
+        document.body.style.top = `-${navScrollLock.y}px`;
+        document.body.style.width = '100%';
+      };
+      const unlockMenuScroll = () => {
+        if (!navScrollLock.active) return;
+        navScrollLock.active = false;
+        document.body.style.position = navScrollLock.previous.position;
+        document.body.style.top = navScrollLock.previous.top;
+        document.body.style.width = navScrollLock.previous.width;
+        window.scrollTo(0, navScrollLock.y);
+        navScrollLock.previous = { position: '', top: '', width: '' };
+        navScrollLock.y = 0;
+      };
+      let menuKeydownHandler = null;
+      const focusMenuDrawer = () => {
+        if (!menuDrawer) return;
+        window.requestAnimationFrame(() => focusElement(menuDrawer));
+      };
+      const attachMenuFocusTrap = () => {
+        if (menuKeydownHandler || !menuDrawer) return;
+        menuKeydownHandler = (event) => {
+          if (!document.body.classList.contains('nav-open')) return;
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            closeMenuDrawer();
+            return;
+          }
+          if (event.key !== 'Tab') return;
+          const focusables = collectFocusable(menuDrawer);
+          if (!focusables.length) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          const active = document.activeElement;
+          if (event.shiftKey) {
+            if (active === first || !menuDrawer.contains(active)) {
+              event.preventDefault();
+              focusElement(last);
+            }
+          } else if (active === last) {
+            event.preventDefault();
+            focusElement(first);
+          }
+        };
+        document.addEventListener('keydown', menuKeydownHandler, true);
+      };
+      const detachMenuFocusTrap = () => {
+        if (!menuKeydownHandler) return;
+        document.removeEventListener('keydown', menuKeydownHandler, true);
+        menuKeydownHandler = null;
+      };
+
       const openMenuDrawer = () => {
+        if (document.body.classList.contains('nav-open')) return;
         document.body.classList.add('nav-open');
+        lockMenuScroll();
         if (menuToggle) {
           menuToggle.setAttribute('aria-expanded', 'true');
         }
+        if (menuDrawer) {
+          menuDrawer.setAttribute('aria-hidden', 'false');
+          menuDrawer.scrollTop = 0;
+        }
+        attachMenuFocusTrap();
+        focusMenuDrawer();
       };
       const closeMenuDrawer = () => {
         document.body.classList.remove('nav-open');
         if (menuToggle) {
           menuToggle.setAttribute('aria-expanded', 'false');
         }
+        if (menuDrawer) {
+          menuDrawer.setAttribute('aria-hidden', 'true');
+        }
+        detachMenuFocusTrap();
+        unlockMenuScroll();
       };
 
       if (menuToggle) {
@@ -1720,9 +1868,6 @@
       }
       window.addEventListener('resize', () => {
         if (window.innerWidth > 900) closeMenuDrawer();
-      });
-      document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') closeMenuDrawer();
       });
 
       const isAuth  = {{ user.is_authenticated|yesno:"true,false" }};
@@ -1805,6 +1950,8 @@
       const detailBook=document.getElementById('serviceDetailBook');
       const detailClose=document.getElementById('serviceDetailClose');
       const detailDismiss=document.getElementById('serviceDetailDismiss');
+      const detailBody=document.getElementById('serviceDetailBody');
+      const detailDialog=detailModal ? detailModal.querySelector('.service-detail') : null;
       const inputName=document.getElementById('paymentName');
       const inputEmail=document.getElementById('paymentEmail');
       const inputAddress1=document.getElementById('paymentAddress1');
@@ -1817,7 +1964,6 @@
       syncPrepaymentInputs(currentPrepaymentPercent);
 
       const BODY_MODAL_CLASS = 'modal-open';
-      const FOCUSABLE_MODAL_SELECTORS = 'a[href],area[href],input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),button:not([disabled]),summary,[tabindex]:not([tabindex="-1"]),[contenteditable="true"]';
 
       const modalState = {
         current: null,
@@ -1846,7 +1992,7 @@
 
       function collectFocusable(container){
         if(!container) return [];
-        return Array.from(container.querySelectorAll(FOCUSABLE_MODAL_SELECTORS)).filter(isFocusable);
+        return Array.from(container.querySelectorAll(FOCUSABLE_SELECTORS)).filter(isFocusable);
       }
 
       function focusElement(el){
@@ -3379,6 +3525,16 @@ async function confirmPayment(){
         }
       }
 
+      function resetServiceDetailScroll(){
+        if(detailDialog){
+          detailDialog.scrollTop = 0;
+          detailDialog.scrollLeft = 0;
+        }
+        if(detailBody){
+          detailBody.scrollTop = 0;
+        }
+      }
+
       function openServiceDetail(card, triggerEl){
         if (!detailModal || !card) return;
         const payload = readServicePayload(card);
@@ -3388,6 +3544,7 @@ async function confirmPayment(){
           trigger: triggerEl instanceof HTMLElement ? triggerEl : card,
         };
         hydrateServiceDetail(payload);
+        resetServiceDetailScroll();
         openModalElement(detailModal, {
           trigger: activeServiceDetail.trigger,
           initialFocusSelector:'#serviceDetailBook',
