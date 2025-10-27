@@ -226,10 +226,11 @@ def get_available_slots(
 
     allowed_room_ids = list(dict.fromkeys(service.allowed_rooms.values_list("pk", flat=True)))
     result: Dict[int, List[datetime]] = {m.id: [] for m in masters}
-    if not allowed_room_ids or total_minutes <= 0:
+    if total_minutes <= 0:
         return result
 
-    room_blocks = _room_busy_intervals(allowed_room_ids, day)
+    requires_room_check = bool(allowed_room_ids)
+    room_blocks = _room_busy_intervals(allowed_room_ids, day) if requires_room_check else {}
     duration_delta = timedelta(minutes=total_minutes)
 
     for m in masters:
@@ -247,7 +248,7 @@ def get_available_slots(
         filtered_slots: List[datetime] = []
         for start in raw_slots:
             end = start + duration_delta
-            if _room_has_capacity(room_blocks, allowed_room_ids, start, end):
+            if not requires_room_check or _room_has_capacity(room_blocks, allowed_room_ids, start, end):
                 filtered_slots.append(start)
 
         result[m.id] = filtered_slots

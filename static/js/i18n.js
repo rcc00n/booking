@@ -116,6 +116,7 @@
         },
         cards: {
           addToCart: 'Add to cart',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
@@ -390,6 +391,7 @@
         },
         cards: {
           addToCart: 'В корзину',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
@@ -644,6 +646,7 @@
         },
         cards: {
           addToCart: 'कार्ट में जोड़ें',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
@@ -898,6 +901,7 @@
         },
         cards: {
           addToCart: 'До кошика',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
@@ -1141,6 +1145,7 @@
         },
         cards: {
           addToCart: 'Ajouter au panier',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
@@ -1395,6 +1400,7 @@
         },
         cards: {
           addToCart: 'أضف إلى السلة',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'

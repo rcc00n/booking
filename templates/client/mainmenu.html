@@ -249,8 +249,18 @@
     .service-card__desc{font-size:.92rem;color:var(--muted);}
     .service-card__price{display:flex;align-items:center;gap:.4rem;font-weight:700;color:var(--green-dark);}
     .service-card__price .old{font-size:.9rem;color:#9aa0a0;text-decoration:line-through;}
-    .service-card__actions{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:.75rem;}
-    .service-card .book-btn{flex-shrink:0;}
+    .service-card__actions{
+      margin-top:auto;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:.75rem;
+      flex-wrap:wrap;
+    }
+    .service-card__cta{
+      flex-shrink:0;
+      white-space:nowrap;
+    }
     .stub{font-style:italic;color:var(--muted);padding:1rem;border:1px dashed rgba(16,54,38,.2);border-radius:var(--radius-md);}
     .section-heading{margin:2rem 0 1rem;font:800 1.25rem/1.2 var(--font-heading);color:var(--green-dark);}
     .section-divider{margin:2rem 0;border:none;border-top:1px solid rgba(16,54,38,.12);}
@@ -328,13 +338,61 @@
     /* =========================
        Service detail modal
        ========================= */
-    .service-detail{padding:0;overflow:hidden;display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:0}
-    .service-detail__media{position:relative;background:linear-gradient(135deg,var(--green-dark),#274535);min-height:360px;display:flex;align-items:flex-end;justify-content:flex-start;padding:1.5rem}
+    .service-detail{
+      padding:0;
+      overflow:hidden;
+      display:grid;
+      grid-template-columns:minmax(0,420px) minmax(0,1fr);
+      gap:0;
+      max-height:calc(100dvh - 2rem);
+    }
+    .service-detail__media{
+      position:relative;
+      background:linear-gradient(135deg,rgba(5,34,22,.95),rgba(15,67,42,.9));
+      min-height:360px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:1.5rem;
+    }
+    .service-detail__media::after{
+      content:'';
+      position:absolute;
+      inset:.9rem;
+      border-radius:1.75rem;
+      border:1px solid rgba(255,255,255,.12);
+      pointer-events:none;
+    }
     .service-detail__image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
     .service-detail__image[hidden]{display:none}
-    .service-detail__image--empty{position:relative;z-index:1;color:rgba(255,255,255,.82);font-size:1rem;font-weight:600}
+    .service-detail__image--empty{
+      position:relative;
+      z-index:1;
+      color:rgba(255,255,255,.9);
+      font-size:1rem;
+      font-weight:600;
+      text-align:center;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      width:100%;
+      height:100%;
+      border-radius:1.25rem;
+      border:1px dashed rgba(255,255,255,.45);
+      background:rgba(5,26,17,.55);
+      backdrop-filter:blur(6px);
+      padding:1rem;
+    }
     .service-detail__badge{position:absolute;top:1.2rem;left:1.2rem;background:rgba(255,255,255,.12);color:#fff;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;padding:.35rem .95rem;border-radius:999px;font-weight:700;backdrop-filter:blur(12px)}
-    .service-detail__body{padding:2rem 2.25rem;display:flex;flex-direction:column;gap:1.5rem}
+    .service-detail__body{
+      padding:2rem 2.25rem;
+      display:flex;
+      flex-direction:column;
+      gap:1.5rem;
+      overflow-y:auto;
+      scrollbar-gutter:stable;
+      min-height:0;
+    }
     .service-detail__top{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}
     .service-detail__eyebrow{font-size:.85rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
     .service-detail__title{font:900 2rem/1.1 var(--font-heading);color:var(--green-dark);margin:0}
@@ -357,8 +415,9 @@
     .service-detail__actions .btn{flex:1 1 auto;min-width:180px}
     .service-detail__forms-count{font-size:.85rem;color:var(--muted);margin-top:.2rem}
     @media(max-width:1100px){
-      .service-detail{grid-template-columns:1fr}
+      .service-detail{grid-template-columns:1fr;max-height:none}
       .service-detail__media{min-height:260px}
+      .service-detail__body{overflow:visible}
     }
     @media(max-width:640px){
       .service-detail__body{padding:1.5rem}
@@ -784,7 +843,7 @@
                       {% endif %}
                     {% endwith %}
                   </div>
-                  <button type="button" class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
+                  <button type="button" class="btn btn--ghost service-card__cta" data-i18n="services.cards.viewDetails">View details</button>
                 </div>
               </div>
               <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
@@ -843,7 +902,7 @@
                       {% endif %}
                     {% endwith %}
                   </div>
-                  <button type="button" class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
+                  <button type="button" class="btn btn--ghost service-card__cta" data-i18n="services.cards.viewDetails">View details</button>
                 </div>
               </div>
               <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
@@ -892,7 +951,7 @@
                         {% endif %}
                       {% endwith %}
                     </div>
-                  <button type="button" class="btn btn--primary book-btn" data-service-id="{{ s.id }}" data-service-name="{{ s.name }}" data-i18n="services.cards.addToCart">Add to cart</button>
+                  <button type="button" class="btn btn--ghost service-card__cta" data-i18n="services.cards.viewDetails">View details</button>
                   </div>
                 </div>
                 <script type="application/json" class="service-card__payload">{{ s|service_payload|as_json }}</script>
@@ -1192,22 +1251,24 @@
   {{ autofill_defaults|json_script:"autofill-defaults" }}
   <script>
     (function(){
-      let bookButtonHandlerBound = false;
-      function handleGlobalBookButtonClick(event){
+      let detailCtaHandlerBound = false;
+      function handleServiceCardCtaClick(event){
         if (event.defaultPrevented) return;
         if (typeof event.button === 'number' && event.button !== 0) return;
         const target = event.target;
         if (!(target instanceof Element)) return;
-        const btn = target.closest('.book-btn');
+        const btn = target.closest('.service-card__cta');
         if (!btn) return;
+        const card = btn.closest('[data-service-card]');
+        if (!card) return;
         event.preventDefault();
         event.stopPropagation();
-        openBookingFlowFromButton(btn);
+        openServiceDetail(card, btn);
       }
       const initMainmenuInteractions = () => {
-        if (!bookButtonHandlerBound) {
-          document.addEventListener('click', handleGlobalBookButtonClick);
-          bookButtonHandlerBound = true;
+        if (!detailCtaHandlerBound) {
+          document.addEventListener('click', handleServiceCardCtaClick);
+          detailCtaHandlerBound = true;
         }
         try {
       const I18N = window.MalvaI18n;
@@ -1485,16 +1546,6 @@
         }
         return fallback !== undefined ? fallback : key;
       }
-      function openBookingFlowFromButton(btn){
-        if (!(btn instanceof HTMLElement)) return;
-        const serviceId = btn.dataset.serviceId;
-        if (!serviceId) {
-          console.warn('[services] Missing service id on book button', btn);
-          return;
-        }
-        const serviceName = btn.dataset.serviceName || translate('common.service', null, 'Service');
-        openModal(serviceId, serviceName, btn);
-      }
       const defaultPrepaymentPercent = Number('{{ default_prepayment_percent|default:100 }}') || 100;
       const stripePublicKey = "{{ stripe_public_key|default:''|escapejs }}";
       let stripeClient = null;
@@ -1583,9 +1634,6 @@
           card.addEventListener('click', (event) => {
             if (event.defaultPrevented) return;
             const target = event.target;
-            if (target instanceof Element && target.closest('.book-btn')) {
-              return;
-            }
             if (target instanceof Element && target.closest('.service-card__payload')) {
               return;
             }
@@ -1595,10 +1643,6 @@
           card.addEventListener('keydown', (event) => {
             if (event.defaultPrevented) return;
             if (event.key !== 'Enter' && event.key !== ' ') return;
-            const target = event.target;
-            if (target instanceof Element && target.closest('.book-btn')) {
-              return;
-            }
             event.preventDefault();
             openServiceDetail(card, card);
           });
@@ -4123,10 +4167,7 @@ async function confirmPayment(){
               ${desc}
               <div class=\"service-card__actions\">
                 <div class=\"service-card__price\">${priceBlock}</div>
-                <button type=\"button\" class=\"btn btn--primary book-btn\"
-                  data-service-id=\"${escapeHtml(s.id)}\"
-                  data-service-name=\"${escapeHtml(rawName)}\"
-                  data-i18n=\"services.cards.addToCart\">${translate('services.cards.addToCart')}</button>
+                <button type=\"button\" class=\"btn btn--ghost service-card__cta\" data-i18n=\"services.cards.viewDetails\">${translate('services.cards.viewDetails')}</button>
               </div>
             </div>
             ${payloadScript}
@@ -4224,17 +4265,6 @@ async function confirmPayment(){
           }
         });
       }
-      document.addEventListener('click', (event) => {
-        if (event.defaultPrevented) return;
-        if (typeof event.button === 'number' && event.button !== 0) return;
-        const target = event.target;
-        if (!(target instanceof Element)) return;
-        const btn = target.closest('.book-btn');
-        if (!btn) return;
-        event.preventDefault();
-        event.stopPropagation();
-        openBookingFlowFromButton(btn);
-      });
       window.DEBUG_checkoutCart = checkoutCart;
     } catch (err) {
       console.error('[services] Failed to initialize booking UI', err);
