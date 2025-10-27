@@ -1,0 +1,62 @@
+{% extends "admin/change_list.html" %}
+
+{% block object-tools-items %}
+    {% if calendar_url %}
+        <li class="object-tools-wrapper">
+            <a href="{{ calendar_url }}" class="calendar-link">Back to calendar</a>
+        </li>
+    {% endif %}
+    {{ block.super }}
+{% endblock %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <style>
+        .object-tools-wrapper {
+            display: flex !important;
+            align-items: center !important;
+            gap: 12px !important;
+            margin-right: 0.5rem !important;
+        }
+
+        .object-tools-wrapper::before {
+            content: "•";
+            color: #333 !important;
+            font-size: 18px !important;
+            margin-right: 4px !important;
+        }
+
+        .calendar-link {
+            font-weight: 600 !important;
+            color: #1a73e8 !important;
+            text-decoration: none !important;
+            font-size: 15px !important;
+        }
+
+        .calendar-link:hover {
+            text-decoration: underline !important;
+        }
+
+        .object-tools a.addlink {
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 6px !important;
+            background-color: #1aaa4b !important;
+            color: #fff !important;
+            border-radius: 6px !important;
+            padding: 6px 16px !important;
+            font-weight: 600 !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+
+        .object-tools a.addlink::before {
+            content: "+" !important;
+            font-weight: 700 !important;
+        }
+
+        .object-tools a.addlink:hover {
+            background-color: #159a44 !important;
+        }
+    </style>
+{% endblock %}

@@ -255,8 +255,15 @@ def get_available_slots(
     return result
 
 def get_or_create_status(name: str) -> AppointmentStatus:
-    obj, _ = AppointmentStatus.objects.get_or_create(name=name)
-    return obj
+    # Multiple legacy statuses can share the same label; reuse the oldest match.
+    status = (
+        AppointmentStatus.objects.filter(name__iexact=name)
+        .order_by("pk")
+        .first()
+    )
+    if status:
+        return status
+    return AppointmentStatus.objects.create(name=name)
 
 def get_default_payment_status() -> Optional[PaymentStatus]:
     return (
