@@ -4108,7 +4108,7 @@ async function confirmPayment(){
             slug: form.slug || '',
           })) : [],
         };
-        const payloadScript = `<script type=\"application/json\" class=\"service-card__payload\">${escapeHtml(JSON.stringify(payload))}</script>`;
+        const payloadScript = `<script type=\"application/json\" class=\"service-card__payload\">${escapeHtml(JSON.stringify(payload))}<\/script>`;
         return `
           <article class=\"service-card\" data-service-card role=\"button\" tabindex=\"0\" aria-label=\"${escapeHtml(ariaLabel)}\" data-i18n-attr=\"aria-label:services.detail.openLabel\" data-i18n-vars='${escapeHtml(JSON.stringify({ name: rawName }))}'>
             <div class=\"${imageClasses.join(' ')}\"${s.image ? '' : ' aria-hidden=\"true\"'}>
