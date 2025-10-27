@@ -600,6 +600,7 @@
     }
 
     @media (max-width: 900px){
+      html.nav-open,
       body.nav-open{overflow:hidden;touch-action:none;}
       .container{padding-inline:1rem;}
       .site-header{padding-block:.65rem;}
@@ -1819,6 +1820,7 @@
       const openMenuDrawer = () => {
         if (document.body.classList.contains('nav-open')) return;
         document.body.classList.add('nav-open');
+        document.documentElement.classList.add('nav-open');
         lockMenuScroll();
         if (menuToggle) {
           menuToggle.setAttribute('aria-expanded', 'true');
@@ -1832,6 +1834,7 @@
       };
       const closeMenuDrawer = () => {
         document.body.classList.remove('nav-open');
+        document.documentElement.classList.remove('nav-open');
         if (menuToggle) {
           menuToggle.setAttribute('aria-expanded', 'false');
         }
