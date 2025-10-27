@@ -12,6 +12,7 @@
     ar: 'ar',
     hi: 'hi-IN'
   };
+  const ATTR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]*$/;
 
   const translations = {
     en: {
@@ -1663,24 +1664,66 @@
     }
   }
 
+  function stripWrapperChars(value) {
+    if (!value) return '';
+    let result = String(value).trim();
+    while (result.length) {
+      if (result.charAt(0) === '\\') {
+        result = result.slice(1).trim();
+        continue;
+      }
+      if (result.charAt(result.length - 1) === '\\') {
+        result = result.slice(0, -1).trim();
+        continue;
+      }
+      const first = result.charAt(0);
+      const last = result.charAt(result.length - 1);
+      if (
+        (first === '"' && last === '"') ||
+        (first === "'" && last === "'") ||
+        (first === '`' && last === '`')
+      ) {
+        result = result.slice(1, -1).trim();
+        continue;
+      }
+      break;
+    }
+    return result;
+  }
+
+  function sanitizeAttrName(name) {
+    if (!name) return '';
+    const cleaned = stripWrapperChars(name);
+    return ATTR_NAME_PATTERN.test(cleaned) ? cleaned : '';
+  }
+
+  function sanitizeAttrKey(key) {
+    if (key === undefined || key === null) return '';
+    return stripWrapperChars(key);
+  }
+
   function parseAttrSpec(spec) {
     if (!spec) return [];
+    const normalized = stripWrapperChars(spec);
     try {
-      const parsed = JSON.parse(spec);
+      const parsed = JSON.parse(normalized);
       if (parsed && typeof parsed === 'object') {
         return Object.keys(parsed).map(function (attr) {
-          return { attr: attr, key: parsed[attr] };
-        });
+          const attrName = sanitizeAttrName(attr);
+          const keyName = sanitizeAttrKey(parsed[attr]);
+          if (!attrName || !keyName) return null;
+          return { attr: attrName, key: keyName };
+        }).filter(Boolean);
       }
     } catch (err) {
       /* ignore */
     }
-    return spec.split(',').map(function (item) {
+    return normalized.split(',').map(function (item) {
       const idx = item.indexOf(':');
       if (idx === -1) return null;
-      const attr = item.slice(0, idx).trim();
-      const key = item.slice(idx + 1).trim();
-      if (!attr) return null;
+      const attr = sanitizeAttrName(item.slice(0, idx));
+      const key = sanitizeAttrKey(item.slice(idx + 1));
+      if (!attr || !key) return null;
       return { attr: attr, key: key };
     }).filter(Boolean);
   }
