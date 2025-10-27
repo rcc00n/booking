@@ -182,6 +182,7 @@
           title: 'Cart',
           empty: 'Your cart is empty.',
           summary: 'Total: {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
           discount: 'Discount',
           checkout: 'Checkout',
           open: 'Open cart',
@@ -260,6 +261,7 @@
           service: 'Service',
           master: 'Master',
           status: 'Status',
+          payment: 'Payment status',
           amount: 'Amount'
         },
         myTitle: 'My appointments',
@@ -274,6 +276,15 @@
         notificationsTitle: 'Notifications',
         comingSoon: 'Coming soon.',
         profileTitle: 'Profile',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'First name',
           lastName: 'Last name',
@@ -470,6 +481,7 @@
           title: 'Корзина',
           empty: 'Ваша корзина пуста.',
           summary: 'Итого: {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
           discount: 'Discount',
           checkout: 'Оформить',
           open: 'Open cart',
@@ -537,6 +549,7 @@
           service: 'Услуга',
           master: 'Мастер',
           status: 'Статус',
+          payment: 'Статус оплаты',
           amount: 'Сумма'
         },
         myTitle: 'Мои записи',
@@ -551,6 +564,15 @@
         notificationsTitle: 'Уведомления',
         comingSoon: 'Скоро появится.',
         profileTitle: 'Профиль',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'Имя',
           lastName: 'Фамилия',
@@ -738,6 +760,7 @@
           title: 'कार्ट',
           empty: 'आपका कार्ट खाली है।',
           summary: 'कुल: {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
           discount: 'Discount',
           checkout: 'चेकआउट',
           open: 'Open cart',
@@ -805,6 +828,7 @@
           service: 'सेवा',
           master: 'मास्टर',
           status: 'स्थिति',
+          payment: 'भुगतान स्थिति',
           amount: 'राशि'
         },
         myTitle: 'मेरी अपॉइंटमेंट्स',
@@ -819,6 +843,15 @@
         notificationsTitle: 'सूचनाएँ',
         comingSoon: 'जल्द उपलब्ध होगा।',
         profileTitle: 'प्रोफ़ाइल',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'पहला नाम',
           lastName: 'अंतिम नाम',
@@ -1006,6 +1039,7 @@
           title: 'Кошик',
           empty: 'Ваш кошик порожній.',
           summary: 'Разом: {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
           discount: 'Discount',
           checkout: 'Оформити',
           open: 'Open cart',
@@ -1073,6 +1107,7 @@
           service: 'Послуга',
           master: 'Майстер',
           status: 'Статус',
+          payment: 'Статус оплати',
           amount: 'Сума'
         },
         myTitle: 'Мої записи',
@@ -1087,6 +1122,15 @@
         notificationsTitle: 'Сповіщення',
         comingSoon: 'Скоро з’явиться.',
         profileTitle: 'Профіль',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'Ім’я',
           lastName: 'Прізвище',
@@ -1262,6 +1306,7 @@
           title: 'Panier',
           empty: 'Votre panier est vide.',
           summary: 'Total : {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
           discount: 'Discount',
           checkout: 'Valider',
           open: 'Open cart',
@@ -1329,6 +1374,7 @@
           service: 'Service',
           master: 'Praticien',
           status: 'Statut',
+          payment: 'Statut de paiement',
           amount: 'Montant'
         },
         myTitle: 'Mes rendez-vous',
@@ -1343,6 +1389,15 @@
         notificationsTitle: 'Notifications',
         comingSoon: 'Bientôt disponible.',
         profileTitle: 'Profil',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'Prénom',
           lastName: 'Nom',
@@ -1530,6 +1585,7 @@
           title: 'السلة',
           empty: 'سلتك فارغة.',
           summary: 'الإجمالي: {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
           discount: 'Discount',
           checkout: 'إتمام الحجز',
           open: 'Open cart',
@@ -1597,6 +1653,7 @@
           service: 'الخدمة',
           master: 'الخبير',
           status: 'الحالة',
+          payment: 'حالة الدفع',
           amount: 'المبلغ'
         },
         myTitle: 'مواعيدي',
@@ -1611,6 +1668,15 @@
         notificationsTitle: 'الإشعارات',
         comingSoon: 'قريباً.',
         profileTitle: 'الملف الشخصي',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'الاسم الأول',
           lastName: 'اسم العائلة',

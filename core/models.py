@@ -240,7 +240,7 @@ class UserRole(models.Model):
         return f"{self.user} → {self.role.name}"
 
 class ClientSource(models.Model):
-    source = models.CharField()
+    source = models.CharField(max_length=255)
 
     def __str__(self):
         return f"{self.source}%"

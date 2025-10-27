@@ -1715,9 +1715,29 @@
           });
         });
       };
-      bindServiceCardInteractions(serverContentNode);
-      applyServiceNameTranslations(serverContentNode);
+      const attachServiceCardBindings = (root) => {
+        if (!root) return;
+        try {
+          bindServiceCardInteractions(root);
+          applyServiceNameTranslations(root);
+        } catch (err) {
+          console.warn('[mainmenu] attachServiceCardBindings failed', err);
+        }
+      };
+      attachServiceCardBindings(serverContentNode);
       const servicePayloadCache = new WeakMap();
+      const serializeServicePayload = (value) => {
+        try {
+          return JSON.stringify(value)
+            .replace(/</g, '\\u003C')
+            .replace(/>/g, '\\u003E')
+            .replace(/\u2028/g, '\\u2028')
+            .replace(/\u2029/g, '\\u2029');
+        } catch (err) {
+          console.warn('[mainmenu] Failed to serialize service payload', err);
+          return '{}';
+        }
+      };
       const readServicePayload = (card) => {
         if (!card) return null;
         if (servicePayloadCache.has(card)) return servicePayloadCache.get(card);
@@ -4217,6 +4237,21 @@ async function confirmPayment(){
       const liveTitle = document.getElementById('liveTitle');
       const liveGrid  = document.getElementById('liveGrid');
       const serverContent = serverContentNode;
+      (() => {
+        const ensureLiveGrid = () => liveGrid || document.getElementById('liveGrid');
+        document.addEventListener('live:render', () => {
+          attachServiceCardBindings(ensureLiveGrid());
+        });
+        const grid = ensureLiveGrid();
+        if (grid && 'MutationObserver' in window) {
+          const mo = new MutationObserver(() => {
+            const current = ensureLiveGrid();
+            if (!current) return;
+            requestAnimationFrame(() => attachServiceCardBindings(current));
+          });
+          mo.observe(grid, { childList: true, subtree: true });
+        }
+      })();
 
       const SEARCH_DELAY = 250;
       let searchTimer = null;
@@ -4312,7 +4347,7 @@ async function confirmPayment(){
             slug: form.slug || '',
           })) : [],
         };
-        const payloadScript = `<script type=\"application/json\" class=\"service-card__payload\">${escapeHtml(JSON.stringify(payload))}<\/script>`;
+        const payloadScript = `<script type=\"application/json\" class=\"service-card__payload\">${serializeServicePayload(payload)}<\/script>`;
         return `
           <article class=\"service-card\" data-service-card role=\"button\" tabindex=\"0\" aria-label=\"${escapeHtml(ariaLabel)}\" data-i18n-attr=\"aria-label:services.detail.openLabel\" data-i18n-vars='${escapeHtml(JSON.stringify({ name: rawName }))}'>
             <div class=\"${imageClasses.join(' ')}\"${s.image ? '' : ' aria-hidden=\"true\"'}>
@@ -4369,9 +4404,17 @@ async function confirmPayment(){
             queueRefresh();
             return;
           }
-          if (liveGrid) liveGrid.innerHTML = items.map(cardHTML).join('');
-          bindServiceCardInteractions(liveGrid);
-          applyServiceNameTranslations(liveGrid);
+          if (liveGrid) {
+            liveGrid.innerHTML = items.map(cardHTML).join('');
+            if (typeof window.CustomEvent === 'function') {
+              document.dispatchEvent(new CustomEvent('live:render'));
+            } else if (document.createEvent) {
+              const evt = document.createEvent('Event');
+              evt.initEvent('live:render', false, false);
+              document.dispatchEvent(evt);
+            }
+            attachServiceCardBindings(liveGrid);
+          }
           queueRefresh();
         }catch(e){
           if (e && e.name === 'AbortError') return;

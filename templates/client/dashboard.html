@@ -82,6 +82,10 @@
     .dashboard-mobile-bar{display:none;}
     .tab-card{border-radius:1.5rem;border:1px solid var(--dash-border);box-shadow:0 25px 50px rgba(15,47,35,.08);background:var(--dash-card);}
     .appointments-list{display:grid;gap:1rem;}
+    .appt-cancel[disabled],
+    .appt-reschedule[disabled],
+    .appt-cancel.is-disabled,
+    .appt-reschedule.is-disabled{opacity:.5;cursor:not-allowed;pointer-events:none;}
     .table-label{display:none;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--dash-muted);font-size:.72rem;}
     .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;}
     .stat-chip{border-radius:1rem;padding:1rem 1.1rem;background:var(--dash-card);border:1px solid var(--dash-border);box-shadow:0 18px 40px rgba(15,47,35,.08);display:flex;flex-direction:column;gap:.2rem;}
@@ -346,9 +350,11 @@
             <a href="#" class="text-sm text-[#1f5f44] font-semibold" data-tab-jump="appointments">View all</a>
           </div>
           {% if upcoming_appointments %}
-            <ul class="space-y-4 max-h-64 overflow-y-auto pr-1">
+            <ul id="upcomingAppointments" class="space-y-4 max-h-64 overflow-y-auto pr-1">
               {% for a in upcoming_appointments %}
-                <li data-appt-id="{{ a.id }}">
+                <li class="appointment-item"
+                    data-appt-id="{{ a.id }}"
+                    data-appt-start-iso="{{ a.start_time|utc|date:'c' }}">
                   <p class="font-semibold text-[#1b392c]">
                     {{ a.start_time|localtime|date:"d M Y, H:i" }}
                   </p>
@@ -410,7 +416,13 @@
                     </td>
                     <td class="py-2 pr-4">
                       <span class="table-label" data-i18n="dashboard.table.master">Master</span>
-                      <span class="table-value">{{ a.master.get_full_name }}</span>
+                      <span class="table-value">
+                        {% with master=a.master %}
+                          {% if master %}
+                            {% firstof master.get_full_name master.name master.user.get_full_name master.user.username '-' %}
+                          {% else %}-{% endif %}
+                        {% endwith %}
+                      </span>
                     </td>
                     <td class="py-2 pr-4">
                       <span class="table-label" data-i18n="dashboard.table.status">Status</span>
@@ -554,6 +566,14 @@
             <textarea
                    name="{{ profile_form.address.html_name }}"
                    id="{{ profile_form.address.id_for_label }}"
+                   rows="3"
+                   class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
+                   autocomplete="street-address"
+                   placeholder="123 Main St"
+                   data-autofill-key="address">{{ profile_form.address.value|default_if_none:'' }}</textarea>
+            {% if profile_form.address.errors %}
+              <p class="mt-1 text-sm text-red-600">{{ profile_form.address.errors.0 }}</p>
+            {% endif %}
 
     <!-- APPOINTMENTS -->
     <section id="tab-appointments" class="tab hidden">
@@ -572,8 +592,9 @@
       {% if appointments %}
         <div class="appointments-list grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {% for a in appointments %}
-            <div class="tab-card p-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between {% if a.start_time < now %}opacity-70{% endif %}"
-                 data-appt-id="{{ a.id }}">
+            <div class="tab-card p-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between {% if a.start_time < now %}opacity-70{% endif %} appointment-item"
+                 data-appt-id="{{ a.id }}"
+                 data-appt-start-iso="{{ a.start_time|utc|date:'c' }}">
               <div class="appt-main">
                 <p class="font-medium text-[#1b392c] appt-dt">{{ a.start_time|localtime|date:"d M Y, H:i" }}</p>
                 <p class="text-sm text-[#4D4D4D]"><span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span> · {{ a.master.get_full_name }}</p>
@@ -951,6 +972,72 @@ document.addEventListener('DOMContentLoaded', () => {
       el.textContent = translateServiceNameText(original) || original;
     });
   };
+
+  function parseUtc(iso) {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const lockClickHandlers = new WeakMap();
+  function enforce24hLock(root = document) {
+    const scope = root && typeof root.querySelectorAll === 'function' ? root : document;
+    const now = new Date();
+    const items = scope.querySelectorAll('.appointment-item[data-appt-start-iso]');
+    items.forEach((item) => {
+      const iso = item.getAttribute('data-appt-start-iso');
+      const start = parseUtc(iso);
+      if (!start) return;
+
+      const msLeft = start.getTime() - now.getTime();
+      const within24h = msLeft < 24 * 60 * 60 * 1000;
+
+      const cancelBtn = item.querySelector('.appt-cancel');
+      const reschedBtn = item.querySelector('.appt-reschedule');
+
+      [cancelBtn, reschedBtn].forEach((btn) => {
+        if (!btn) return;
+        const handler = lockClickHandlers.get(btn);
+        if (within24h) {
+          btn.setAttribute('disabled', 'disabled');
+          btn.setAttribute('aria-disabled', 'true');
+          btn.classList.add('is-disabled');
+          if (!handler) {
+            const prevent = (event) => {
+              event.preventDefault();
+            };
+            btn.addEventListener('click', prevent);
+            lockClickHandlers.set(btn, prevent);
+          }
+        } else {
+          btn.removeAttribute('disabled');
+          btn.removeAttribute('aria-disabled');
+          btn.classList.remove('is-disabled');
+          if (handler) {
+            btn.removeEventListener('click', handler);
+            lockClickHandlers.delete(btn);
+          }
+        }
+      });
+    });
+  }
+  function observeAppointments(){
+    const host = document.getElementById('upcomingAppointments');
+    if (!host || !('MutationObserver' in window)) return;
+    const mo = new MutationObserver(() => {
+      window.requestAnimationFrame(() => enforce24hLock(host));
+    });
+    mo.observe(host, { childList: true, subtree: true });
+  }
+
+  enforce24hLock();
+  observeAppointments();
+  document.addEventListener('appointments:render', (event) => {
+    const detail = event && event.detail && event.detail.root;
+    if (detail && typeof detail.querySelectorAll === 'function') {
+      enforce24hLock(detail);
+    } else {
+      enforce24hLock();
+    }
+  });
 
   const links = document.querySelectorAll('[data-tab]');
   const tabs  = document.querySelectorAll('.tab');
@@ -1363,7 +1450,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   document.addEventListener('click', async (e)=>{
-    const a = e.target.closest('.appt-cancel'); if(!a) return; e.preventDefault();
+    const a = e.target.closest('.appt-cancel');
+    if(!a) return;
+    if (a.hasAttribute('aria-disabled') || a.classList.contains('is-disabled')) {
+      e.preventDefault();
+      return;
+    }
+    e.preventDefault();
     const id = a.dataset.apptId; if(!id) return;
     cancelAppointment(id);
   });
@@ -1825,7 +1918,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.addEventListener('click', (e)=>{
     const a = e.target.closest('.appt-reschedule');
-    if(!a) return; e.preventDefault();
+    if(!a) return;
+    if (a.hasAttribute('aria-disabled') || a.classList.contains('is-disabled')) {
+      e.preventDefault();
+      return;
+    }
+    e.preventDefault();
     openRes(a.dataset.apptId, a.dataset.serviceId);
   });
   resClose.addEventListener('click', closeRes);
@@ -1834,10 +1932,12 @@ document.addEventListener('DOMContentLoaded', () => {
   resSubmit.addEventListener('click', submitRes);
 
   applyServiceNameTranslations();
+  enforce24hLock();
 
   if (I18N && typeof I18N.onChange === 'function') {
     I18N.onChange(() => {
       applyServiceNameTranslations();
+      enforce24hLock();
       if (resModal && resModal.classList.contains('flex')) {
         renderWindow().catch(()=>{});
       }
