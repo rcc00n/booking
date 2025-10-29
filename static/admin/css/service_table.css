@@ -49,6 +49,16 @@
     color:#fff !important;
     border-color:#16a34a;
 }
+.svc-btn--danger{
+    background:#fee2e2;
+    color:#b91c1c !important;
+    border-color:#fca5a5;
+}
+.svc-btn--danger:hover{
+    background:#fecaca;
+    color:#991b1b !important;
+    border-color:#f87171;
+}
 
 .svc-filters{
     display:flex;

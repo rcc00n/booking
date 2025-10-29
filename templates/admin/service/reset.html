@@ -1,0 +1,53 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{{ changelist_url|default:'#' }}">
+      {{ opts.verbose_name_plural|capfirst }}
+    </a>
+    &rsaquo; Delete all services
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h1 style="margin-bottom: 0.5rem;">Delete all services</h1>
+    <p class="help">
+      This action permanently removes every service and cascades to related appointment items. Use it only when you are
+      about to re-import a fresh catalog.
+    </p>
+
+    <ul class="help" style="margin-bottom: 1rem;">
+      <li>Total services: {{ stats.service_total }}</li>
+      <li>Active services: {{ stats.active_services }}</li>
+      <li>Service categories: {{ stats.category_total }}</li>
+      <li>Employee assignments: {{ stats.service_master_total }}</li>
+      <li>Appointment items referencing services: {{ stats.appointment_items_total }}</li>
+    </ul>
+
+    {% if stats.upcoming_appointment_items %}
+      <div class="alert alert-warning">
+        {{ stats.upcoming_appointment_items }} upcoming appointment items will lose their linked service records.
+      </div>
+    {% endif %}
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <fieldset class="module aligned">
+        <div class="form-row">
+          <label for="id_confirm">Type {{ confirm_token }} to confirm</label>
+          <div class="field-box">
+            <input id="id_confirm" type="text" name="confirm" placeholder="{{ confirm_token }}" autocomplete="off" />
+            <p class="help">This cannot be undone.</p>
+          </div>
+        </div>
+      </fieldset>
+      <div class="submit-row">
+        <input type="submit" class="deletelink" value="Delete all services">
+        <a class="button cancel-link" href="{{ changelist_url|default:'#' }}">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

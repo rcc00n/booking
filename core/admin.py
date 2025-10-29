@@ -56,6 +56,7 @@ from core.services.user_import import (
     UserImportSchemaError,
 )
 from core.services.product_import import import_products_from_file, ProductImportError
+from core.services.service_import import import_services_from_file, ServiceImportError
 from core.services.pricing import compute_appointment_pricing, PricingComputationError
 from core.services import payments as payment_services
 from core.utils.fees import CARD_PROCESSING_PERCENT, CARD_PROCESSING_FIXED, card_processing_fee
@@ -4121,6 +4122,26 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
         'extra_time_min',
         'is_taxable',
     ]
+    import_template_name = "admin/services/import.html"
+    reset_template_name = "admin/service/reset.html"
+    reset_confirm_token = "DELETE"
+
+    def get_urls(self):
+        urls = super().get_urls()
+        opts = self.model._meta
+        custom = [
+            path(
+                "import/",
+                self.admin_site.admin_view(self.import_services_view),
+                name=f"{opts.app_label}_{opts.model_name}_import",
+            ),
+            path(
+                "reset/",
+                self.admin_site.admin_view(self.reset_services_view),
+                name=f"{opts.app_label}_{opts.model_name}_reset",
+            ),
+        ]
+        return custom + urls
 
     @admin.action(description="Mark selected services as active")
     def mark_active(self, request, queryset):
@@ -4177,6 +4198,81 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
 
     def get_ordering(self, request):
         return ("name", "pk")
+
+    def import_services_view(self, request):
+        form = ServiceImportUploadForm(request.POST or None, request.FILES or None)
+        changelist_url = reverse(f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist")
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "form": form,
+            "title": "Import services",
+            "changelist_url": changelist_url,
+        }
+
+        if request.method == "POST" and form.is_valid():
+            uploaded = form.cleaned_data["import_file"]
+            try:
+                result = import_services_from_file(uploaded)
+            except ServiceImportError as exc:
+                form.add_error("import_file", str(exc))
+            else:
+                if result.created or result.updated:
+                    messages.success(
+                        request,
+                        f"Imported {result.created} new services and updated {result.updated}.",
+                    )
+                else:
+                    messages.info(request, "No services were imported. The file did not contain new data.")
+
+                if result.errors:
+                    preview = "; ".join(
+                        f"Row {msg.row_number}: {msg.message}"
+                        for msg in result.errors[:3]
+                    )
+                    if len(result.errors) > 3:
+                        preview += f" (+{len(result.errors) - 3} more rows)"
+                    messages.warning(request, f"Some rows were skipped: {preview}")
+
+                return HttpResponseRedirect(changelist_url)
+
+        return TemplateResponse(request, self.import_template_name, context)
+
+    def reset_services_view(self, request):
+        changelist_url = reverse(f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist")
+        now = timezone.now()
+        stats = {
+            "service_total": self.model.objects.count(),
+            "active_services": self.model.objects.filter(is_active=True).count(),
+            "category_total": ServiceCategory.objects.count(),
+            "service_master_total": ServiceMaster.objects.count(),
+            "appointment_items_total": AppointmentItem.objects.filter(service__isnull=False).count(),
+            "upcoming_appointment_items": AppointmentItem.objects.filter(
+                service__isnull=False,
+                start_time__gte=now,
+            ).count(),
+        }
+
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "title": "Delete all services",
+            "changelist_url": changelist_url,
+            "stats": stats,
+            "confirm_token": self.reset_confirm_token,
+        }
+
+        if request.method == "POST":
+            confirm = (request.POST.get("confirm") or "").strip()
+            if confirm != self.reset_confirm_token:
+                messages.error(request, f"Type {self.reset_confirm_token} to confirm deletion.")
+            else:
+                with transaction.atomic():
+                    self.model.objects.all().delete()
+                messages.success(request, "All services were deleted.")
+                return HttpResponseRedirect(changelist_url)
+
+        return TemplateResponse(request, self.reset_template_name, context)
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
         if request.method == "POST" and "_duplicate" in request.POST:
@@ -4298,6 +4394,27 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
             context["category_options"] = category_options
             context["current_category"] = current_category
             context["currency_symbol"] = currency_symbol
+            try:
+                import_url = reverse(f'admin:{opts.app_label}_{opts.model_name}_import')
+            except NoReverseMatch:
+                import_url = None
+            try:
+                reset_url = reverse(f'admin:{opts.app_label}_{opts.model_name}_reset')
+            except NoReverseMatch:
+                reset_url = None
+
+            if import_url:
+                context["import_url"] = import_url
+                context.setdefault("import_label", "📥 Import services")
+            else:
+                context.setdefault("import_url", None)
+
+            if reset_url:
+                context["reset_url"] = reset_url
+                context.setdefault("reset_label", "🗑 Delete all services")
+            else:
+                context.setdefault("reset_url", None)
+
             cl = context.get("cl")
             pagination = {
                 "has_previous": False,

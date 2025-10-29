@@ -1,7 +1,7 @@
 import json
 import re
 from pathlib import Path
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from dal import autocomplete
 from django import forms
@@ -793,6 +793,69 @@ def _parse_stock_value(value: str):
     return number
 
 
+_DURATION_TOKEN_RE = re.compile(
+    r"(\d+(?:[.,]\d*)?)\s*(h(?:ours?)?|hr|hrs?|hour|hours|m(?:in(?:ute)?s?)?|mins?|minute|minutes)\b",
+    re.IGNORECASE,
+)
+
+_DURATION_FALLBACK_NUMBER = re.compile(r"\d+(?:[.,]\d*)?")
+
+
+def _raise_duration_error():
+    raise forms.ValidationError("Enter duration in minutes (e.g. '1h 30m' or '90').")
+
+
+def _parse_duration_minutes(value: str, *, required: bool) -> int | None:
+    text = _coerce_cell_value(value)
+    if not text:
+        return None if not required else _raise_duration_error()
+
+    total = Decimal("0")
+    for match in _DURATION_TOKEN_RE.finditer(text):
+        number_raw, unit_raw = match.groups()
+        try:
+            number = Decimal(number_raw.replace(",", "."))
+        except (InvalidOperation, ValueError):
+            continue
+        unit = unit_raw.lower()
+        if unit.startswith("h"):
+            total += number * Decimal("60")
+        else:
+            total += number
+
+    if total == 0:
+        fallback_match = _DURATION_FALLBACK_NUMBER.search(text)
+        if fallback_match:
+            try:
+                total = Decimal(fallback_match.group().replace(",", "."))
+            except (InvalidOperation, ValueError):
+                total = Decimal("0")
+
+    if total <= 0:
+        return None if not required else _raise_duration_error()
+
+    minutes = int(total.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return minutes if minutes > 0 else (None if not required else _raise_duration_error())
+
+
+def _parse_tax_value(value: str) -> bool:
+    text = _coerce_cell_value(value).lower()
+    if not text:
+        return False
+    if text in {"yes", "y", "true", "1"}:
+        return True
+    if text in {"no", "n", "false", "0"}:
+        return False
+    match = _DURATION_FALLBACK_NUMBER.search(text)
+    if match:
+        try:
+            number = Decimal(match.group().replace(",", "."))
+        except (InvalidOperation, ValueError):
+            return False
+        return number > 0
+    return "gst" in text or "tax" in text
+
+
 class ProductImportRowForm(forms.Form):
     name = forms.CharField(max_length=200)
     sku = forms.CharField(max_length=64, required=False)
@@ -814,6 +877,46 @@ class ProductImportRowForm(forms.Form):
 
     def clean_total_stock(self):
         return _parse_stock_value(self.cleaned_data.get("total_stock"))
+
+
+class ServiceImportUploadForm(forms.Form):
+    import_file = forms.FileField(
+        label="Services file",
+        help_text="Upload CSV or XLSX with columns: Service Name, Retail Price, Duration, Extra Time, Tax, Description, Category.",
+    )
+
+    def clean_import_file(self):
+        uploaded = self.cleaned_data["import_file"]
+        filename = (uploaded.name or "").lower()
+        if not any(filename.endswith(ext) for ext in PRODUCT_IMPORT_SUPPORTED_EXTENSIONS):
+            raise forms.ValidationError("Unsupported file type. Upload CSV or XLSX.")
+        uploaded.seek(0)
+        return uploaded
+
+
+class ServiceImportRowForm(forms.Form):
+    name = forms.CharField(max_length=100)
+    description = forms.CharField(required=False)
+    base_price = forms.CharField()
+    duration = forms.CharField()
+    extra_time = forms.CharField(required=False)
+    tax = forms.CharField(required=False)
+    category = forms.CharField(max_length=100, required=False)
+
+    def clean_base_price(self):
+        value = _parse_decimal_value(self.cleaned_data.get("base_price"))
+        if value is None:
+            raise forms.ValidationError("Retail price is required.")
+        return value
+
+    def clean_duration(self):
+        return _parse_duration_minutes(self.cleaned_data.get("duration"), required=True)
+
+    def clean_extra_time(self):
+        return _parse_duration_minutes(self.cleaned_data.get("extra_time"), required=False)
+
+    def clean_tax(self):
+        return _parse_tax_value(self.cleaned_data.get("tax"))
 # -----------------------------
 # Custom User Change Form
 # -----------------------------
