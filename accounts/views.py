@@ -1,6 +1,8 @@
 # accounts/views.py
 from __future__ import annotations
 
+from collections import OrderedDict
+from dataclasses import dataclass
 from decimal import Decimal
 import hashlib
 import json
@@ -26,6 +28,7 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.db.models import OuterRef, Subquery, Count, Prefetch, Sum, F, Q
 from django.db.models.functions import TruncMonth
 
@@ -245,6 +248,112 @@ class MainMenuView(LoginRequiredMixin, TemplateView):
 # =========================
 # Личный кабинет клиента
 # =========================
+@dataclass(slots=True)
+class DashboardAppointmentCard:
+    """
+    Simple container for appointments rendered on the dashboard.
+    """
+
+    id: str
+    start_iso: str
+    start_display: str
+    service_name: str
+    service_original: str
+    service_id: str | None
+    master_name: str
+    payment_status: str | None
+    price: str | None
+    is_future: bool
+
+
+def _dashboard_primary_item(appointment: Appointment) -> AppointmentItem | None:
+    items = getattr(appointment, "prefetched_items", None)
+    if items is None:
+        items = list(
+            appointment.items.select_related("service", "master__user").order_by("start_time")
+        )
+    return items[0] if items else None
+
+
+def _dashboard_master_name(item: AppointmentItem | None) -> str:
+    if not item or not item.master:
+        return "—"
+    profile = getattr(item.master, "user", None)
+    account_user = getattr(profile, "user", None) if profile else None
+    if account_user:
+        full_name = account_user.get_full_name()
+        if full_name:
+            return full_name
+        if account_user.username:
+            return account_user.username
+    for attr in ("full_name", "name"):
+        value = getattr(item.master, attr, "")
+        if value:
+            return value
+    return "—"
+
+
+def build_dashboard_appointments(
+    appointments: Iterable[Appointment],
+    now_local: timezone.datetime,
+) -> list[dict[str, object]]:
+    grouped: OrderedDict[timezone.datetime, dict[str, object]] = OrderedDict()
+    tz = now_local.tzinfo or timezone.get_current_timezone()
+
+    for appointment in appointments:
+        if not appointment.start_time:
+            continue
+
+        start_local = timezone.localtime(appointment.start_time, tz)
+        month_anchor = start_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        bucket = grouped.get(month_anchor)
+        if bucket is None:
+            bucket = {
+                "label": date_format(month_anchor, "F Y"),
+                "iso": month_anchor.date().isoformat(),
+                "appointments": [],
+            }
+            grouped[month_anchor] = bucket
+
+        item = _dashboard_primary_item(appointment)
+        service_original = ""
+        service_name = "Service"
+        service_id = None
+        if item and item.service:
+            service_original = item.service.name or ""
+            service_name = service_original or "Service"
+            if item.service_id:
+                service_id = str(item.service_id)
+
+        start_iso = start_local.isoformat()
+        card = DashboardAppointmentCard(
+            id=str(appointment.pk),
+            start_iso=start_iso,
+            start_display=date_format(start_local, "d M Y, H:i"),
+            service_name=service_name,
+            service_original=service_original,
+            service_id=service_id,
+            master_name=_dashboard_master_name(item),
+            payment_status=appointment.payment_status.name if appointment.payment_status else None,
+            price=str(appointment.final_price) if appointment.final_price is not None else None,
+            is_future=start_local >= now_local,
+        )
+        bucket["appointments"].append(card)
+
+    return [
+        {
+            "label": data["label"],
+            "iso": data["iso"],
+            "appointments": sorted(
+                data["appointments"],
+                key=lambda card: card.start_iso,
+                reverse=True,
+            ),
+        }
+        for _, data in sorted(grouped.items(), key=lambda pair: pair[0], reverse=True)
+    ]
+
+
 class ClientDashboardView(LoginRequiredMixin, TemplateView):
     """
     GET  → страница и данные
@@ -256,11 +365,12 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         ctx = super().get_context_data(**kwargs)
         user = self.request.user
         now = timezone.now()
+        now_local = timezone.localtime(now)
 
         # профиль может отсутствовать → None
         profile = getattr(user, "userprofile", None)
         ctx["profile"] = profile
-        ctx["now"] = now
+        ctx["now"] = now_local
         ctx["profile_form"] = ClientProfileForm(user=user)
         ctx["support_email"] = getattr(settings, "BUSINESS_SUPPORT_EMAIL", getattr(settings, "DEFAULT_FROM_EMAIL", "support@malvabooking.com"))
         ctx["business_phone"] = getattr(settings, "BUSINESS_PHONE", "")
@@ -281,6 +391,7 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         items_prefetch = Prefetch(
             "items",
             queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
+            to_attr="prefetched_items",
         )
 
         qs = (
@@ -333,6 +444,10 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
 
         ctx["pending_intake_assignments"] = pending_assignments
         ctx["total_intake_assignments"] = total_assignments
+
+        ctx["appointments_by_month"] = (
+            build_dashboard_appointments(qs, now_local) if profile else []
+        )
 
         ctx["stripe_public_key"] = settings.STRIPE_PUBLIC_KEY
 

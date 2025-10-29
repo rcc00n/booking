@@ -405,15 +405,17 @@
                         </select>
                     </div>  {# ←ВАЖНО: закрываем .combo #}
                     {% url 'admin:auth_user_add' as raw_add_client_url %}
-                    {% with raw_add_client_url|add:'?_to_field=id&_popup=1' as add_client_url %}
-                        <a
-                            href="{{ add_client_url }}"
-                            class="related-widget-wrapper-link add-related"
-                            id="add_id_client"
-                            title="Add client"
-                            onclick="return showAddAnotherPopup(this);"
-                            style="margin-left:8px"
-                        >＋ Add client</a>
+                    {% with request.get_full_path|urlencode as return_url %}
+                        {% with raw_add_client_url|add:'?_to_field=id&_popup=1&_from_custom_appt=1&return_to='|add:return_url as add_client_url %}
+                            <a
+                                href="{{ add_client_url }}"
+                                class="related-widget-wrapper-link add-related"
+                                id="add_id_client"
+                                title="Add client"
+                                onclick="return showAddAnotherPopup(this);"
+                                style="margin-left:8px"
+                            >＋ Add client</a>
+                        {% endwith %}
                     {% endwith %}
 
                     {% if field_errors.client %}

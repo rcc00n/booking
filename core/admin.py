@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import Dict, Any, List, Sequence, Iterable, Tuple, Optional
 from dataclasses import dataclass, field
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse, unquote_plus
 
 from django.contrib.admin import DateFieldListFilter
 from django.contrib.admin.options import IS_POPUP_VAR, TO_FIELD_VAR
@@ -1257,6 +1257,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     add_form = CustomUserCreationForm
     form = CustomUserChangeForm
     change_list_template = "admin/users/changelist_cards.html"
+    add_form_template = "admin/users/add_form.html"
     export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
     list_per_page = 10
     readonly_fields = getattr(BaseUserAdmin, "readonly_fields", tuple()) + ("password_change_link",)
@@ -1348,6 +1349,16 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         return mark_safe(f'<a href="{url}">{_("Change password")}</a>')
 
     password_change_link.short_description = _("Password")
+
+    def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
+        if add and (request.GET.get(IS_POPUP_VAR) or request.POST.get(IS_POPUP_VAR)):
+            if request.GET.get("_from_custom_appt") or request.POST.get("_from_custom_appt"):
+                return_to_param = request.GET.get("return_to") or request.POST.get("return_to")
+                if return_to_param:
+                    context = {**context}
+                    context["popup_cancel_url"] = unquote_plus(return_to_param)
+                    context["popup_cancel_param"] = return_to_param
+        return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
 
     def get_queryset(self, request):
         # Prefetch the attached profile to avoid N+1 lookups.
@@ -1551,6 +1562,48 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     def _profile_popup_response(self, request, profile, *, action):
         if profile is None:
             return None
+
+        return_to = request.GET.get("return_to") or request.POST.get("return_to")
+        came_from_custom_create = request.GET.get("_from_custom_appt") or request.POST.get("_from_custom_appt")
+        redirect_url = None
+        if return_to and came_from_custom_create:
+            decoded_return_to = unquote_plus(return_to)
+            try:
+                parsed = urlparse(decoded_return_to)
+            except Exception:
+                parsed = None
+            if parsed and not parsed.netloc and parsed.path:
+                pairs = [
+                    (key, value)
+                    for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+                    if key != "client"
+                ]
+                pairs.append(("client", str(profile.pk)))
+                rebuilt_query = urlencode(pairs, doseq=True)
+                redirect_url = urlunparse(parsed._replace(query=rebuilt_query))
+
+        if redirect_url:
+            safe_redirect = json.dumps(redirect_url)
+            html = (
+                "<!DOCTYPE html><html><head><title>Popup closing</title></head>"
+                "<body><p>Popup closing...</p>"
+                "<script>"
+                "(function() {"
+                "var url = " + safe_redirect + ";"
+                "if (window.opener && !window.opener.closed) {"
+                "window.opener.location.href = url;"
+                "window.close();"
+                "} else if (window.parent && window.parent !== window) {"
+                "window.parent.location.href = url;"
+                "window.close();"
+                "} else {"
+                "window.location.href = url;"
+                "}"
+                "})();"
+                "</script></body></html>"
+            )
+            return HttpResponse(html)
+
         to_field = request.POST.get(TO_FIELD_VAR) or request.GET.get(TO_FIELD_VAR)
         if to_field:
             try:
@@ -1566,9 +1619,10 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             "value": str(value),
             "obj": str(profile),
         }
+        template_name = self.popup_response_template or "admin/popup_response.html"
         return TemplateResponse(
             request,
-            self.popup_response_template,
+            template_name,
             {
                 **self.admin_site.each_context(request),
                 "popup_response_data": json.dumps(popup_response_data),
@@ -3079,6 +3133,10 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "gst_enabled": getattr(settings, "GST_ENABLED", True),
                 "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
+
+            requested_client = (request.GET.get("client") or "").strip()
+            if requested_client:
+                ctx["posted_client"] = requested_client
 
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 

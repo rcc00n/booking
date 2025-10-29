@@ -577,46 +577,79 @@
 
     <!-- APPOINTMENTS -->
     <section id="tab-appointments" class="tab hidden">
+
       <div class="flex flex-wrap items-center gap-3 mb-6">
+
         <div>
+
           <p class="uppercase text-xs tracking-[0.2em] text-[#4D4D4D]/70">Schedule</p>
+
           <h2 class="text-2xl font-semibold text-[#1b392c]" data-i18n="dashboard.myTitle">My appointments</h2>
+
         </div>
+
         <a href="/accounts/#services"
+
            class="ml-auto inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-white bg-[#1f5f44] hover:bg-[#194f39] shadow"
+
            data-i18n="dashboard.book">
+
           + Book
+
         </a>
+
       </div>
 
-      {% if appointments %}
-        <div class="appointments-list grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {% for a in appointments %}
-            <div class="tab-card p-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between {% if a.start_time < now %}opacity-70{% endif %} appointment-item"
-                 data-appt-id="{{ a.id }}"
-                 data-appt-start-iso="{{ a.start_time|utc|date:'c' }}">
-              <div class="appt-main">
-                <p class="font-medium text-[#1b392c] appt-dt">{{ a.start_time|localtime|date:"d M Y, H:i" }}</p>
-                <p class="text-sm text-[#4D4D4D]"><span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span> · {{ a.master.get_full_name }}</p>
-              </div>
 
-              {% if a.start_time >= now %}
-                <div class="flex gap-3 text-sm appt-actions sm:justify-end">
-                  <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
-                     data-appt-id="{{ a.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>
-                  <a href="#" class="appt-reschedule text-[#1f5f44] hover:opacity-90 underline-offset-4 hover:underline"
-                     data-appt-id="{{ a.id }}" data-service-id="{{ a.service.id }}" data-i18n="dashboard.appointment.reschedule">Reschedule</a>
-                </div>
-              {% else %}
-                <span class="text-xs text-[#4D4D4D]/70" data-i18n="dashboard.appointment.completed">Completed</span>
-              {% endif %}
+
+      <div id="appointmentsByMonth" class="space-y-6">
+        {% if appointments_by_month %}
+          {% for month in appointments_by_month %}
+            <div class="tab-card p-5" data-month="{{ month.iso }}">
+              <h3 class="text-lg font-bold text-[#1b392c] mb-3">{{ month.label }}</h3>
+              <div class="appointments-list grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {% for a in month.appointments %}
+                  <div class="tab-card p-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between appointment-item {% if not a.is_future %}opacity-70{% endif %}"
+                       data-appt-id="{{ a.id }}"
+                       data-appt-start-iso="{{ a.start_iso }}">
+                    <div class="appt-main">
+                      <p class="font-medium text-[#1b392c] appt-dt">{{ a.start_display }}</p>
+                      <p class="text-sm text-[#4D4D4D]">
+                        <span data-service-name-original="{{ a.service_original|default_if_none:''|escape }}">{{ a.service_name }}</span>
+                        &middot; {{ a.master_name }}
+                      </p>
+                    </div>
+
+                    {% if a.is_future %}
+                      <div class="flex gap-3 text-sm appt-actions sm:justify-end">
+                        <a href="#"
+                           class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
+                           data-appt-id="{{ a.id }}"
+                           data-i18n="dashboard.appointment.cancel">Cancel</a>
+                        <a href="#"
+                           class="appt-reschedule text-[#1f5f44] hover:opacity-90 underline-offset-4 hover:underline"
+                           data-appt-id="{{ a.id }}"
+                           data-service-id="{{ a.service_id|default:'' }}"
+                           data-i18n="dashboard.appointment.reschedule">Reschedule</a>
+                      </div>
+                    {% else %}
+                      <span class="text-xs text-[#4D4D4D]/70" data-i18n="dashboard.appointment.completed">Completed</span>
+                    {% endif %}
+                  </div>
+                {% empty %}
+                  <p class="col-span-full text-sm text-[#4D4D4D]/70">No appointments this month.</p>
+                {% endfor %}
+              </div>
             </div>
           {% endfor %}
-        </div>
-      {% else %}
-        <p class="text-[#4D4D4D]/70" data-i18n="dashboard.myEmpty">No appointments.</p>
-      {% endif %}
+        {% else %}
+          <p class="text-[#4D4D4D]/70" data-i18n="dashboard.myEmpty">No appointments.</p>
+        {% endif %}
+      </div>
+
+
     </section>
+
 
     <!-- BILLING -->
     <section id="tab-billing" class="tab hidden">

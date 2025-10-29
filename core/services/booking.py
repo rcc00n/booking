@@ -226,6 +226,8 @@ def get_available_slots(
 
     allowed_room_ids = list(dict.fromkeys(service.allowed_rooms.values_list("pk", flat=True)))
     result: Dict[int, List[datetime]] = {m.id: [] for m in masters}
+    if not allowed_room_ids:
+        return result
     if total_minutes <= 0:
         return result
 
