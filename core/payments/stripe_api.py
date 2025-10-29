@@ -49,6 +49,116 @@ if getattr(settings, "STRIPE_API_VERSION", None):
 
 PRIMARY_PREPAYMENT_PERCENTS = (100, 25)
 DEFAULT_PREPAYMENT_PERCENT = 100
+_MAX_META_LEN = 480
+
+
+def _safe_meta(meta: dict[str, Any] | None) -> dict[str, str]:
+    safe: dict[str, str] = {}
+    for key, value in (meta or {}).items():
+        try:
+            if isinstance(value, (dict, list, tuple)):
+                serialized = json.dumps(
+                    value,
+                    default=str,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+            else:
+                serialized = "" if value is None else str(value)
+        except Exception:
+            serialized = "" if value is None else str(value)
+        if len(serialized) > _MAX_META_LEN:
+            serialized = serialized[:_MAX_META_LEN] + "…"
+        safe[str(key)[:40]] = serialized
+    if len(safe) > 45:
+        priority = [
+            "appointment_id",
+            "user_id",
+            "cart_id",
+            "item_count",
+            "grand_total_minor",
+            "subtotal_minor",
+            "tax_minor",
+            "processing_fee_minor",
+            "service_fee_minor",
+            "cart_finalized",
+            "cart_total_minor",
+            "cart_processing_fee_minor",
+            "cart_service_fee_minor",
+        ]
+        trimmed: dict[str, str] = {k: safe[k] for k in priority if k in safe}
+        remaining_slots = max(0, 45 - len(trimmed))
+        if remaining_slots:
+            for key in safe:
+                if key in trimmed:
+                    continue
+                trimmed[key] = safe[key]
+                remaining_slots -= 1
+                if remaining_slots == 0:
+                    break
+        safe = trimmed
+    return safe
+
+
+def _compact_cart_metadata(
+    *,
+    user_id: Any,
+    cart_id: Any,
+    pricing: dict[str, Any] | None,
+    prepayment_percent: int | None = None,
+    partial_total_minor: int | None = None,
+    appointment_id: str | None = None,
+    cart_finalized: bool | None = None,
+) -> dict[str, str]:
+    summary, total_minor = _summarize_pricing(pricing or {})
+    compact = _compact_pricing_summary(summary) if summary else {}
+
+    meta: dict[str, Any] = {
+        "user_id": str(user_id or ""),
+        "cart_id": str(cart_id or ""),
+        "item_count": str(compact.get("item_count", 0)),
+        "currency": str(compact.get("currency", "")),
+        "grand_total_minor": str(compact.get("grand_total_minor", total_minor or 0)),
+        "subtotal_minor": str(compact.get("subtotal_minor", 0)),
+        "tax_minor": str(compact.get("tax_minor", 0)),
+        "processing_fee_minor": str(compact.get("processing_fee_minor", 0)),
+        "service_fee_minor": str(compact.get("service_fee_minor", 0)),
+        "cart_pricing": compact or {},
+    }
+    if prepayment_percent is not None:
+        meta["prepayment_percent"] = str(int(prepayment_percent))
+    if partial_total_minor is not None:
+        meta["partial_total_minor"] = str(int(partial_total_minor))
+    if appointment_id:
+        meta["appointment_id"] = str(appointment_id)
+    if cart_finalized is not None:
+        meta["cart_finalized"] = "true" if cart_finalized else "false"
+
+    return _safe_meta(meta)
+
+
+def _deserialize_cart_pricing(value: Any) -> Optional[dict[str, Any]]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        variants = [value]
+        trimmed = value.strip()
+        if trimmed.endswith("…"):
+            variants.append(trimmed[:-1].rstrip())
+        elif trimmed.endswith("..."):
+            variants.append(trimmed[: -3].rstrip())
+        last_brace = trimmed.rfind("}")
+        if last_brace != -1:
+            variants.append(trimmed[: last_brace + 1])
+        for candidate in variants:
+            candidate = candidate.strip()
+            if not candidate:
+                continue
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+    return None
 
 
 # === Utility helpers ========================================================
@@ -273,9 +383,6 @@ def _charge_captured_at(charge: Optional[dict[str, Any]]) -> Optional[datetime]:
         return None
     return datetime.fromtimestamp(created, tz=dt_timezone.utc)
 
-
-def _metadata_json(value: Any) -> str:
-    return json.dumps(value, default=str)
 
 
 def _coerce_minor(value: Any) -> Optional[int]:
@@ -602,6 +709,7 @@ def _upsert_payment_from_intent(
         except Exception:
             fee_minor = _to_minor_units(Decimal("0.00"))
         metadata.setdefault("card_processing_fee_minor", str(fee_minor))
+    metadata = _safe_meta(metadata)
     raw_response = intent.to_dict_recursive()
     method = _payment_method_from_funding((payment_method_data or {}).get("card", {}).get("funding"))
 
@@ -751,68 +859,115 @@ def _handle_payment_intent_succeeded(intent_obj: Any) -> Payment:
         except PricingComputationError:
             pricing_snapshot = None
 
-    summary = None
+    current_summary = _deserialize_cart_pricing(metadata.get("cart_pricing"))
+    previous_summary = _deserialize_cart_pricing(previous_metadata.get("cart_pricing"))
+
+    summary_data: Optional[dict[str, Any]] = None
     expected_minor = None
-    reuse_previous_summary = bool(previous_metadata.get("cart_pricing")) and not metadata.get("cart_pricing")
+    reuse_previous_summary = bool(previous_summary) and not current_summary
     if reuse_previous_summary:
-        summary = previous_metadata["cart_pricing"]
+        summary_data = previous_summary
         expected_minor = _coerce_minor(
-            summary.get("total")
-            or summary.get("grand_total_minor")
+            summary_data.get("total")
+            or summary_data.get("grand_total_minor")
         )
     else:
-        summary_source = metadata.get("cart_pricing")
-        if not summary_source and pricing_snapshot:
-            summary_source = pricing_snapshot
-        if not summary_source and previous_metadata.get("cart_pricing"):
-            summary_source = previous_metadata["cart_pricing"]
-        if not summary_source:
-            summary_source = metadata or {}
-        summary, expected_minor = _summarize_pricing(summary_source)
-    prepayment_percent = _normalize_prepayment_percent(metadata.get("prepayment_percent"))
-    partial_expected_minor = _coerce_minor(metadata.get("partial_total_minor"))
+        summary_source: Any = current_summary or pricing_snapshot or previous_summary or metadata or {}
+        summary_data, expected_minor = _summarize_pricing(summary_source)
+
+    prepayment_percent = _normalize_prepayment_percent(
+        metadata.get("prepayment_percent")
+        or previous_metadata.get("prepayment_percent")
+    )
+    partial_expected_minor = _coerce_minor(
+        metadata.get("partial_total_minor")
+        or previous_metadata.get("partial_total_minor")
+    )
     if prepayment_percent != DEFAULT_PREPAYMENT_PERCENT and partial_expected_minor is not None:
         expected_minor = partial_expected_minor
 
-    if summary:
-        meta["cart_pricing"] = summary
-        meta["cart_service_fee_minor"] = str(summary.get("service_fee_minor", 0))
+    cart_finalized_now = cart_finalized or created_via_cart_conversion
+    user_id_value = metadata.get("user_id") or previous_metadata.get("user_id")
+    if not user_id_value and profile:
+        user_id_value = str(profile.pk)
+    cart_id_value = metadata.get("cart_id") or previous_metadata.get("cart_id") or ""
+    appointment_id_value = (
+        str(appointment.pk)
+        if appointment
+        else metadata.get("appointment_id") or previous_metadata.get("appointment_id")
+    )
+
+    compact_source = summary_data or pricing_snapshot or previous_summary or current_summary or {}
+    compact_meta = _compact_cart_metadata(
+        user_id=user_id_value,
+        cart_id=cart_id_value,
+        pricing=compact_source if isinstance(compact_source, dict) else {},
+        prepayment_percent=prepayment_percent,
+        partial_total_minor=partial_expected_minor,
+        appointment_id=appointment_id_value,
+        cart_finalized=cart_finalized_now,
+    )
+    if compact_meta:
+        meta.update(compact_meta)
         meta_changed = True
-    if cart_finalized or created_via_cart_conversion:
-        if meta.get("cart_finalized") != "true":
-            meta["cart_finalized"] = "true"
+
+    if summary_data:
+        meta["cart_service_fee_minor"] = str(summary_data.get("service_fee_minor", 0))
+
+    passthrough_keys = (
+        "booking_type",
+        "cart_checkout",
+        "cart_total_minor",
+        "cart_pre_fee_total_minor",
+        "cart_subtotal_minor",
+        "cart_tax_minor",
+        "cart_processing_fee_minor",
+        "cart_service_fee_minor",
+        "cart_currency",
+        "cart_item_count",
+        "partial_base_minor",
+        "partial_processing_fee_minor",
+        "partial_total_minor",
+        "partial_base_decimal",
+        "partial_processing_fee_decimal",
+        "partial_total_decimal",
+    )
+    for key in passthrough_keys:
+        if key in metadata:
+            meta[key] = metadata[key]
             meta_changed = True
 
-    if cart_finalized:
-        intent_amount = getattr(intent, "amount_received", None)
-        if intent_amount is None:
-            intent_amount = getattr(intent, "amount", None)
-        if (
-            isinstance(intent_amount, int)
-            and expected_minor is not None
-            and expected_minor != intent_amount
-        ):
-            meta["pricing_amount_mismatch"] = {
-                "expected": expected_minor,
-                "intent": intent_amount,
-            }
-            logger.warning(
-                "Stripe intent %s amount mismatch (expected %s, got %s)",
-                intent.id,
-                expected_minor,
-                intent_amount,
-            )
-
-    if "cart_pricing" not in meta and "cart_pricing" in previous_metadata:
-        meta["cart_pricing"] = previous_metadata["cart_pricing"]
+    if appointment_id_value and meta.get("appointment_id") != str(appointment_id_value):
+        meta["appointment_id"] = str(appointment_id_value)
         meta_changed = True
 
-    if appointment and metadata.get("appointment_id") != str(appointment.pk):
-        meta["appointment_id"] = str(appointment.pk)
+    if cart_finalized_now and meta.get("cart_finalized") != "true":
+        meta["cart_finalized"] = "true"
         meta_changed = True
+
+    intent_amount = getattr(intent, "amount_received", None)
+    if intent_amount is None:
+        intent_amount = getattr(intent, "amount", None)
+    if (
+        cart_finalized_now
+        and isinstance(intent_amount, int)
+        and expected_minor is not None
+        and expected_minor != intent_amount
+    ):
+        meta["pricing_amount_mismatch"] = {
+            "expected": expected_minor,
+            "intent": intent_amount,
+        }
+        meta_changed = True
+        logger.warning(
+            "Stripe intent %s amount mismatch (expected %s, got %s)",
+            intent.id,
+            expected_minor,
+            intent_amount,
+        )
 
     if meta_changed:
-        payment.metadata = meta
+        payment.metadata = _safe_meta(meta)
         payment.save(update_fields=["metadata", "updated_at"])
 
     _update_appointment_payment_status(appointment, succeeded=True)
@@ -842,7 +997,7 @@ def _handle_payment_intent_failed(intent_obj: Any) -> Payment:
     if error:
         meta = dict(payment.metadata)
         meta["last_payment_error"] = _serialize_stripe_object(error)
-        payment.metadata = meta
+        payment.metadata = _safe_meta(meta)
         payment.save(update_fields=["metadata", "updated_at"])
     _update_appointment_payment_status(appointment, succeeded=False)
     return payment
@@ -941,20 +1096,37 @@ def stripe_create_cart_intent(request):
                 currency=pricing["currency"],
             )
             payment = bundle.payment
-            summary, _ = _summarize_pricing(pricing_snapshot or pricing)
+            summary_source = pricing_snapshot or pricing
+            compact_meta = _compact_cart_metadata(
+                user_id=profile.pk,
+                cart_id=pricing["cart_id"],
+                pricing=summary_source,
+                prepayment_percent=prepayment_percent,
+                partial_total_minor=partial_breakdown["total_minor"],
+                appointment_id=str(appointment.pk),
+                cart_finalized=True,
+            )
             meta = dict(payment.metadata or {})
-            if summary:
-                meta["cart_pricing"] = summary
-            meta["cart_checkout"] = {"mode": "free"}
-            meta["cart_finalized"] = "true"
-            meta["prepayment_percent"] = str(prepayment_percent)
-            meta["partial_base_minor"] = str(partial_breakdown["base_minor"])
-            meta["partial_processing_fee_minor"] = str(partial_breakdown["processing_fee_minor"])
-            meta["partial_total_minor"] = str(partial_breakdown["total_minor"])
-            meta["partial_base_decimal"] = partial_breakdown["base_decimal"]
-            meta["partial_processing_fee_decimal"] = partial_breakdown["processing_fee_decimal"]
-            meta["partial_total_decimal"] = partial_breakdown["total_decimal"]
-            payment.metadata = meta
+            meta.update(compact_meta)
+            meta.update(
+                {
+                    "booking_type": "appointment_cart",
+                    "cart_checkout": {"mode": "free"},
+                    "cart_total_minor": str(pricing.get("total", 0)),
+                    "cart_pre_fee_total_minor": str(pre_fee_minor or 0),
+                    "cart_subtotal_minor": str(pricing.get("subtotal", 0)),
+                    "cart_tax_minor": str(pricing.get("tax_total", 0)),
+                    "cart_processing_fee_minor": str(processing_fee_minor),
+                    "cart_currency": pricing["currency"],
+                    "cart_item_count": str(pricing.get("count", len(pricing.get("items", [])))),
+                    "partial_base_minor": str(partial_breakdown["base_minor"]),
+                    "partial_processing_fee_minor": str(partial_breakdown["processing_fee_minor"]),
+                    "partial_base_decimal": partial_breakdown["base_decimal"],
+                    "partial_processing_fee_decimal": partial_breakdown["processing_fee_decimal"],
+                    "partial_total_decimal": partial_breakdown["total_decimal"],
+                }
+            )
+            payment.metadata = _safe_meta(meta)
             payment.raw_response = {"source": "cart_zero_total"}
             payment.save(update_fields=["metadata", "raw_response", "updated_at"])
             _update_appointment_payment_status(appointment, succeeded=True)
@@ -993,30 +1165,35 @@ def stripe_create_cart_intent(request):
     if service_fee_minor is None:
         service_fee_minor = 0
     charge_amount_minor = partial_breakdown["total_minor"]
-    summary_payload, summary_total_minor = _summarize_pricing(pricing)
-    stripe_metadata = {
-        "user_id": str(profile.pk),
-        "cart_id": str(pricing["cart_id"]),
-        "booking_type": "appointment_cart",
-        "cart_total_minor": str(pricing["total"]),
-        "cart_pre_fee_total_minor": str(pre_fee_minor),
-        "cart_subtotal_minor": str(pricing.get("subtotal", 0)),
-        "cart_tax_minor": str(pricing.get("tax_total", 0)),
-        "cart_processing_fee_minor": str(processing_fee_minor),
-        "cart_service_fee_minor": str(service_fee_minor),
-        "cart_currency": pricing["currency"],
-        "cart_item_count": str(pricing.get("count", len(pricing.get("items", [])))),
-        "cart_finalized": "false",
-        "prepayment_percent": str(prepayment_percent),
-        "partial_base_minor": str(partial_breakdown["base_minor"]),
-        "partial_processing_fee_minor": str(partial_breakdown["processing_fee_minor"]),
-        "partial_total_minor": str(partial_breakdown["total_minor"]),
-        "partial_base_decimal": partial_breakdown["base_decimal"],
-        "partial_processing_fee_decimal": partial_breakdown["processing_fee_decimal"],
-        "partial_total_decimal": partial_breakdown["total_decimal"],
-    }
-    if summary_payload:
-        stripe_metadata["cart_pricing"] = _metadata_json(_compact_pricing_summary(summary_payload))
+    stripe_metadata = dict(
+        _compact_cart_metadata(
+            user_id=profile.pk,
+            cart_id=pricing["cart_id"],
+            pricing=pricing,
+            prepayment_percent=prepayment_percent,
+            partial_total_minor=partial_breakdown["total_minor"],
+            cart_finalized=False,
+        )
+    )
+    stripe_metadata.update(
+        {
+            "booking_type": "appointment_cart",
+            "cart_total_minor": str(pricing.get("total", 0)),
+            "cart_pre_fee_total_minor": str(pre_fee_minor or 0),
+            "cart_subtotal_minor": str(pricing.get("subtotal", 0)),
+            "cart_tax_minor": str(pricing.get("tax_total", 0)),
+            "cart_processing_fee_minor": str(processing_fee_minor),
+            "cart_service_fee_minor": str(service_fee_minor or 0),
+            "cart_currency": pricing["currency"],
+            "cart_item_count": str(pricing.get("count", len(pricing.get("items", [])))),
+            "partial_base_minor": str(partial_breakdown["base_minor"]),
+            "partial_processing_fee_minor": str(partial_breakdown["processing_fee_minor"]),
+            "partial_base_decimal": partial_breakdown["base_decimal"],
+            "partial_processing_fee_decimal": partial_breakdown["processing_fee_decimal"],
+            "partial_total_decimal": partial_breakdown["total_decimal"],
+        }
+    )
+    stripe_metadata = _safe_meta(stripe_metadata)
 
     try:
         intent = stripe.PaymentIntent.create(
@@ -1109,30 +1286,43 @@ def stripe_finalize_cart_booking(request):
             snapshot_for_metadata = compute_appointment_pricing(appointment)
         except PricingComputationError:
             snapshot_for_metadata = None
-    if snapshot_for_metadata:
-        summary_payload, _ = _summarize_pricing(snapshot_for_metadata)
-        if summary_payload:
-            metadata["cart_pricing"] = _metadata_json(_compact_pricing_summary(summary_payload))
-            metadata["cart_service_fee_minor"] = str(summary_payload.get("service_fee_minor", 0))
-        client_profile = getattr(appointment, "client", None)
-        client_user = getattr(client_profile, "user", None)
-        if client_user and not metadata.get("client_name"):
-            metadata["client_name"] = client_user.get_full_name() or client_user.username
-        if client_user and not metadata.get("client_email"):
-            metadata["client_email"] = client_user.email or ""
-        if client_profile and not metadata.get("client_phone"):
-            metadata["client_phone"] = client_profile.phone or ""
 
+    pricing_source: Any = snapshot_for_metadata or _deserialize_cart_pricing(metadata.get("cart_pricing")) or metadata
+    prepayment_value = metadata.get("prepayment_percent")
+    partial_total_value = _coerce_minor(metadata.get("partial_total_minor"))
+    compact_meta = _compact_cart_metadata(
+        user_id=metadata.get("user_id"),
+        cart_id=metadata.get("cart_id"),
+        pricing=pricing_source if isinstance(pricing_source, dict) else pricing_source,
+        prepayment_percent=_normalize_prepayment_percent(prepayment_value),
+        partial_total_minor=partial_total_value,
+        appointment_id=str(appointment.pk),
+        cart_finalized=True,
+    )
+
+    merged_meta = dict(metadata)
+    merged_meta.update(compact_meta)
+
+    client_profile = getattr(appointment, "client", None)
+    client_user = getattr(client_profile, "user", None)
+    if client_user and not merged_meta.get("client_name"):
+        merged_meta["client_name"] = client_user.get_full_name() or client_user.username
+    if client_user and not merged_meta.get("client_email"):
+        merged_meta["client_email"] = client_user.email or ""
+    if client_profile and not merged_meta.get("client_phone"):
+        merged_meta["client_phone"] = client_profile.phone or ""
+
+    safe_metadata = _safe_meta(merged_meta)
     try:
-        stripe.PaymentIntent.modify(payment_intent_id, metadata=metadata)
+        stripe.PaymentIntent.modify(payment_intent_id, metadata=safe_metadata)
     except stripe.error.StripeError as exc:
         logger.warning(
             "Failed to update metadata for payment intent %s: %s",
             payment_intent_id,
             exc,
         )
+    metadata = safe_metadata
 
-    summary_payload, _ = _summarize_pricing(snapshot_for_metadata or metadata)
     with transaction.atomic():
         payment = (
             Payment.objects.select_for_update()
@@ -1141,11 +1331,9 @@ def stripe_finalize_cart_booking(request):
         )
         if payment:
             payment_meta = dict(payment.metadata or {})
-            if summary_payload:
-                payment_meta["cart_pricing"] = summary_payload
-                payment_meta["cart_service_fee_minor"] = str(summary_payload.get("service_fee_minor", 0))
+            payment_meta.update(compact_meta)
             payment_meta["cart_finalized"] = "true"
-            payment.metadata = payment_meta
+            payment.metadata = _safe_meta(payment_meta)
             if payment.appointment_id != appointment.pk:
                 payment.appointment = appointment
             payment.save(update_fields=["metadata", "appointment", "updated_at"])
@@ -1269,11 +1457,13 @@ def stripe_no_show_charge(request):
             off_session=True,
             confirm=True,
             error_on_requires_action=True,
-            metadata={
-                "reason": "no_show",
-                "appointment_id": str(appointment.pk),
-                "user_id": str(profile.pk),
-            },
+            metadata=_safe_meta(
+                {
+                    "reason": "no_show",
+                    "appointment_id": str(appointment.pk),
+                    "user_id": str(profile.pk),
+                }
+            ),
         )
     except stripe.error.CardError as exc:
         logger.warning("Card error during no-show charge for appointment %s: %s", appointment.pk, exc)

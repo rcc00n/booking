@@ -67,6 +67,30 @@ def _parse_metadata(metadata: Any) -> Dict[str, Any]:
     return {}
 
 
+def _load_compact_summary(value: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        variants = [value.strip()]
+        trimmed = value.strip()
+        if trimmed.endswith("…"):
+            variants.append(trimmed[:-1].rstrip())
+        elif trimmed.endswith("..."):
+            variants.append(trimmed[:-3].rstrip())
+        last_brace = trimmed.rfind("}")
+        if last_brace != -1:
+            variants.append(trimmed[: last_brace + 1])
+        for candidate in variants:
+            candidate = candidate.strip()
+            if not candidate:
+                continue
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
 @dataclass
 class PricingLine:
     name: str = ""
@@ -186,12 +210,7 @@ class PricingSummary:
 
 
 def _pricing_from_metadata(payment: Payment, metadata: Dict[str, Any]) -> Optional[PricingSummary]:
-    summary = metadata.get("cart_pricing")
-    if isinstance(summary, str):
-        try:
-            summary = json.loads(summary)
-        except json.JSONDecodeError:
-            summary = None
+    summary = _load_compact_summary(metadata.get("cart_pricing"))
     if not isinstance(summary, dict):
         return None
 

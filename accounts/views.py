@@ -387,6 +387,12 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
             .values("status__name")[:1]
         )
 
+        latest_status_for_item = (
+            AppointmentStatusHistory.objects.filter(appointment_id=OuterRef("appointment_id"))
+            .order_by("-set_at")
+            .values("status__name")[:1]
+        )
+
         # все записи клиента (для статистики/истории)
         items_prefetch = Prefetch(
             "items",
@@ -415,6 +421,21 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         )
         ctx["upcoming_appointments"] = upcoming_qs
         ctx["next_appointment"] = upcoming_qs.first()  # для обратной совместимости
+        if profile:
+            upcoming_items = (
+                AppointmentItem.objects.filter(
+                    appointment__client=profile,
+                    start_time__gte=now,
+                )
+                .select_related("service", "master__user", "appointment__payment_status")
+                .annotate(latest_status=Subquery(latest_status_for_item))
+                .exclude(latest_status="Cancelled")
+                .order_by("start_time")
+            )
+        else:
+            upcoming_items = AppointmentItem.objects.none()
+
+        ctx["upcoming_items"] = upcoming_items
 
         # статистика по месяцам (для графика)
         month_counts = (

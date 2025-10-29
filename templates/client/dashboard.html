@@ -203,7 +203,7 @@
           <span data-i18n="services.userMenu.appointments">Appointments</span>
           <small>Upcoming & history</small>
         </div>
-        {% with count=upcoming_appointments|length %}
+        {% with count=upcoming_items|length %}
           {% if count %}
             <span class="account-menu__badge">{{ count }}</span>
           {% endif %}
@@ -316,7 +316,7 @@
         <div class="stat-grid mt-6">
           <div class="stat-chip">
             <span data-i18n="dashboard.upcomingTitle">Upcoming appointments</span>
-            <strong>{{ upcoming_appointments|length }}</strong>
+            <strong>{{ upcoming_items|length }}</strong>
           </div>
           <div class="stat-chip">
             <span data-i18n="dashboard.recentTitle">Completed visits</span>
@@ -349,24 +349,24 @@
             <h2 class="text-lg font-semibold text-[#1b392c]" data-i18n="dashboard.upcomingTitle">Upcoming appointments</h2>
             <a href="#" class="text-sm text-[#1f5f44] font-semibold" data-tab-jump="appointments">View all</a>
           </div>
-          {% if upcoming_appointments %}
+          {% if upcoming_items %}
             <ul id="upcomingAppointments" class="space-y-4 max-h-64 overflow-y-auto pr-1">
-              {% for a in upcoming_appointments %}
+              {% for it in upcoming_items %}
                 <li class="appointment-item"
-                    data-appt-id="{{ a.id }}"
-                    data-appt-start-iso="{{ a.start_time|utc|date:'c' }}">
+                    data-appt-id="{{ it.appointment.id }}"
+                    data-appt-start-iso="{{ it.start_time|utc|date:'c' }}">
                   <p class="font-semibold text-[#1b392c]">
-                    {{ a.start_time|localtime|date:"d M Y, H:i" }}
+                    {{ it.start_time|localtime|date:"d M Y, H:i" }}
                   </p>
                   <p class="text-sm text-[#4D4D4D]">
-                    <span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span> · {{ a.master.get_full_name }}
+                    <span data-service-name-original="{{ it.service.name|escape }}">{{ it.service.name }}</span> · {{ it.master.get_full_name }}
                   </p>
-                  <p class="text-xs text-[#4D4D4D]/80 mt-1">Payment status: {{ a.payment_status.name|default:"Pending" }}</p>
+                  <p class="text-xs text-[#4D4D4D]/80 mt-1">Payment status: {{ it.appointment.payment_status.name|default:"Pending" }}</p>
                   <div class="mt-2 flex gap-4 text-sm">
                     <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
-                       data-appt-id="{{ a.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>
+                       data-appt-id="{{ it.appointment.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>
                     <a href="#" class="appt-reschedule text-[#1f5f44] hover:opacity-90 underline-offset-4 hover:underline font-semibold"
-                       data-appt-id="{{ a.id }}" data-service-id="{{ a.service.id }}" data-i18n="dashboard.appointment.reschedule">Reschedule</a>
+                       data-appt-id="{{ it.appointment.id }}" data-service-id="{{ it.service.id }}" data-i18n="dashboard.appointment.reschedule">Reschedule</a>
                   </div>
                 </li>
               {% endfor %}

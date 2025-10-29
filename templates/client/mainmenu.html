@@ -3014,10 +3014,7 @@ function updateCartUI(data){
       }
 
       async function requestCartIntent(percent){
-        const payload = {};
-        if (Number.isFinite(percent)){
-          payload.prepayment_percent = percent;
-        }
+        const payload = Number.isFinite(percent) ? { prepayment_percent: Number(percent) } : {};
         const resp = await fetch(apiStripeCartIntent,{
           method:'POST',
           headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
