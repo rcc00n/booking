@@ -2813,16 +2813,50 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 first_name=Coalesce("user__first_name", Value("")),
                 last_name=Coalesce("user__last_name", Value("")),
                 username=Coalesce("user__username", Value("")),
+                email=Coalesce("user__email", Value("")),
+                phone=Coalesce("phone", Value("")),
             )
-            .values("id", "first_name", "last_name", "username")
+            .values("id", "first_name", "last_name", "username", "email", "phone")
             .order_by("user__first_name", "user__last_name", "user__username")
         )
         clients = []
         for row in clients_raw:
-            label = f"{row['first_name']} {row['last_name']}".strip()
+            first_name = (row["first_name"] or "").strip()
+            last_name = (row["last_name"] or "").strip()
+            username = (row["username"] or "").strip()
+            email = (row["email"] or "").strip()
+            phone = (row["phone"] or "").strip()
+
+            label = f"{first_name} {last_name}".strip()
             if not label:
-                label = row["username"] or str(row["id"])
-            clients.append({"id": row["id"], "label": label})
+                label = username or str(row["id"])
+
+            phone_digits = re.sub(r"\D", "", phone)
+            search_sources = [
+                label,
+                first_name,
+                last_name,
+                username,
+                email,
+                phone,
+                phone_digits,
+            ]
+            search_blob = " ".join(filter(None, search_sources)).lower()
+            meta_parts = [p for p in (email, phone) if p]
+            meta = " • ".join(meta_parts)
+
+            clients.append(
+                {
+                    "id": row["id"],
+                    "label": label,
+                    "username": username,
+                    "email": email,
+                    "phone": phone,
+                    "meta": meta,
+                    "search_text": search_blob,
+                    "search_digits": phone_digits,
+                }
+            )
         masters = (
             MasterProfile.objects.select_related("user")
             .annotate(label=Concat("user__user__first_name", Value(" "), "user__user__last_name"))

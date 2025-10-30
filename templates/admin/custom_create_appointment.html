@@ -209,6 +209,8 @@
             white-space:normal;
             line-height:1.35;
         }
+        .combo-item__label{font-weight:600;color:var(--ab-gray-900);}
+        .combo-item__meta{font-size:12px;color:var(--ab-muted);margin-top:2px;}
         .combo-item:hover,
         .combo-item[aria-selected="true"]{
             background:#f3f4f6;
@@ -400,7 +402,16 @@
                         <select id="id_client" name="client" required class="ab-hidden">
                             <option value="">---------</option>
                             {% for c in clients %}
-                                <option value="{{ c.id }}">{{ c.label }}</option>
+                                <option
+                                    value="{{ c.id }}"
+                                    data-label="{{ c.label|default_if_none:''|escape }}"
+                                    data-username="{{ c.username|default_if_none:''|escape }}"
+                                    data-email="{{ c.email|default_if_none:''|escape }}"
+                                    data-phone="{{ c.phone|default_if_none:''|escape }}"
+                                    data-meta="{{ c.meta|default_if_none:''|escape }}"
+                                    data-search="{{ c.search_text|default_if_none:''|escape }}"
+                                    data-search-digits="{{ c.search_digits|default_if_none:''|escape }}"
+                                >{{ c.label }}</option>
                             {% endfor %}
                         </select>
                     </div>  {# ←ВАЖНО: закрываем .combo #}
@@ -590,30 +601,96 @@
             });
 
             /* ────────────── Client combobox ────────────── */
-            if (clientEl && CLIENTS.length) {
-                const hasRealOptions = Array.from(clientEl.options).some(o => o.value);
-                if (!hasRealOptions) {
+            const HTML_ESCAPE_LOOKUP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+            const escapeHtml = (value) => {
+                const raw = value === undefined || value === null ? '' : String(value);
+                return raw.replace(/[&<>"']/g, (ch) => HTML_ESCAPE_LOOKUP[ch]);
+            };
+            const CLIENT_DATA = new Map(CLIENTS.map(c => [String(c.id), c]));
+
+            function hydrateClientOption(option, data) {
+                if (!option) return;
+                const payload = data || {};
+                const label = (payload.label || option.textContent || String(option.value || "")).trim();
+                option.textContent = label;
+                option.dataset.label = label;
+                option.dataset.username = payload.username || "";
+                option.dataset.email = payload.email || "";
+                option.dataset.phone = payload.phone || "";
+                option.dataset.meta = payload.meta || "";
+                const searchText = (payload.search_text || label || "").toString().toLowerCase();
+                option.dataset.search = searchText;
+                option.dataset.searchDigits = payload.search_digits || "";
+            }
+
+            function ensureClientOptionsHydrated() {
+                if (!clientEl) {
+                    return;
+                }
+                const existing = Array.from(clientEl.options).filter(o => o.value);
+                if (!existing.length && CLIENTS.length) {
                     const frag = document.createDocumentFragment();
                     CLIENTS.forEach(c => {
                         const opt = document.createElement('option');
                         opt.value = String(c.id);
-                        opt.textContent = c.label || String(c.id);
+                        hydrateClientOption(opt, c);
                         frag.appendChild(opt);
                     });
                     clientEl.appendChild(frag);
+                    return;
                 }
+                existing.forEach(option => {
+                    const data = CLIENT_DATA.get(String(option.value));
+                    if (data) {
+                        hydrateClientOption(option, data);
+                    } else {
+                        hydrateClientOption(option, {
+                            id: option.value,
+                            label: option.dataset.label || option.textContent || String(option.value),
+                            username: option.dataset.username || "",
+                            email: option.dataset.email || "",
+                            phone: option.dataset.phone || "",
+                            meta: option.dataset.meta || "",
+                            search_text: (option.dataset.search || option.textContent || "").toLowerCase(),
+                            search_digits: option.dataset.searchDigits || (option.dataset.phone || "").replace(/\D+/g, ""),
+                        });
+                    }
+                });
             }
 
+            ensureClientOptionsHydrated();
+
             (function clientComboBox(){
+                if (!clientEl) { return; }
+
                 const input     = document.getElementById('client_combo_input');
                 const listEl    = document.getElementById('client_combo_list');
                 const comboWrap = document.getElementById('client_combo');
 
-                const ALL = Array.from(clientEl.options).filter(o => o.value)
-                    .map(o => ({ id: o.value, label: o.textContent }));
+                function collectClientOptions(){
+                    ensureClientOptionsHydrated();
+                    return Array.from(clientEl.options)
+                        .filter(o => o.value)
+                        .map(option => {
+                            const dataset = option.dataset || {};
+                            const label = (dataset.label || option.textContent || option.value || '').trim();
+                            const email = dataset.email || '';
+                            const phone = dataset.phone || '';
+                            const meta = dataset.meta || [email, phone].filter(Boolean).join(' • ');
+                            const searchText = (dataset.search || label || '').toString().toLowerCase();
+                            const searchDigits = dataset.searchDigits || phone.replace(/\D+/g, '');
+                            const username = dataset.username || '';
+                            return { id: option.value, label, meta, email, phone, username, searchText, searchDigits };
+                        });
+                }
 
+                let ALL = collectClientOptions();
                 let filtered = ALL.slice();
                 let activeIdx = -1;
+
+                function refreshAll(){
+                    ALL = collectClientOptions();
+                }
 
                 function render(items){
                     listEl.innerHTML = '';
@@ -626,8 +703,13 @@
                     items.forEach((it, idx) => {
                         const div = document.createElement('div');
                         div.className = 'combo-item'; div.setAttribute('role','option');
-                        div.dataset.id = it.id; div.textContent = it.label;
-                        if (idx === activeIdx) div.setAttribute('aria-selected','true');
+                        div.dataset.id = it.id;
+                        if (idx === activeIdx) {
+                            div.setAttribute('aria-selected','true');
+                        }
+                        const labelHtml = `<div class="combo-item__label">${escapeHtml(it.label)}</div>`;
+                        const metaHtml = it.meta ? `<div class="combo-item__meta">${escapeHtml(it.meta)}</div>` : '';
+                        div.innerHTML = labelHtml + metaHtml;
                         div.addEventListener('mousedown', (e) => { e.preventDefault(); choose(it); });
                         listEl.appendChild(div);
                     });
@@ -635,12 +717,38 @@
                 function open(){ comboWrap.classList.add('combo-open'); input.setAttribute('aria-expanded','true'); }
                 function close(){ comboWrap.classList.remove('combo-open'); input.setAttribute('aria-expanded','false'); activeIdx = -1; }
                 function filter(term){
-                    const t = (term||'').trim().toLowerCase();
-                    filtered = t ? ALL.filter(x => x.label.toLowerCase().includes(t)) : ALL.slice();
-                    activeIdx = filtered.length ? 0 : -1; render(filtered);
+                    refreshAll();
+                    const raw = (term || '').trim();
+                    if (!raw) {
+                        filtered = ALL.slice();
+                        activeIdx = filtered.length ? 0 : -1;
+                        render(filtered);
+                        return;
+                    }
+                    const lower = raw.toLowerCase();
+                    const tokens = lower.split(/\s+/).filter(Boolean);
+                    const digits = raw.replace(/\D+/g, '');
+
+                    filtered = ALL.filter(entry => {
+                        const usernameLc = entry.username ? entry.username.toLowerCase() : '';
+                        const matchesTokens = tokens.every(token => {
+                            if (!token) { return true; }
+                            return entry.searchText.includes(token) || usernameLc.includes(token);
+                        });
+                        if (matchesTokens) {
+                            return true;
+                        }
+                        if (digits && entry.searchDigits) {
+                            return entry.searchDigits.includes(digits);
+                        }
+                        return false;
+                    });
+                    activeIdx = filtered.length ? 0 : -1;
+                    render(filtered);
                 }
                 function choose(item){
                     input.value = item.label;
+                    input.title = item.meta ? `${item.label} — ${item.meta}` : item.label;
                     clientEl.value = item.id;
                     clientEl.dispatchEvent(new Event('change', { bubbles:true }));
                     close();
@@ -648,18 +756,57 @@
 
                 if (POSTED_CLIENT){
                     const found = ALL.find(x => String(x.id) === String(POSTED_CLIENT));
-                    if (found){ clientEl.value = found.id; input.value = found.label; }
+                    if (found){
+                        clientEl.value = found.id;
+                        input.value = found.label;
+                        input.title = found.meta ? `${found.label} — ${found.meta}` : found.label;
+                    }
                 }
                 input.addEventListener('focus', () => { filter(input.value); open(); });
                 input.addEventListener('click',  () => { filter(input.value); open(); });
                 input.addEventListener('input', () => { filter(input.value); open(); clientEl.value = ''; });
 
                 input.addEventListener('keydown', (e) => {
-                    if (!comboWrap.classList.contains('combo-open') && (e.key==='ArrowDown'||e.key==='ArrowUp')){ open(); render(filtered); return; }
-                    if (e.key==='ArrowDown'){ e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx+1)%filtered.length; render(filtered);} }
-                    if (e.key==='ArrowUp'){   e.preventDefault(); if (filtered.length){ activeIdx=(activeIdx-1+filtered.length)%filtered.length; render(filtered);} }
-                    if (e.key==='Enter'){ if (comboWrap.classList.contains('combo-open') && filtered[activeIdx]){ e.preventDefault(); choose(filtered[activeIdx]); } }
-                    if (e.key==='Escape'){ close(); }
+                    const isOpen = comboWrap.classList.contains('combo-open');
+                    if (!isOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                        open();
+                        render(filtered);
+                        return;
+                    }
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        if (filtered.length) {
+                            activeIdx = (activeIdx + 1) % filtered.length;
+                            render(filtered);
+                        }
+                    }
+                    if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        if (filtered.length) {
+                            activeIdx = (activeIdx - 1 + filtered.length) % filtered.length;
+                            render(filtered);
+                        }
+                    }
+                    if (e.key === 'Enter') {
+                        if (comboWrap.classList.contains('combo-open') && filtered[activeIdx]) {
+                            e.preventDefault();
+                            choose(filtered[activeIdx]);
+                        }
+                    }
+                    if (e.key === 'Escape') {
+                        close();
+                    }
+                });
+                clientEl.addEventListener('change', () => {
+                    refreshAll();
+                    const current = ALL.find(x => String(x.id) === String(clientEl.value));
+                    if (current) {
+                        input.value = current.label;
+                        input.title = current.meta ? `${current.label} — ${current.meta}` : current.label;
+                    } else if (!clientEl.value) {
+                        input.value = '';
+                        input.title = '';
+                    }
                 });
                 document.addEventListener('click', (e) => { if (!comboWrap.contains(e.target)) close(); });
             })();
@@ -2243,7 +2390,10 @@
 
             // init
             (function init(){
-                if (POSTED_CLIENT){ clientEl.value = POSTED_CLIENT; }
+                if (POSTED_CLIENT){
+                    clientEl.value = POSTED_CLIENT;
+                    clientEl.dispatchEvent(new Event('change', { bubbles: true }));
+                }
 
                 if (IS_MASTER && CURRENT_MASTER_ID){
                     if (!INITIAL_FIRST || typeof INITIAL_FIRST !== 'object') window.INITIAL_FIRST = {};
@@ -2285,8 +2435,8 @@
 
             document.getElementById('appt-form').addEventListener('submit', (e) => {
                 updateSerializedPayload();
-                if (!clientEl.value){ e.preventDefault(); alert('Выберите клиента.'); return; }
-                if (container.querySelectorAll('.ab-item').length === 0){ e.preventDefault(); alert('Добавьте хотя бы одну услугу.'); return; }
+                if (!clientEl.value){ e.preventDefault(); alert('Please choose a client.'); return; }
+                if (container.querySelectorAll('.ab-item').length === 0){ e.preventDefault(); alert('Please add at least one service.'); return; }
                 if (IS_MASTER){
                     container.querySelectorAll('select.js-master').forEach(sel => {
                         if (sel.disabled){ sel.value = CURRENT_MASTER_ID; ensureHiddenClone(sel); }
