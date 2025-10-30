@@ -2810,22 +2810,29 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         clients_raw = (
             UserProfile.objects.select_related("user")
             .annotate(
-                first_name=Coalesce("user__first_name", Value("")),
-                last_name=Coalesce("user__last_name", Value("")),
-                username=Coalesce("user__username", Value("")),
-                email=Coalesce("user__email", Value("")),
-                phone=Coalesce("phone", Value("")),
+                first_name_value=Coalesce("user__first_name", Value("")),
+                last_name_value=Coalesce("user__last_name", Value("")),
+                username_value=Coalesce("user__username", Value("")),
+                email_value=Coalesce("user__email", Value("")),
+                phone_value=Coalesce("phone", Value("")),
             )
-            .values("id", "first_name", "last_name", "username", "email", "phone")
+            .values(
+                "id",
+                "first_name_value",
+                "last_name_value",
+                "username_value",
+                "email_value",
+                "phone_value",
+            )
             .order_by("user__first_name", "user__last_name", "user__username")
         )
         clients = []
         for row in clients_raw:
-            first_name = (row["first_name"] or "").strip()
-            last_name = (row["last_name"] or "").strip()
-            username = (row["username"] or "").strip()
-            email = (row["email"] or "").strip()
-            phone = (row["phone"] or "").strip()
+            first_name = (row["first_name_value"] or "").strip()
+            last_name = (row["last_name_value"] or "").strip()
+            username = (row["username_value"] or "").strip()
+            email = (row["email_value"] or "").strip()
+            phone = (row["phone_value"] or "").strip()
 
             label = f"{first_name} {last_name}".strip()
             if not label:
