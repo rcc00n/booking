@@ -18,8 +18,8 @@ import stripe
 
 from core.models import (
     Appointment, ServiceCategory, Service, PromoCode,
-    AppointmentStatusHistory, MasterProfile, UserProfile, CancellationReason,
-    AppointmentItem, BookingCart, BookingCartItem, Payment, ClientIntakeForm,
+    AppointmentStatusHistory, AppointmentItemStatusHistory, MasterProfile, UserProfile, CancellationReason,
+    AppointmentItem, BookingCart, BookingCartItem, Payment, ClientIntakeForm, ServiceMaster,
 )
 from core.services.booking import (
     get_available_slots,
@@ -29,10 +29,12 @@ from core.services.booking import (
     _tz_aware,
     create_appointment_from_cart_items,
 )
+from core.services.item_status import record_item_status
 from accounts.utils import build_autofill_defaults
 from core.services import payments as payment_services
 from core.services.pricing import compute_cart_pricing, get_available_prepayment_percents
 from core.utils.fees import card_processing_fee
+from core.tasks import send_item_cancellation_email, send_item_confirmation_email
 
 def _build_catalog_context(request):
     """Общий конструктор контекста каталога."""
@@ -517,6 +519,191 @@ def _status(name: str) -> AppointmentStatus:
     obj, _ = AppointmentStatus.objects.get_or_create(name=name)
     return obj
 
+
+
+def _fetch_admin_item(item_id):
+    return (
+        AppointmentItem.objects.select_related(
+            "appointment__client__user",
+            "appointment__payment_status",
+            "service",
+            "status",
+        )
+        .prefetch_related(
+            Prefetch(
+                "status_history",
+                queryset=AppointmentItemStatusHistory.objects.select_related(
+                    "status", "set_by"
+                ).order_by("-set_at", "-id"),
+                to_attr="_export_status_history",
+            )
+        )
+        .filter(pk=item_id)
+        .first()
+    )
+
+
+@staff_member_required
+@require_POST
+@csrf_protect
+def admin_item_status_update(request, item_id):
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+
+    status_value = payload.get("status") or payload.get("code") or ""
+    status_code = str(status_value).upper().strip()
+    if not status_code:
+        return JsonResponse({"error": "Status code required"}, status=400)
+    allowed_codes = {"BOOKED", "CONFIRMED", "CANCELLED", "COMPLETED"}
+    if status_code not in allowed_codes:
+        return JsonResponse({"error": f"Unsupported status '{status_code}'"}, status=400)
+
+    item = _fetch_admin_item(item_id)
+    if not item:
+        return JsonResponse({"error": "Item not found"}, status=404)
+
+    note = payload.get("note")
+    reason = payload.get("reason")
+    notify = payload.get("notify", True)
+    set_by_id = getattr(request.user, "id", None)
+
+    result = record_item_status(
+        item,
+        status_code,
+        set_by_user_id=set_by_id,
+        note=note,
+    )
+
+    item.refresh_from_db(fields=["status"])
+
+    appointment = (
+        Appointment.objects.with_aggregated_status()
+        .filter(pk=item.appointment_id)
+        .only("pk")
+        .first()
+    )
+
+    status_obj = getattr(item, "status", None) or getattr(result, "status", None)
+    status_label = getattr(status_obj, "name", "") or status_code.title()
+    status_code_resolved = getattr(status_obj, "code", "") or status_code
+
+    if status_code == "CANCELLED" and notify:
+        send_item_cancellation_email.delay(str(item.pk), reason=reason)
+    elif status_code == "CONFIRMED" and payload.get("trigger_confirmation", False):
+        send_item_confirmation_email.delay(str(item.pk))
+
+    return JsonResponse({
+        "ok": True,
+        "item": {
+            "id": str(item.pk),
+            "status": {
+                "code": status_code_resolved,
+                "label": status_label,
+            },
+        },
+        "appointment": {
+            "id": str(item.appointment_id),
+            "aggregated_status": {
+                "code": getattr(appointment, "aggregated_status_code", ""),
+                "label": getattr(appointment, "aggregated_status", ""),
+            },
+        },
+    })
+
+
+@staff_member_required
+@require_POST
+@csrf_protect
+def admin_item_reschedule(request, item_id):
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+
+    start_iso = payload.get("start_time")
+    if not start_iso:
+        return JsonResponse({"error": "start_time required"}, status=400)
+
+    try:
+        new_start = parse_datetime(start_iso) or _tz_aware(datetime.fromisoformat(start_iso))
+        if not timezone.is_aware(new_start):
+            new_start = _tz_aware(new_start)
+    except Exception:
+        return JsonResponse({"error": "invalid start_time"}, status=400)
+
+    item = _fetch_admin_item(item_id)
+    if not item:
+        return JsonResponse({"error": "Item not found"}, status=404)
+
+    master_id = payload.get("master")
+    if master_id:
+        new_master = get_object_or_404(MasterProfile, pk=master_id)
+        if not ServiceMaster.objects.filter(service=item.service, master=new_master).exists():
+            return JsonResponse({"error": "master can't perform this service"}, status=400)
+        item.master = new_master
+
+    item.start_time = new_start
+
+    try:
+        item.full_clean()
+    except ValidationError as exc:
+        return JsonResponse({"error": exc.message_dict}, status=400)
+
+    with transaction.atomic():
+        update_fields = {"start_time", "end_time", "room"}
+        if master_id:
+            update_fields.add("master")
+        item.save(update_fields=sorted(update_fields))
+        appointment = item.appointment
+        appointment.sync_start_time_from_items(save=True)
+        appointment.recompute_totals(save=True)
+        AppointmentStatusHistory.objects.create(
+            appointment=appointment,
+            status=_status("Rescheduled"),
+            set_by=request.user.userprofile,
+        )
+
+    appointment = (
+        Appointment.objects.with_aggregated_status()
+        .filter(pk=item.appointment_id)
+        .only("pk", "start_time")
+        .first()
+    )
+
+    def _master_display(appt):
+        master_obj = getattr(appt, "master", None)
+        if not master_obj:
+            return ""
+        profile = getattr(master_obj, "user", None)
+        user_obj = getattr(profile, "user", None) or profile
+        if not user_obj:
+            return ""
+        full_name = getattr(user_obj, "get_full_name", lambda: "")()
+        username = getattr(user_obj, "username", "")
+        return full_name or username or ""
+
+    item.refresh_from_db()
+
+    return JsonResponse({
+        "ok": True,
+        "item": {
+            "id": str(item.pk),
+            "start_time": item.start_time.isoformat(),
+            "master_id": str(item.master_id) if item.master_id else "",
+        },
+        "appointment": {
+            "id": str(item.appointment_id),
+            "start_time": appointment.start_time.isoformat() if appointment else "",
+            "master": _master_display(appointment) if appointment else "",
+            "aggregated_status": {
+                "code": getattr(appointment, "aggregated_status_code", ""),
+                "label": getattr(appointment, "aggregated_status", ""),
+            },
+        },
+    })
+
 @login_required
 @require_POST
 @csrf_protect
@@ -530,42 +717,107 @@ def api_appointment_cancel(request, appt_id):
         ),
         pk=appt_id,
     )
-    # только владелец или staff
-
+    # Legacy clients can call this endpoint; staff always allowed.
     if not (request.user.is_staff or appt.client_id == request.user.userprofile.id):
         return HttpResponseForbidden("not allowed")
 
     try:
-        payload = json.loads(request.body.decode("utf-8"))
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
     except Exception:
         payload = {}
 
+    item_id = payload.get("item_id")
+    reason_text = payload.get("reason") or payload.get("note")
     reason_id = payload.get("reason_id")
-    reason_obj = None
-    if reason_id:
-        reason_obj = CancellationReason.objects.filter(pk=reason_id).first()
+    reason_obj = CancellationReason.objects.filter(pk=reason_id).first() if reason_id else None
+    set_by_user_id = getattr(request.user, "id", None)
 
-    cancelled = _status("Cancelled")
-    # уже отменена?
-    if appt.appointmentstatushistory_set.filter(status=cancelled).exists():
-        return JsonResponse({"ok": True, "already": True})
-
-    with transaction.atomic():
-        AppointmentStatusHistory.objects.create(
-            appointment=appt,
-            status=cancelled,
-            set_by=request.user.userprofile,
-            cancellation_reason=reason_obj,
+    def _aggregated_payload() -> dict[str, str]:
+        row = (
+            Appointment.objects.with_aggregated_status()
+            .filter(pk=appt.pk)
+            .values("_aggregated_status_code", "_aggregated_status_label")
+            .first()
         )
-    return JsonResponse({"ok": True})
+        if not row:
+            return {"code": "", "label": ""}
+        return {"code": row["_aggregated_status_code"], "label": row["_aggregated_status_label"]}
+
+    if item_id:
+        item = (
+            appt.items.select_related("service", "master", "status")
+            .filter(pk=item_id)
+            .first()
+        )
+        if not item:
+            return JsonResponse({"error": "item not found"}, status=404)
+        result = record_item_status(
+            item,
+            "CANCELLED",
+            set_by_user_id=set_by_user_id,
+            note=reason_text,
+        )
+        send_item_cancellation_email.delay(str(item.pk), reason=reason_text)
+        aggregated_status = _aggregated_payload()
+        item_status = {"code": result.status.code, "label": result.status.name}
+        return JsonResponse(
+            {
+                "ok": True,
+                "appointment_id": str(appt.pk),
+                "item_id": str(item.pk),
+                "item_status": item_status,
+                "appointment_aggregated_status": aggregated_status,
+            }
+        )
+
+    # DEPRECATED: appointment-level cancellation path. Applies to all active items.
+    cancellable_items = list(
+        appt.items.with_current_status().select_related("service", "status")
+    )
+    updated_items: list[str] = []
+    for candidate in cancellable_items:
+        current_code = (
+            (candidate.current_status_code or "")
+            or (getattr(getattr(candidate, "status", None), "code", ""))
+        ).upper()
+        if current_code == "CANCELLED":
+            continue
+        record_item_status(
+            candidate,
+            "CANCELLED",
+            set_by_user_id=set_by_user_id,
+            note=reason_text,
+        )
+        updated_items.append(str(candidate.pk))
+        send_item_cancellation_email.delay(str(candidate.pk), reason=reason_text)
+
+    if updated_items:
+        with transaction.atomic():
+            AppointmentStatusHistory.objects.create(
+                appointment=appt,
+                status=_status("Cancelled"),
+                set_by=request.user.userprofile,
+                cancellation_reason=reason_obj,
+            )
+
+    aggregated_status = _aggregated_payload()
+    return JsonResponse(
+        {
+            "ok": True,
+            "appointment_id": str(appt.pk),
+            "item_ids": updated_items,
+            "item_status": {"code": "CANCELLED", "label": "Cancelled"},
+            "appointment_aggregated_status": aggregated_status,
+            "deprecated": True,
+        }
+    )
 
 @login_required
 @require_POST
 @csrf_protect
 def api_appointment_reschedule(request, appt_id):
     """
-    JSON: { "start_time": "<ISO8601>", "master": <user_id optional> }
-    Меняет время (и по желанию мастера) с валидацией Appointment.clean().
+    JSON: { "start_time": "<ISO8601>", "master": <user_id optional>, "item_id": <uuid optional> }
     """
     appt = get_object_or_404(
         Appointment.objects.select_related("client").prefetch_related(
@@ -588,7 +840,6 @@ def api_appointment_reschedule(request, appt_id):
     if not start_iso:
         return HttpResponseBadRequest("start_time required")
 
-    # разбираем дату/время
     try:
         new_start = parse_datetime(start_iso) or _tz_aware(datetime.fromisoformat(start_iso))
         if not timezone.is_aware(new_start):
@@ -596,41 +847,100 @@ def api_appointment_reschedule(request, appt_id):
     except Exception:
         return HttpResponseBadRequest("invalid start_time")
 
-    # смена мастера (опционально)
-    master_id = payload.get("master")
-    primary_item = appt.primary_item
-    if not primary_item:
-        return HttpResponseBadRequest("appointment has no items")
+    item_id = payload.get("item_id")
+    legacy_mode = False
+    if item_id:
+        item = (
+            appt.items.select_related("service", "master")
+            .filter(pk=item_id)
+            .first()
+        )
+        if not item:
+            return JsonResponse({"error": "item not found"}, status=404)
+    else:
+        # DEPRECATED: fallback to the primary appointment item.
+        item = appt.primary_item
+        if not item:
+            return HttpResponseBadRequest("appointment has no items")
+        legacy_mode = True
 
+    master_id = payload.get("master")
     if master_id:
         new_master = get_object_or_404(MasterProfile, pk=master_id)
-        # мастер должен уметь услугу
-        if not ServiceMaster.objects.filter(service=primary_item.service, master=new_master).exists():
+        if not ServiceMaster.objects.filter(service=item.service, master=new_master).exists():
             return HttpResponseBadRequest("master can't perform this service")
-        primary_item.master = new_master
+        item.master = new_master
 
-    primary_item.start_time = new_start
+    item.start_time = new_start
+    computed_end = getattr(item, "compute_end_time", None)
+    if callable(computed_end):
+        end_val = computed_end()
+        if end_val is not None:
+            item.end_time = end_val
 
-    # валидация пересечений/комнат/отпусков
-    primary_item.full_clean()
+    item.full_clean()
     with transaction.atomic():
-        primary_item.save()
+        item.save()
         appt.sync_start_time_from_items(save=True)
         appt.recompute_totals(save=True)
-        # история статусов
         AppointmentStatusHistory.objects.create(
             appointment=appt,
             status=_status("Rescheduled"),
             set_by=request.user.userprofile,
         )
 
-    return JsonResponse({"ok": True, "appointment": {
-        "id": str(appt.pk),
-        "start_time": appt.start_time.isoformat(),
-        "master": appt.master.user.get_full_name() or appt.master.user.username if appt.master else ""
-    }})
+    def _aggregated_payload() -> dict[str, str]:
+        row = (
+            Appointment.objects.with_aggregated_status()
+            .filter(pk=appt.pk)
+            .values("_aggregated_status_code", "_aggregated_status_label", "start_time")
+            .first()
+        )
+        if not row:
+            return {"code": "", "label": ""}
+        appt.__dict__["start_time"] = row.get("start_time") or appt.start_time
+        return {"code": row["_aggregated_status_code"], "label": row["_aggregated_status_label"]}
 
+    item.refresh_from_db()
 
+    status_obj = getattr(item, "status", None)
+    status_code = (getattr(status_obj, "code", "") or "").upper() or "BOOKED"
+    status_label = getattr(status_obj, "name", None) or status_code.title()
+    item_status = {"code": status_code, "label": status_label}
+    aggregated_status = _aggregated_payload()
+
+    appt_master = getattr(appt, "master", None)
+    master_display = ""
+    if appt_master:
+        profile = getattr(appt_master, "user", None)
+        user_obj = getattr(profile, "user", None) or profile
+        if user_obj:
+            full_name = getattr(user_obj, "get_full_name", lambda: "")()
+            username = getattr(user_obj, "username", "")
+            master_display = full_name or username or ""
+
+    return JsonResponse({
+        "ok": True,
+        "appointment_id": str(appt.pk),
+        "item_id": str(item.pk),
+        "item": {
+            "id": str(item.pk),
+            "start_time": item.start_time.isoformat(),
+            "master_id": str(item.master_id) if item.master_id else "",
+        },
+        "item_status": item_status,
+        "appointment": {
+            "id": str(appt.pk),
+            "start_time": appt.start_time.isoformat() if appt.start_time else "",
+            "master": master_display,
+            "aggregated_status": {
+                "code": aggregated_status["code"],
+                "label": aggregated_status["label"],
+            },
+        },
+        "appointment_aggregated_status": aggregated_status,
+        "deprecated": legacy_mode,
+    })
 
 @require_GET
 def service_search(request):

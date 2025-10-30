@@ -35,7 +35,6 @@ from django.db.models.functions import TruncMonth
 from core.models import (
     Service,
     Appointment,
-    AppointmentStatusHistory,
     UserProfile,
     AppointmentItem,
     Product,
@@ -264,15 +263,9 @@ class DashboardAppointmentCard:
     payment_status: str | None
     price: str | None
     is_future: bool
-
-
-def _dashboard_primary_item(appointment: Appointment) -> AppointmentItem | None:
-    items = getattr(appointment, "prefetched_items", None)
-    if items is None:
-        items = list(
-            appointment.items.select_related("service", "master__user").order_by("start_time")
-        )
-    return items[0] if items else None
+    aggregated_status_code: str
+    aggregated_status_label: str
+    items: list[dict[str, object]]
 
 
 def _dashboard_master_name(item: AppointmentItem | None) -> str:
@@ -315,7 +308,13 @@ def build_dashboard_appointments(
             }
             grouped[month_anchor] = bucket
 
-        item = _dashboard_primary_item(appointment)
+        items = getattr(appointment, "prefetched_items", None)
+        if items is None:
+            items = list(
+                appointment.items.select_related("service", "master__user").order_by("start_time")
+            )
+
+        item = items[0] if items else None
         service_original = ""
         service_name = "Service"
         service_id = None
@@ -326,6 +325,40 @@ def build_dashboard_appointments(
                 service_id = str(item.service_id)
 
         start_iso = start_local.isoformat()
+        aggregated_code = getattr(appointment, "aggregated_status_code", "") or "BOOKED"
+        aggregated_label = getattr(appointment, "aggregated_status", "") or aggregated_code.title()
+
+        items_payload: list[dict[str, object]] = []
+        for appt_item in items:
+            status_code = (getattr(appt_item, "current_status_code", "") or "").upper()
+            if not status_code:
+                status_obj = getattr(appt_item, "status", None)
+                status_code = (getattr(status_obj, "code", "") or "").upper() or "BOOKED"
+            status_label = (
+                getattr(appt_item, "current_status_label", None)
+                or getattr(getattr(appt_item, "status", None), "name", None)
+                or status_code.title()
+            )
+            item_start_display = ""
+            item_is_future = False
+            if appt_item.start_time:
+                item_start_local = timezone.localtime(appt_item.start_time, tz)
+                item_start_display = date_format(item_start_local, "d M Y, H:i")
+                item_is_future = item_start_local >= now_local
+            items_payload.append(
+                {
+                    "id": str(appt_item.pk),
+                    "service_name": getattr(appt_item.service, "name", "") if appt_item.service else "",
+                    "master_name": _dashboard_master_name(appt_item),
+                    "start_display": item_start_display,
+                    "service_id": str(appt_item.service_id) if getattr(appt_item, "service_id", None) else "",
+                    "status_code": status_code,
+                    "status_label": status_label,
+                    "is_future": item_is_future,
+                    "can_manage": item_is_future and status_code != "CANCELLED",
+                }
+            )
+
         card = DashboardAppointmentCard(
             id=str(appointment.pk),
             start_iso=start_iso,
@@ -337,6 +370,9 @@ def build_dashboard_appointments(
             payment_status=appointment.payment_status.name if appointment.payment_status else None,
             price=str(appointment.final_price) if appointment.final_price is not None else None,
             is_future=start_local >= now_local,
+            aggregated_status_code=aggregated_code,
+            aggregated_status_label=aggregated_label,
+            items=items_payload,
         )
         bucket["appointments"].append(card)
 
@@ -381,31 +417,22 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         ctx["services"] = Service.objects.filter(is_active=True).order_by("name")
 
         # подзапрос на последний статус записи
-        latest_status = (
-            AppointmentStatusHistory.objects.filter(appointment_id=OuterRef("pk"))
-            .order_by("-set_at")
-            .values("status__name")[:1]
-        )
-
-        latest_status_for_item = (
-            AppointmentStatusHistory.objects.filter(appointment_id=OuterRef("appointment_id"))
-            .order_by("-set_at")
-            .values("status__name")[:1]
-        )
-
         # все записи клиента (для статистики/истории)
         items_prefetch = Prefetch(
             "items",
-            queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
+            queryset=(
+                AppointmentItem.objects.with_current_status()
+                .select_related("service", "master__user")
+                .order_by("start_time")
+            ),
             to_attr="prefetched_items",
         )
 
         qs = (
-            Appointment.objects
+            Appointment.objects.with_aggregated_status()
             .filter(client=getattr(user, "userprofile", None))
             .select_related("payment_status")
             .prefetch_related(items_prefetch)
-            .annotate(current_status=Subquery(latest_status))
             .order_by("-start_time")
         )
         ctx["appointments"] = qs
@@ -416,24 +443,40 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         # 🔹 все будущие (по возрастанию), исключая отменённые
         upcoming_qs = (
             qs.filter(start_time__gte=now)
-              .exclude(current_status="Cancelled")
+              .exclude(_aggregated_status_code="CANCELLED")
               .order_by("start_time")
         )
         ctx["upcoming_appointments"] = upcoming_qs
         ctx["next_appointment"] = upcoming_qs.first()  # для обратной совместимости
         if profile:
-            upcoming_items = (
-                AppointmentItem.objects.filter(
+            upcoming_items_qs = (
+                AppointmentItem.objects.with_current_status()
+                .filter(
                     appointment__client=profile,
                     start_time__gte=now,
                 )
+                .exclude(current_status_code="CANCELLED")
                 .select_related("service", "master__user", "appointment__payment_status")
-                .annotate(latest_status=Subquery(latest_status_for_item))
-                .exclude(latest_status="Cancelled")
                 .order_by("start_time")
             )
+            upcoming_items = list(upcoming_items_qs)
+            if upcoming_items:
+                appointment_ids = {item.appointment_id for item in upcoming_items}
+                aggregated_rows = (
+                    Appointment.objects.with_aggregated_status()
+                    .filter(pk__in=appointment_ids)
+                    .values("id", "_aggregated_status_code", "_aggregated_status_label")
+                )
+                aggregated_map = {row["id"]: row for row in aggregated_rows}
+                for item in upcoming_items:
+                    row = aggregated_map.get(item.appointment_id)
+                    if row and hasattr(item, "appointment"):
+                        item.appointment._cache_aggregated_status(
+                            row["_aggregated_status_code"],
+                            row["_aggregated_status_label"],
+                        )
         else:
-            upcoming_items = AppointmentItem.objects.none()
+            upcoming_items = []
 
         ctx["upcoming_items"] = upcoming_items
 

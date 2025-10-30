@@ -171,6 +171,179 @@
             uiSelect.appendChild(buildOption(p.id, p.text));
         });
     }
+
+    const ITEM_STATUS_CLASSES = {
+        BOOKED: "status-booked",
+        CONFIRMED: "status-confirmed",
+        COMPLETED: "status-completed",
+        CANCELLED: "status-cancelled",
+    };
+    const ITEM_STATUS_LABELS = {
+        BOOKED: "Booked",
+        CONFIRMED: "Confirmed",
+        COMPLETED: "Completed",
+        CANCELLED: "Cancelled",
+    };
+    const ACTION_STATUS_MAP = {
+        confirm: "CONFIRMED",
+        complete: "COMPLETED",
+        cancel: "CANCELLED",
+    };
+    const STATUS_CLASS_VALUES = Object.values(ITEM_STATUS_CLASSES);
+
+    function getCsrfToken() {
+        const input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        return (input && input.value) || "";
+    }
+
+    function normaliseStatusCode(value) {
+        if (!value) return "BOOKED";
+        return String(value).trim().toUpperCase();
+    }
+
+    function resolveStatusLabel(code, fallback) {
+        const norm = normaliseStatusCode(code);
+        if (fallback && String(fallback).trim()) {
+            return String(fallback);
+        }
+        return ITEM_STATUS_LABELS[norm] || norm.charAt(0) + norm.slice(1).toLowerCase();
+    }
+
+    function updateItemStatusPill(itemEl, code, label) {
+        if (!itemEl) return;
+        const pill = itemEl.querySelector('[data-role="status-pill"]');
+        if (!pill) return;
+        const normCode = normaliseStatusCode(code);
+        const resolvedLabel = resolveStatusLabel(normCode, label || itemEl.dataset.statusLabel);
+        pill.textContent = resolvedLabel;
+        STATUS_CLASS_VALUES.forEach(cls => pill.classList.remove(cls));
+        const className = ITEM_STATUS_CLASSES[normCode] || ITEM_STATUS_CLASSES.BOOKED;
+        pill.classList.add(className);
+        pill.dataset.statusCode = normCode;
+        itemEl.dataset.statusCode = normCode;
+        itemEl.dataset.statusLabel = resolvedLabel;
+    }
+
+    function syncStatusButtons(itemEl, currentCode) {
+        const norm = normaliseStatusCode(currentCode);
+        const hasItemId = !!itemEl.dataset.itemId;
+        itemEl.querySelectorAll(".ab-item-status-btn").forEach(btn => {
+            const action = btn.dataset.action || "";
+            const targetCode = ACTION_STATUS_MAP[action] || "";
+            if (!hasItemId) {
+                btn.disabled = true;
+                btn.classList.add("disabled");
+                return;
+            }
+            btn.disabled = targetCode === norm;
+            if (btn.disabled) {
+                btn.classList.add("disabled");
+            } else {
+                btn.classList.remove("disabled");
+            }
+        });
+        const note = itemEl.querySelector(".ab-item-status-note");
+        if (note && hasItemId) {
+            note.style.display = "none";
+        }
+    }
+
+    function toggleButtonsLoading(itemEl, isLoading) {
+        itemEl.querySelectorAll(".ab-item-status-btn").forEach(btn => {
+            if (isLoading) {
+                btn.dataset.prevDisabled = String(btn.disabled);
+                btn.disabled = true;
+                btn.classList.add("loading");
+            } else if (Object.prototype.hasOwnProperty.call(btn.dataset, "prevDisabled")) {
+                btn.disabled = btn.dataset.prevDisabled === "true";
+                delete btn.dataset.prevDisabled;
+                btn.classList.remove("loading");
+            }
+        });
+    }
+
+    function notifyUser(message, level = "info") {
+        if (!message) return;
+        const toast = window.showToast || window.notify || null;
+        if (typeof toast === "function") {
+            toast(message, level);
+            return;
+        }
+        if (window.console) {
+            const fn = level === "error" ? console.error : console.info;
+            fn.call(console, message);
+        }
+        if (level === "error" || level === "warning") {
+            window.alert(message);
+        }
+    }
+
+    function handleStatusButtonClick(event) {
+        const btn = event.currentTarget;
+        const itemEl = btn.closest(".ab-item");
+        if (!itemEl) return;
+        const action = btn.dataset.action || "";
+        const targetStatus = ACTION_STATUS_MAP[action];
+        if (!targetStatus) return;
+        const itemId = itemEl.dataset.itemId;
+        const url = itemEl.dataset.statusUrl;
+        if (!itemId || !url) {
+            notifyUser("Save the appointment before updating item status.", "warning");
+            return;
+        }
+        const payload = { status: targetStatus };
+        if (targetStatus === "CANCELLED") {
+            const reason = window.prompt("Cancellation reason (optional)", "");
+            if (reason === null) {
+                return;
+            }
+            if (reason.trim()) {
+                payload.reason = reason.trim();
+            }
+        }
+        toggleButtonsLoading(itemEl, true);
+        fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": getCsrfToken(),
+            },
+            body: JSON.stringify(payload),
+        })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().catch(() => ({})).then(body => {
+                        const error = body && body.error ? body.error : response.statusText;
+                        throw new Error(error || "Failed to update status");
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (!data || data.ok !== true) {
+                    throw new Error((data && data.error) || "Failed to update status");
+                }
+                const statusData = data.item && data.item.status ? data.item.status : {};
+                updateItemStatusPill(itemEl, statusData.code, statusData.label);
+                syncStatusButtons(itemEl, statusData.code);
+                notifyUser(`Item status updated to ${statusData.label || statusData.code}`, "info");
+            })
+            .catch(err => {
+                notifyUser(err.message || "Unable to update item status", "error");
+            })
+            .finally(() => {
+                toggleButtonsLoading(itemEl, false);
+            });
+    }
+
+    function initItemStatusControls(itemEl) {
+        if (!itemEl) return;
+        updateItemStatusPill(itemEl, itemEl.dataset.statusCode, itemEl.dataset.statusLabel);
+        syncStatusButtons(itemEl, itemEl.dataset.statusCode);
+        itemEl.querySelectorAll(".ab-item-status-btn").forEach(btn => {
+            btn.addEventListener("click", handleStatusButtonClick);
+        });
+    }
     function updateRowSummary(row) {
         const priceInput = row.querySelector('input[name$="-unit_price"]');
         const deleteInput = row.querySelector('input[name$="-DELETE"]');
@@ -1273,6 +1446,14 @@
             });
             mo.observe(container, { childList: true, subtree: true });
         }
+        document.querySelectorAll(".ab-item").forEach(initItemStatusControls);
+        document.addEventListener("formset:added", evt => {
+            const node = evt && evt.detail && evt.detail.form;
+            if (!node || !node.classList) return;
+            if (node.classList.contains("ab-item")) {
+                initItemStatusControls(node);
+            }
+        });
         initPayMenu();
     });
 

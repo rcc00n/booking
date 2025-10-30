@@ -101,19 +101,21 @@
                     👨‍🏫 Masters <span class="arrow">⌄</span>
                 </div>
                 <div class="filter-content">
-                    {% for m in masters %}
-                        {% with mid=m.id|stringformat:"s" %}
-                            <label class="checkbox-wrapper">
-                                <input
-                                        type="checkbox"
-                                        name="master"
-                                        value="{{ mid }}"
-                                        {% if mid in selected_masters %}checked{% endif %}
-                                >
-                                <span>{{ m }}</span>
-                            </label>
-                        {% endwith %}
-                    {% endfor %}
+                    {% with master_list=filter_masters|default:masters %}
+                        {% for m in master_list %}
+                            {% with mid=m.id|stringformat:"s" %}
+                                <label class="checkbox-wrapper">
+                                    <input
+                                            type="checkbox"
+                                            name="master"
+                                            value="{{ mid }}"
+                                            {% if mid in selected_masters %}checked{% endif %}
+                                    >
+                                    <span>{{ m }}</span>
+                                </label>
+                            {% endwith %}
+                        {% endfor %}
+                    {% endwith %}
                 </div>
             </div>
 

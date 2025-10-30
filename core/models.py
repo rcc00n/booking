@@ -21,6 +21,7 @@ from django.db.models import (
     When,
     Value,
     IntegerField,
+    Exists,
 )
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -912,6 +913,109 @@ class PaymentStatus(models.Model):
         return self.name
 
 
+class AppointmentQuerySet(models.QuerySet):
+    STATUS_CANCELLED = "CANCELLED"
+    STATUS_COMPLETED = "COMPLETED"
+    STATUS_CONFIRMED = "CONFIRMED"
+    STATUS_BOOKED = "BOOKED"
+
+    STATUS_LABELS = {
+        STATUS_CANCELLED: "Cancelled",
+        STATUS_COMPLETED: "Completed",
+        STATUS_CONFIRMED: "Confirmed",
+        STATUS_BOOKED: "Booked",
+    }
+
+    def with_aggregated_status(self) -> "AppointmentQuerySet":
+        """
+        Annotate appointments with their derived status code and label based on item statuses.
+        """
+        latest_history = (
+            AppointmentItemStatusHistory.objects.filter(item_id=OuterRef("pk"))
+            .order_by("-set_at", "-id")
+        )
+
+        items_with_status = AppointmentItem.objects.filter(appointment_id=OuterRef("pk")).annotate(
+            latest_status_code=Subquery(latest_history.values("status__code")[:1])
+        )
+
+        labels = self.STATUS_LABELS
+
+        return (
+            self.alias(
+                _has_items=Exists(items_with_status),
+                _has_cancelled=Exists(
+                    items_with_status.filter(latest_status_code=self.STATUS_CANCELLED)
+                ),
+                _has_non_cancelled=Exists(
+                    items_with_status.filter(
+                        Q(latest_status_code__isnull=True)
+                        | ~Q(latest_status_code=self.STATUS_CANCELLED)
+                    )
+                ),
+                _has_completed=Exists(
+                    items_with_status.filter(latest_status_code=self.STATUS_COMPLETED)
+                ),
+                _has_non_completed=Exists(
+                    items_with_status.filter(
+                        Q(latest_status_code__isnull=True)
+                        | ~Q(latest_status_code=self.STATUS_COMPLETED)
+                    )
+                ),
+                _has_confirmed=Exists(
+                    items_with_status.filter(latest_status_code=self.STATUS_CONFIRMED)
+                ),
+            )
+            .annotate(
+                _aggregated_status_code=Case(
+                    When(
+                        Q(
+                            _has_items=True,
+                            _has_cancelled=True,
+                            _has_non_cancelled=False,
+                        ),
+                        then=Value(self.STATUS_CANCELLED),
+                    ),
+                    When(
+                        Q(
+                            _has_items=True,
+                            _has_completed=True,
+                            _has_non_completed=False,
+                        ),
+                        then=Value(self.STATUS_COMPLETED),
+                    ),
+                    When(
+                        Q(
+                            _has_confirmed=True,
+                            _has_cancelled=False,
+                        ),
+                        then=Value(self.STATUS_CONFIRMED),
+                    ),
+                    default=Value(self.STATUS_BOOKED),
+                    output_field=models.CharField(max_length=32),
+                )
+            )
+            .annotate(
+                _aggregated_status_label=Case(
+                    When(
+                        _aggregated_status_code=self.STATUS_CANCELLED,
+                        then=Value(labels[self.STATUS_CANCELLED]),
+                    ),
+                    When(
+                        _aggregated_status_code=self.STATUS_COMPLETED,
+                        then=Value(labels[self.STATUS_COMPLETED]),
+                    ),
+                    When(
+                        _aggregated_status_code=self.STATUS_CONFIRMED,
+                        then=Value(labels[self.STATUS_CONFIRMED]),
+                    ),
+                    default=Value(labels[self.STATUS_BOOKED]),
+                    output_field=models.CharField(max_length=32),
+                )
+            )
+        )
+
+
 class Appointment(models.Model):
     """
     Represents a scheduled appointment between a client and a master for a service.
@@ -959,6 +1063,85 @@ class Appointment(models.Model):
         editable=False,
         help_text="Personal discount snapshot at booking time"
     )
+
+    objects = AppointmentQuerySet.as_manager()
+
+    def _cache_aggregated_status(self, code: str, label: str) -> None:
+        self.__dict__["_aggregated_status_code"] = code
+        self.__dict__["_aggregated_status_label"] = label
+
+    def _derive_aggregated_status(self) -> tuple[str, str]:
+        """
+        Compute the aggregated status code and display label from current item statuses.
+        """
+        items = list(self._prefetched_items())
+        if not items:
+            code = AppointmentQuerySet.STATUS_BOOKED
+            label = AppointmentQuerySet.STATUS_LABELS[code]
+            return code, label
+
+        missing_status = False
+        observed_codes: set[str] = set()
+
+        for item in items:
+            code = getattr(item, "current_status_code", None)
+            if not code:
+                status = getattr(item, "status", None)
+                code = getattr(status, "code", None)
+
+            if not code:
+                missing_status = True
+                continue
+
+            observed_codes.add(str(code).upper())
+
+        if missing_status:
+            code = AppointmentQuerySet.STATUS_BOOKED
+        elif not observed_codes:
+            code = AppointmentQuerySet.STATUS_BOOKED
+        elif observed_codes == {AppointmentQuerySet.STATUS_CANCELLED}:
+            code = AppointmentQuerySet.STATUS_CANCELLED
+        elif observed_codes == {AppointmentQuerySet.STATUS_COMPLETED}:
+            code = AppointmentQuerySet.STATUS_COMPLETED
+        elif (
+            AppointmentQuerySet.STATUS_CONFIRMED in observed_codes
+            and AppointmentQuerySet.STATUS_CANCELLED not in observed_codes
+        ):
+            code = AppointmentQuerySet.STATUS_CONFIRMED
+        else:
+            code = AppointmentQuerySet.STATUS_BOOKED
+
+        label = AppointmentQuerySet.STATUS_LABELS.get(
+            code, code.replace("_", " ").title()
+        )
+        return code, label
+
+    @property
+    def aggregated_status_code(self) -> str:
+        """
+        Return the computed aggregate status code for this appointment.
+        """
+        if "_aggregated_status_code" in self.__dict__:
+            return self.__dict__["_aggregated_status_code"]
+
+        code, label = self._derive_aggregated_status()
+        self._cache_aggregated_status(code, label)
+        return code
+
+    @property
+    def aggregated_status(self) -> str:
+        """
+        Human-readable aggregate status label for the appointment.
+        """
+        if "_aggregated_status_label" in self.__dict__:
+            return self.__dict__["_aggregated_status_label"]
+
+        # Ensure code and label are cached together
+        self.aggregated_status_code
+        return self.__dict__.get(
+            "_aggregated_status_label",
+            AppointmentQuerySet.STATUS_LABELS[AppointmentQuerySet.STATUS_BOOKED],
+        )
 
     def _prefetched_items(self):
         """Return prefetched items list or fallback queryset."""
@@ -1187,13 +1370,15 @@ class Appointment(models.Model):
             # Поиск пересечений с чужими AppointmentItem этого же мастера
             overlapping_qs = AppointmentItem.objects.filter(
                 master=it.master,
-                appointment__start_time__lt=this_end,
-                appointment__start_time__gte=start_dt - timedelta(hours=3),
+                start_time__lt=this_end,
+                start_time__gte=start_dt - timedelta(hours=3),
             )
 
             # исключаем все айтемы текущего Appointment
             if self.pk:
                 overlapping_qs = overlapping_qs.exclude(appointment=self)
+            if getattr(it, "pk", None):
+                overlapping_qs = overlapping_qs.exclude(pk=it.pk)
 
             if cancelled_status:
                 overlapping_qs = overlapping_qs.exclude(
@@ -1306,11 +1491,41 @@ class CancellationReason(models.Model):
     def __str__(self):
         return self.name
 
+class AppointmentItemQuerySet(models.QuerySet):
+    def with_current_status(self) -> "AppointmentItemQuerySet":
+        """
+        Annotate appointment items with their latest status metadata.
+        """
+        latest_history = (
+            AppointmentItemStatusHistory.objects.filter(item_id=OuterRef("pk"))
+            .order_by("-set_at", "-id")
+        )
+
+        return self.annotate(
+            current_status_id=Subquery(latest_history.values("status_id")[:1]),
+            current_status_code=Subquery(latest_history.values("status__code")[:1]),
+            current_status_label=Subquery(latest_history.values("status__name")[:1]),
+            current_status_set_at=Subquery(latest_history.values("set_at")[:1]),
+        )
+
+
+class AppointmentItemManager(models.Manager.from_queryset(AppointmentItemQuerySet)):
+    pass
+
+
 class AppointmentItem(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     appointment = models.ForeignKey(Appointment, on_delete=models.CASCADE, related_name="items")
     service = models.ForeignKey(Service, on_delete=models.CASCADE)
     master = models.ForeignKey(MasterProfile, on_delete=models.CASCADE, related_name="appointment_items")
+    status = models.ForeignKey(
+        "core.AppointmentItemStatus",
+        on_delete=models.PROTECT,
+        related_name="items",
+        null=True,
+        blank=True,
+        help_text="Legacy pointer to the latest status; prefer status history helpers.",
+    )
 
     # Время начала именно этой услуги
     start_time = models.DateTimeField()
@@ -1343,6 +1558,8 @@ class AppointmentItem(models.Model):
     final_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
     tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"), editable=False)
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)  # '', 'service', 'promocode'
+
+    objects = AppointmentItemManager()
 
     class Meta:
         indexes = [
@@ -1681,6 +1898,61 @@ class AppointmentItem(models.Model):
         with transaction.atomic():
             super().save(*args, **kwargs)
 
+
+
+class AppointmentItemStatus(models.Model):
+    name = models.CharField(max_length=40)
+    code = models.CharField(max_length=32, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        verbose_name = "Appointment item status"
+        verbose_name_plural = "Appointment item statuses"
+        indexes = [
+            models.Index(fields=["code"], name="appt_item_status_code_idx"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.code:
+            self.code = self.code.upper()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.code})"
+
+
+class AppointmentItemStatusHistory(models.Model):
+    item = models.ForeignKey(
+        AppointmentItem,
+        on_delete=models.CASCADE,
+        related_name="status_history",
+    )
+    status = models.ForeignKey(
+        AppointmentItemStatus,
+        on_delete=models.PROTECT,
+        related_name="history",
+    )
+    set_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="appointment_item_status_actions",
+        null=True,
+        blank=True,
+    )
+    set_at = models.DateTimeField(default=timezone.now, db_index=True)
+    note = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ["-set_at", "-id"]
+        verbose_name = "Appointment item status history"
+        verbose_name_plural = "Appointment item status history"
+        indexes = [
+            models.Index(fields=["item", "-set_at"], name="appt_item_status_hist_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.item_id} → {self.status.code} @ {self.set_at:%Y-%m-%d %H:%M:%S}"
 
 
 class AppointmentStatusHistory(models.Model):
@@ -2247,8 +2519,8 @@ class MasterAvailability(models.Model):
             .annotate(last_status=Subquery(last_status_sq))
             .filter(
                 master=self.master,
-                appointment__start_time__lt=self.end_time,
-                appointment__start_time__gte=self.start_time - timedelta(hours=3),
+                start_time__lt=self.end_time,
+                start_time__gte=self.start_time - timedelta(hours=3),
             )
         )
         if cancelled:
@@ -2431,3 +2703,6 @@ def detect_discount_source(service, client, promocode):
     if s > 0:
         return "service"
     return ""
+
+
+

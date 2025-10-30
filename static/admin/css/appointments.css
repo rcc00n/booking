@@ -508,6 +508,20 @@ html, body {
     font-size: 1.5vh;
     font-weight: 500;
 }
+
+.event-status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.4vh;
+    padding: 0.2vh 0.9vh;
+    border-radius: 999px;
+    font-size: 1.2vh;
+    font-weight: 600;
+    color: #111827;
+    background: rgba(255, 255, 255, 0.85);
+    margin-bottom: 0.4vh;
+}
 .event:hover > div, .unavailable-cell:hover > div {
     width: calc(100% - 5%); /* сжатие справа */
     margin-left: 0;           /* левый край остаётся */
@@ -669,6 +683,33 @@ html, body {
 }
 #apptTooltip .tooltip-price-old{ text-decoration:line-through; opacity:.6; }
 #apptTooltip .tooltip-price-current{ font-weight:700; }
+#apptTooltip .tooltip-actions{
+  margin-top:1.8vh;
+  display:flex;
+  gap:0.8vh;
+  flex-wrap:wrap;
+}
+#apptTooltip .tooltip-action-btn{
+  background:#111827;
+  color:#fff;
+  border:none;
+  border-radius:0.9vh;
+  padding:0.6vh 1.2vh;
+  font-size:1.4vh;
+  cursor:pointer;
+  transition:background-color 0.2s ease;
+}
+#apptTooltip .tooltip-action-btn.secondary{
+  background:#e5e7eb;
+  color:#111827;
+}
+#apptTooltip .tooltip-action-btn.danger{
+  background:#b91c1c;
+  color:#fff;
+}
+#apptTooltip .tooltip-action-btn:hover{
+  filter:brightness(0.9);
+}
 .corner-badges{
     position:absolute; top:6px; right:8px;
     display:flex; gap:6px; align-items:center; z-index:2;

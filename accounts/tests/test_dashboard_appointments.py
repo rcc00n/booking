@@ -148,3 +148,26 @@ def test_dashboard_markup_includes_data_attributes(client, make_user_with_profil
     assert 'data-appt-start-iso="' in html
     assert 'class="appt-cancel' in html
     assert 'class="appt-reschedule' in html
+
+
+@pytest.mark.django_db
+def test_dashboard_query_count(client, make_user_with_profile, master_profile, django_assert_num_queries):
+    user, profile = make_user_with_profile("queries")
+    client.force_login(user)
+
+    starts = [
+        _aware(timezone.now() + timedelta(days=day, hours=offset))
+        for day in range(1, 4)
+        for offset in (0, 2)
+    ]
+    for index, start in enumerate(starts):
+        _create_appointment(
+            profile=profile,
+            start=start,
+            service_name=f"Service {index}",
+            master=master_profile,
+        )
+
+    with django_assert_num_queries(11):
+        response = client.get(reverse("dashboard"))
+    assert response.status_code == 200

@@ -18,11 +18,15 @@ from core.views import (
     service_promocodes_api,
     terminal_connection_token,
     api_terminal_start,
+    admin_item_status_update,
+    admin_item_reschedule,
 )
 from core.payments.stripe_api import stripe_webhook
 from core.admin import stats_view
 from accounts.views import health_view, health_edit
 urlpatterns = [
+    path("admin/api/appointment-items/<uuid:item_id>/status/", admin_item_status_update, name="admin-item-status-update"),
+    path("admin/api/appointment-items/<uuid:item_id>/reschedule/", admin_item_reschedule, name="admin-item-reschedule"),
     path("admin/", admin.site.urls),
 
     # ВАЖНО: подключаем accounts БЕЗ namespace, чтобы {% url 'register' %} и т.п. работали

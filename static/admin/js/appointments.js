@@ -28,6 +28,11 @@ function changeDateByDays(days) {
     onDateChange(newDate);
 }
 
+function getCsrfToken() {
+    const match = document.cookie.match(/(?:^|;)\s*csrftoken=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : "";
+}
+
 function onDateChange(value) {
     const display = document.getElementById("displayDate");
     display.textContent = value;
@@ -211,6 +216,9 @@ function showTooltip(box) {
     const price = box.dataset.price || "";
     const final = box.dataset.final || "";
     const master = box.dataset.master || "";
+    const editUrl = box.dataset.editUrl || "";
+    const statusUrl = box.dataset.statusUrl || "";
+    const rescheduleUrl = box.dataset.rescheduleUrl || "";
 
     const firstLetter = client.trim().charAt(0).toUpperCase();
     const baseRawValue = parseCurrencyValue(box.dataset.baseRaw);
@@ -279,6 +287,8 @@ function showTooltip(box) {
 
     const priceBlockHtml = priceLinesHtml ? `<div class="tooltip-price-block">${priceLinesHtml}</div>` : "";
 
+    const actionsHtml = "";
+
     tooltip.innerHTML = `
         <div class="tooltip-card">
             <div class="tooltip-header">
@@ -296,10 +306,11 @@ function showTooltip(box) {
                 <div class="tooltip-footer-row">
                     <div class="tooltip-details">
                         ${service ? `<div class="tooltip-service-name">${service}</div>` : ""}
-                        <div class="tooltip-meta">${master} · ${duration}</div>
+                        <div class="tooltip-meta">${master} | ${duration}</div>
                     </div>
                     ${priceBlockHtml}
                 </div>
+                ${actionsHtml}
             </div>
         </div>
     `;
@@ -322,8 +333,69 @@ function showTooltip(box) {
     tooltip.style.left = `${left}px`;
     tooltip.classList.remove("hidden");
     tooltip.classList.add("visible");
+
+    tooltip.querySelectorAll(".tooltip-action-btn").forEach(btn => {
+        btn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            handleTooltipAction(box, btn.dataset.action);
+        });
+    });
 }
 
+function handleTooltipAction(box, action) {
+    if (!box || !action) {
+        return;
+    }
+}
+
+function performItemReschedule(box) {
+    const rescheduleUrl = box.dataset.rescheduleUrl;
+    if (!rescheduleUrl) {
+        return;
+    }
+    const currentStart = box.dataset.startIso || "";
+    const defaultPrompt = currentStart ? currentStart.replace("T", " ").slice(0, 16) : "";
+    const userInput = window.prompt("New start time (local, YYYY-MM-DD HH:MM)", defaultPrompt);
+    if (userInput === null) {
+        return;
+    }
+    const trimmed = userInput.trim();
+    if (!trimmed) {
+        return;
+    }
+    const isoCandidate = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
+    const parsed = new Date(isoCandidate);
+    if (Number.isNaN(parsed.getTime())) {
+        window.alert("Invalid date/time. Please use YYYY-MM-DD HH:MM format.");
+        return;
+    }
+    const payload = { start_time: parsed.toISOString() };
+
+    fetch(rescheduleUrl, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": getCsrfToken(),
+        },
+        body: JSON.stringify(payload),
+    })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().catch(() => ({})).then(data => {
+                    throw new Error(data.error || response.statusText || "Unable to reschedule item");
+                });
+            }
+            return response.json();
+        })
+        .then(() => {
+            hideTooltip();
+            window.location.reload();
+        })
+        .catch(err => {
+            window.alert(err.message || "Unable to reschedule item");
+        });
+}
 function hideTooltip() {
     tooltip.classList.remove("visible");
     tooltip.classList.add("hidden");

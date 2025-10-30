@@ -309,6 +309,10 @@ def create_appointment_from_cart_items(
         appt.apply_card_processing_fee = True
         appt.card_processing_fee = Decimal("0.00")
 
+        now_ts = timezone.now()
+        user = getattr(profile, "user", None)
+        user_id = getattr(user, "id", None)
+
         for cart_item in items:
             item = AppointmentItem(
                 appointment=appt,
@@ -316,6 +320,10 @@ def create_appointment_from_cart_items(
                 master=cart_item.master,
                 start_time=cart_item.start_time,
             )
+            item._initial_status_code = "CONFIRMED"
+            item._initial_status_user_id = user_id
+            item._initial_status_timestamp = now_ts
+            item._initial_status_note = "checkout-confirmed"
             item.full_clean()
             item.save()
 

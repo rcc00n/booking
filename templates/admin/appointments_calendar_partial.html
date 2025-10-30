@@ -46,17 +46,26 @@
 
                         {# 3) событие (апойтмент): активный = 2 колонки, отменённый = 1 колонка #}
                     {% elif cell.kind == 'appt_active' or cell.kind == 'appt_cancelled' or cell.appointment %}
+                        {% with status_code=cell.status_code|default:''|upper %}
                         <td rowspan="{{ cell.rowspan|default:1 }}"
-                            colspan="{% if cell.status == 'Cancelled' %}1{% else %}{{ cell.colspan|default:2 }}{% endif %}"
-                            class="event {% if cell.kind == 'appt_cancelled' %}lane-left{% elif cell.kind == 'appt_active_right' %}lane-right{% endif %}"
-                            onclick="window.location.href='/admin/core/appointment/{{ cell.appt_id }}/change/'"
+                            colspan="{% if status_code == 'CANCELLED' %}1{% else %}{{ cell.colspan|default:2 }}{% endif %}"
+                            class="event {{ cell.status_class }} {% if cell.kind == 'appt_cancelled' %}lane-left{% elif cell.kind == 'appt_active_right' %}lane-right{% endif %}"
+                            onclick="if(this.dataset.editUrl){window.location.href=this.dataset.editUrl;}"
+                            data-appointment-id="{{ cell.appt_id }}"
+                            data-item-id="{{ cell.item_id }}"
+                            data-edit-url="{{ cell.edit_url|default:'' }}"
+                            data-status-url="{% url 'admin-item-status-update' cell.item_id %}"
+                            data-reschedule-url="{% url 'admin-item-reschedule' cell.item_id %}"
                             data-client="{{ cell.client }}"
                             data-phone="{{ cell.phone }}"
                             data-service="{{ cell.service }}"
-                            data-status="{{ cell.status }}"
+                            data-status="{{ cell.status_label|default:cell.status }}"
+                            data-status-code="{{ cell.status_code }}"
                             data-master="{{ cell.master }}"
                             data-time-label="{{ cell.time_label }}"
                             data-duration="{{ cell.duration }}"
+                            data-start-iso="{{ cell.start_iso }}"
+                            data-end-iso="{{ cell.end_iso }}"
                             data-price="{{ cell.base_price }}"
                             data-base-raw="{{ cell.base_price_raw }}"
                             data-final="{{ cell.final_price }}"
@@ -67,11 +76,12 @@
                             data-items-count="{{ cell.items_count }}"
                             data-has-note="{{ cell.has_note|yesno:'true,false' }}">
                             <div class="event-inner"
-                                 style="background-color: {{ cell.background }}; {% if cell.status == 'Cancelled' %}opacity:.6;{% endif %} position:relative;">
-
+                                 style="background-color: {{ cell.background }}; {% if status_code == 'CANCELLED' %}opacity:.6;{% endif %} position:relative;">
+                                <span class="event-status-pill">{{ cell.status_label|default:cell.status }}</span>
                                 {{ cell.html|safe }}
                             </div>
                         </td>
+                        {% endwith %}
 
                         {# 4) свободные ячейки: по умолчанию 2 колонки; свободная половинка рядом с Cancelled — 1 колонка #}
                     {% else %}

@@ -374,6 +374,7 @@
     <div class="ab-wrap">
         <form method="post" action="" id="appt-form" class="ab-card">
             {% csrf_token %}
+            <input type="hidden" name="return_to_date" value="{{ return_to_date|default:'' }}">
 
             <h2>Создание записи</h2>
             <p class="ab-sub">Сначала выберите клиента, затем добавьте одну или несколько услуг.</p>
