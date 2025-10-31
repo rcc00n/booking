@@ -1103,6 +1103,33 @@
         initSaleRow(node);
     }
 
+    function initRefundMenu() {
+        const refundBtn = document.getElementById("refund-btn");
+        const refundMenu = document.getElementById("refund-menu");
+        if (!refundBtn || !refundMenu) return;
+
+        const hasRefunds = (refundBtn.dataset.hasRefunds || "").toLowerCase() === "true";
+        if (!hasRefunds || refundBtn.disabled) {
+            refundMenu.hidden = true;
+            return;
+        }
+
+        const toggleMenu = (visible) => {
+            refundMenu.hidden = !visible;
+        };
+
+        refundBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            toggleMenu(refundMenu.hidden);
+        });
+
+        document.addEventListener("click", (event) => {
+            if (!refundMenu.contains(event.target) && !refundBtn.contains(event.target)) {
+                toggleMenu(false);
+            }
+        });
+    }
+
     function initPayMenu() {
         const cfg = window.APPOINTMENT_PAY || {};
         const payBtn = document.getElementById("pay-btn");
@@ -1483,6 +1510,7 @@
                 initItemStatusControls(node);
             }
         });
+        initRefundMenu();
         initPayMenu();
     });
 

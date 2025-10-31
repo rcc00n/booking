@@ -2505,18 +2505,73 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             }.get(str(currency_code_current).lower(), f"{str(currency_code_current).upper()} ")
 
         paid_total = Decimal("0.00")
+        refunded_total = Decimal("0.00")
+        refundable_payments: List[Dict[str, str]] = []
         if obj:
-            paid_agg = obj.payments.filter(status="succeeded").aggregate(
+            paid_total = payment_services.get_total_received_for_appointment(obj)
+            refunded_agg = obj.payments.filter(status="succeeded").aggregate(
                 total=Coalesce(
                     Sum(
-                        F("amount_received") - F("amount_refunded"),
+                        F("amount_refunded"),
                         output_field=DecimalField(max_digits=12, decimal_places=2),
                     ),
                     Value(Decimal("0.00")),
                 )
             )
-            paid_total = Decimal(paid_agg.get("total") or Decimal("0.00")).quantize(TWOPLACES)
+            refunded_total = Decimal(refunded_agg.get("total") or Decimal("0.00")).quantize(TWOPLACES)
+
+            currency_symbol_local = ctx.get("currency_symbol")
+            if not currency_symbol_local:
+                currency_code_local = ctx.get("currency_code") or getattr(settings, "CURRENCY_CODE", "CAD")
+                currency_symbol_local = {
+                    "cad": "CA$",
+                    "usd": "$",
+                }.get(str(currency_code_local).lower(), f"{str(currency_code_local).upper()} ")
+
+            succeeded_for_refund = (
+                obj.payments.filter(status__iexact="succeeded")
+                .select_related("method")
+                .order_by("-created_at")
+            )
+            for payment in succeeded_for_refund:
+                amount_received = getattr(payment, "amount_received", None) or getattr(payment, "amount", Decimal("0.00")) or Decimal("0.00")
+                amount_received = Decimal(amount_received).quantize(TWOPLACES)
+                amount_refunded = Decimal(getattr(payment, "amount_refunded", Decimal("0.00")) or Decimal("0.00")).quantize(TWOPLACES)
+                available_amount = (amount_received - amount_refunded).quantize(TWOPLACES)
+                if available_amount <= Decimal("0.00"):
+                    continue
+
+                created_at_label = ""
+                created_at = getattr(payment, "created_at", None)
+                if created_at:
+                    try:
+                        created_at_label = localtime(created_at).strftime("%Y-%m-%d")
+                    except Exception:  # pragma: no cover - fallback to raw value
+                        created_at_label = str(created_at)
+
+                method_label = (getattr(payment.method, "name", "") or "").strip() or "Payment"
+                label = (
+                    f"{method_label} - {currency_symbol_local}{available_amount:.2f} available "
+                    f"/ {currency_symbol_local}{amount_received:.2f} received"
+                )
+                if amount_refunded > Decimal("0.00"):
+                    label += f" (refunded {currency_symbol_local}{amount_refunded:.2f})"
+                if created_at_label:
+                    label += f" - {created_at_label}"
+
+                refundable_payments.append(
+                    {
+                        "payment_id": str(payment.pk),
+                        "label": label,
+                        "refund_url": reverse("admin-payment-refund", args=[payment.pk]),
+                    }
+                )
+
         ctx["paid_total"] = paid_total
+        ctx["refunded_total"] = refunded_total
+        net_paid_total = (paid_total - refunded_total).quantize(TWOPLACES)
+        if net_paid_total < Decimal("0.00"):
+            net_paid_total = Decimal("0.00")
 
         appointment_total_amount = Decimal("0.00")
         if obj:
@@ -2532,10 +2587,11 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             else:
                 appointment_total_amount = Decimal(getattr(obj, "final_price", Decimal("0.00")) or Decimal("0.00"))
         ctx["appointment_total_amount"] = appointment_total_amount.quantize(TWOPLACES)
-        outstanding_amount = (appointment_total_amount - paid_total).quantize(TWOPLACES)
+        outstanding_amount = (appointment_total_amount - net_paid_total).quantize(TWOPLACES)
         if outstanding_amount < Decimal("0.00"):
             outstanding_amount = Decimal("0.00")
         ctx["appointment_outstanding_amount"] = outstanding_amount
+        ctx["refundable_payments"] = refundable_payments
 
         ctx["card_fee_percent"] = str(CARD_PROCESSING_PERCENT)
         ctx["card_fee_fixed"] = str(CARD_PROCESSING_FIXED)

@@ -108,11 +108,14 @@
         .pay-split{position:relative}
         .pay-menu{position:absolute;right:0;top:calc(100% + 6px);background:#fff;border:1px solid #d1d5db;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,0.18);padding:10px;min-width:220px;z-index:20}
         .pay-menu[hidden]{display:none}
-        .pay-menu__item{width:100%;text-align:left;padding:8px 10px;border:none;border-radius:8px;background:#f9fafb;color:#111827;font-size:14px;cursor:pointer;margin-bottom:6px}
+        .pay-menu__item{display:block;width:100%;text-align:left;padding:8px 10px;border:none;border-radius:8px;background:#f9fafb;color:#111827;font-size:14px;cursor:pointer;margin-bottom:6px;text-decoration:none}
         .pay-menu__item:last-of-type{margin-bottom:0}
         .pay-menu__item.accent{background:#111827;color:#fff}
         .pay-menu__item:hover{background:#e5e7eb;color:#0f172a}
         .pay-menu hr{border:none;border-top:1px solid #e5e7eb;margin:6px 0}
+        .pay-actions{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+        .ab-btn[disabled]{opacity:0.5;cursor:not-allowed}
+        .pay-menu__empty{padding:8px 10px;color:#6b7280;font-size:13px;text-align:left}
         .ab-item-status{margin:14px 0 4px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
         .ab-item-status-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;background:#e0f2fe;color:#075985;font-weight:600;font-size:13px}
         .ab-item-status-pill.status-confirmed{background:#dcfce7;color:#166534}
@@ -231,6 +234,10 @@
                                             <span>Paid</span>
                                             <strong id="appt-paid">{{ currency_symbol|default:"CA$" }}{{ paid_total|floatformat:2 }}</strong>
                                         </div>
+                                        <div class="ab-summary-line">
+                                            <span>Refunded</span>
+                                            <strong id="appt-refunded">{{ currency_symbol|default:"CA$" }}{{ refunded_total|floatformat:2 }}</strong>
+                                        </div>
                                     {% else %}
                                         {% with gross=form.instance.final_price|default_if_none:0 tax=form.instance.tax_amount|default_if_none:0 %}
                                             <div class="ab-summary-line">
@@ -264,6 +271,10 @@
                                             <div class="ab-summary-line">
                                                 <span>Paid</span>
                                                 <strong id="appt-paid">{{ currency_symbol|default:"CA$" }}{{ paid_total|floatformat:2 }}</strong>
+                                            </div>
+                                            <div class="ab-summary-line">
+                                                <span>Refunded</span>
+                                                <strong id="appt-refunded">{{ currency_symbol|default:"CA$" }}{{ refunded_total|floatformat:2 }}</strong>
                                             </div>
                                         {% endwith %}
                                     {% endif %}
@@ -880,27 +891,53 @@
                     <a href="{% url 'admin:core_appointment_changelist' %}" class="ab-btn secondary">Cancel</a>
                 </div>
                 {% if form.instance.pk %}
-                    <div class="pay-split">
-                        <button
-                            type="button"
-                            class="ab-btn secondary"
-                            id="pay-btn"
-                            data-payment-add-url="{{ payment_add_url }}"
-                            data-fee-endpoint="{{ enable_card_fee_url|default:'' }}"
-                            data-appointment-id="{{ form.instance.pk }}"
-                            data-fee-applied="{{ form.instance.apply_card_processing_fee|yesno:'true,false' }}"
-                            data-terminal-start-url="{{ terminal_start_url|default:'' }}"
-                            data-terminal-conn-url="{{ terminal_conn_token_url|default:'' }}"
-                            data-payment-verify-url="{{ payment_verify_url|default:'' }}"
-                            data-amount-due="{{ appointment_outstanding_amount|default_if_none:'0.00' }}">
-                            Pay ▾
-                        </button>
-                        <div id="pay-menu" class="pay-menu" hidden>
-                            <button type="button" class="pay-menu__item" data-pay="cash">Cash</button>
-                            <button type="button" class="pay-menu__item" data-pay="etransfer">E-transfer</button>
-                            <hr>
-                            <button type="button" class="pay-menu__item ab-btn small accent" data-pay="card-credit">Credit card (terminal)</button>
-                            <button type="button" class="pay-menu__item ab-btn small accent" data-pay="card-debit">Debit card (terminal)</button>
+                    <div class="pay-actions">
+                        <div class="pay-split">
+                            <button
+                                type="button"
+                                class="ab-btn secondary"
+                                id="pay-btn"
+                                data-payment-add-url="{{ payment_add_url }}"
+                                data-fee-endpoint="{{ enable_card_fee_url|default:'' }}"
+                                data-appointment-id="{{ form.instance.pk }}"
+                                data-fee-applied="{{ form.instance.apply_card_processing_fee|yesno:'true,false' }}"
+                                data-terminal-start-url="{{ terminal_start_url|default:'' }}"
+                                data-terminal-conn-url="{{ terminal_conn_token_url|default:'' }}"
+                                data-payment-verify-url="{{ payment_verify_url|default:'' }}"
+                                data-amount-due="{{ appointment_outstanding_amount|default_if_none:'0.00' }}">
+                                Pay ▾
+                            </button>
+                            <div id="pay-menu" class="pay-menu" hidden>
+                                <button type="button" class="pay-menu__item" data-pay="cash">Cash</button>
+                                <button type="button" class="pay-menu__item" data-pay="etransfer">E-transfer</button>
+                                <hr>
+                                <button type="button" class="pay-menu__item ab-btn small accent" data-pay="card-credit">Credit card (terminal)</button>
+                                <button type="button" class="pay-menu__item ab-btn small accent" data-pay="card-debit">Debit card (terminal)</button>
+                            </div>
+                        </div>
+                        <div class="pay-split">
+                            <button
+                                type="button"
+                                class="ab-btn secondary"
+                                id="refund-btn"
+                                data-has-refunds="{% if refundable_payments %}true{% else %}false{% endif %}"
+                                {% if not refundable_payments %}disabled{% endif %}>
+                                Refund ▾
+                            </button>
+                            <div id="refund-menu" class="pay-menu" hidden>
+                                {% if refundable_payments %}
+                                    {% for entry in refundable_payments %}
+                                        <a
+                                            href="{{ entry.refund_url }}"
+                                            class="pay-menu__item refund-menu__item"
+                                            data-payment-id="{{ entry.payment_id }}">
+                                            {{ entry.label }}
+                                        </a>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="pay-menu__empty">No refundable payments available.</div>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                 {% endif %}
