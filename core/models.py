@@ -1,8 +1,10 @@
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 
 from django.apps import apps
 from django.core.validators import MinValueValidator, MaxValueValidator
-from django.db import models, transaction
+from django.db import connection, models, transaction
+from django.db.utils import OperationalError, ProgrammingError
 from django.contrib.auth.models import User
 import uuid
 from django.core.exceptions import ValidationError
@@ -1527,6 +1529,12 @@ class AppointmentItem(models.Model):
         help_text="Legacy pointer to the latest status; prefer status history helpers.",
     )
 
+    validation_enabled = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text="When off, time/room validation for this item is skipped; overlaps are allowed.",
+    )
+
     # Время начала именно этой услуги
     start_time = models.DateTimeField()
 
@@ -1560,6 +1568,17 @@ class AppointmentItem(models.Model):
     discount_source = models.CharField(max_length=30, blank=True, default="", editable=False)  # '', 'service', 'promocode'
 
     objects = AppointmentItemManager()
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _validation_column_available() -> bool:
+        table = AppointmentItem._meta.db_table
+        try:
+            with connection.cursor() as cursor:
+                description = connection.introspection.get_table_description(cursor, table)
+        except Exception:
+            return False
+        return any(getattr(col, "name", "") == "validation_enabled" for col in description)
 
     class Meta:
         indexes = [
@@ -1728,6 +1747,9 @@ class AppointmentItem(models.Model):
         total_min = self.duration_min
         this_end = self.end_time or (start_dt + timedelta(minutes=total_min))
 
+        if not self._validation_column_available():
+            return
+
         # === 1) Пересечения для этого мастера по предметному времени (AppointmentItem.start_time) ===
         # Исключаем отменённые аппы (если статус «Cancelled» существует)
         cancelled_status = (
@@ -1736,29 +1758,37 @@ class AppointmentItem(models.Model):
             .first()
         )
 
-        overlapping_qs = type(self).objects.filter(
-            master=self.master,
-            start_time__lt=this_end,
-            start_time__gt=start_dt - timedelta(hours=24),  # «окно» поиска (с запасом на смены через полночь)
-        )
-        if self.pk:
-            overlapping_qs = overlapping_qs.exclude(pk=self.pk)
-        if cancelled_status:
-            overlapping_qs = overlapping_qs.exclude(
-                appointment__appointmentstatushistory__status=cancelled_status
+        if not getattr(self, "validation_enabled", True):
+            return
+
+        try:
+            overlapping_qs = type(self).objects.filter(
+                master=self.master,
+                start_time__lt=this_end,
+                start_time__gt=start_dt - timedelta(hours=24),  # «окно» поиска (с запасом на смены через полночь)
             )
+            if self.pk:
+                overlapping_qs = overlapping_qs.exclude(pk=self.pk)
+            if cancelled_status:
+                overlapping_qs = overlapping_qs.exclude(
+                    appointment__appointmentstatushistory__status=cancelled_status
+                )
 
-        # Фактическое пересечение по интервалам item'ов
-        for other in overlapping_qs.select_related("service", "appointment"):
-            if not other.start_time:
-                continue
-            other_total = other.duration_min if hasattr(other, "duration_min") else 0
-            other_end = other.start_time + timedelta(minutes=other_total)
+            # Фактическое пересечение по интервалам item'ов
+            for other in overlapping_qs.select_related("service", "appointment"):
+                if hasattr(other, "validation_enabled") and not getattr(other, "validation_enabled", True):
+                    continue
+                if not other.start_time:
+                    continue
+                other_total = other.duration_min if hasattr(other, "duration_min") else 0
+                other_end = other.start_time + timedelta(minutes=other_total)
 
-            if start_dt < other_end and this_end > other.start_time:
-                raise ValidationError({
-                    "start_time": "Этот слот пересекается с другим приёмом у того же мастера."
-                })
+                if start_dt < other_end and this_end > other.start_time:
+                    raise ValidationError({
+                        "start_time": "Этот слот пересекается с другим приёмом у того же мастера."
+                    })
+        except (ProgrammingError, OperationalError):
+            pass
 
         # === 2) Проверка рабочего окна мастера (MasterProfile.workdays[weekday]: start_time..end_time) ===
         # master может быть либо MasterProfile, либо User с related master_profile

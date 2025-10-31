@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import timedelta
 
@@ -12,7 +12,7 @@ from django.utils import timezone
 
 class AppointmentItemStatusMigrationTests(TransactionTestCase):
     migrate_from = ("core", "0038_alter_clientsource_source")
-    migrate_to = ("core", "0041_port_appointment_status_to_items")
+    migrate_to = ("core", "0042_appointmentitem_validation_enabled")
     databases = {"default"}
 
     def setUp(self):
@@ -230,5 +230,6 @@ class AppointmentItemStatusMigrationTests(TransactionTestCase):
 
         finally:
             self._migrate_to_head()
+
 
 

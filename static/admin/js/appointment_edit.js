@@ -578,6 +578,16 @@
         const nativeForce  = row.querySelector(".native-promocode input[name$='-force_apply']");
         const promoForceUI = row.querySelector(".js-promo-force");
         if (nativeForce) nativeForce.checked = !!(promoForceUI && promoForceUI.checked);
+
+        const nativeValidation = row.querySelector(".native-validation input[type='checkbox'][name$='-validation_enabled']");
+        const hiddenValidation = row.querySelector(".native-validation input[type='hidden'][name$='-validation_enabled']");
+        const uiValidation = row.querySelector(".js-validation-toggle");
+        if (nativeValidation && uiValidation) {
+            nativeValidation.checked = uiValidation.checked;
+        }
+        if (hiddenValidation && uiValidation) {
+            hiddenValidation.value = uiValidation.checked ? "True" : "False";
+        }
     }
     function initRow(row) {
         // элементы
@@ -588,6 +598,9 @@
         const nativePromo  = $(".native-promocode select[name$='-promocode']", row);
         const uiPromo      = $(".js-promocode", row);
         const promoForceUI = $(".js-promo-force", row);
+        const nativeValidation = $(".native-validation input[type='checkbox'][name$='-validation_enabled']", row);
+        const hiddenValidation = $(".native-validation input[type='hidden'][name$='-validation_enabled']", row);
+        const uiValidation = $(".js-validation-toggle", row);
         const nativeStart  = $("[name$='-start_time']", row);   // реальное поле
         const nativePrice  = $("[name$='-unit_price']", row);   // реальное поле
         const durationInput = $("[name$='-duration_override_min']", row);
@@ -603,6 +616,20 @@
         row.dataset.discountAmount = roundCurrency(parseAmount(row.dataset.discountAmount)).toFixed(2);
 
         const markDirty = () => { row.dataset.pricingDirty = "1"; };
+
+        if (uiValidation && nativeValidation) {
+            uiValidation.checked = nativeValidation.checked;
+            if (hiddenValidation) {
+                hiddenValidation.value = uiValidation.checked ? "True" : "False";
+            }
+            uiValidation.addEventListener("change", () => {
+                nativeValidation.checked = uiValidation.checked;
+                if (hiddenValidation) {
+                    hiddenValidation.value = uiValidation.checked ? "True" : "False";
+                }
+                markDirty();
+            });
+        }
 
         const syncTaxableMeta = () => {
             const opt = uiSvc && uiSvc.selectedOptions ? uiSvc.selectedOptions[0] : null;
@@ -776,6 +803,8 @@
                 if (nativePrice)     disableAndClone(nativePrice);
                 if (durationInput)   disableAndClone(durationInput);
                 if (discountInput)   disableAndClone(discountInput);
+                if (nativeValidation) disableAndClone(nativeValidation);
+                if (uiValidation) uiValidation.disabled = true;
 
                 // если поверх time уже навешан четвертной селект — тоже задизейблим
 

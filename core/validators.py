@@ -114,6 +114,8 @@ def validate_no_time_overlap_for_same_master(appt) -> None:
     # Собираем интервалы по мастерам
     per_master = {}
     for it in mgr.all():
+        if hasattr(it, "validation_enabled") and not getattr(it, "validation_enabled", True):
+            continue
         master_id = getattr(it.master, "pk", None)
         start = getattr(it, "start_time", None)
         dur_min = getattr(getattr(it, "service", None), "duration_min", None)

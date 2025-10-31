@@ -1142,7 +1142,7 @@
                 });
             }
 
-            function initTimeslotPicker({ row, masterEl, serviceEl, dateEl, timeEl }){
+            function initTimeslotPicker({ row, masterEl, serviceEl, dateEl, timeEl, validationToggle }){
                 const wrap = row.querySelector('.js-timeslots-wrap');
                 const statusEl = row.querySelector('.js-timeslots-status');
                 const grid = row.querySelector('.js-timeslots-grid');
@@ -1266,12 +1266,37 @@
                     }
                 }
 
+                function buildUnlockedSlots(){
+                    const dateStr = dateEl.value;
+                    if (!dateStr) return [];
+                    const base = new Date(`${dateStr}T00:00:00`);
+                    if (Number.isNaN(base.getTime())) return [];
+                    const slots = [];
+                    for (let minutes = 0; minutes < 24 * 60; minutes += 15){
+                        const dt = new Date(base.getTime() + minutes * 60 * 1000);
+                        slots.push(dt.toISOString());
+                    }
+                    return slots;
+                }
+
                 function refresh(options = {}){
                     const preserveSelection = !!options.preserveSelection;
-                    const message = missingInputsMessage();
                     if (!preserveSelection){
                         clearSelection({ emit: true });
                     }
+                    const bypassValidation = validationToggle && !validationToggle.checked;
+                    if (bypassValidation){
+                        if (!dateEl.value){
+                            grid.innerHTML = '';
+                            setStatus('idle', 'Select a date to view all time slots.');
+                            return;
+                        }
+                        const slots = buildUnlockedSlots();
+                        renderSlots(slots);
+                        setStatus('ready', 'Validation disabled: all time slots available.');
+                        return;
+                    }
+                    const message = missingInputsMessage();
                     if (message){
                         grid.innerHTML = '';
                         setStatus('idle', message);
@@ -2071,6 +2096,15 @@
         <input type="number" class="js-discount" min="0" max="100" step="1" placeholder="0">
         <div class="ab-field-error js-err-discount"></div>
       </div>
+      <div class="ab-field" data-field="validation_enabled">
+        <label>Validation</label>
+        <input type="hidden" class="js-validation-hidden" value="True">
+        <label style="display:inline-flex;align-items:center;gap:6px;">
+          <input type="checkbox" class="js-validation-toggle" checked>
+          Enabled
+        </label>
+        
+      </div>
     </div>
 
     <div class="ab-foot">
@@ -2117,6 +2151,8 @@
                 const promoSel  = row.querySelector('.js-promo');
                 const durationInp = row.querySelector('.js-duration');
                 const discountInp = row.querySelector('.js-discount');
+                const validationHidden = row.querySelector('.js-validation-hidden');
+                const validationToggle = row.querySelector('.js-validation-toggle');
                 const hint      = row.querySelector('.js-service-hint');
                 row.dataset.taxable = "0";
 
@@ -2171,14 +2207,37 @@
                         if (val > 100) discountInp.value = '100';
                     });
                 }
+                if (validationHidden) {
+                    validationHidden.name = name('validation_enabled');
+                    validationHidden.id = `id_items-${idx}-validation_enabled_hidden`;
+                }
+                let availability = null;
+                const applyValidationState = () => {
+                    if (validationHidden) {
+                        const enabled = validationToggle ? validationToggle.checked : true;
+                        validationHidden.value = enabled ? "True" : "False";
+                    }
+                };
+                if (validationToggle) {
+                    validationToggle.name = name('validation_enabled');
+                    validationToggle.id = `id_items-${idx}-validation_enabled`;
+                    validationToggle.addEventListener('change', () => {
+                        applyValidationState();
+                        if (availability) {
+                            availability.refresh({ preserveSelection: true });
+                        }
+                    });
+                }
+                applyValidationState();
 
                 populateMasters(masterSel);
-                const availability = initTimeslotPicker({
+                availability = initTimeslotPicker({
                     row,
                     masterEl: masterSel,
                     serviceEl: serviceSel,
                     dateEl: dateInp,
                     timeEl: timeInp,
+                    validationToggle,
                 });
 
                 let serviceCombo = makeComboFromSelect(serviceSel, 'Type to search service...');
@@ -2252,6 +2311,14 @@
 
             function addRow(prefill){
                 const idx = Number(totalForms.value);
+                const parseValidationFlag = (value) => {
+                    if (typeof value === "boolean") return value;
+                    if (value === undefined || value === null) return undefined;
+                    const norm = String(value).trim().toLowerCase();
+                    if (["false", "0", "no", "off"].includes(norm)) return false;
+                    if (["true", "1", "yes", "on"].includes(norm)) return true;
+                    return Boolean(value);
+                };
                 const row = createRow();
                 const ref = hookRow(row, idx);
 
@@ -2262,6 +2329,8 @@
                 const priceInp  = row.querySelector('.js-price');
                 const durationInp = row.querySelector('.js-duration');
                 const discountInp = row.querySelector('.js-discount');
+                const validationHidden = row.querySelector('.js-validation-hidden');
+                const validationToggle = row.querySelector('.js-validation-toggle');
                 
                 const comboRef = ref && ref.serviceCombo ? ref.serviceCombo : null;
                 let resolvedMaster = masterSel.value;
@@ -2320,6 +2389,16 @@
                 }
                 if (discountInp && prefill && prefill.manual_discount_percent !== undefined && prefill.manual_discount_percent !== null && prefill.manual_discount_percent !== ''){
                     discountInp.value = prefill.manual_discount_percent;
+                }
+                const validationEnabledPrefillRaw = prefill && Object.prototype.hasOwnProperty.call(prefill, "validation_enabled")
+                    ? parseValidationFlag(prefill.validation_enabled)
+                    : undefined;
+                const validationEnabledPrefill = validationEnabledPrefillRaw === undefined ? true : validationEnabledPrefillRaw;
+                if (validationToggle) validationToggle.checked = validationEnabledPrefill;
+                if (validationToggle && validationHidden) {
+                    validationHidden.value = validationEnabledPrefill ? "True" : "False";
+                } else if (validationHidden && !validationHidden.value) {
+                    validationHidden.value = validationEnabledPrefill ? "True" : "False";
                 }
                 if (ref && typeof ref.refreshPromos === 'function'){
                     const promoOpts = {};
@@ -2411,7 +2490,8 @@
                             unit_price: it.unit_price,
                             promocode: it.promocode,
                             duration_override_min: it.duration_override_min,
-                            manual_discount_percent: it.manual_discount_percent
+                            manual_discount_percent: it.manual_discount_percent,
+                            validation_enabled: it.validation_enabled
                         });
                     });
                 } else {

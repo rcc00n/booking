@@ -11,6 +11,7 @@ from .utils.sms import send_sms
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db.models.signals import pre_save, post_save, post_delete, pre_delete
+from django.db.utils import OperationalError, ProgrammingError
 from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.timezone import localtime
@@ -107,16 +108,22 @@ def _safe_assignments_call(func, *args, **kwargs):
 # 4) Хелпер: список позиций (услуга + мастер + время)
 def _items_summary_lines(appt: Appointment) -> list[str]:
     lines = []
-    qs = appt.items.select_related("service", "master__user").order_by("start_time")
-    for it in qs:
-        s = localtime(it.start_time).strftime("%d %b %Y, %H:%M")
-        master_name = it.master.user.get_full_name() or it.master.user.user.username
-        lines.append(f"• {it.service.name} with {master_name} at {s}")
+    try:
+        qs = appt.items.select_related("service", "master__user").order_by("start_time")
+        for it in qs:
+            s = localtime(it.start_time).strftime("%d %b %Y, %H:%M")
+            master_name = it.master.user.get_full_name() or it.master.user.user.username
+            lines.append(f"• {it.service.name} with {master_name} at {s}")
+    except (ProgrammingError, OperationalError):
+        return lines
     return lines
 
 def _short_labels(appt: Appointment) -> tuple[str, str]:
     """Для тем/смс: если 1 позиция — точные названия, иначе агрегированные."""
-    items = list(appt.items.select_related("service", "master__user"))
+    try:
+        items = list(appt.items.select_related("service", "master__user"))
+    except (ProgrammingError, OperationalError):
+        return "", ""
     if not items:
         return "", ""
     if len(items) == 1:

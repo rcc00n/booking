@@ -2127,7 +2127,11 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         if not rows:
             return
 
-        service_ids = {row["service_id"] for row in rows if row.get("service_id")}
+        service_ids = {
+            row["service_id"]
+            for row in rows
+            if row.get("service_id") and row.get("validation_enabled", True)
+        }
         if not service_ids:
             return
 
@@ -2150,6 +2154,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             start = row.get("dt")
             if not sid or not start:
                 continue
+            if not row.get("validation_enabled", True):
+                continue  # CHANGED: skip capacity checks when validation is off
             meta = service_meta.get(str(sid))
             if not meta:
                 continue
@@ -2189,6 +2195,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         service_map = {}
         for idx, item, _ in prebuilt_items:
+            if hasattr(item, "validation_enabled") and not getattr(item, "validation_enabled", True):
+                continue  # CHANGED: skip capacity checks when validation is off
             service = getattr(item, "service", None)
             if not service:
                 continue
@@ -3314,16 +3322,23 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         posted_items = []  # чтобы вернуть в шаблон ровно то, что вводили
         for i in range(total_forms):
             pref = f"items-{i}-"
-            posted_items.append({
-                "master":      (request.POST.get(pref + "master") or "").strip(),
-                "service":     (request.POST.get(pref + "service") or "").strip(),
-                "start_time_0": (request.POST.get(pref + "start_time_0") or "").strip(),  # date
-                "start_time_1": (request.POST.get(pref + "start_time_1") or "").strip(),  # time
-                "unit_price":  (request.POST.get(pref + "unit_price") or "").strip(),
-                "promocode":   (request.POST.get(pref + "promocode") or "").strip(),
-                "duration_override_min": (request.POST.get(pref + "duration_override_min") or "").strip(),
-                "manual_discount_percent": (request.POST.get(pref + "manual_discount_percent") or "").strip(),
-            })
+        validation_values = request.POST.getlist(pref + "validation_enabled")
+        validation_enabled = (
+            any(str(val).strip().lower() in {"1", "true", "on", "yes"} for val in validation_values)
+            if validation_values
+            else False
+        )
+        posted_items.append({
+            "master":      (request.POST.get(pref + "master") or "").strip(),
+            "service":     (request.POST.get(pref + "service") or "").strip(),
+            "start_time_0": (request.POST.get(pref + "start_time_0") or "").strip(),  # date
+            "start_time_1": (request.POST.get(pref + "start_time_1") or "").strip(),  # time
+            "unit_price":  (request.POST.get(pref + "unit_price") or "").strip(),
+            "promocode":   (request.POST.get(pref + "promocode") or "").strip(),
+            "duration_override_min": (request.POST.get(pref + "duration_override_min") or "").strip(),
+            "manual_discount_percent": (request.POST.get(pref + "manual_discount_percent") or "").strip(),
+            "validation_enabled": validation_enabled,
+        })
 
         # обязательные поля верхнего уровня
         if not client_id:
@@ -3397,6 +3412,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "promocode_id": (row["promocode"] or None),
                 "duration_override": duration_override,
                 "manual_discount": manual_discount,
+                "validation_enabled": bool(row.get("validation_enabled", True)),
             })
 
         self._validate_service_room_capacity(valid_rows, bag)
@@ -3502,6 +3518,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                         unit_price=row["unit_price"] or None,
                         duration_override_min=row.get("duration_override"),
                         manual_discount_percent=row.get("manual_discount", 0) or 0,
+                        validation_enabled=row.get("validation_enabled", True),
                     )
                     try:
                         item.full_clean()
@@ -6659,55 +6676,146 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
     cancel_lanes = {}
     skip_two = {}
     skip_lane = {}
+    overlap_lanes = {}
     for m in masters:
         mid = m.id
         two_col_map[mid] = {}
         cancel_lanes[mid] = {0: {}, 1: {}}
         skip_two[mid] = {}
         skip_lane[mid] = {0: {}, 1: {}}
+        overlap_lanes[mid] = {0: {}, 1: {}}
 
-    # ───── позиции (AppointmentItem) ────────────────────────────────────────────
+    # ───────────────── позиции (AppointmentItem) ───────────────────────────────
+    prepared_items = []
+    entry_lookup = {}
     for item in items:
         start_local = localtime(item.start_time)
         if start_local.date() != selected_date:
             continue
 
-        mid = item.master_id
-        slot_key = start_local.strftime("%H:%M")
-        total_min = int(getattr(item, "duration_min", 0) or 0)
-        rowspan = max(1, (-(-total_min // 15)))  # ceil
+        duration_minutes = int(getattr(item, 'duration_min', 0) or 0)
+        rowspan = max(1, (-(-duration_minutes // 15)))  # ceil
+        end_local = start_local + timedelta(minutes=duration_minutes)
+        status_code, _, _ = _resolve_item_status(item)
+        prepared = {
+            'item': item,
+            'master_id': item.master_id,
+            'start': start_local,
+            'end': end_local,
+            'rowspan': rowspan,
+            'status_code': status_code,
+            'is_cancelled': status_code == 'CANCELLED',
+            'validation_enabled': getattr(item, 'validation_enabled', True),
+        }
+        prepared_items.append(prepared)
+        entry_lookup[item.pk] = prepared
 
-        # Ensure custom slots outside of the default window are present.
         for i in range(rowspan):
-            t = (start_local + timedelta(minutes=15 * i)).strftime("%H:%M")
+            t = (start_local + timedelta(minutes=15 * i)).strftime('%H:%M')
             if t not in slot_times:
                 slot_times.append(t)
 
-        status_code, _, _ = _resolve_item_status(item)
-        is_cancelled = status_code == "CANCELLED"
+    items_by_master = {}
+    for entry in prepared_items:
+        items_by_master.setdefault(entry['master_id'], []).append(entry)
 
-        if not is_cancelled:
-            two_col_map[mid][slot_key] = {
-                "kind": "appt_active",
-                "rowspan": rowspan,
-                "colspan": 2,
-                "item": item,
-            }
-            for i in range(rowspan):
-                t = (start_local + timedelta(minutes=15 * i)).strftime("%H:%M")
-                skip_two[mid][t] = True
-        else:
+    lane_assignments = {}
+    for mid, bucket in items_by_master.items():
+        bucket.sort(key=lambda e: (e['start'], str(e['item'].pk)))
+        to_lane = set()
+        for i, first in enumerate(bucket):
+            for second in bucket[i + 1:]:
+                if second['start'] >= first['end']:
+                    break
+                if first['start'] < second['end'] and second['start'] < first['end']:
+                    if (not first['validation_enabled']) or (not second['validation_enabled']):
+                        to_lane.add(first['item'].pk)
+                        to_lane.add(second['item'].pk)
+        if not to_lane:
+            continue
+
+        graph = {pk: set() for pk in to_lane}
+        for i, first in enumerate(bucket):
+            pk_first = first['item'].pk
+            if pk_first not in to_lane:
+                continue
+            for second in bucket[i + 1:]:
+                pk_second = second['item'].pk
+                if pk_second not in to_lane:
+                    continue
+                if second['start'] >= first['end']:
+                    break
+                if first['start'] < second['end'] and second['start'] < first['end']:
+                    graph[pk_first].add(pk_second)
+                    graph[pk_second].add(pk_first)
+
+        assigned = {}
+        visited = set()
+        for pk in graph:
+            if pk in visited:
+                continue
+            component = []
+            stack = [pk]
+            visited.add(pk)
+            while stack:
+                node = stack.pop()
+                component.append(node)
+                for nbr in graph.get(node, ()):
+                    if nbr not in visited:
+                        visited.add(nbr)
+                        stack.append(nbr)
+            component.sort(key=lambda val: (entry_lookup[val]['start'], str(val)))
+            lane_toggle = 0
+            for comp_pk in component:
+                assigned[comp_pk] = lane_toggle % 2
+                lane_toggle += 1
+        if assigned:
+            lane_assignments[mid] = assigned
+
+    for entry in prepared_items:
+        item = entry['item']
+        mid = entry['master_id']
+        slot_key = entry['start'].strftime('%H:%M')
+        rowspan = entry['rowspan']
+
+        if entry['is_cancelled']:
             lane0_busy = skip_lane[mid][0].get(slot_key) or (slot_key in cancel_lanes[mid][0])
             lane = 0 if not lane0_busy else 1
             cancel_lanes[mid][lane][slot_key] = {
-                "kind": "appt_cancelled",
-                "rowspan": rowspan,
-                "colspan": 1,
-                "item": item,
+                'kind': 'appt_cancelled',
+                'rowspan': rowspan,
+                'colspan': 1,
+                'item': item,
             }
             for i in range(rowspan):
-                t = (start_local + timedelta(minutes=15 * i)).strftime("%H:%M")
+                t = (entry['start'] + timedelta(minutes=15 * i)).strftime('%H:%M')
                 skip_lane[mid][lane][t] = True
+            continue
+
+        assigned_lane = lane_assignments.get(mid, {}).get(item.pk)
+        if assigned_lane is not None:
+            lane_bucket = overlap_lanes[mid][assigned_lane]
+            if slot_key not in lane_bucket:
+                lane_bucket[slot_key] = {
+                    'kind': 'appt_active' if assigned_lane == 0 else 'appt_active_right',
+                    'rowspan': rowspan,
+                    'colspan': 1,
+                    'item': item,
+                }
+            for i in range(rowspan):
+                t = (entry['start'] + timedelta(minutes=15 * i)).strftime('%H:%M')
+                skip_lane[mid][assigned_lane][t] = True
+            continue
+
+        two_col_map[mid][slot_key] = {
+            'kind': 'appt_active',
+            'rowspan': rowspan,
+            'colspan': 2,
+            'item': item,
+        }
+        for i in range(rowspan):
+            t = (entry['start'] + timedelta(minutes=15 * i)).strftime('%H:%M')
+            skip_two[mid][t] = True
 
     slot_times.sort()
 
@@ -6769,6 +6877,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                     start_idx = 0
                 span_times = slot_times[start_idx:start_idx + cell["rowspan"]]
                 overlaps_cancel_left = any(skip_lane[mid][0].get(t) for t in span_times)
+                left_lane_overlap = overlap_lanes[mid][0].get(time_str)
 
                 if not overlaps_cancel_left:
                     if cell["kind"] == "appt_active":
@@ -6815,6 +6924,18 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                             show_cancelled=True,
                         )
                     )
+                elif left_lane_overlap:
+                    lane_cell = _make_item_cell(
+                        kind=left_lane_overlap["kind"],
+                        item=left_lane_overlap["item"],
+                        rowspan=left_lane_overlap["rowspan"],
+                        colspan=1,
+                        master_obj=master,
+                        bg=MASTER_COLORS.get(mid),
+                        show_cancelled=False,
+                    )
+                    lane_cell["status_class"] = f"{lane_cell.get('status_class', '')} lane-left".strip()
+                    row["cells"].append(lane_cell)
                 elif not skip_lane[mid][0].get(time_str):
                     row["cells"].append({
                         "rowspan": 1, "colspan": 1, "kind": "free_half",
@@ -6822,34 +6943,41 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                     })
 
                 # правая половина переносимого блока
-                row["cells"].append(
-                    _make_item_cell(
-                        kind="appt_active_right" if cell["kind"] == "appt_active" else "unavailable_right",
+                if cell["kind"] == "appt_active":
+                    lane_right_cell = _make_item_cell(
+                        kind="appt_active_right",
                         item=cell.get("item"),
                         rowspan=cell["rowspan"],
                         colspan=1,
                         master_obj=master,
                         bg=MASTER_COLORS.get(mid),
                         show_cancelled=False,
-                    ) if cell["kind"] == "appt_active" else
-                    _make_unavail_cell(
-                        kind="unavailable_right",
-                        rowsp=cell["rowspan"],
-                        colspan=1,
-                        avail_id=cell["availability_id"],
-                        reason=cell["reason"],
-                        from_s=cell["from"],
-                        to_s=cell["to"],
-                        until_s=cell["until"],
                     )
-                )
+                    lane_right_cell["status_class"] = f"{lane_right_cell.get('status_class', '')} lane-right".strip()
+                    row["cells"].append(lane_right_cell)
+                else:
+                    row["cells"].append(
+                        _make_unavail_cell(
+                            kind="unavailable_right",
+                            rowsp=cell["rowspan"],
+                            colspan=1,
+                            avail_id=cell["availability_id"],
+                            reason=cell["reason"],
+                            from_s=cell["from"],
+                            to_s=cell["to"],
+                            until_s=cell["until"],
+                        )
+                    )
                 continue
 
             # 2) lane-режим (отменённые/перенесённые)
             lane0_start = time_str in cancel_lanes[mid][0]
+            lane1_start = time_str in cancel_lanes[mid][1]
+            left_lane_active = overlap_lanes[mid][0].get(time_str)
+            right_lane_active = overlap_lanes[mid][1].get(time_str)
             lane0_skip = bool(skip_lane[mid][0].get(time_str))
             lane1_skip = bool(skip_lane[mid][1].get(time_str))
-            lane_mode = lane0_start or lane0_skip or lane1_skip
+            lane_mode = lane0_start or lane1_start or lane0_skip or lane1_skip or left_lane_active or right_lane_active
 
             if lane_mode:
                 # левая половинка
@@ -6866,6 +6994,18 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                             show_cancelled=True,
                         )
                     )
+                elif left_lane_active:
+                    lane_cell = _make_item_cell(
+                        kind=left_lane_active["kind"],
+                        item=left_lane_active["item"],
+                        rowspan=left_lane_active["rowspan"],
+                        colspan=1,
+                        master_obj=master,
+                        bg=MASTER_COLORS.get(mid),
+                        show_cancelled=False,
+                    )
+                    lane_cell["status_class"] = f"{lane_cell.get('status_class', '')} lane-left".strip()
+                    row["cells"].append(lane_cell)
                 elif not lane0_skip:
                     row["cells"].append({
                         "rowspan": 1, "colspan": 1, "kind": "free_half",
@@ -6873,7 +7013,33 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                     })
 
                 # правая половинка
-                if not lane1_skip:
+                c1 = cancel_lanes[mid][1].get(time_str)
+                if c1:
+                    row["cells"].append(
+                        _make_item_cell(
+                            kind="appt_cancelled",
+                            item=c1["item"],
+                            rowspan=c1["rowspan"],
+                            colspan=1,
+                            master_obj=master,
+                            bg=MASTER_COLORS.get(mid),
+                            show_cancelled=True,
+                        )
+                    )
+                elif right_lane_active:
+                    lane_cell = _make_item_cell(
+                        kind=right_lane_active["kind"],
+                        item=right_lane_active["item"],
+                        rowspan=right_lane_active["rowspan"],
+                        colspan=1,
+                        master_obj=master,
+                        bg=MASTER_COLORS.get(mid),
+                        show_cancelled=False,
+                    )
+                    if right_lane_active["kind"] == "appt_active_right":
+                        lane_cell["status_class"] = f"{lane_cell.get('status_class', '')} lane-right".strip()
+                    row["cells"].append(lane_cell)
+                elif not lane1_skip:
                     row["cells"].append({
                         "rowspan": 1, "colspan": 1, "kind": "free_half",
                         "master_id": mid, "html": "", "lane": "right"

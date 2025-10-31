@@ -389,6 +389,23 @@
                                     </div>
                                 </div>
 
+                                <div class="ab-row">
+                                    <div class="ab-field" data-field="validation_enabled" style="grid-column: span 2;">
+                                        {% with vf=f|getfield:"validation_enabled" %}
+                                            <div class="ab-hidden native-validation">
+                                                <input type="hidden" value="False" name="{{ vf.html_name }}">
+                                                {{ vf }}
+                                            </div>
+                                        {% endwith %}
+                                        <label>Validation</label>
+                                        <label style="display:inline-flex;gap:6px;align-items:center;">
+                                            <input type="checkbox" class="js-validation-toggle">
+                                            Enabled
+                                        </label>
+                                        <div class="ab-muted">When off, time/room validation is skipped; overlaps are allowed.</div>
+                                    </div>
+                                </div>
+
                                 <!-- PROMOCODE -->
                                 <div class="ab-row">
                                     <div class="ab-field" data-field="promocode" style="grid-column:1/3">
@@ -506,6 +523,23 @@
                                         <label>Manual discount (%)</label>
                                         {{ f.manual_discount_percent }}
                                         <div class="ab-muted">Applied on top of service/promocode discounts</div>
+                                    </div>
+                                </div>
+
+                                <div class="ab-row">
+                                    <div class="ab-field" data-field="validation_enabled" style="grid-column: span 2;">
+                                        <div class="ab-hidden native-validation">
+                                            {% with vf=f|getfield:"validation_enabled" %}
+                                                <input type="hidden" value="False" name="{{ vf.html_name }}">
+                                                {{ vf }}
+                                            {% endwith %}
+                                        </div>
+                                        <label>Validation</label>
+                                        <label style="display:inline-flex;gap:6px;align-items:center;">
+                                            <input type="checkbox" class="js-validation-toggle">
+                                            Enabled
+                                        </label>
+                                        <div class="ab-muted">When off, time/room validation is skipped; overlaps are allowed.</div>
                                     </div>
                                 </div>
 
