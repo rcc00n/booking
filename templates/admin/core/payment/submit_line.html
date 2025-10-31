@@ -1,0 +1,13 @@
+{% extends "admin/submit_line.html" %}
+{% load i18n %}
+
+{% block extra-actions %}
+    {% if show_refund_button and refund_url %}
+        <div class="form-group">
+            <a href="{{ refund_url }}" class="btn {{ jazzmin_ui.button_classes.warning }} form-control">
+                {% trans "Refund" %}
+            </a>
+        </div>
+    {% endif %}
+    {{ block.super }}
+{% endblock %}

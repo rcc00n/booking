@@ -1556,3 +1556,47 @@ class ClientIntakeFormAdminForm(forms.ModelForm):
                     raise forms.ValidationError(f"Field key '{key}' is duplicated.")
                 seen_keys.add(key)
         return data
+
+
+class PaymentRefundForm(forms.Form):
+    """
+    Validate staff-selected refund amounts against appointment payment limits.
+    """
+
+    amount_to_refund = forms.DecimalField(
+        label="Amount to refund",
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+    )
+    item_ids = forms.MultipleChoiceField(required=False)
+    product_ids = forms.MultipleChoiceField(required=False)
+
+    def __init__(self, *args, **kwargs):
+        self.max_refund_minor = int(kwargs.pop("max_refund_minor", 0) or 0)
+        item_choices = kwargs.pop("item_choices", ())
+        product_choices = kwargs.pop("product_choices", ())
+        super().__init__(*args, **kwargs)
+
+        self.fields["item_ids"].choices = list(item_choices)
+        self.fields["product_ids"].choices = list(product_choices)
+
+        amount_widget = self.fields["amount_to_refund"].widget
+        amount_widget.attrs.setdefault("step", "0.01")
+        amount_widget.attrs.setdefault("min", "0.01")
+        amount_widget.attrs.setdefault("data-refund-amount-input", "1")
+        amount_widget.attrs.setdefault("autocomplete", "off")
+        amount_widget.attrs.setdefault("inputmode", "decimal")
+
+    @staticmethod
+    def _to_minor_units(amount: Decimal) -> int:
+        quantized = Decimal(amount or Decimal("0.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return int((quantized * 100).to_integral_value(rounding=ROUND_HALF_UP))
+
+    def clean_amount_to_refund(self) -> Decimal:
+        amount = self.cleaned_data["amount_to_refund"]
+        amount_minor = self._to_minor_units(amount)
+        if self.max_refund_minor and amount_minor > self.max_refund_minor:
+            raise ValidationError("Refund amount exceeds amount paid for this appointment.")
+        self.cleaned_data["amount_minor"] = amount_minor
+        return amount

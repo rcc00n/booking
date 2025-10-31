@@ -1003,6 +1003,64 @@ def _handle_payment_intent_failed(intent_obj: Any) -> Payment:
     return payment
 
 
+def _handle_charge_refund_update(refund_obj: Any) -> None:
+    if not refund_obj:
+        return
+
+    data = _serialize_stripe_object(refund_obj)
+    payment_intent_id = data.get("payment_intent")
+    charge_id = data.get("charge")
+
+    if not payment_intent_id and charge_id:
+        payment_intent_id = (
+            Payment.objects.filter(stripe_charge_id=charge_id)
+            .values_list("stripe_payment_intent_id", flat=True)
+            .first()
+        )
+
+    if not payment_intent_id:
+        logger.info(
+            "Stripe refund event without payment_intent or charge match: %s payload=%s",
+            data.get("id"),
+            data,
+        )
+        print("[Stripe Webhook Debug] Refund event missing payment_intent", data)
+        return
+
+    logger.info(
+        "Processing refund event for intent %s (charge=%s refund=%s amount=%s currency=%s)",
+        payment_intent_id,
+        charge_id,
+        data.get("id"),
+        data.get("amount"),
+        data.get("currency"),
+    )
+    print(
+        "[Stripe Webhook Debug] Syncing intent",
+        {
+            "payment_intent": payment_intent_id,
+            "charge": charge_id,
+            "refund": data.get("id"),
+            "amount": data.get("amount"),
+        },
+    )
+
+    try:
+        payment_services.sync_payment_from_intent(payment_intent_id)
+    except Payment.DoesNotExist:
+        logger.warning(
+            "Stripe refund event references unknown payment_intent %s",
+            payment_intent_id,
+        )
+    except stripe.error.StripeError:
+        logger.exception(
+            "Stripe API error while syncing refund for intent %s",
+            payment_intent_id,
+        )
+    except Exception:  # pragma: no cover - unexpected issues
+        logger.exception("Unexpected error while syncing refund event")
+
+
 def _handle_payment_method_attached(method_obj: Any) -> None:
     data = _serialize_stripe_object(method_obj)
     customer_id = data.get("customer")
@@ -1022,7 +1080,7 @@ def _handle_payment_method_attached(method_obj: Any) -> None:
     if not profile:
         logger.info("Skipping payment_method.attached for unknown customer %s", customer_id)
         return
-    _sync_client_card(profile, customer_id, data.get("id"), data)
+        _sync_client_card(profile, customer_id, data.get("id"), data)
 
 @login_required
 @require_POST
@@ -1507,6 +1565,7 @@ def stripe_webhook(request):
 
     event_type = event.get("type")
     data_object = event.get("data", {}).get("object")
+    print("[Stripe Webhook Debug] Received event", event_type)
 
     try:
         if event_type == "payment_intent.succeeded":
@@ -1518,9 +1577,17 @@ def stripe_webhook(request):
             if intent_id:
                 intent = _fetch_intent({"id": intent_id})
                 _handle_payment_intent_failed(intent)
+        elif event_type in {"charge.refunded", "charge.refund.updated", "refund.updated"}:
+            _handle_charge_refund_update(data_object)
+        elif event_type == "charge.updated":
+            if data_object and data_object.get("amount_refunded"):
+                _handle_charge_refund_update(data_object)
+            else:
+                print("[Stripe Webhook Debug] charge.updated with no amount_refunded payload", data_object)
         elif event_type == "payment_method.attached":
             _handle_payment_method_attached(data_object)
         else:
+            print("[Stripe Webhook Debug] Unhandled event passthrough", event_type)
             logger.debug("Unhandled Stripe event %s", event_type)
     except Exception:  # pragma: no cover - ensure webhook ack and log
         logger.exception("Error processing Stripe webhook (%s)", event_type)

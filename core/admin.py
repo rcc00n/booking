@@ -317,7 +317,7 @@ def make_preset_date_filter(
     return PresetDateRangeFilter
 
 from core.models import (
-    Appointment, AppointmentItem, Payment,
+    Appointment, AppointmentItem, Payment, PaymentRefund,
     AppointmentStatus, Role, MasterProfile, Service,
     ClientIntakeForm, ClientIntakeFormSubmission,
 )
@@ -4075,6 +4075,19 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
             fields.append("resend_receipt_action")
         return fields
 
+    def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
+        show_refund = bool(
+            not add
+            and obj
+            and request.user.has_perm("core.change_payment")
+            and getattr(obj, "appointment_id", None)
+        )
+        context["show_refund_button"] = show_refund
+        context["refund_url"] = (
+            reverse("admin-payment-refund", args=[obj.pk]) if show_refund else ""
+        )
+        return super().render_change_form(request, context, add, change, form_url, obj)
+
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
@@ -4162,6 +4175,32 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
             self.message_user(request, f"Queued receipt emails for {count} payments.")
         else:
             self.message_user(request, "No succeeded payments selected.", level=messages.WARNING)
+
+
+@admin.register(PaymentRefund)
+class PaymentRefundAdmin(admin.ModelAdmin):
+    """Lightweight listing for refund audit entries."""
+
+    list_display = (
+        "appointment",
+        "payment",
+        "amount",
+        "method",
+        "stripe_refund_id",
+        "created_by",
+        "created_at",
+    )
+    list_filter = ("method", "created_at")
+    search_fields = (
+        "appointment__client__user__first_name",
+        "appointment__client__user__last_name",
+        "appointment__client__user__email",
+        "payment__stripe_payment_intent_id",
+        "stripe_refund_id",
+    )
+    readonly_fields = ("created_at", "created_by")
+    ordering = ("-created_at",)
+    date_hierarchy = "created_at"
 
 
 # -----------------------------

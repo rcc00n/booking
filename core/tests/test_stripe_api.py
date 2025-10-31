@@ -18,6 +18,8 @@ from core.models import (
     MasterProfile,
     MasterWorkDay,
     Payment,
+    PaymentMethod,
+    PaymentStatus,
     Service,
     ServiceCategory,
     ServiceMaster,
@@ -263,6 +265,86 @@ class StripeWebhookTests(TestCase):
         self.assertEqual(payment.status, 'payment_failed')
         self.assertIsNone(payment.appointment)
         self.assertEqual(payment.amount, Decimal('52.00'))
+
+    @patch('core.payments.stripe_api.payment_services.sync_payment_from_intent')
+    @patch('core.payments.stripe_api.stripe.Webhook.construct_event')
+    def test_webhook_charge_refund_updated_syncs_payment(self, mock_construct, mock_sync):
+        method = PaymentMethod.objects.create(name="Credit card")
+        payment_status = PaymentStatus.objects.create(name="Pending")
+        appointment = Appointment.objects.create(
+            client=self.profile,
+            start_time=timezone.now(),
+            payment_status=payment_status,
+        )
+        payment = Payment.objects.create(
+            appointment=appointment,
+            amount=Decimal("100.00"),
+            amount_received=Decimal("100.00"),
+            amount_refunded=Decimal("0.00"),
+            method=method,
+            status="succeeded",
+            stripe_payment_intent_id="pi_refund",
+            stripe_charge_id="ch_refund",
+        )
+
+        def _sync(intent_id):
+            self.assertEqual(intent_id, "pi_refund")
+            payment.amount_refunded = Decimal("25.00")
+            payment.save(update_fields=["amount_refunded", "updated_at"])
+            return payment
+
+        mock_sync.side_effect = _sync
+        mock_construct.return_value = {
+            "type": "charge.refund.updated",
+            "data": {"object": {"id": "re_test", "payment_intent": "pi_refund", "charge": "ch_refund"}},
+        }
+
+        response = self.client.post(
+            "/stripe/webhook/",
+            data=b"{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="sig",
+        )
+        self.assertEqual(response.status_code, 200)
+        payment.refresh_from_db()
+        self.assertEqual(payment.amount_refunded, Decimal("25.00"))
+        mock_sync.assert_called_once_with("pi_refund")
+
+    @patch('core.payments.stripe_api.payment_services.sync_payment_from_intent')
+    @patch('core.payments.stripe_api.stripe.Webhook.construct_event')
+    def test_webhook_charge_refunded_uses_charge_lookup(self, mock_construct, mock_sync):
+        method = PaymentMethod.objects.create(name="Credit card")
+        payment_status = PaymentStatus.objects.create(name="Pending")
+        appointment = Appointment.objects.create(
+            client=self.profile,
+            start_time=timezone.now(),
+            payment_status=payment_status,
+        )
+        payment = Payment.objects.create(
+            appointment=appointment,
+            amount=Decimal("80.00"),
+            amount_received=Decimal("80.00"),
+            amount_refunded=Decimal("0.00"),
+            method=method,
+            status="succeeded",
+            stripe_payment_intent_id="pi_charge_lookup",
+            stripe_charge_id="ch_charge_lookup",
+        )
+
+        mock_sync.side_effect = lambda intent_id: payment
+        mock_construct.return_value = {
+            "type": "charge.refunded",
+            "data": {"object": {"id": "re_other", "charge": "ch_charge_lookup"}},
+        }
+
+        response = self.client.post(
+            "/stripe/webhook/",
+            data=b"{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="sig",
+        )
+        self.assertEqual(response.status_code, 200)
+        mock_sync.assert_called_once_with("pi_charge_lookup")
 
     @override_settings(STRIPE_SECRET_KEY='sk_test', STRIPE_WEBHOOK_SECRET='wh_test')
     @patch('core.payments.stripe_api.stripe.PaymentMethod.retrieve')

@@ -2345,6 +2345,63 @@ class Payment(models.Model):
         target = self.appointment_id or "unlinked"
         return f"Payment {self.amount} {self.currency} for {target}"
 
+
+class PaymentRefund(models.Model):
+    """Audit record for manual or Stripe-initiated refunds tied to an appointment."""
+
+    METHOD_STRIPE = "stripe"
+    METHOD_CASH = "cash"
+    METHOD_ETRANSFER = "etransfer"
+
+    METHOD_CHOICES = [
+        (METHOD_STRIPE, "Stripe"),
+        (METHOD_CASH, "Cash"),
+        (METHOD_ETRANSFER, "E-Transfer"),
+    ]
+
+    appointment = models.ForeignKey(
+        Appointment,
+        on_delete=models.CASCADE,
+        related_name="refunds",
+    )
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.CASCADE,
+        related_name="refunds",
+        null=True,
+        blank=True,
+    )
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+        help_text="Refund amount in major currency units.",
+    )
+    amount_minor = models.IntegerField(
+        validators=[MinValueValidator(1)],
+        help_text="Refund amount in minor currency units (e.g., cents).",
+    )
+    method = models.CharField(max_length=20, choices=METHOD_CHOICES)
+    stripe_refund_id = models.CharField(max_length=64, blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        related_name="payment_refunds",
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Payment Refund"
+        verbose_name_plural = "Payment Refunds"
+
+    def __str__(self) -> str:
+        amount_display = f"{self.amount:.2f}"
+        method_label = dict(self.METHOD_CHOICES).get(self.method, self.method)
+        return f"{amount_display} via {method_label} for {self.appointment_id}"
+
 # --- 6. PREPAYMENTS ---
 
 

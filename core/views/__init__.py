@@ -4,14 +4,17 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.forms import inlineformset_factory
 from django.shortcuts import render, get_object_or_404, redirect
 from django.db.models import Prefetch, Q
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
+from django.utils.html import format_html
+from django.urls import reverse
 from datetime import datetime
 from decimal import Decimal
-from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError, PermissionDenied
 from django.db import transaction
 import json
 import stripe
@@ -19,7 +22,7 @@ import stripe
 from core.models import (
     Appointment, ServiceCategory, Service, PromoCode,
     AppointmentStatusHistory, AppointmentItemStatusHistory, MasterProfile, UserProfile, CancellationReason,
-    AppointmentItem, BookingCart, BookingCartItem, Payment, ClientIntakeForm, ServiceMaster,
+    AppointmentItem, BookingCart, BookingCartItem, Payment, ClientIntakeForm, ServiceMaster, ProductSale,
 )
 from core.services.booking import (
     get_available_slots,
@@ -32,9 +35,16 @@ from core.services.booking import (
 from core.services.item_status import record_item_status
 from accounts.utils import build_autofill_defaults
 from core.services import payments as payment_services
-from core.services.pricing import compute_cart_pricing, get_available_prepayment_percents
+from core.services.pricing import (
+    compute_cart_pricing,
+    compute_appointment_pricing,
+    get_available_prepayment_percents,
+    PricingComputationError,
+)
+from core.services.refunds import RefundService, RefundError
 from core.utils.fees import card_processing_fee
 from core.tasks import send_item_cancellation_email, send_item_confirmation_email
+from core.forms import PaymentRefundForm
 
 def _build_catalog_context(request):
     """Общий конструктор контекста каталога."""
@@ -1026,3 +1036,266 @@ def service_promocodes_api(request, service_id: str):
         for pc in qs
     ]
     return JsonResponse(data, safe=False)
+
+
+@staff_member_required
+@csrf_protect
+def payment_refund_view(request, pk):
+    """
+    Render and process the admin refund workflow for a specific payment.
+    """
+    if not request.user.has_perm("core.change_payment"):
+        raise PermissionDenied
+
+    payment = get_object_or_404(
+        Payment.objects.select_related("appointment", "method"),
+        pk=pk,
+    )
+
+    if not payment.appointment_id:
+        messages.error(request, "This payment is not linked to an appointment.")
+        return redirect("admin:core_payment_change", payment.pk)
+
+    items_qs = AppointmentItem.objects.select_related("service", "master__user").order_by("start_time")
+    product_sales_qs = ProductSale.objects.select_related("product").order_by("sold_at")
+    succeeded_payments_qs = (
+        Payment.objects.filter(status__iexact="succeeded")
+        .select_related("method")
+        .order_by("created_at")
+    )
+    appointment = (
+        Appointment.objects.filter(pk=payment.appointment_id)
+        .select_related("client__user")
+        .prefetch_related(
+            Prefetch("items", queryset=items_qs),
+            Prefetch("product_sales", queryset=product_sales_qs),
+            Prefetch("payments", queryset=succeeded_payments_qs),
+        )
+        .first()
+    )
+    if not appointment:
+        messages.error(request, "Appointment not found for this payment.")
+        return redirect("admin:core_payment_change", payment.pk)
+
+    payment.appointment = appointment
+
+    def _quantize(amount: Decimal | None) -> Decimal:
+        if amount is None:
+            return Decimal("0.00")
+        if not isinstance(amount, Decimal):
+            amount = Decimal(str(amount))
+        return amount.quantize(Decimal("0.01"))
+
+    try:
+        pricing = compute_appointment_pricing(appointment)
+    except PricingComputationError:
+        pricing = None
+
+    default_currency = (getattr(settings, "STRIPE_CURRENCY", "cad") or "cad").lower()
+    fallback_symbol = "CA$" if default_currency == "cad" else f"{default_currency.upper()} "
+    currency_symbol = pricing.get("currency_symbol") if pricing else None
+    if not currency_symbol:
+        currency_symbol = fallback_symbol
+
+    items_data: list[dict[str, object]] = []
+    if pricing:
+        for entry in pricing.get("items", []):
+            amount = _quantize(entry.get("total_with_tax"))
+            amount_minor = RefundService._to_minor_units(amount)
+            master_label = entry.get("master") or ""
+            items_data.append(
+                {
+                    "id": str(entry.get("id") or ""),
+                    "name": entry.get("name") or "",
+                    "master": master_label,
+                    "amount": amount,
+                    "amount_minor": amount_minor,
+                    "display": f"{currency_symbol}{amount:.2f}",
+                }
+            )
+    else:
+        for item in appointment.items.all():
+            total = _quantize(
+                (item.final_price or Decimal("0.00")) + (item.tax_amount or Decimal("0.00"))
+            )
+            amount_minor = RefundService._to_minor_units(total)
+            master = getattr(item, "master", None)
+            master_name = ""
+            if master:
+                master_name = getattr(master, "display_name", "") or ""
+                if not master_name:
+                    user = getattr(master, "user", None)
+                    if user:
+                        master_name = user.get_full_name() or user.username
+            items_data.append(
+                {
+                    "id": str(item.pk),
+                    "name": getattr(getattr(item, "service", None), "name", ""),
+                    "master": master_name,
+                    "amount": total,
+                    "amount_minor": amount_minor,
+                    "display": f"{currency_symbol}{total:.2f}",
+                }
+            )
+
+    products_data: list[dict[str, object]] = []
+    if pricing:
+        for entry in pricing.get("product_sales", []):
+            product_total = _quantize(entry.get("total_amount"))
+            tax_amount = _quantize(entry.get("tax_amount"))
+            combined = _quantize(product_total + tax_amount)
+            amount_minor = RefundService._to_minor_units(combined)
+            products_data.append(
+                {
+                    "id": str(entry.get("id") or ""),
+                    "name": entry.get("name") or "",
+                    "quantity": entry.get("quantity") or 0,
+                    "amount": combined,
+                    "amount_minor": amount_minor,
+                    "display": f"{currency_symbol}{combined:.2f}",
+                }
+            )
+    else:
+        for sale in appointment.product_sales.all():
+            combined = _quantize(
+                (sale.total_amount or Decimal("0.00")) + (sale.tax_amount or Decimal("0.00"))
+            )
+            amount_minor = RefundService._to_minor_units(combined)
+            products_data.append(
+                {
+                    "id": str(sale.pk),
+                    "name": getattr(getattr(sale, "product", None), "name", ""),
+                    "quantity": getattr(sale, "quantity", 0),
+                    "amount": combined,
+                    "amount_minor": amount_minor,
+                    "display": f"{currency_symbol}{combined:.2f}",
+                }
+            )
+
+    item_choices = [(entry["id"], entry["id"]) for entry in items_data if entry["id"]]
+    product_choices = [(entry["id"], entry["id"]) for entry in products_data if entry["id"]]
+
+    succeeded_payments = list(appointment.payments.all())
+    total_paid_decimal = payment_services.get_total_received_for_appointment(appointment)
+    already_refunded_decimal = sum(
+        (_quantize(p.amount_refunded) for p in succeeded_payments),
+        Decimal("0.00"),
+    )
+    already_refunded_decimal = _quantize(already_refunded_decimal)
+    available_decimal = total_paid_decimal - already_refunded_decimal
+    if available_decimal < Decimal("0.00"):
+        available_decimal = Decimal("0.00")
+
+    totals_section = (pricing or {}).get("totals") if pricing else None
+    if totals_section:
+        grand_total = _quantize(totals_section.get("grand_total"))
+    else:
+        grand_total = _quantize(getattr(appointment, "total_with_tax", Decimal("0.00")))
+
+    max_refund_minor = RefundService._to_minor_units(available_decimal)
+
+    form_kwargs = {
+        "max_refund_minor": max_refund_minor,
+        "item_choices": item_choices,
+        "product_choices": product_choices,
+    }
+
+    if request.method == "POST":
+        form = PaymentRefundForm(request.POST, **form_kwargs)
+        selected_item_ids = set(request.POST.getlist("item_ids"))
+        selected_product_ids = set(request.POST.getlist("product_ids"))
+        if form.is_valid():
+            requested_minor = form.cleaned_data["amount_minor"]
+            try:
+                print(
+                    "[Refund Debug] Initiating refund",
+                    {
+                        "payment_id": str(payment.pk),
+                        "appointment_id": str(appointment.pk),
+                        "requested_minor": requested_minor,
+                        "selected_items": list(selected_item_ids),
+                        "selected_products": list(selected_product_ids),
+                    },
+                )
+                allocations = RefundService.allocate_refund_for_appointment(
+                    appointment,
+                    requested_minor,
+                )
+                print(
+                    "[Refund Debug] Allocations resolved",
+                    [
+                        {
+                            "payment_id": str(allocation.payment.pk),
+                            "available_minor": RefundService._available_minor(allocation.payment),
+                            "allocated_minor": allocation.amount_minor,
+                        }
+                        for allocation in allocations
+                    ],
+                )
+                stripe_ids = RefundService.perform_refund(allocations, actor=request.user)
+            except RefundError as exc:
+                print("[Refund Debug] RefundError encountered:", exc)
+                form.add_error(None, str(exc))
+            else:
+                amount = form.cleaned_data["amount_to_refund"]
+                payment_url = reverse("admin:core_payment_change", args=[payment.pk])
+                appointment_url = reverse("admin:core_appointment_change", args=[appointment.pk])
+                links_html = format_html(
+                    '<a href="{}">Payment</a> · <a href="{}">Appointment</a>',
+                    payment_url,
+                    appointment_url,
+                )
+                if stripe_ids:
+                    stripe_html = format_html(" Stripe refund ID(s): {}", ", ".join(stripe_ids))
+                else:
+                    stripe_html = ""
+                amount_display = format_html(
+                    "{}{}",
+                    currency_symbol,
+                    f"{amount:.2f}",
+                )
+                messages.success(
+                    request,
+                    format_html(
+                        "Refund of {} initiated. {}{}",
+                        amount_display,
+                        links_html,
+                        stripe_html,
+                    ),
+                )
+                print(
+                    "[Refund Debug] Refund complete",
+                    {
+                        "payment_id": str(payment.pk),
+                        "appointment_id": str(appointment.pk),
+                        "refunded_minor": requested_minor,
+                        "stripe_refunds": stripe_ids,
+                    },
+                )
+                return redirect("admin-payment-refund", pk=payment.pk)
+    else:
+        form = PaymentRefundForm(
+            initial={"amount_to_refund": Decimal("0.00")},
+            **form_kwargs,
+        )
+        selected_item_ids = set()
+        selected_product_ids = set()
+
+    context = {
+        "form": form,
+        "payment": payment,
+        "appointment": appointment,
+        "items": items_data,
+        "products": products_data,
+        "currency_symbol": currency_symbol,
+        "summary": {
+            "grand_total": grand_total,
+            "total_paid": total_paid_decimal,
+            "already_refunded": already_refunded_decimal,
+            "available": available_decimal,
+        },
+        "selected_item_ids": selected_item_ids,
+        "selected_product_ids": selected_product_ids,
+        "max_refund_minor": max_refund_minor,
+    }
+    return render(request, "admin/payment_refund.html", context)

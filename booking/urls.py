@@ -27,6 +27,7 @@ from accounts.views import health_view, health_edit
 urlpatterns = [
     path("admin/api/appointment-items/<uuid:item_id>/status/", admin_item_status_update, name="admin-item-status-update"),
     path("admin/api/appointment-items/<uuid:item_id>/reschedule/", admin_item_reschedule, name="admin-item-reschedule"),
+path("", include("core.urls")),
     path("admin/", admin.site.urls),
 
     # ВАЖНО: подключаем accounts БЕЗ namespace, чтобы {% url 'register' %} и т.п. работали
