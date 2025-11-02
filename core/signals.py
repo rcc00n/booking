@@ -21,6 +21,7 @@ from core.tasks import (
     send_item_confirmation_email,
     generate_payment_receipt_task,
     email_payment_receipt_task,
+    email_refund_receipt_task,
 )
 from .models import (
     Appointment,
@@ -32,6 +33,7 @@ from .models import (
     UserProfile,
     PaymentStatus,
     Payment,
+    PaymentRefund,
     ClientIntakeForm,
 )
 from core.services.item_status import (
@@ -42,7 +44,7 @@ from core.services.intake_assignments import (
     ensure_universal_assignments_for_form,
     ensure_universal_assignments_for_profile,
 )
-from django.db import OperationalError, ProgrammingError
+from django.db import OperationalError, ProgrammingError, transaction
 
 logger = logging.getLogger(__name__)
 
@@ -746,3 +748,24 @@ def trigger_receipt_pipeline(sender, instance: Payment, created: bool, **kwargs)
     payment_id = str(instance.pk)
     generate_payment_receipt_task.delay(payment_id)
     email_payment_receipt_task.delay(payment_id)
+
+
+@receiver(post_save, sender=PaymentRefund)
+def on_payment_refund_created(sender, instance: PaymentRefund, created: bool, **kwargs) -> None:
+    if not created or kwargs.get("raw"):
+        return
+
+    refund_id = str(instance.pk)
+
+    def enqueue_refund_email() -> None:
+        try:
+            email_refund_receipt_task.delay(refund_id)
+        except Exception as exc:  # noqa: BLE001 - log but do not interrupt the save flow
+            logger.warning(
+                "Refund %s: failed to enqueue refund receipt email task: %s",
+                refund_id,
+                exc,
+                exc_info=exc,
+            )
+
+    transaction.on_commit(enqueue_refund_email)

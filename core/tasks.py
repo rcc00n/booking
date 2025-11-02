@@ -22,8 +22,10 @@ from core.models import (
     ReminderSchedule,
     AppointmentItem,
     Payment,
+    PaymentRefund,
 )
-from core.services.mailer import send_payment_receipt_email
+from core.receipts import generate_refund_receipt_pdf
+from core.services.mailer import send_payment_receipt_email, send_refund_receipt_email
 from core.services.receipts import generate_payment_receipt_pdf, persist_payment_receipt
 from core.services.item_status import record_item_status, EMAIL_CONFIRM_NOTE
 
@@ -829,3 +831,46 @@ def email_payment_receipt_task(payment_id: str, force: bool = False) -> None:
 
     if send_payment_receipt_email(payment, pdf_bytes):
         Payment.objects.filter(pk=payment_id).update(receipt_sent_at=timezone.now())
+
+
+@shared_task(name="core.tasks.generate_refund_receipt_task")
+def generate_refund_receipt_task(refund_id: str) -> bytes:
+    """
+    Generate a refund receipt PDF for the given refund.
+    """
+    try:
+        refund = (
+            PaymentRefund.objects.select_related("payment__appointment__client__user")
+            .get(pk=refund_id)
+        )
+    except PaymentRefund.DoesNotExist:
+        logger.warning("Refund %s: generate task skipped because refund record was not found", refund_id)
+        return b""
+
+    return generate_refund_receipt_pdf(refund)
+
+
+@shared_task(name="core.tasks.email_refund_receipt_task")
+def email_refund_receipt_task(refund_id: str) -> bool:
+    """
+    Generate and email a refund receipt PDF to the client.
+    """
+    try:
+        refund = (
+            PaymentRefund.objects.select_related("payment__appointment__client__user")
+            .get(pk=refund_id)
+        )
+    except PaymentRefund.DoesNotExist:
+        logger.warning("Refund %s: email task skipped because refund record was not found", refund_id)
+        return False
+
+    pdf_bytes = generate_refund_receipt_pdf(refund)
+    if not pdf_bytes:
+        logger.warning("Refund %s: PDF generation returned empty payload; skipping email", refund_id)
+        return False
+
+    if send_refund_receipt_email(refund, pdf_bytes):
+        return True
+
+    logger.warning("Refund %s: email task finished with failure", refund_id)
+    return False

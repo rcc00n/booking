@@ -1,16 +1,21 @@
 """
-Mail helpers for delivering payment receipts.
+Mail helpers for delivering payment and refund receipts.
 """
 from __future__ import annotations
 
-from typing import Any
+import logging
 from decimal import Decimal
+from typing import Any
 
 from django.conf import settings
 from django.core.mail import EmailMessage
 from django.template.loader import render_to_string
-from core.services.pricing import get_appointment_grand_total
+
+from core.models import PaymentRefund
 from core.services.payments import get_total_received_for_appointment
+from core.services.pricing import get_appointment_grand_total
+
+logger = logging.getLogger(__name__)
 
 
 def _quantize(amount: Any) -> Decimal:
@@ -126,3 +131,75 @@ def send_payment_receipt_email(payment, pdf_bytes: bytes) -> bool:
     msg.attach(filename, pdf_bytes, "application/pdf")
     msg.send(fail_silently=False)
     return True
+
+
+def _metadata_lookup(payment: Any, key: str) -> str:
+    metadata = getattr(payment, "metadata", None)
+    if isinstance(metadata, dict):
+        value = metadata.get(key)
+        if isinstance(value, str):
+            return value.strip()
+        if value is not None:
+            return str(value).strip()
+    return ""
+
+
+def send_refund_receipt_email(refund: PaymentRefund, pdf_bytes: bytes) -> bool:
+    """
+    Send a refund receipt email with the generated PDF attachment to the client.
+    """
+    if not refund or not pdf_bytes:
+        return False
+
+    payment = getattr(refund, "payment", None)
+    if payment is None:
+        logger.warning("Refund %s: missing payment reference; skipping email", getattr(refund, "pk", "?"))
+        return False
+
+    appointment = getattr(payment, "appointment", None)
+
+    client_email = _resolve_client_email(payment) or _metadata_lookup(payment, "client_email")
+    if not client_email:
+        logger.warning("Refund %s: no client email found; skipping email", refund.pk)
+        return False
+
+    client_name = (
+        _resolve_client_name(payment)
+        or _metadata_lookup(payment, "client_name")
+        or "Client"
+    )
+
+    currency = (getattr(payment, "currency", None) or getattr(settings, "STRIPE_CURRENCY", "cad") or "cad").upper()
+
+    ctx = {
+        "client_name": client_name,
+        "refund": {
+            "id": str(refund.pk),
+            "amount": getattr(refund, "amount", None),
+            "currency": currency,
+        },
+        "appointment_datetime": getattr(appointment, "start_time", None),
+    }
+
+    subject = render_to_string("emails/refund_receipt_subject.txt", ctx).strip()
+    body = render_to_string("emails/refund_receipt_body.txt", ctx)
+
+    bcc_email = getattr(settings, "BUSINESS_BCC_EMAIL", "")
+    reply_to_email = getattr(settings, "BUSINESS_SUPPORT_EMAIL", getattr(settings, "DEFAULT_FROM_EMAIL", ""))
+
+    msg = EmailMessage(
+        subject=subject,
+        body=body,
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        to=[client_email],
+        bcc=[bcc_email] if bcc_email else None,
+        reply_to=[reply_to_email] if reply_to_email else None,
+    )
+    msg.attach(f"refund_receipt_{refund.pk}.pdf", pdf_bytes, "application/pdf")
+
+    try:
+        msg.send(fail_silently=False)
+        return True
+    except Exception as exc:  # noqa: BLE001 - email failure should not break refund flow
+        logger.exception("Failed to send refund receipt email for refund %s: %s", refund.pk, exc)
+        return False

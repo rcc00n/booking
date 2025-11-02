@@ -1,0 +1,120 @@
+{% load tz %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Refund Receipt {{ receipt_number }}</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #111; line-height: 1.4; }
+    h1, h2, h3 { margin: 0 0 8px; }
+    .header, .section { margin-bottom: 20px; }
+    .meta { font-size: 12px; color: #555; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
+    th { background-color: #f7f7f7; text-transform: uppercase; font-size: 12px; letter-spacing: 0.4px; }
+    .right { text-align: right; }
+    .totals td { border: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Refund Receipt</h1>
+    <div class="meta">
+      <div><strong>Receipt #:</strong> {{ receipt_number }}</div>
+      <div><strong>Issued at:</strong> {{ issued_at|date:"Y-m-d H:i" }}</div>
+      {% if refund.created_at %}
+      <div><strong>Refunded at:</strong> {{ refund.created_at|date:"Y-m-d H:i" }}</div>
+      {% endif %}
+      {% if appointment %}
+        <div><strong>Appointment:</strong>
+          {{ appointment.start_time|date:"Y-m-d H:i" }}
+          {% if appointment.staff %} · {{ appointment.staff }}{% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="section">
+    <table>
+      <tr>
+        <td>
+          <h3>{{ business.name }}</h3>
+          {% if business.address %}<div>{{ business.address }}</div>{% endif %}
+          {% if business.phone %}<div>{{ business.phone }}</div>{% endif %}
+          {% if business.email %}<div>{{ business.email }}</div>{% endif %}
+        </td>
+        <td class="right">
+          <h3>Client</h3>
+          <div>{{ client_contact.name|default:"" }}</div>
+          {% if client_contact.email %}<div>{{ client_contact.email }}</div>{% endif %}
+          {% if client_contact.phone %}<div>{{ client_contact.phone }}</div>{% endif %}
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <h3>Items</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Service / Product</th>
+          <th>Professional</th>
+          <th>Scheduled</th>
+          <th class="right">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if items %}
+          {% for item in items %}
+          <tr>
+            <td>{{ item.name }}</td>
+            <td>{{ item.master|default:"—" }}</td>
+            <td>
+              {% if item.start_at %}
+                {{ item.start_at|date:"Y-m-d H:i" }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td class="right">
+              {% if item.total_with_tax %}
+                {{ item.total_with_tax|floatformat:2 }} {{ totals.currency }}
+              {% elif item.display_price %}
+                {{ item.display_price|floatformat:2 }} {{ totals.currency }}
+              {% else %}
+                {{ item.final_price|floatformat:2 }} {{ totals.currency }}
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="4" class="meta">No items recorded for this refund.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h3>Summary</h3>
+    <table class="totals">
+      <tr>
+        <td>Total paid</td>
+        <td class="right">
+          {% if payment.amount %}{{ payment.amount|floatformat:2 }} {{ refund.currency }}{% else %}{{ totals.total|floatformat:2 }} {{ totals.currency }}{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td><strong>Refunded in this transaction</strong></td>
+        <td class="right"><strong>{{ refund.amount|floatformat:2 }} {{ refund.currency }}</strong></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="meta">
+    If you have questions about this refund, please contact {{ business.email|default:"our support" }}.
+  </div>
+</body>
+</html>
