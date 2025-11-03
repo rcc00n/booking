@@ -873,7 +873,7 @@
                                                     {% endif %}
                                                     <figcaption>
                                                         <span class="ab-photo-card__meta">
-                                                            {{ file.uploaded_at|localtime|date:"Y-m-d H:i" }}
+                                                            Uploaded {{ file.uploaded_at|localtime|date:"Y-m-d H:i" }}
                                                             {% if file.uploader_display %}
                                                                 — {{ file.uploader_display }}
                                                             {% endif %}
@@ -881,11 +881,17 @@
                                                         {% if file.description %}
                                                             <span class="ab-photo-card__desc">{{ file.description }}</span>
                                                         {% endif %}
-                                                        <form method="post" action="{% url photo_delete_url_name form.instance.pk file.pk %}" class="ab-photo-card__actions">
-                                                            {% csrf_token %}
-                                                            <input type="hidden" name="return_to_date" value="{{ return_to_date|default:'' }}">
-                                                            <button type="submit" class="ab-btn-link">Delete</button>
-                                                        </form>
+                                                        <div class="ab-photo-card__actions">
+                                                            <button
+                                                                type="submit"
+                                                                class="ab-btn-link"
+                                                                formaction="{% url photo_delete_url_name form.instance.pk file.pk %}"
+                                                                formmethod="post"
+                                                                formnovalidate
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        </div>
                                                     </figcaption>
                                                 </figure>
                                             {% endfor %}
@@ -899,9 +905,7 @@
 
                         <div class="ab-divider"></div>
 
-                        <form method="post" enctype="multipart/form-data" action="{{ photo_upload_url }}" class="ab-photo-upload">
-                            {% csrf_token %}
-                            <input type="hidden" name="return_to_date" value="{{ return_to_date|default:'' }}">
+                        <div class="ab-photo-upload">
                             <div class="ab-field">
                                 {{ photo_upload_form.kind.label_tag }} {{ photo_upload_form.kind }}
                                 {% if photo_upload_form.kind.errors %}<div class="ab-err">{{ photo_upload_form.kind.errors }}</div>{% endif %}
@@ -916,9 +920,18 @@
                                 {% if photo_upload_form.description.errors %}<div class="ab-err">{{ photo_upload_form.description.errors }}</div>{% endif %}
                             </div>
                             <div class="ab-r" style="justify-content:flex-end">
-                                <button type="submit" class="ab-btn">Upload photos</button>
+                                <button
+                                    type="submit"
+                                    class="ab-btn"
+                                    formaction="{{ photo_upload_url }}"
+                                    formmethod="post"
+                                    formenctype="multipart/form-data"
+                                    formnovalidate
+                                >
+                                    Upload photos
+                                </button>
                             </div>
-                        </form>
+                        </div>
                     {% endif %}
                 </div>
             </section>

@@ -102,6 +102,8 @@ class AppointmentPhotoAdminTests(TestCase):
         payload = {
             "kind": ClientFile.KIND_BEFORE,
             "description": "Session start",
+            "return_to_date": "2025-02-14",
+            "client": str(appointment.client_id),
             "files": [self._fake_image("before-1.jpg"), self._fake_image("before-2.jpg")],
         }
         multipart_data = encode_multipart(BOUNDARY, payload)
@@ -109,7 +111,10 @@ class AppointmentPhotoAdminTests(TestCase):
         response = self.client.generic("POST", url, multipart_data, content_type=MULTIPART_CONTENT)
 
         self.assertEqual(response.status_code, 302)
-        expected_redirect = f"{reverse('admin:core_appointment_change', args=[appointment.pk])}#before-after"
+        expected_redirect = (
+            f"{reverse('admin:core_appointment_change', args=[appointment.pk])}"
+            f"?date={payload['return_to_date']}#before-after"
+        )
         self.assertEqual(response.headers.get("Location"), expected_redirect)
 
         uploaded_payload = response.wsgi_request.FILES.getlist("files")
@@ -143,7 +148,13 @@ class AppointmentPhotoAdminTests(TestCase):
 
         url = reverse("admin:core_appointment_delete_photo", args=[appointment.pk, file_record.pk])
         self.client.force_login(self.admin_user)
-        response = self.client.post(url, data={"return_to_date": ""})
+        response = self.client.post(
+            url,
+            data={
+                "return_to_date": "",
+                "client": str(appointment.client_id),
+            },
+        )
 
         self.assertEqual(response.status_code, 302)
         self.assertFalse(ClientFile.objects.filter(pk=file_record.pk).exists())
