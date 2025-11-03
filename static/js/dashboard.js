@@ -568,6 +568,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const rsMobileHint = document.getElementById('rsMobileHint');
 
   const WINDOW_DAYS = 14, START=6, END=23, STEP=30;
+  const normalizeId = (value) => (value === undefined || value === null ? "" : String(value));
 
   let resState = {
     apptId:null, serviceId:null, itemId:null, masterId:null, slot:null, masters:[],
@@ -606,17 +607,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function fetchAvail(dayISO, masterId){
     const params = new URLSearchParams({ service: resState.serviceId, date: dayISO });
-    if (masterId) params.set('master', masterId);
+    const masterParam = normalizeId(masterId);
+    if (masterParam) params.set('master', masterParam);
     const r = await fetch(`/accounts/api/availability/?${params.toString()}`, {credentials:'same-origin'});
     if(!r.ok) throw new Error(translate('dashboard.reschedule.loadFailed'));
     const data = await r.json();
 
     let slots=[];
-    if (masterId){
-      const m=(data.masters||[]).find(x=>Number(x.id)===Number(masterId)); slots = m ? (m.slots||[]) : [];
+    if (masterParam){
+      if (Array.isArray(data.slots)) {
+        slots = data.slots;
+      } else {
+        const match = (data.masters || []).find((entry) => normalizeId(entry.id) === masterParam);
+        slots = match ? (match.slots || []) : [];
+      }
     }else{
       // возьмём слоты первого мастера только чтобы понять список мастеров
-      slots = (data.masters && data.masters[0] && data.masters[0].slots) ? data.masters[0].slots : [];
+      const firstWithSlots = Array.isArray(data.masters)
+        ? data.masters.find((entry) => Array.isArray(entry.slots) && entry.slots.length)
+        : null;
+      slots = firstWithSlots ? firstWithSlots.slots : [];
     }
     const set=new Set(), map=new Map();
     (slots||[]).forEach(iso=>{ const d=new Date(iso); const key=`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; set.add(key); if(!map.has(key)) map.set(key, iso); });
@@ -668,10 +678,10 @@ document.addEventListener('DOMContentLoaded', () => {
         queueRefresh();
         return;
       }
-      resState.masters.forEach(m=>{ const opt=document.createElement('option'); opt.value=m.id; opt.textContent=m.name; resMaster.appendChild(opt); });
+      resState.masters.forEach(m=>{ const opt=document.createElement('option'); opt.value=normalizeId(m.id); opt.textContent=m.name; resMaster.appendChild(opt); });
       const withSlots = resState.masters.find(m=>(m.slots||[]).length) || resState.masters[0];
-      resMaster.value = withSlots.id;
-      resState.masterId = Number(resMaster.value);
+      resMaster.value = normalizeId(withSlots.id);
+      resState.masterId = resMaster.value;
       resState.cache.clear();
       await renderWindow();
     }catch(e){
@@ -953,7 +963,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   resMaster.addEventListener('change', async ()=>{
-    resState.masterId = Number(resMaster.value);
+    resState.masterId = resMaster.value;
     resState.slot = null; resSubmit.disabled=true; resState.cache.clear();
     resState.selectedDayIndex = 0;
     resErr.classList.add('hidden'); clearTextKey(resErr);
