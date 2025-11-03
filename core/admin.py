@@ -1310,6 +1310,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     form = CustomUserChangeForm
     change_list_template = "admin/users/changelist_cards.html"
     add_form_template = "admin/users/add_form.html"
+    change_form_template = "admin/users/change_form.html"
     export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
     list_per_page = 10
     readonly_fields = getattr(BaseUserAdmin, "readonly_fields", tuple()) + ("password_change_link",)
@@ -1403,13 +1404,36 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     password_change_link.short_description = _("Password")
 
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
+        context = dict(context or {})
+        context.setdefault("client_files", None)
+        context.setdefault("client_files_total", 0)
+
         if add and (request.GET.get(IS_POPUP_VAR) or request.POST.get(IS_POPUP_VAR)):
             if request.GET.get("_from_custom_appt") or request.POST.get("_from_custom_appt"):
                 return_to_param = request.GET.get("return_to") or request.POST.get("return_to")
                 if return_to_param:
-                    context = {**context}
                     context["popup_cancel_url"] = unquote_plus(return_to_param)
                     context["popup_cancel_param"] = return_to_param
+        if not add and obj:
+            profile = getattr(obj, "userprofile", None)
+            if profile:
+                files_qs = (
+                    ClientFile.objects.filter(user=profile)
+                    .select_related("appointment", "uploaded_by_user")
+                    .order_by("-uploaded_at", "-id")
+                )
+                files = []
+                for file_obj in files_qs:
+                    appointment_url = ""
+                    if file_obj.appointment_id:
+                        try:
+                            appointment_url = reverse("admin:core_appointment_change", args=[file_obj.appointment_id])
+                        except NoReverseMatch:
+                            appointment_url = ""
+                    setattr(file_obj, "appointment_admin_url", appointment_url)
+                    files.append(file_obj)
+                context["client_files"] = files
+                context["client_files_total"] = len(files)
         return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
 
     def get_queryset(self, request):
