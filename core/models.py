@@ -2460,13 +2460,29 @@ class ClientFile(models.Model):
     """
     USER = 'user'
     ADMIN = 'admin'
+    KIND_BEFORE = "before"
+    KIND_AFTER = "after"
+    KIND_OTHER = "other"
 
     OWNER_CHOICES = [
         (USER, 'User'),
         (ADMIN, 'Admin'),
     ]
+    KIND_CHOICES = [
+        (KIND_BEFORE, "Before"),
+        (KIND_AFTER, "After"),
+        (KIND_OTHER, "Other"),
+    ]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
+    appointment = models.ForeignKey(
+        Appointment,
+        on_delete=models.CASCADE,
+        related_name="client_files",
+        null=True,
+        blank=True,
+        help_text="Appointment this file belongs to.",
+    )
     file = models.FileField(upload_to='client_files/', storage=S3Boto3Storage()) # stored in S3!
     file_type = models.CharField(max_length=50, editable=False)
     uploaded_at = models.DateTimeField(auto_now_add=True)
@@ -2476,17 +2492,112 @@ class ClientFile(models.Model):
         default=USER,
         help_text="Who uploaded the file: admin or user"
     )
+    uploaded_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_client_files",
+        help_text="Staff member who uploaded the file.",
+    )
+    kind = models.CharField(
+        max_length=16,
+        choices=KIND_CHOICES,
+        default=KIND_OTHER,
+        help_text="Categorise the file for before/after tracking.",
+    )
 
     description = models.CharField(
         max_length=255,
         blank=True,
         help_text="Optional description (e.g., 'Form before procedure')"
     )
+
+    class Meta:
+        ordering = ("-uploaded_at", "-id")
+
+    def _sync_user_with_appointment(self):
+        if not self.appointment_id:
+            return
+        appointment_client_id = getattr(self.appointment, "client_id", None)
+        if appointment_client_id is None:
+            appointment_client_id = (
+                Appointment.objects.filter(pk=self.appointment_id)
+                .values_list("client_id", flat=True)
+                .first()
+            )
+        if appointment_client_id is None:
+            raise ValidationError({
+                "appointment": "Selected appointment has no client linked.",
+            })
+        client_obj = getattr(self.appointment, "client", None)
+        if client_obj is None:
+            client_obj = UserProfile.objects.filter(pk=appointment_client_id).first()
+        if client_obj is None:
+            raise ValidationError({
+                "appointment": "Unable to resolve the client profile for this appointment.",
+            })
+        self.user = client_obj
+        self.user_id = appointment_client_id
+
+    def clean(self):
+        super().clean()
+        self._sync_user_with_appointment()
+
     def save(self, *args, **kwargs):
         if self.file and not self.file_type:
             name, extension = os.path.splitext(self.file.name)
             self.file_type = extension.lower().lstrip('.')  # без точки
+        # Ensure relational integrity before persisting.
+        self._sync_user_with_appointment()
+        self.full_clean()
         super().save(*args, **kwargs)
+
+    @property
+    def is_image(self) -> bool:
+        image_types = {
+            "jpg",
+            "jpeg",
+            "png",
+            "gif",
+            "bmp",
+            "webp",
+            "tiff",
+            "heic",
+            "heif",
+            "svg",
+        }
+        return (self.file_type or "").lower() in image_types
+
+    def __str__(self) -> str:
+        kind_label = self.get_kind_display()
+        if self.appointment_id:
+            return f"{kind_label} for appointment {self.appointment_id}"
+        return f"{kind_label} for {self.user}"
+
+    @property
+    def uploader_display(self) -> str:
+        if self.uploaded_by_user_id:
+            user_obj = self.uploaded_by_user
+            if user_obj:
+                full_name = user_obj.get_full_name()
+                if full_name:
+                    return full_name
+                username = getattr(user_obj, "get_username", None)
+                if callable(username):
+                    return username()
+                return getattr(user_obj, "username", str(user_obj))
+        if self.uploaded_by == self.ADMIN:
+            return "Admin"
+        if self.uploaded_by == self.USER:
+            return "Client"
+        return (self.uploaded_by or "Unknown").title()
+
+    @property
+    def filename(self) -> str:
+        if not self.file:
+            return ""
+        return os.path.basename(self.file.name or "")
 
 # --- 7. NOTIFICATIONS ---
 

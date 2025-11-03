@@ -52,6 +52,12 @@ HEALTH_CONTRA_CHOICES = [
     ("allergy_unknown", "Allergy to unknown agents"),
 ]
 
+
+class MultiFileInput(forms.ClearableFileInput):
+    """File input widget that supports selecting multiple files."""
+
+    allow_multiple_selected = True
+
 EDITABLE_FIELDS_FOR_MASTER = (
     "service", "start_time", "end_time", "unit_price", "promocode",
 )
@@ -333,6 +339,46 @@ class AppointmentAddForm(forms.ModelForm):
     class Meta:
         model = Appointment
         fields = ("client",)
+
+
+class AppointmentPhotoUploadForm(forms.Form):
+    """Upload form for internal Before/After appointment photos."""
+
+    kind = forms.ChoiceField(
+        label="Category",
+        choices=ClientFile.KIND_CHOICES,
+        initial=ClientFile.KIND_BEFORE,
+    )
+    files = forms.Field(
+        label="Photos",
+        required=False,
+        widget=MultiFileInput(
+            attrs={
+                "multiple": True,
+                "accept": "image/*",
+            }
+        ),
+        help_text="Upload one or more images to attach to this appointment.",
+    )
+    description = forms.CharField(
+        label="Description",
+        max_length=255,
+        required=False,
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "Optional note visible to staff only",
+            }
+        ),
+    )
+
+    def clean_files(self):
+        uploaded_files = self.files.getlist("files")
+        if not uploaded_files:
+            raise forms.ValidationError("Select at least one file to upload.")
+        for file_obj in uploaded_files:
+            if not getattr(file_obj, "name", None):
+                raise forms.ValidationError("One of the selected files has no name.")
+        return uploaded_files
 
 class AppointmentItemInlineForm(forms.ModelForm):
     promocode = forms.ModelChoiceField(

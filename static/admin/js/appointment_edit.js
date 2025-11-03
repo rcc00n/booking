@@ -1449,14 +1449,54 @@
     function initTabs() {
         const tabs = $$(".tab");
         const panels = $$(".tab-panel");
-        tabs.forEach(t => t.addEventListener("click", () => {
-            tabs.forEach(x => x.classList.remove("active"));
-            panels.forEach(p => p.classList.remove("active"));
-            t.classList.add("active");
-            const id = t.getAttribute("data-tab");
-            const panel = $(`.tab-panel[data-tab-panel="${id}"]`);
-            if (panel) panel.classList.add("active");
+
+        const activateTab = (id) => {
+            if (!id) return;
+            tabs.forEach(tab => {
+                const tabId = tab.getAttribute("data-tab");
+                const isActive = tabId === id;
+                tab.classList.toggle("active", isActive);
+            });
+            panels.forEach(panel => {
+                const panelId = panel.getAttribute("data-tab-panel");
+                const isActive = panelId === id;
+                panel.classList.toggle("active", isActive);
+            });
+        };
+
+        const syncHash = (id) => {
+            if (!("replaceState" in history)) {
+                return;
+            }
+            const base = `${window.location.pathname}${window.location.search}`;
+            if (!id || id === "details") {
+                history.replaceState(null, "", base);
+            } else {
+                history.replaceState(null, "", `${base}#${id}`);
+            }
+        };
+
+        tabs.forEach(tab => tab.addEventListener("click", () => {
+            const id = tab.getAttribute("data-tab");
+            activateTab(id);
+            syncHash(id);
         }));
+
+        const initialHash = window.location.hash ? window.location.hash.slice(1) : "";
+        if (initialHash) {
+            const targetExists = tabs.some(tab => tab.getAttribute("data-tab") === initialHash);
+            if (targetExists) {
+                activateTab(initialHash);
+                return;
+            }
+        }
+
+        const defaultTab = tabs.find(tab => tab.classList.contains("active"));
+        if (defaultTab) {
+            activateTab(defaultTab.getAttribute("data-tab"));
+        } else if (tabs.length) {
+            activateTab(tabs[0].getAttribute("data-tab"));
+        }
     }
     function stripDateTimeLabels(root=document){
         root.querySelectorAll('p.datetime').forEach(p => {

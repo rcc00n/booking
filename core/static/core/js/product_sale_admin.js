@@ -111,9 +111,14 @@
       try {
         const newPrice = await fetchUnitPrice(priceEndpoint, productId);
         if (newPrice !== null) {
+          const previousValue = unitPriceInput.value;
           unitPriceInput.value = newPrice;
           unitPriceInput.dataset.userEdited = "";
           updateTotal();
+          if (previousValue !== newPrice) {
+            unitPriceInput.dispatchEvent(new Event("input", { bubbles: true }));
+            unitPriceInput.dispatchEvent(new Event("change", { bubbles: true }));
+          }
         }
       } catch (error) {
         console.warn("Unable to fetch product price", error);

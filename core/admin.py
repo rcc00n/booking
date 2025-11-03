@@ -2661,6 +2661,43 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 .order_by("-sent_at", "-id")
             )
 
+        photo_upload_form = AppointmentPhotoUploadForm()
+        photo_kind_labels = dict(ClientFile.KIND_CHOICES)
+        photo_groups: list[dict[str, Any]] = []
+        photo_total_count = 0
+        if obj:
+            appointment_files = (
+                ClientFile.objects.filter(appointment=obj)
+                .select_related("uploaded_by_user", "user__user")
+                .order_by("-uploaded_at", "-id")
+            )
+            photo_total_count = appointment_files.count()
+            grouped: dict[str, list[ClientFile]] = {key: [] for key in photo_kind_labels}
+            for file_obj in appointment_files:
+                grouped.setdefault(file_obj.kind, []).append(file_obj)
+            photo_groups = [
+                {
+                    "key": kind,
+                    "label": photo_kind_labels.get(kind, kind.title()),
+                    "files": grouped.get(kind, []),
+                }
+                for kind in photo_kind_labels
+                if grouped.get(kind)
+            ]
+            try:
+                ctx["photo_upload_url"] = reverse("admin:core_appointment_upload_photos", args=[obj.pk])
+            except NoReverseMatch:
+                ctx["photo_upload_url"] = ""
+            ctx["photo_delete_url_name"] = "admin:core_appointment_delete_photo"
+        else:
+            ctx["photo_upload_url"] = ""
+            ctx["photo_delete_url_name"] = ""
+
+        ctx["photo_groups"] = photo_groups
+        ctx["photo_upload_form"] = photo_upload_form
+        ctx["photo_upload_disabled"] = obj is None
+        ctx["photo_total_count"] = photo_total_count
+
         ctx.update({
             "masters_data": masters,
             "ms_map_data": dict(ms_map),
@@ -2912,6 +2949,16 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 name="core_appointment_manage_form",
             ),
             path(
+                "<uuid:appointment_id>/photos/upload/",
+                self.admin_site.admin_view(self.before_after_upload_view),
+                name="core_appointment_upload_photos",
+            ),
+            path(
+                "<uuid:appointment_id>/photos/<uuid:file_id>/delete/",
+                self.admin_site.admin_view(self.before_after_delete_view),
+                name="core_appointment_delete_photo",
+            ),
+            path(
                 "create/custom/",
                 self.admin_site.admin_view(self.custom_create_view),
                 name="core_appointment_custom_create",
@@ -2972,6 +3019,92 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "apply_card_processing_fee": True,
             }
         )
+
+    def _change_view_url(self, appointment, request, *, anchor: str | None = None) -> str:
+        base_url = reverse("admin:core_appointment_change", args=[appointment.pk])
+        date_value = request.GET.get("date") or request.POST.get("return_to_date")
+        if date_value:
+            separator = "&" if "?" in base_url else "?"
+            base_url = f"{base_url}{separator}date={date_value}"
+        if anchor:
+            base_url = f"{base_url}#{anchor}"
+        return base_url
+
+    def _redirect_to_change_view(self, request, appointment, *, anchor: str | None = None) -> HttpResponseRedirect:
+        return redirect(self._change_view_url(appointment, request, anchor=anchor))
+
+    def before_after_upload_view(self, request, appointment_id):
+        if request.method != "POST":
+            return HttpResponseBadRequest("POST required")
+
+        appointment = get_object_or_404(Appointment, pk=appointment_id)
+        if not self.has_change_permission(request, appointment):
+            raise PermissionDenied
+
+        form = AppointmentPhotoUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            uploaded_files = form.cleaned_data["files"]
+            kind = form.cleaned_data["kind"]
+            description = (form.cleaned_data.get("description") or "").strip()
+            uploader_flag = ClientFile.ADMIN if request.user.is_staff else ClientFile.USER
+            uploader_user = request.user if request.user.is_authenticated else None
+            created = 0
+            try:
+                with transaction.atomic():
+                    for uploaded in uploaded_files:
+                        instance = ClientFile(
+                            user=appointment.client,
+                            appointment=appointment,
+                            file=uploaded,
+                            kind=kind,
+                            description=description,
+                            uploaded_by=uploader_flag,
+                            uploaded_by_user=uploader_user,
+                        )
+                        instance.save()
+                        created += 1
+            except ValidationError as exc:
+                messages.error(
+                    request,
+                    "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc),
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                messages.error(request, f"Could not upload photos: {exc}")
+            else:
+                if created == 1:
+                    messages.success(request, "Photo uploaded.")
+                elif created > 1:
+                    messages.success(request, f"{created} photos uploaded.")
+                else:
+                    messages.warning(request, "No files were uploaded.")
+        else:
+            for field, errors in form.errors.items():
+                label = form.fields.get(field).label if field in form.fields else field
+                for message_text in errors:
+                    if field == "__all__":
+                        messages.error(request, message_text)
+                    else:
+                        messages.error(request, f"{label}: {message_text}")
+
+        return self._redirect_to_change_view(request, appointment, anchor="before-after")
+
+    def before_after_delete_view(self, request, appointment_id, file_id):
+        if request.method != "POST":
+            return HttpResponseBadRequest("POST required")
+
+        appointment = get_object_or_404(Appointment, pk=appointment_id)
+        if not self.has_change_permission(request, appointment):
+            raise PermissionDenied
+
+        file_obj = get_object_or_404(ClientFile, pk=file_id, appointment=appointment)
+        try:
+            file_obj.delete()
+        except Exception as exc:  # pylint: disable=broad-except
+            messages.error(request, f"Could not delete the photo: {exc}")
+        else:
+            messages.success(request, "Photo deleted.")
+
+        return self._redirect_to_change_view(request, appointment, anchor="before-after")
 
 
     def _calendar_date_for_obj(self, obj) -> str | None:
@@ -4955,13 +5088,37 @@ class ClientFileAdmin(admin.ModelAdmin):
     """
     Admin interface for managing user-uploaded files.
     """
-    list_display = ('user', "uploaded_by" ,'file_type', 'file')
-    fields = ('user', 'file',"uploaded_by", 'file_type')
-    readonly_fields = ('file_type',)  # 👈 делаем только для чтения
-    exclude = ('file_type',)  # 👈 скрываем из формы создания
-    list_filter = (('uploaded_at', DateFieldListFilter), 'file_type')
-    search_fields = ('user__user__first_name', 'user__user__last_name')
-    ordering = ['-uploaded_at']
+    list_display = (
+        "user",
+        "appointment",
+        "kind",
+        "uploaded_by",
+        "uploaded_by_user",
+        "file_type",
+        "uploaded_at",
+        "file",
+    )
+    fields = (
+        "user",
+        "appointment",
+        "kind",
+        "description",
+        "file",
+        "uploaded_by",
+        "uploaded_by_user",
+        "file_type",
+        "uploaded_at",
+    )
+    readonly_fields = ("file_type", "uploaded_at", "uploaded_by_user")
+    list_filter = (("uploaded_at", DateFieldListFilter), "kind", "uploaded_by")
+    search_fields = (
+        "user__user__first_name",
+        "user__user__last_name",
+        "user__user__email",
+        "appointment__id",
+    )
+    ordering = ["-uploaded_at", "-id"]
+    list_select_related = ("user__user", "appointment__client__user", "uploaded_by_user")
 
 
 

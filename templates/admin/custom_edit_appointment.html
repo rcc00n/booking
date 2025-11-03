@@ -1,6 +1,7 @@
 {% extends "admin/base_site.html" %}
 {% load static %}
 {% load filters %}
+{% load tz %}
 
 {% if form.instance.pk %}
     {% url 'admin:core_appointment_enable_card_fee' appointment_id=form.instance.pk as enable_card_fee_url %}
@@ -130,6 +131,22 @@
         .ab-item-status-btn.disabled{opacity:0.5;cursor:not-allowed}
         .ab-item-status-btn.loading{opacity:0.6;cursor:wait}
         .ab-item-status-note{font-size:12px;color:#6b7280}
+        .ab-empty{padding:16px;border:1px dashed #d1d5db;border-radius:14px;text-align:center;color:#6b7280;background:#f9fafb}
+        .ab-divider{height:1px;background:#e5e7eb;margin:24px 0}
+        .ab-photo-groups{display:flex;flex-direction:column;gap:24px}
+        .ab-photo-group__title{margin:0 0 12px;font-weight:700;font-size:16px;color:#1f2937}
+        .ab-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:16px}
+        .ab-photo-card{border:1px solid #e5e7eb;border-radius:14px;background:#fff;padding:12px;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 10px rgba(15,23,42,0.05)}
+        .ab-photo-card img{width:100%;height:160px;object-fit:cover;border-radius:10px;background:#f3f4f6}
+        .ab-photo-card__file{display:flex;align-items:center;justify-content:center;height:160px;border-radius:10px;background:#f3f4f6;color:#1f2937;font-weight:600;text-decoration:none}
+        .ab-photo-card__file:hover{text-decoration:underline}
+        .ab-photo-card__meta{font-size:12px;color:#4b5563}
+        .ab-photo-card__desc{font-size:13px;color:#111827}
+        .ab-photo-card__actions{margin-top:4px}
+        .ab-btn-link{display:inline-flex;align-items:center;gap:6px;background:none;border:none;color:#2563eb;padding:0;cursor:pointer;font-weight:600}
+        .ab-btn-link:hover{text-decoration:underline}
+        .ab-photo-upload .ab-field{margin-bottom:16px}
+        .ab-photo-upload input[type="file"]{display:block}
 
     </style>
 {% endblock %}
@@ -152,6 +169,7 @@
                     <button type="button" class="tab" data-tab="product-sales">Product sales</button>
                 {% endif %}
                 <button type="button" class="tab" data-tab="notes">Notes</button>
+                <button type="button" class="tab" data-tab="before-after" id="tab-before-after">Before &amp; After</button>
                 <button type="button" class="tab" data-tab="messages">Messages</button>
             </nav>
 
@@ -822,6 +840,86 @@
                         {% if form.notes.errors %}<div class="ab-err">{{ form.notes.errors }}</div>{% endif %}
                         {% if form.notes.help_text %}<div class="ab-muted">{{ form.notes.help_text }}</div>{% endif %}
                     </div>
+                </div>
+            </section>
+
+            <section class="tab-panel" data-tab-panel="before-after" id="before-after">
+                <div class="ab-section ab-card">
+                    <h3 class="ab-h">
+                        Before &amp; After photos
+                        {% if photo_total_count %}
+                            <span class="ab-pill">{{ photo_total_count }}</span>
+                        {% endif %}
+                    </h3>
+                    <p class="ab-sub">Photos stay internal and help document progress for each appointment.</p>
+
+                    {% if photo_upload_disabled %}
+                        <div class="ab-empty">Save this appointment before managing photo uploads.</div>
+                    {% else %}
+                        {% if photo_groups %}
+                            <div class="ab-photo-groups">
+                                {% for group in photo_groups %}
+                                    <div class="ab-photo-group">
+                                        <h4 class="ab-photo-group__title">{{ group.label }} ({{ group.files|length }})</h4>
+                                        <div class="ab-photo-grid">
+                                            {% for file in group.files %}
+                                                <figure class="ab-photo-card" data-file-id="{{ file.pk }}">
+                                                    {% if file.is_image %}
+                                                        <a href="{{ file.file.url }}" target="_blank" rel="noopener" title="Open image in a new tab">
+                                                            <img src="{{ file.file.url }}" alt="{{ group.label }} photo {{ forloop.counter }}" loading="lazy">
+                                                        </a>
+                                                    {% else %}
+                                                        <a href="{{ file.file.url }}" target="_blank" rel="noopener" class="ab-photo-card__file">View file</a>
+                                                    {% endif %}
+                                                    <figcaption>
+                                                        <span class="ab-photo-card__meta">
+                                                            {{ file.uploaded_at|localtime|date:"Y-m-d H:i" }}
+                                                            {% if file.uploader_display %}
+                                                                — {{ file.uploader_display }}
+                                                            {% endif %}
+                                                        </span>
+                                                        {% if file.description %}
+                                                            <span class="ab-photo-card__desc">{{ file.description }}</span>
+                                                        {% endif %}
+                                                        <form method="post" action="{% url photo_delete_url_name form.instance.pk file.pk %}" class="ab-photo-card__actions">
+                                                            {% csrf_token %}
+                                                            <input type="hidden" name="return_to_date" value="{{ return_to_date|default:'' }}">
+                                                            <button type="submit" class="ab-btn-link">Delete</button>
+                                                        </form>
+                                                    </figcaption>
+                                                </figure>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <div class="ab-empty">No photos uploaded yet.</div>
+                        {% endif %}
+
+                        <div class="ab-divider"></div>
+
+                        <form method="post" enctype="multipart/form-data" action="{{ photo_upload_url }}" class="ab-photo-upload">
+                            {% csrf_token %}
+                            <input type="hidden" name="return_to_date" value="{{ return_to_date|default:'' }}">
+                            <div class="ab-field">
+                                {{ photo_upload_form.kind.label_tag }} {{ photo_upload_form.kind }}
+                                {% if photo_upload_form.kind.errors %}<div class="ab-err">{{ photo_upload_form.kind.errors }}</div>{% endif %}
+                            </div>
+                            <div class="ab-field">
+                                {{ photo_upload_form.files.label_tag }} {{ photo_upload_form.files }}
+                                {% if photo_upload_form.files.errors %}<div class="ab-err">{{ photo_upload_form.files.errors }}</div>{% endif %}
+                                {% if photo_upload_form.files.help_text %}<p class="ab-muted">{{ photo_upload_form.files.help_text }}</p>{% endif %}
+                            </div>
+                            <div class="ab-field">
+                                {{ photo_upload_form.description.label_tag }} {{ photo_upload_form.description }}
+                                {% if photo_upload_form.description.errors %}<div class="ab-err">{{ photo_upload_form.description.errors }}</div>{% endif %}
+                            </div>
+                            <div class="ab-r" style="justify-content:flex-end">
+                                <button type="submit" class="ab-btn">Upload photos</button>
+                            </div>
+                        </form>
+                    {% endif %}
                 </div>
             </section>
 
