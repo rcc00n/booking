@@ -919,12 +919,14 @@ class AppointmentQuerySet(models.QuerySet):
     STATUS_CANCELLED = "CANCELLED"
     STATUS_COMPLETED = "COMPLETED"
     STATUS_CONFIRMED = "CONFIRMED"
+    STATUS_NO_SHOW = "NO_SHOW"
     STATUS_BOOKED = "BOOKED"
 
     STATUS_LABELS = {
         STATUS_CANCELLED: "Cancelled",
         STATUS_COMPLETED: "Completed",
         STATUS_CONFIRMED: "Confirmed",
+        STATUS_NO_SHOW: "No show",
         STATUS_BOOKED: "Booked",
     }
 
@@ -955,6 +957,15 @@ class AppointmentQuerySet(models.QuerySet):
                         | ~Q(latest_status_code=self.STATUS_CANCELLED)
                     )
                 ),
+                _has_no_show=Exists(
+                    items_with_status.filter(latest_status_code=self.STATUS_NO_SHOW)
+                ),
+                _has_non_no_show=Exists(
+                    items_with_status.filter(
+                        Q(latest_status_code__isnull=True)
+                        | ~Q(latest_status_code=self.STATUS_NO_SHOW)
+                    )
+                ),
                 _has_completed=Exists(
                     items_with_status.filter(latest_status_code=self.STATUS_COMPLETED)
                 ),
@@ -977,6 +988,14 @@ class AppointmentQuerySet(models.QuerySet):
                             _has_non_cancelled=False,
                         ),
                         then=Value(self.STATUS_CANCELLED),
+                    ),
+                    When(
+                        Q(
+                            _has_items=True,
+                            _has_no_show=True,
+                            _has_non_no_show=False,
+                        ),
+                        then=Value(self.STATUS_NO_SHOW),
                     ),
                     When(
                         Q(
@@ -1010,6 +1029,10 @@ class AppointmentQuerySet(models.QuerySet):
                     When(
                         _aggregated_status_code=self.STATUS_CONFIRMED,
                         then=Value(labels[self.STATUS_CONFIRMED]),
+                    ),
+                    When(
+                        _aggregated_status_code=self.STATUS_NO_SHOW,
+                        then=Value(labels[self.STATUS_NO_SHOW]),
                     ),
                     default=Value(labels[self.STATUS_BOOKED]),
                     output_field=models.CharField(max_length=32),
@@ -1105,6 +1128,8 @@ class Appointment(models.Model):
             code = AppointmentQuerySet.STATUS_CANCELLED
         elif observed_codes == {AppointmentQuerySet.STATUS_COMPLETED}:
             code = AppointmentQuerySet.STATUS_COMPLETED
+        elif observed_codes == {AppointmentQuerySet.STATUS_NO_SHOW}:
+            code = AppointmentQuerySet.STATUS_NO_SHOW
         elif (
             AppointmentQuerySet.STATUS_CONFIRMED in observed_codes
             and AppointmentQuerySet.STATUS_CANCELLED not in observed_codes

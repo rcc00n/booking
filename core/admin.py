@@ -350,42 +350,22 @@ def custom_index(request):
 
         chart_data.append({"day": day.strftime("%a %d"), "sales": float(sales), "appointments": appts})
 
-    # Статусы и счётчики на ближайшие 7 дней
-
-    confirmed = AppointmentStatus.objects.filter(name="Confirmed").first()
-    cancelled = AppointmentStatus.objects.filter(name="Cancelled").first()
-
-    # Подзапрос «последний статус для визита»
-    last_status_sq_items = (
-        AppointmentStatusHistory.objects
-        .filter(appointment_id=OuterRef("appointment_id"))
-        .order_by("-set_at")
-        .values("status_id")[:1]
-    )
-
-    # берём позиции ближайшей недели (как и было), но аннотируем последний статус визита
+    # upcoming counters now rely on per-item statuses
     upcoming_items = (
-        AppointmentItem.objects
+        AppointmentItem.objects.with_current_status()
         .filter(start_time__date__range=(today, today + timedelta(days=7)))
-        .annotate(last_status_id=Subquery(last_status_sq_items))
     )
+    if is_master(request.user) and master_profile:
+        upcoming_items = upcoming_items.filter(master=master_profile)
 
-    # считаем КОЛ-ВО ВИЗИТОВ (distinct по appointment_id), где последний статус == нужному
-    confirmed_count = (
-        upcoming_items
-        .filter(last_status_id=getattr(confirmed, "id", None))
-        .values("appointment_id")
-        .distinct()
-        .count()
-    ) if confirmed else 0
+    q_booked = Q(current_status_code__isnull=True) | Q(current_status_code__iexact="BOOKED")
+    q_confirmed = Q(current_status_code__iexact="CONFIRMED")
+    q_cancelled = Q(current_status_code__iexact="CANCELLED")
 
-    cancelled_count = (
-        upcoming_items
-        .filter(last_status_id=getattr(cancelled, "id", None))
-        .values("appointment_id")
-        .distinct()
-        .count()
-    ) if cancelled else 0
+    booked_count = upcoming_items.filter(q_booked).count()
+    confirmed_count = upcoming_items.filter(q_confirmed).count()
+    cancelled_count = upcoming_items.filter(q_cancelled).count()
+    upcoming_total = booked_count
 
 
 # Top services (текущий месяц) — считаем позиции у Service через обратную связь "appointmentitem"
@@ -485,25 +465,35 @@ def custom_index(request):
         AppointmentItem.objects.select_related("appointment__client__user").order_by("-start_time")[:20]
     )
 
-    # Сегодняшние предстоящие встречи (Appointment + items); мастеру — только его
-    today_appointments = (
-        AppointmentItem.objects.filter(start_time__date=today, start_time__gte=now)
-        .select_related("appointment__client__user")
-        .order_by("start_time")
+    # Сегодняшние предстоящие встречи (items); мастеру показываем только свои
+    today_items = (
+        AppointmentItem.objects.with_current_status()
+        .select_related("appointment__client__user", "service", "master__user__user")
+        .filter(
+            start_time__date=timezone.localdate(now),
+            start_time__gte=now,
+        )
     )
     if is_master(request.user) and master_profile:
-        today_appointments = today_appointments.filter(master=master_profile).distinct()
+        today_items = today_items.filter(master=master_profile)
 
-    # Ежедневная разбивка Confirmed/Cancelled (на 7 дней вперёд)
+    today_appointments = today_items.filter(
+        Q(current_status_code__isnull=True) |
+        Q(current_status_code__in=["BOOKED", "CONFIRMED"])
+    ).order_by("start_time")
+
+    # Ежедневная разбивка Confirmed/Cancelled (на 7 дней вперёд) по статусам позиций
+    daily_items = AppointmentItem.objects.with_current_status().filter(
+        start_time__date__range=[week_ago, today]
+    )
+    if is_master(request.user) and master_profile:
+        daily_items = daily_items.filter(master=master_profile)
     daily_counts = []
     for day in week_days:
-        c = Appointment.objects.filter(start_time__date=day,
-                                       appointmentstatushistory__status=confirmed) \
-            .distinct().count() if confirmed else 0
-        x = Appointment.objects.filter(start_time__date=day,
-                                       appointmentstatushistory__status=cancelled) \
-            .distinct().count() if cancelled else 0
-        daily_counts.append({"day": day.strftime("%a %d"), "confirmed": c, "cancelled": x})
+        day_items = daily_items.filter(start_time__date=day)
+        confirmed_per_day = day_items.filter(q_confirmed).count()
+        cancelled_per_day = day_items.filter(q_cancelled).count()
+        daily_counts.append({"day": day.strftime("%a %d"), "confirmed": confirmed_per_day, "cancelled": cancelled_per_day})
 
     context = admin.site.each_context(request)
     context.update({
@@ -511,7 +501,7 @@ def custom_index(request):
         "daily_appointments": daily_counts,
         "chart_data": chart_data,
         "total_sales": total_sales,
-        "upcoming_total": upcoming_items.count(),
+        "upcoming_total": upcoming_total,
         "confirmed_count": confirmed_count,
         "cancelled_count": cancelled_count,
         "top_services": top_services,      # Service с .name и .count
@@ -821,6 +811,7 @@ class ExportXlsxMixin:
             "CONFIRMED": "Confirmed",
             "CANCELLED": "Cancelled",
             "COMPLETED": "Completed",
+            "NO_SHOW": "No show",
         }
 
         def derive_item_status(item):
@@ -2765,34 +2756,102 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         return user
 
     def save_formset(self, request, form, formset, change):
-        # Забираем инстансы без сохранения
-        instances = formset.save(commit=False)
-        # Удаления — отдельно
-        for deleted in formset.deleted_objects:
-            deleted.delete()
+        is_item_formset = getattr(formset, "model", None) is AppointmentItem
+        staged_status_map: dict[str, dict[str, str]] = {}
+        original_status_map: dict[str, str] = {}
 
-        # Прогоняем full_clean() на каждом дочернем объекте
-        for inst in instances:
-            if isinstance(inst, ProductSale):
-                if form.instance and not inst.client_id and getattr(form.instance, "client_id", None):
-                    inst.client_id = form.instance.client_id
-                if not inst.sold_by_id:
-                    profile = getattr(request.user, "userprofile", None)
-                    if profile:
-                        inst.sold_by = profile
-                if not inst.sold_at:
-                    base_dt = getattr(form.instance, "start_time", None)
-                    inst.sold_at = base_dt or timezone.now()
-            if isinstance(inst, AppointmentItem) and inst._state.adding:
-                inst._created_via_admin = True
-                inst._initial_status_code = "BOOKED"
-                inst._initial_status_user_id = getattr(getattr(request, "user", None), "id", None)
-                inst._initial_status_timestamp = timezone.now()
-                inst._initial_status_note = "admin-initial"
-            inst.full_clean()  # вызывает AppointmentItem.clean()
-            inst.save()
+        if is_item_formset:
+            for inline_form in formset.forms:
+                prefix = getattr(inline_form, "prefix", None)
+                if not prefix:
+                    continue
+                instance = getattr(inline_form, "instance", None)
+                if isinstance(instance, AppointmentItem) and instance.pk:
+                    current_code = getattr(getattr(instance, "status", None), "code", "") or ""
+                    original_status_map[prefix] = current_code.upper()
+                raw_code = (request.POST.get(f"{prefix}-status_code") or "").strip()
+                raw_reason = (request.POST.get(f"{prefix}-status_reason") or "").strip()
+                if raw_code:
+                    staged_status_map[prefix] = {
+                        "code": raw_code.upper(),
+                        "reason": raw_reason,
+                    }
 
-        formset.save_m2m()
+        with transaction.atomic():
+            instances = formset.save(commit=False)
+            for deleted in formset.deleted_objects:
+                deleted.delete()
+
+            for inst in instances:
+                if isinstance(inst, ProductSale):
+                    if form.instance and not inst.client_id and getattr(form.instance, "client_id", None):
+                        inst.client_id = form.instance.client_id
+                    if not inst.sold_by_id:
+                        profile = getattr(request.user, "userprofile", None)
+                        if profile:
+                            inst.sold_by = profile
+                    if not inst.sold_at:
+                        base_dt = getattr(form.instance, "start_time", None)
+                        inst.sold_at = base_dt or timezone.now()
+                if isinstance(inst, AppointmentItem):
+                    if inst.pk:
+                        current_status_id = (
+                            AppointmentItem.objects.filter(pk=inst.pk).values_list("status_id", flat=True).first()
+                        )
+                        if current_status_id:
+                            inst.status_id = current_status_id
+                    if inst._state.adding:
+                        inst._created_via_admin = True
+                        inst._initial_status_code = "BOOKED"
+                        inst._initial_status_user_id = getattr(getattr(request, "user", None), "id", None)
+                        inst._initial_status_timestamp = timezone.now()
+                        inst._initial_status_note = "admin-initial"
+                inst.full_clean()
+                inst.save()
+
+            formset.save_m2m()
+
+            if is_item_formset and staged_status_map:
+                staged_updates = []
+                for inline_form in formset.forms:
+                    prefix = getattr(inline_form, "prefix", None)
+                    stage = staged_status_map.get(prefix)
+                    if not stage:
+                        continue
+                    instance = getattr(inline_form, "instance", None)
+                    if not isinstance(instance, AppointmentItem) or not instance.pk:
+                        continue
+                    cleaned = getattr(inline_form, "cleaned_data", {}) or {}
+                    if cleaned.get("DELETE"):
+                        continue
+                    code = (stage.get("code") or "").strip().upper()
+                    if not code:
+                        continue
+                    current_code = original_status_map.get(prefix, "")
+                    if not current_code:
+                        current_code = (
+                            AppointmentItem.objects.filter(pk=instance.pk)
+                            .values_list("status__code", flat=True)
+                            .first()
+                            or ""
+                        )
+                        current_code = (current_code or "").upper()
+                    if code == current_code:
+                        continue
+                    staged_updates.append((instance, code, (stage.get("reason") or "").strip()))
+
+                if staged_updates:
+                    set_by_user_id = getattr(getattr(request, "user", None), "id", None)
+                    for item, status_code, reason in staged_updates:
+                        record_item_status(
+                            item,
+                            status_code,
+                            set_by_user_id=set_by_user_id,
+                            note="admin-save",
+                        )
+                        if status_code == "CANCELLED":
+                            send_item_cancellation_email.delay(str(item.pk), reason=reason or None)
+
     def get_form(self, request, obj=None, **kwargs):
         if obj is None:
             kwargs["form"] = self.add_form

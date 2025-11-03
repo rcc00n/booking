@@ -17,6 +17,7 @@ STATUS_LABELS = {
     "CONFIRMED": "Confirmed",
     "CANCELLED": "Cancelled",
     "COMPLETED": "Completed",
+    "NO_SHOW": "No show",
 }
 
 INITIAL_NOTE = "initial-status"
@@ -117,4 +118,3 @@ def ensure_initial_status(
         set_by_user_id=set_by_user_id,
         note=effective_note,
     )
-

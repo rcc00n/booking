@@ -176,25 +176,23 @@
         BOOKED: "status-booked",
         CONFIRMED: "status-confirmed",
         COMPLETED: "status-completed",
+        NO_SHOW: "status-noshow",
         CANCELLED: "status-cancelled",
     };
     const ITEM_STATUS_LABELS = {
         BOOKED: "Booked",
         CONFIRMED: "Confirmed",
         COMPLETED: "Completed",
+        NO_SHOW: "No show",
         CANCELLED: "Cancelled",
     };
     const ACTION_STATUS_MAP = {
         confirm: "CONFIRMED",
         complete: "COMPLETED",
+        noshow: "NO_SHOW",
         cancel: "CANCELLED",
     };
     const STATUS_CLASS_VALUES = Object.values(ITEM_STATUS_CLASSES);
-
-    function getCsrfToken() {
-        const input = document.querySelector('input[name="csrfmiddlewaretoken"]');
-        return (input && input.value) || "";
-    }
 
     function normaliseStatusCode(value) {
         if (!value) return "BOOKED";
@@ -207,6 +205,57 @@
             return String(fallback);
         }
         return ITEM_STATUS_LABELS[norm] || norm.charAt(0) + norm.slice(1).toLowerCase();
+    }
+
+    function statusBaseMessage(itemEl) {
+        return "";
+    }
+
+    function getStatusHiddenInput(itemEl) {
+        if (!itemEl) return null;
+        const prefix = itemEl.dataset.formPrefix || "";
+        if (prefix) {
+            const exact = itemEl.querySelector(`input[name="${prefix}-status_code"]`);
+            if (exact) return exact;
+        }
+        return itemEl.querySelector('input[name$="-status_code"]');
+    }
+
+    function getStatusReasonHiddenInput(itemEl) {
+        if (!itemEl) return null;
+        const prefix = itemEl.dataset.formPrefix || "";
+        if (prefix) {
+            const exact = itemEl.querySelector(`input[name="${prefix}-status_reason"]`);
+            if (exact) return exact;
+        }
+        return itemEl.querySelector('input[name$="-status_reason"]');
+    }
+
+    function updateStatusNote(itemEl, stagedCode, reason) {
+        const noteEl = itemEl && itemEl.querySelector('[data-role="status-note"]');
+        if (!noteEl) return;
+        noteEl.textContent = "";
+        noteEl.classList.remove("pending");
+        noteEl.style.display = "none";
+    }
+
+    function stageItemStatus(itemEl, code, options = {}) {
+        if (!itemEl) return;
+        const norm = normaliseStatusCode(code);
+        const reasonText = (options.reason || "").trim();
+        itemEl.dataset.pendingStatus = norm;
+        const hidden = getStatusHiddenInput(itemEl);
+        if (hidden) hidden.value = norm;
+        const reasonHidden = getStatusReasonHiddenInput(itemEl);
+        if (reasonHidden) reasonHidden.value = reasonText;
+        if (reasonText) {
+            itemEl.dataset.pendingCancelReason = reasonText;
+        } else {
+            delete itemEl.dataset.pendingCancelReason;
+        }
+        updateItemStatusPill(itemEl, norm);
+        syncStatusButtons(itemEl, norm);
+        updateStatusNote(itemEl, norm, reasonText);
     }
 
     function updateItemStatusPill(itemEl, code, label) {
@@ -242,24 +291,6 @@
                 btn.classList.remove("disabled");
             }
         });
-        const note = itemEl.querySelector(".ab-item-status-note");
-        if (note && hasItemId) {
-            note.style.display = "none";
-        }
-    }
-
-    function toggleButtonsLoading(itemEl, isLoading) {
-        itemEl.querySelectorAll(".ab-item-status-btn").forEach(btn => {
-            if (isLoading) {
-                btn.dataset.prevDisabled = String(btn.disabled);
-                btn.disabled = true;
-                btn.classList.add("loading");
-            } else if (Object.prototype.hasOwnProperty.call(btn.dataset, "prevDisabled")) {
-                btn.disabled = btn.dataset.prevDisabled === "true";
-                delete btn.dataset.prevDisabled;
-                btn.classList.remove("loading");
-            }
-        });
     }
 
     function notifyUser(message, level = "info") {
@@ -285,61 +316,47 @@
         const action = btn.dataset.action || "";
         const targetStatus = ACTION_STATUS_MAP[action];
         if (!targetStatus) return;
-        const itemId = itemEl.dataset.itemId;
-        const url = itemEl.dataset.statusUrl;
-        if (!itemId || !url) {
-            notifyUser("Save the appointment before updating item status.", "warning");
+        if (!itemEl.dataset.itemId) {
+            notifyUser("Save this appointment before managing item status.", "warning");
             return;
         }
-        const payload = { status: targetStatus };
+        let reasonValue = itemEl.dataset.pendingCancelReason || "";
         if (targetStatus === "CANCELLED") {
-            const reason = window.prompt("Cancellation reason (optional)", "");
-            if (reason === null) {
+            const response = window.prompt("Cancellation reason (optional)", reasonValue);
+            if (response === null) {
                 return;
             }
-            if (reason.trim()) {
-                payload.reason = reason.trim();
-            }
+            reasonValue = response.trim();
+        } else {
+            reasonValue = "";
         }
-        toggleButtonsLoading(itemEl, true);
-        fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-CSRFToken": getCsrfToken(),
-            },
-            body: JSON.stringify(payload),
-        })
-            .then(response => {
-                if (!response.ok) {
-                    return response.json().catch(() => ({})).then(body => {
-                        const error = body && body.error ? body.error : response.statusText;
-                        throw new Error(error || "Failed to update status");
-                    });
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (!data || data.ok !== true) {
-                    throw new Error((data && data.error) || "Failed to update status");
-                }
-                const statusData = data.item && data.item.status ? data.item.status : {};
-                updateItemStatusPill(itemEl, statusData.code, statusData.label);
-                syncStatusButtons(itemEl, statusData.code);
-                notifyUser(`Item status updated to ${statusData.label || statusData.code}`, "info");
-            })
-            .catch(err => {
-                notifyUser(err.message || "Unable to update item status", "error");
-            })
-            .finally(() => {
-                toggleButtonsLoading(itemEl, false);
-            });
+        stageItemStatus(itemEl, targetStatus, { reason: reasonValue, notify: false });
     }
 
     function initItemStatusControls(itemEl) {
         if (!itemEl) return;
-        updateItemStatusPill(itemEl, itemEl.dataset.statusCode, itemEl.dataset.statusLabel);
-        syncStatusButtons(itemEl, itemEl.dataset.statusCode);
+        const currentCode = normaliseStatusCode(itemEl.dataset.statusCode);
+        const currentLabel = itemEl.dataset.statusLabel;
+        if (!itemEl.dataset.originalStatusCode) {
+            itemEl.dataset.originalStatusCode = currentCode;
+        }
+        const hidden = getStatusHiddenInput(itemEl);
+        const stagedCode = hidden && hidden.value ? normaliseStatusCode(hidden.value) : "";
+        const reasonHidden = getStatusReasonHiddenInput(itemEl);
+        const stagedReason = reasonHidden && reasonHidden.value ? reasonHidden.value : "";
+        if (stagedCode && stagedCode !== currentCode) {
+            stageItemStatus(itemEl, stagedCode, { reason: stagedReason, silent: true, notify: false });
+        } else {
+            updateItemStatusPill(itemEl, currentCode, currentLabel);
+            syncStatusButtons(itemEl, currentCode);
+            itemEl.dataset.pendingStatus = "";
+            if (stagedReason) {
+                itemEl.dataset.pendingCancelReason = stagedReason;
+            } else {
+                delete itemEl.dataset.pendingCancelReason;
+            }
+            updateStatusNote(itemEl, "", "");
+        }
         itemEl.querySelectorAll(".ab-item-status-btn").forEach(btn => {
             btn.addEventListener("click", handleStatusButtonClick);
         });
@@ -921,6 +938,9 @@
         });
         // для удобства
         rootEl.dataset.formIndex = String(idx);
+        if (rootEl.dataset.formPrefix && rootEl.dataset.formPrefix.includes("__prefix__")) {
+            rootEl.dataset.formPrefix = rootEl.dataset.formPrefix.replace(/__prefix__/g, idx);
+        }
     }
 
     function initDefaultsForNewRow(row) {

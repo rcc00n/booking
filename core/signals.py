@@ -182,6 +182,7 @@ def dispatch_item_status_side_effects(sender, instance: AppointmentItemStatusHis
         "seed-from-appointment-status",
         "initial-status",
         "admin-initial",
+        "admin-save",
     }
     if instance.note and instance.note in skip_notes:
         return
