@@ -15,7 +15,7 @@ from django.contrib.auth.forms import (
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, Q
 from django.forms import BaseInlineFormSet, inlineformset_factory
 from django.template import TemplateDoesNotExist, engines
@@ -1116,14 +1116,17 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         profile.address = address
         profile.save()
 
-
         uploaded_files = self.files.getlist('files')
-        for f in uploaded_files:
-            ClientFile.objects.create(
-                user=user,
-                file=f,
-                file_type=""
-            )
+        if uploaded_files:
+            with transaction.atomic():
+                for f in uploaded_files:
+                    if not f or not getattr(f, "name", None):
+                        continue
+                    ClientFile.objects.create(
+                        user=profile,
+                        file=f,
+                        uploaded_by=ClientFile.ADMIN,
+                    )
         return user
 
 

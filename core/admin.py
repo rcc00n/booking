@@ -384,47 +384,76 @@ def custom_index(request):
     else:
         first_day_next = date(first_day.year, first_day.month + 1, 1)
 
-    # 2) Агрегация денег по мастеру из AppointmentItem.final_price
-    paid_by_appt = dict(
+    # 2) Агрегация денег по мастеру с учётом возвратов
+    zero_decimal = Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))
+    payments_by_appt = (
         Payment.objects
         .filter(created_at__date__gte=first_day, created_at__date__lt=first_day_next)
         .values("appointment_id")
-        .annotate(total=Coalesce(Sum("amount"), Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))))
-        .values_list("appointment_id", "total")
+        .annotate(
+            total_received=Coalesce(Sum("amount_received"), zero_decimal),
+            total_amount=Coalesce(Sum("amount"), zero_decimal),
+            total_refunded=Coalesce(Sum("amount_refunded"), zero_decimal),
+        )
     )
 
-    master_month_totals = {}
+    paid_by_appt: Dict[int, Decimal] = {}
+    for row in payments_by_appt:
+        appointment_id = row["appointment_id"]
+        gross = row["total_received"] or row["total_amount"] or Decimal("0.00")
+        gross_decimal = Decimal(gross).quantize(TWOPLACES)
+        refunded_decimal = Decimal(row["total_refunded"] or Decimal("0.00")).quantize(TWOPLACES)
+        net = (gross_decimal - refunded_decimal).quantize(TWOPLACES)
+        if net < Decimal("0.00"):
+            net = Decimal("0.00")
+        paid_by_appt[appointment_id] = net
+
+    master_month_totals: Dict[int, Decimal] = {}
     top_masters = []
     if paid_by_appt:
         rows = (
             AppointmentItem.objects
             .filter(appointment_id__in=paid_by_appt.keys())
             .values("appointment_id", "master_id")
-            .annotate(msum=Coalesce(Sum("final_price"), Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))))
+            .annotate(
+                subtotal=Coalesce(Sum("final_price"), zero_decimal),
+                tax_total=Coalesce(Sum("tax_amount"), zero_decimal),
+            )
         )
+        rows = list(rows)
 
-        appt_total = {}
+        appt_total: Dict[int, Decimal] = {}
         for r in rows:
             aid = r["appointment_id"]
-            appt_total[aid] = (appt_total.get(aid, 0) or 0) + (r["msum"] or 0)
+            subtotal = Decimal(r.get("subtotal") or Decimal("0.00"))
+            tax_total = Decimal(r.get("tax_total") or Decimal("0.00"))
+            item_total = subtotal + tax_total
+            current_total = appt_total.get(aid, Decimal("0.00"))
+            appt_total[aid] = current_total + item_total
 
-        master_totals = {}
+        master_totals: Dict[int, Decimal] = {}
         for r in rows:
             aid = r["appointment_id"]
             mid = r["master_id"]
-            msum = r["msum"] or 0
-            paid = paid_by_appt.get(aid, 0) or 0
-            total = appt_total.get(aid, 0) or 0
-            if paid and total > 0 and msum > 0:
-                part = paid * (msum / total)
-                master_totals[mid] = (master_totals.get(mid, 0) or 0) + part
+            subtotal = Decimal(r.get("subtotal") or Decimal("0.00"))
+            tax_total = Decimal(r.get("tax_total") or Decimal("0.00"))
+            item_total = subtotal + tax_total
+            paid = paid_by_appt.get(aid, Decimal("0.00"))
+            total = appt_total.get(aid, Decimal("0.00"))
+            if paid > Decimal("0.00") and total > Decimal("0.00") and item_total > Decimal("0.00"):
+                share = item_total / total
+                part = paid * share
+                current_value = master_totals.get(mid, Decimal("0.00"))
+                master_totals[mid] = current_value + part
+
+        master_totals = {mid: value.quantize(TWOPLACES) for mid, value in master_totals.items()}
 
         master_month_totals = master_totals
         top_ids = sorted(master_month_totals.keys(), key=lambda k: master_month_totals[k], reverse=True)[:10]
         top_masters_qs = MasterProfile.objects.filter(pk__in=top_ids).select_related("user")
         top_masters = list(top_masters_qs)
         for m in top_masters:
-            m.total = master_month_totals.get(m.pk, Decimal("0"))
+            m.total = master_month_totals.get(m.pk, Decimal("0.00"))
 
         top_masters = sorted(top_masters, key=lambda m: m.total or 0, reverse=True)[:10]
 
