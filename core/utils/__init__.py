@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from django.apps import apps
-from django.db.models import Q
+from django.db.models import OuterRef, Q, Subquery
 
 if TYPE_CHECKING:
     from core.models import MasterRoom, Service
@@ -36,13 +36,25 @@ def pick_free_room(service: "Service", start: datetime, end: datetime) -> "Maste
         return None
 
     AppointmentItem = _appointment_item_model()
-    AppointmentStatus = apps.get_model("core", "AppointmentStatus")
-    cancelled_status = AppointmentStatus.objects.filter(name__iexact="Cancelled").first()
+    try:
+        AppointmentStatusHistory = apps.get_model("core", "AppointmentStatusHistory")
+    except LookupError:
+        AppointmentStatusHistory = None
+    latest_appt_status_sq = None
+    if AppointmentStatusHistory is not None:
+        latest_appt_status_sq = (
+            AppointmentStatusHistory.objects.filter(appointment_id=OuterRef("appointment_id"))
+            .order_by("-set_at", "-id")
+            .values("status__name")[:1]
+        )
 
     for room in rooms:
-        qs = AppointmentItem.objects.filter(room=room).filter(time_overlaps_q(start, end))
-        if cancelled_status:
-            qs = qs.exclude(appointment__appointmentstatushistory__status=cancelled_status)
+        qs = AppointmentItem.objects.with_current_status().filter(room=room).filter(time_overlaps_q(start, end))
+        if latest_appt_status_sq is not None:
+            qs = qs.annotate(_latest_appt_status=Subquery(latest_appt_status_sq)).exclude(
+                _latest_appt_status__iexact="Cancelled"
+            )
+        qs = qs.exclude(current_status_code__iexact="CANCELLED")
         if not qs.exists():
             return room
     return None

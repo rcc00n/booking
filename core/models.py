@@ -1775,29 +1775,39 @@ class AppointmentItem(models.Model):
         if not self._validation_column_available():
             return
 
-        # === 1) Пересечения для этого мастера по предметному времени (AppointmentItem.start_time) ===
-        # Исключаем отменённые аппы (если статус «Cancelled» существует)
-        cancelled_status = (
-            apps.get_model(self._meta.app_label, "AppointmentStatus")
-            .objects.filter(name="Cancelled")
-            .first()
-        )
+        latest_appt_status_sq = None
+        try:
+            appt_status_history_model = apps.get_model(self._meta.app_label, "AppointmentStatusHistory")
+        except LookupError:
+            appt_status_history_model = None
+        else:
+            latest_appt_status_sq = (
+                appt_status_history_model.objects.filter(appointment_id=OuterRef("appointment_id"))
+                .order_by("-set_at", "-id")
+                .values("status__name")[:1]
+            )
 
+        # === 1) Пересечения для этого мастера по предметному времени (AppointmentItem.start_time) ===
         if not getattr(self, "validation_enabled", True):
             return
 
         try:
-            overlapping_qs = type(self).objects.filter(
-                master=self.master,
-                start_time__lt=this_end,
-                start_time__gt=start_dt - timedelta(hours=24),  # «окно» поиска (с запасом на смены через полночь)
+            overlapping_qs = (
+                type(self)
+                .objects.with_current_status()
+                .filter(
+                    master=self.master,
+                    start_time__lt=this_end,
+                    start_time__gt=start_dt - timedelta(hours=24),  # «окно» поиска (с запасом на смены через полночь)
+                )
+                .exclude(current_status_code__iexact="CANCELLED")
             )
+            if latest_appt_status_sq is not None:
+                overlapping_qs = overlapping_qs.annotate(
+                    _latest_appt_status=Subquery(latest_appt_status_sq)
+                ).exclude(_latest_appt_status__iexact="Cancelled")
             if self.pk:
                 overlapping_qs = overlapping_qs.exclude(pk=self.pk)
-            if cancelled_status:
-                overlapping_qs = overlapping_qs.exclude(
-                    appointment__appointmentstatushistory__status=cancelled_status
-                )
 
             # Фактическое пересечение по интервалам item'ов
             for other in overlapping_qs.select_related("service", "appointment"):
@@ -1877,17 +1887,22 @@ class AppointmentItem(models.Model):
                 raise ValidationError("All rooms for this service are busy at this time.")
             self.room = room_candidate
 
-        room_overlap_qs = type(self).objects.filter(
-            room_id=self.room_id,
-            start_time__lt=this_end,
-            start_time__gt=start_dt - timedelta(hours=24),
+        room_overlap_qs = (
+            type(self)
+            .objects.with_current_status()
+            .filter(
+                room_id=self.room_id,
+                start_time__lt=this_end,
+                start_time__gt=start_dt - timedelta(hours=24),
+            )
+            .exclude(current_status_code__iexact="CANCELLED")
         )
+        if latest_appt_status_sq is not None:
+            room_overlap_qs = room_overlap_qs.annotate(
+                _latest_appt_status=Subquery(latest_appt_status_sq)
+            ).exclude(_latest_appt_status__iexact="Cancelled")
         if self.pk:
             room_overlap_qs = room_overlap_qs.exclude(pk=self.pk)
-        if cancelled_status:
-            room_overlap_qs = room_overlap_qs.exclude(
-                appointment__appointmentstatushistory__status=cancelled_status
-            )
 
         for other in room_overlap_qs.select_related("service", "appointment", "master"):
             if not other.start_time:
@@ -2815,6 +2830,3 @@ def detect_discount_source(service, client, promocode):
     if s > 0:
         return "service"
     return ""
-
-
-
