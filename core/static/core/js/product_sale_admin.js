@@ -100,6 +100,11 @@
       }
       const productId = productField.value;
       if (!productId) {
+        if (force) {
+          unitPriceInput.value = "";
+          unitPriceInput.dataset.userEdited = "";
+          updateTotal();
+        }
         return;
       }
       if (!force && unitPriceInput.value && unitPriceInput.value.trim().length) {
@@ -125,7 +130,28 @@
       }
     }
 
-    productField.addEventListener("change", () => syncUnitPrice(true));
+    if (productField.dataset.productSalePriceBound !== "1") {
+      const handleProductSelection = () => syncUnitPrice(true);
+      productField.addEventListener("change", handleProductSelection);
+      productField.addEventListener("input", handleProductSelection);
+
+      const jq =
+        window.jQuery || (window.django && window.django.jQuery) || null;
+      if (jq && jq.fn && typeof jq.fn.on === "function") {
+        const $field = jq(productField);
+        if (!$field.data("productSalePriceBound")) {
+          $field
+            .on("select2:select", handleProductSelection)
+            .on("autocompleteLightSelect", handleProductSelection)
+            .on("autocompleteLightChange", handleProductSelection)
+            .on("change", handleProductSelection);
+          $field.data("productSalePriceBound", true);
+        }
+      }
+
+      productField.dataset.productSalePriceBound = "1";
+    }
+
     quantityInput.addEventListener("input", updateTotal);
     quantityInput.addEventListener("change", updateTotal);
     unitPriceInput.addEventListener("input", () => {

@@ -105,11 +105,14 @@ class ProductSaleAdminForm(forms.ModelForm):
 
         unit_price = self.fields.get("unit_price")
         if unit_price:
+            unit_price.required = False
+            unit_price.empty_value = None
             unit_price.widget.attrs.update(
                 {
                     "data-unit-price-input": "1",
                     "autocomplete": "off",
                     "data-product-sale-role": "unit-price",
+                    "inputmode": "decimal",
                 }
             )
 
@@ -121,6 +124,28 @@ class ProductSaleAdminForm(forms.ModelForm):
                     "data-product-sale-role": "quantity",
                 }
             )
+
+    def clean_unit_price(self):
+        unit_price = self.cleaned_data.get("unit_price")
+        product = self.cleaned_data.get("product") or getattr(self.instance, "product", None)
+
+        if unit_price in (None, ""):
+            if product and getattr(product, "price", None) is not None:
+                try:
+                    return Decimal(product.price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                except (TypeError, InvalidOperation) as exc:
+                    raise forms.ValidationError("Could not derive unit price from the product.") from exc
+            raise forms.ValidationError("Unit price is required for the selected product.")
+
+        try:
+            decimal_price = Decimal(unit_price)
+        except (TypeError, InvalidOperation) as exc:
+            raise forms.ValidationError("Enter a valid unit price.") from exc
+
+        if decimal_price < Decimal("0.00"):
+            raise forms.ValidationError("Unit price cannot be negative.")
+
+        return decimal_price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class AppointmentProductSaleForm(ProductSaleAdminForm):
