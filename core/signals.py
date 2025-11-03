@@ -11,28 +11,40 @@ from .utils.sms import send_sms
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db.models.signals import pre_save, post_save, post_delete, pre_delete
+from django.db.utils import OperationalError, ProgrammingError
 from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.timezone import localtime
-from .tasks import send_cancellation_email
+from core.tasks import (
+    send_cancellation_email,
+    send_item_cancellation_email,
+    send_item_confirmation_email,
+    generate_payment_receipt_task,
+    email_payment_receipt_task,
+    email_refund_receipt_task,
+)
 from .models import (
     Appointment,
     AppointmentStatusHistory,
     Notification,
     AppointmentItem,
+    AppointmentItemStatusHistory,
     AppointmentItemPromoCode,
     UserProfile,
     PaymentStatus,
     Payment,
+    PaymentRefund,
     ClientIntakeForm,
 )
-from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
+from core.services.item_status import (
+    ensure_initial_status,
+)
 from core.services.payments import get_total_received_for_appointment
 from core.services.intake_assignments import (
     ensure_universal_assignments_for_form,
     ensure_universal_assignments_for_profile,
 )
-from django.db import OperationalError, ProgrammingError
+from django.db import OperationalError, ProgrammingError, transaction
 
 logger = logging.getLogger(__name__)
 
@@ -98,16 +110,22 @@ def _safe_assignments_call(func, *args, **kwargs):
 # 4) Хелпер: список позиций (услуга + мастер + время)
 def _items_summary_lines(appt: Appointment) -> list[str]:
     lines = []
-    qs = appt.items.select_related("service", "master__user").order_by("start_time")
-    for it in qs:
-        s = localtime(it.start_time).strftime("%d %b %Y, %H:%M")
-        master_name = it.master.user.get_full_name() or it.master.user.user.username
-        lines.append(f"• {it.service.name} with {master_name} at {s}")
+    try:
+        qs = appt.items.select_related("service", "master__user").order_by("start_time")
+        for it in qs:
+            s = localtime(it.start_time).strftime("%d %b %Y, %H:%M")
+            master_name = it.master.user.get_full_name() or it.master.user.user.username
+            lines.append(f"• {it.service.name} with {master_name} at {s}")
+    except (ProgrammingError, OperationalError):
+        return lines
     return lines
 
 def _short_labels(appt: Appointment) -> tuple[str, str]:
     """Для тем/смс: если 1 позиция — точные названия, иначе агрегированные."""
-    items = list(appt.items.select_related("service", "master__user"))
+    try:
+        items = list(appt.items.select_related("service", "master__user"))
+    except (ProgrammingError, OperationalError):
+        return "", ""
     if not items:
         return "", ""
     if len(items) == 1:
@@ -126,6 +144,51 @@ def _short_labels(appt: Appointment) -> tuple[str, str]:
         m_name = next((n for n in name_candidates if n), "")
         return s_name, m_name
     return f"{len(items)} services", "multiple masters"
+
+
+@receiver(post_save, sender=AppointmentItem)
+def bootstrap_item_status_on_create(sender, instance: AppointmentItem, created: bool, **kwargs):
+    if kwargs.get("raw") or not created:
+        return
+
+    code = getattr(instance, "_initial_status_code", None) or "BOOKED"
+    timestamp = getattr(instance, "_initial_status_timestamp", None)
+    set_by_user_id = getattr(instance, "_initial_status_user_id", None)
+    note = getattr(instance, "_initial_status_note", None)
+
+    ensure_initial_status(
+        instance,
+        code,
+        timestamp=timestamp,
+        set_by_user_id=set_by_user_id,
+        note=note,
+    )
+
+    if getattr(instance, "_created_via_admin", False):
+        send_item_confirmation_email.delay(str(instance.pk))
+
+
+@receiver(post_save, sender=AppointmentItemStatusHistory)
+def dispatch_item_status_side_effects(sender, instance: AppointmentItemStatusHistory, created: bool, **kwargs):
+    if kwargs.get("raw") or not created:
+        return
+
+    status = getattr(instance, "status", None)
+    code = (getattr(status, "code", "") or "").upper()
+    if code != "CANCELLED":
+        return
+
+    skip_notes = {
+        "seed-from-appointment-status",
+        "initial-status",
+        "admin-initial",
+        "admin-save",
+    }
+    if instance.note and instance.note in skip_notes:
+        return
+
+    send_item_cancellation_email.delay(str(instance.item_id))
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Снимок полей перед сохранением и дифф после сохранения
@@ -686,3 +749,24 @@ def trigger_receipt_pipeline(sender, instance: Payment, created: bool, **kwargs)
     payment_id = str(instance.pk)
     generate_payment_receipt_task.delay(payment_id)
     email_payment_receipt_task.delay(payment_id)
+
+
+@receiver(post_save, sender=PaymentRefund)
+def on_payment_refund_created(sender, instance: PaymentRefund, created: bool, **kwargs) -> None:
+    if not created or kwargs.get("raw"):
+        return
+
+    refund_id = str(instance.pk)
+
+    def enqueue_refund_email() -> None:
+        try:
+            email_refund_receipt_task.delay(refund_id)
+        except Exception as exc:  # noqa: BLE001 - log but do not interrupt the save flow
+            logger.warning(
+                "Refund %s: failed to enqueue refund receipt email task: %s",
+                refund_id,
+                exc,
+                exc_info=exc,
+            )
+
+    transaction.on_commit(enqueue_refund_email)

@@ -15,139 +15,7 @@
   <script src="{% static 'js/autofill.js' %}"></script>
 
   <!-- Мини-стили для горизонтального дейтпикера (в модалке) -->
-  <style>
-    :root{
-      --free:#1F5C3A; --busy:#D32F2F; --grid:#E6E7E7; --today:#FAFDFB; --chip:#F3F7F5;
-      --dash-bg-1:#f8fbf8; --dash-bg-2:#edf3ee;
-      --dash-card:#ffffff; --dash-ink:#0f2c22; --dash-muted:#6f7d73;
-      --dash-border:rgba(15,63,45,.12); --dash-shadow:0 35px 80px rgba(15,47,35,.12);
-      --dash-accent:#0f7a5b; --dash-accent-soft:#e0f3ea;
-    }
-    .ol2{display:flex;flex-direction:column;border:1px solid var(--grid);border-radius:.75rem;background:#fff;overflow:visible}
-    .ol2__toolbar{display:flex;align-items:center;justify-content:space-between;padding:.5rem .75rem;border-bottom:1px solid var(--grid)}
-    .ol2__wrap{flex:1 1 auto;overflow-x:auto;overflow-y:auto;max-height:56vh;min-height:300px;padding-bottom:10px;scrollbar-gutter:stable both-edges}
-    .ol2__grid{display:grid;grid-auto-rows:36px;grid-template-columns:100px repeat(var(--days,14),140px);min-width:calc(100px + var(--days,14)*140px + 1px)}
-    .ol2__cell{border-bottom:1px solid var(--grid);border-right:1px solid var(--grid);padding:.25rem .35rem;background:#fff;white-space:nowrap}
-    .ol2__cell.time{position:sticky;left:0;background:#fff;z-index:2;font-size:.85rem;color:#666}
-    .ol2__head{position:sticky;top:0;background:#fff;z-index:3;border-bottom:2px solid var(--grid)}
-    .ol2__day{display:flex;flex-direction:column;padding:.4rem .45rem}
-    .ol2__day .t{font-weight:800;font-size:.92rem;color:#204029;text-transform:capitalize}
-    .ol2__day .s{font-size:.75rem;color:#666;margin-top:.15rem}
-    .ol2__day.today{background:var(--today)}
-
-    .chip{display:inline-flex;align-items:center;justify-content:center;height:1.7rem;min-width:3.4rem;padding:0 .45rem;border-radius:.5rem;border:1.6px solid transparent;font-weight:800;font-size:.9rem;line-height:1;user-select:none}
-    .chip--free{color:var(--free);border-color:color-mix(in srgb, var(--free) 55%, #fff);background:var(--chip);cursor:pointer}
-    .chip--free:hover{filter:brightness(.98)}
-    .chip--busy{color:#fff;background:var(--busy);opacity:.92}
-    .chip--sel{background:var(--free)!important;color:#fff;border-color:var(--free)!important;box-shadow:0 0 0 2px color-mix(in srgb, var(--free) 20%, transparent)}
-    @media (max-width: 900px){ .ol2__wrap{max-height:50vh} }
-    body.dashboard-body{
-      min-height:100vh;
-      background:radial-gradient(circle at 85% 0, rgba(15,63,45,.14), transparent 48%), linear-gradient(180deg, var(--dash-bg-1) 0%, var(--dash-bg-2) 100%);
-      color:var(--dash-ink);
-      font-family:'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    }
-    .lang-picker{display:flex;flex-direction:column;gap:.35rem;color:var(--dash-muted);font-size:.78rem;}
-    .lang-picker__label{font-weight:700;letter-spacing:.08em;text-transform:uppercase;}
-    .lang-picker__select{appearance:none;background:#fff;border:1px solid var(--dash-border);color:var(--dash-ink);padding:.45rem .85rem;border-radius:.9rem;font-weight:600;cursor:pointer;box-shadow:0 12px 24px rgba(15,63,45,.12);}
-    .lang-picker__select:focus{outline:2px solid var(--dash-accent);outline-offset:2px;}
-
-    .dashboard-shell{min-height:100vh;display:flex;gap:2rem;padding:2rem clamp(1rem,4vw,3rem) 3rem;max-width:1440px;margin:0 auto;}
-    .dashboard-sidebar{width:320px;background:var(--dash-card);color:var(--dash-ink);border-radius:28px;border:1px solid var(--dash-border);box-shadow:var(--dash-shadow);padding:1.75rem 1.5rem 1.25rem;display:flex;flex-direction:column;gap:1.5rem;position:sticky;top:1.5rem;height:fit-content;max-height:calc(100vh - 3rem);}
-    .sidebar-brand{display:flex;align-items:center;gap:.85rem;font-weight:800;font-size:1.15rem;}
-    .sidebar-brand .mark{width:44px;height:44px;border-radius:16px;background:var(--dash-accent);color:#fff;display:grid;place-items:center;font-weight:800;box-shadow:0 22px 40px rgba(15,63,45,.35);}
-    .sidebar-profile{display:flex;align-items:center;gap:.85rem;}
-    .sidebar-profile__avatar{width:54px;height:54px;border-radius:18px;background:var(--dash-ink);color:#fff;display:grid;place-items:center;font-weight:700;font-size:1.15rem;box-shadow:0 18px 38px rgba(15,47,35,.25);}
-    .sidebar-profile__meta strong{display:block;font-size:1.1rem;}
-    .sidebar-profile__meta small{display:block;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--dash-muted);}
-    .account-tag{display:inline-flex;align-items:center;gap:.35rem;padding:.25rem .75rem;border-radius:999px;background:var(--dash-accent-soft);color:var(--dash-accent);font-weight:600;font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;}
-    .account-menu{display:flex;flex-direction:column;gap:.35rem;}
-    .account-menu__link{display:flex;align-items:center;gap:.85rem;padding:.65rem .85rem;border-radius:1rem;font-weight:600;color:var(--dash-ink);transition:.2s;border:1px solid transparent;}
-    .account-menu__link small{display:block;font-size:.78rem;color:var(--dash-muted);font-weight:500;}
-    .account-menu__icon{width:38px;height:38px;border-radius:1rem;background:var(--dash-accent-soft);color:var(--dash-accent);display:grid;place-items:center;font-size:1rem;}
-    .account-menu__link:hover{background:var(--dash-accent-soft);border-color:var(--dash-border);}
-    .account-menu__link.is-active{background:var(--dash-accent);color:#fff;border-color:var(--dash-accent);box-shadow:0 24px 45px rgba(15,63,45,.22);}
-    .account-menu__link.is-active small{color:rgba(255,255,255,.85);}
-    .account-menu__link.is-active .account-menu__icon{background:rgba(255,255,255,.25);color:#fff;}
-    .account-menu__meta{flex:1;}
-    .account-menu__badge{margin-left:auto;padding:.1rem .65rem;border-radius:999px;font-size:.75rem;font-weight:700;background:var(--dash-accent-soft);color:var(--dash-accent);}
-    .account-menu__link.is-active .account-menu__badge{background:#fff;color:var(--dash-accent);}
-    .sidebar-footer{margin-top:auto;padding-top:1rem;border-top:1px solid var(--dash-border);display:flex;flex-direction:column;gap:.35rem;font-size:.9rem;color:var(--dash-muted);}
-    .sidebar-footer a{color:inherit;}
-    .sidebar-close{display:none;}
-
-    .dashboard-main{flex:1;display:flex;flex-direction:column;}
-    .dashboard-content{padding:0 0 2.5rem;}
-    .dashboard-heading{letter-spacing:.01em;}
-    .dashboard-mobile-bar{display:none;}
-    .tab-card{border-radius:1.5rem;border:1px solid var(--dash-border);box-shadow:0 25px 50px rgba(15,47,35,.08);background:var(--dash-card);}
-    .appointments-list{display:grid;gap:1rem;}
-    .table-label{display:none;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--dash-muted);font-size:.72rem;}
-    .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;}
-    .stat-chip{border-radius:1rem;padding:1rem 1.1rem;background:var(--dash-card);border:1px solid var(--dash-border);box-shadow:0 18px 40px rgba(15,47,35,.08);display:flex;flex-direction:column;gap:.2rem;}
-    .stat-chip strong{font-size:1.8rem;color:var(--dash-ink);}
-    .stat-chip span{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--dash-muted);}
-
-    .rs-mobile-days{display:flex;gap:.5rem;overflow-x:auto;padding:.4rem 0;margin-top:.35rem;scrollbar-width:thin;}
-    .rs-mobile-days::-webkit-scrollbar{height:6px}
-    .rs-mobile-days::-webkit-scrollbar-thumb{background:rgba(32,64,41,.25);border-radius:999px}
-    .rs-mobile-day{flex:0 0 auto;min-width:120px;padding:.6rem .75rem;border-radius:.85rem;border:1px solid #DAD3C1;background:#fff;color:#204029;font-weight:700;line-height:1.3;text-align:left;box-shadow:0 8px 18px rgba(32,64,41,.08);transition:.2s ease;}
-    .rs-mobile-day strong{display:block;font-size:.95rem;font-weight:800;color:#204029;}
-    .rs-mobile-day span{display:block;font-size:.78rem;color:#6b7a6f;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-top:.15rem;}
-    .rs-mobile-day--active{background:#204029;color:#fff;border-color:#204029;box-shadow:0 12px 28px rgba(32,64,41,.22);}
-    .rs-mobile-day--active strong,.rs-mobile-day--active span{color:#fff;}
-    .rs-mobile-times{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin-top:1rem;}
-    .rs-mobile-time{padding:.65rem .75rem;border-radius:.75rem;border:1px solid #DAD3C1;background:#fff;font-weight:700;color:#204029;box-shadow:0 6px 18px rgba(32,64,41,.12);transition:.2s ease;}
-    .rs-mobile-time--selected{background:#204029;color:#fff;border-color:#204029;box-shadow:0 12px 28px rgba(32,64,41,.22);}
-    .rs-mobile-empty{font-size:.85rem;color:#6b7a6f;padding:1rem 0;text-align:center;}
-
-    @media (max-width:480px){ .rs-mobile-times{grid-template-columns:1fr;} }
-
-    @media (max-width:1023px){
-      .dashboard-shell{flex-direction:column;padding:1.25rem;}
-      .dashboard-sidebar{position:fixed;top:0;left:0;bottom:0;width:min(calc(100vw - 2.5rem),320px);transform:translateX(-100%);border-radius:0;max-height:none;z-index:60;box-shadow:0 45px 80px rgba(0,0,0,.35);background:var(--dash-card);}
-      body.nav-open .dashboard-sidebar{transform:translateX(0);}
-      .dashboard-backdrop{position:fixed;inset:0;background:rgba(6,20,13,.6);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:50;}
-      body.nav-open .dashboard-backdrop{opacity:1;pointer-events:auto;}
-      .dashboard-mobile-bar{position:sticky;top:0;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border-radius:1.25rem;padding:.65rem 1rem;margin-bottom:1rem;border:1px solid rgba(15,63,45,.12);display:flex;align-items:center;gap:.75rem;box-shadow:0 18px 40px rgba(15,47,35,.15);}
-      .dashboard-mobile-bar__btn{display:inline-flex;align-items:center;justify-content:center;width:2.6rem;height:2.6rem;border-radius:.85rem;border:1px solid rgba(32,64,41,.18);background:#fff;color:#204029;font-size:1.25rem;line-height:1;box-shadow:0 8px 20px rgba(32,64,41,.12);} 
-      .dashboard-mobile-bar__btn:active{transform:scale(.96);}
-      .dashboard-mobile-user{display:flex;align-items:center;gap:.55rem;font-weight:600;color:#204029;}
-      .dashboard-mobile-user span.badge{display:inline-flex;align-items:center;justify-content:center;width:2.2rem;height:2.2rem;border-radius:999px;background:#204029;color:#DAD3C1;font-weight:800;letter-spacing:.04em;}
-      .dashboard-mobile-user small{display:block;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:#4D4D4D;opacity:.75;}
-      .dashboard-content{padding:0 0 2rem;}
-      .sidebar-close{display:flex;align-items:center;gap:.5rem;margin:0 1rem 1rem;font-size:.95rem;color:var(--dash-ink);background:rgba(15,63,45,.1);border-radius:.85rem;padding:.55rem .8rem;border:1px solid rgba(15,63,45,.15);cursor:pointer;font-weight:600;}
-      .sidebar-close span{font-size:1.1rem;}
-      .tab-card{border-radius:1.25rem;}
-    }
-
-    @media (max-width:768px){
-      .dashboard-heading{font-size:clamp(1.75rem,5vw,2.35rem);}
-      .appointments-list > div{flex-direction:column;align-items:flex-start;gap:.85rem;}
-      .appointments-list .appt-actions{width:100%;justify-content:flex-end;}
-      .recent-table{display:block;width:100%;border-collapse:separate;border-spacing:0;}
-      .recent-table thead{display:none;}
-      .recent-table tbody{display:grid;gap:1rem;}
-      .recent-table tr{display:grid;gap:.6rem;padding:1.15rem 1rem;border:1px solid var(--dash-border);border-radius:1.25rem;background:var(--dash-card);box-shadow:0 14px 32px rgba(32,64,41,.08);} 
-      .recent-table td{display:flex;flex-direction:column;align-items:flex-start;gap:.35rem;padding:0!important;}
-      .recent-table td .table-label{display:block;}
-      .recent-table td .table-value{font-size:.95rem;color:var(--dash-ink);}
-      .recent-table td:first-child .table-value{font-weight:700;color:var(--dash-ink);}
-      .tab-card{padding:1.2rem 1rem;}
-    }
-
-    @media (min-width:1024px){
-      .dashboard-shell{flex-direction:row;}
-      .dashboard-sidebar{position:sticky;transform:none!important;}
-      .dashboard-backdrop{display:none!important;}
-      .dashboard-mobile-bar{display:none;}
-      .dashboard-content{padding:0;}
-    }
-
-    @media (hover:none){
-      .account-menu__link:hover{background:var(--dash-accent-soft);border-color:var(--dash-border);}
-    }
-  </style>
+  <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
 </head>
 <body class="dashboard-body" data-autofill-user="{{ request.user.pk }}" data-autofill-payment-endpoint="{% url 'api-autofill-payment' %}">
 <div class="dashboard-backdrop" data-nav-backdrop></div>
@@ -199,7 +67,7 @@
           <span data-i18n="services.userMenu.appointments">Appointments</span>
           <small>Upcoming & history</small>
         </div>
-        {% with count=upcoming_appointments|length %}
+        {% with count=upcoming_items|length %}
           {% if count %}
             <span class="account-menu__badge">{{ count }}</span>
           {% endif %}
@@ -312,7 +180,7 @@
         <div class="stat-grid mt-6">
           <div class="stat-chip">
             <span data-i18n="dashboard.upcomingTitle">Upcoming appointments</span>
-            <strong>{{ upcoming_appointments|length }}</strong>
+            <strong>{{ upcoming_items|length }}</strong>
           </div>
           <div class="stat-chip">
             <span data-i18n="dashboard.recentTitle">Completed visits</span>
@@ -345,22 +213,46 @@
             <h2 class="text-lg font-semibold text-[#1b392c]" data-i18n="dashboard.upcomingTitle">Upcoming appointments</h2>
             <a href="#" class="text-sm text-[#1f5f44] font-semibold" data-tab-jump="appointments">View all</a>
           </div>
-          {% if upcoming_appointments %}
-            <ul class="space-y-4 max-h-64 overflow-y-auto pr-1">
-              {% for a in upcoming_appointments %}
-                <li data-appt-id="{{ a.id }}">
-                  <p class="font-semibold text-[#1b392c]">
-                    {{ a.start_time|localtime|date:"d M Y, H:i" }}
-                  </p>
-                  <p class="text-sm text-[#4D4D4D]">
-                    <span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span> · {{ a.master.get_full_name }}
-                  </p>
-                  <p class="text-xs text-[#4D4D4D]/80 mt-1" data-i18n="dashboard.appointment.paymentLabel" data-i18n-vars='{"status":"{{ a.payment_status.name|default:"Pending" }}"}'>Payment: {{ a.payment_status.name|default:"Pending" }}</p>
+          {% if upcoming_items %}
+            <ul id="upcomingAppointments" class="space-y-4 max-h-64 overflow-y-auto pr-1">
+              {% for it in upcoming_items %}
+                <li class="appointment-item"
+                    data-appt-id="{{ it.appointment.id }}"
+                    data-item-id="{{ it.id }}"
+                    data-appt-start-iso="{{ it.start_time|utc|date:'c' }}">
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <p class="font-semibold text-[#1b392c] appt-dt">
+                        {{ it.start_time|localtime|date:"d M Y, H:i" }}
+                      </p>
+                      <p class="text-sm text-[#4D4D4D]">
+                        <span data-service-name-original="{{ it.service.name|escape }}">{{ it.service.name }}</span> · {{ it.master.get_full_name }}
+                      </p>
+                    </div>
+                    <span class="inline-flex items-center rounded-full bg-[#e0f3ea] px-2 py-1 text-xs font-semibold text-[#1f5f44]"
+                          data-role="item-status"
+                          data-status-code="{{ it.current_status_code|default:'BOOKED' }}">
+                      {{ it.current_status_label|default:"Booked" }}
+                    </span>
+                  </div>
+                  <div class="mt-1 flex items-center justify-between text-xs text-[#4D4D4D]/80">
+                    <span class="inline-flex items-center gap-2" data-role="appointment-status"
+                          data-status-code="{{ it.appointment.aggregated_status_code|default:'BOOKED' }}">
+                      <span class="inline-block h-2 w-2 rounded-full bg-[#1f5f44]/60" aria-hidden="true"></span>
+                      {{ it.appointment.aggregated_status|default:"Booked" }}
+                    </span>
+                    <span>Payment status: {{ it.appointment.payment_status.name|default:"Pending" }}</span>
+                  </div>
                   <div class="mt-2 flex gap-4 text-sm">
                     <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
-                       data-appt-id="{{ a.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>
+                       data-appt-id="{{ it.appointment.id }}"
+                       data-item-id="{{ it.id }}"
+                       data-i18n="dashboard.appointment.cancel">Cancel</a>
                     <a href="#" class="appt-reschedule text-[#1f5f44] hover:opacity-90 underline-offset-4 hover:underline font-semibold"
-                       data-appt-id="{{ a.id }}" data-service-id="{{ a.service.id }}" data-i18n="dashboard.appointment.reschedule">Reschedule</a>
+                       data-appt-id="{{ it.appointment.id }}"
+                       data-item-id="{{ it.id }}"
+                       data-service-id="{{ it.service.id }}"
+                       data-i18n="dashboard.appointment.reschedule">Reschedule</a>
                   </div>
                 </li>
               {% endfor %}
@@ -410,11 +302,17 @@
                     </td>
                     <td class="py-2 pr-4">
                       <span class="table-label" data-i18n="dashboard.table.master">Master</span>
-                      <span class="table-value">{{ a.master.get_full_name }}</span>
+                      <span class="table-value">
+                        {% with master=a.master %}
+                          {% if master %}
+                            {% firstof master.get_full_name master.name master.user.get_full_name master.user.username '-' %}
+                          {% else %}-{% endif %}
+                        {% endwith %}
+                      </span>
                     </td>
                     <td class="py-2 pr-4">
                       <span class="table-label" data-i18n="dashboard.table.status">Status</span>
-                      <span class="table-value">{{ a.current_status }}</span>
+                      <span class="table-value">{{ a.aggregated_status }}</span>
                     </td>
                     <td class="py-2 pr-4">
                       <span class="table-label" data-i18n="dashboard.table.payment">Payment</span>
@@ -554,48 +452,131 @@
             <textarea
                    name="{{ profile_form.address.html_name }}"
                    id="{{ profile_form.address.id_for_label }}"
-
+                   rows="3"
+                   class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
+                   autocomplete="street-address"
+                   placeholder="123 Main St"
+                   data-autofill-key="address">{{ profile_form.address.value|default_if_none:'' }}</textarea>
+            {% if profile_form.address.errors %}
+              <p class="mt-1 text-sm text-red-600">{{ profile_form.address.errors.0 }}</p>
+            {% endif %}
+          </div> <!-- /md-col-span-2 -->
+  </div>   <!-- /grid -->
+</form>     <!-- /profile form -->
+</section>  <!-- /tab-overview -->
     <!-- APPOINTMENTS -->
     <section id="tab-appointments" class="tab hidden">
+
       <div class="flex flex-wrap items-center gap-3 mb-6">
+
         <div>
+
           <p class="uppercase text-xs tracking-[0.2em] text-[#4D4D4D]/70">Schedule</p>
+
           <h2 class="text-2xl font-semibold text-[#1b392c]" data-i18n="dashboard.myTitle">My appointments</h2>
+
         </div>
+
         <a href="/accounts/#services"
+
            class="ml-auto inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-white bg-[#1f5f44] hover:bg-[#194f39] shadow"
+
            data-i18n="dashboard.book">
+
           + Book
+
         </a>
+
       </div>
 
-      {% if appointments %}
-        <div class="appointments-list grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {% for a in appointments %}
-            <div class="tab-card p-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between {% if a.start_time < now %}opacity-70{% endif %}"
-                 data-appt-id="{{ a.id }}">
-              <div class="appt-main">
-                <p class="font-medium text-[#1b392c] appt-dt">{{ a.start_time|localtime|date:"d M Y, H:i" }}</p>
-                <p class="text-sm text-[#4D4D4D]"><span data-service-name-original="{{ a.service.name|escape }}">{{ a.service.name }}</span> · {{ a.master.get_full_name }}</p>
-              </div>
 
-              {% if a.start_time >= now %}
-                <div class="flex gap-3 text-sm appt-actions sm:justify-end">
-                  <a href="#" class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
-                     data-appt-id="{{ a.id }}" data-i18n="dashboard.appointment.cancel">Cancel</a>
-                  <a href="#" class="appt-reschedule text-[#1f5f44] hover:opacity-90 underline-offset-4 hover:underline"
-                     data-appt-id="{{ a.id }}" data-service-id="{{ a.service.id }}" data-i18n="dashboard.appointment.reschedule">Reschedule</a>
-                </div>
-              {% else %}
-                <span class="text-xs text-[#4D4D4D]/70" data-i18n="dashboard.appointment.completed">Completed</span>
-              {% endif %}
+
+      <div id="appointmentsByMonth" class="space-y-6">
+        {% if appointments_by_month %}
+          {% for month in appointments_by_month %}
+            <div class="tab-card p-5" data-month="{{ month.iso }}">
+              <h3 class="text-lg font-bold text-[#1b392c] mb-3">{{ month.label }}</h3>
+              <div class="appointments-list grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {% for a in month.appointments %}
+                  <div class="tab-card p-5 flex flex-col gap-4 appointment-item{% if not a.is_future %} opacity-70{% endif %}"
+                       data-appt-id="{{ a.id }}"
+                       data-appt-start-iso="{{ a.start_iso }}">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <p class="font-medium text-[#1b392c] appt-dt">{{ a.start_display }}</p>
+                        <p class="text-xs text-[#4D4D4D]/70">Payment status: {{ a.payment_status|default:"Pending" }}</p>
+                      </div>
+                      <span class="inline-flex items-center rounded-full bg-[#E8E8FD] px-2 py-1 text-xs font-semibold text-[#2F2F99]"
+                            data-role="appointment-status"
+                            data-status-code="{{ a.aggregated_status_code }}">
+                        {{ a.aggregated_status_label }}
+                      </span>
+                    </div>
+                    <ul class="space-y-3">
+                      {% for item in a.items %}
+                        <li class="rounded-lg border border-[#E2E8E1] p-3 flex flex-col gap-2"
+                            data-item-id="{{ item.id }}">
+                          <div class="flex items-start justify-between gap-3">
+                            <div>
+                              <p class="text-sm font-semibold text-[#1b392c]" data-service-name-original="{{ item.service_name|escape }}">{{ item.service_name }}</p>
+                              <p class="text-xs text-[#4D4D4D]/80">
+                                {{ item.master_name }}
+                                {% if item.start_display %}
+                                  &middot; {{ item.start_display }}
+                                {% endif %}
+                              </p>
+                            </div>
+                            <span class="inline-flex items-center rounded-full bg-[#e0f3ea] px-2 py-1 text-xs font-semibold text-[#1f5f44]"
+                                  data-role="item-status"
+                                  data-status-code="{{ item.status_code }}">
+                              {{ item.status_label }}
+                            </span>
+                          </div>
+                          {% if item.can_manage %}
+                            <div class="flex flex-wrap gap-3 text-xs sm:text-sm">
+                              <a href="#"
+                                 class="appt-cancel text-[#4D4D4D] hover:text-[#AF9525] underline-offset-4 hover:underline"
+                                 data-appt-id="{{ a.id }}"
+                                 data-item-id="{{ item.id }}"
+                                 data-i18n="dashboard.appointment.cancel">Cancel</a>
+                              <a href="#"
+                                 class="appt-reschedule text-[#1f5f44] hover:opacity-90 underline-offset-4 hover:underline font-semibold"
+                                 data-appt-id="{{ a.id }}"
+                                 data-item-id="{{ item.id }}"
+                                 data-service-id="{{ item.service_id }}"
+                                 data-i18n="dashboard.appointment.reschedule">Reschedule</a>
+                            </div>
+                          {% else %}
+                            <span class="text-xs text-[#4D4D4D]/70">
+                              {% if item.status_code == "CANCELLED" %}
+                                {{ item.status_label }}
+                              {% elif item.is_future %}
+                                Actions unavailable
+                              {% else %}
+                                Completed
+                              {% endif %}
+                            </span>
+                          {% endif %}
+                        </li>
+                      {% empty %}
+                        <li class="text-sm text-[#4D4D4D]/70">No services recorded.</li>
+                      {% endfor %}
+                    </ul>
+                  </div>
+                {% empty %}
+                  <p class="col-span-full text-sm text-[#4D4D4D]/70">No appointments this month.</p>
+                {% endfor %}
+              </div>
             </div>
           {% endfor %}
-        </div>
-      {% else %}
-        <p class="text-[#4D4D4D]/70" data-i18n="dashboard.myEmpty">No appointments.</p>
-      {% endif %}
+        {% else %}
+          <p class="text-[#4D4D4D]/70" data-i18n="dashboard.myEmpty">No appointments.</p>
+        {% endif %}
+      </div>
+
+
     </section>
+
 
     <!-- BILLING -->
     <section id="tab-billing" class="tab hidden">
@@ -891,963 +872,8 @@
 </div>
 
 <!-- ▸▸ JS ◂◂ -->
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  const I18N = window.MalvaI18n;
-  let refreshPending = false;
-  const queueRefresh = () => {
-    if (!I18N || typeof I18N.refresh !== 'function' || refreshPending) return;
-    refreshPending = true;
-    window.requestAnimationFrame(() => {
-      refreshPending = false;
-      I18N.refresh({ silent: true });
-    });
-  };
-  const translate = (key, vars, fallback) => {
-    if (!key) return fallback || '';
-    if (I18N) {
-      try {
-        return I18N.t(key, vars);
-      } catch (err) {
-        return fallback !== undefined ? fallback : key;
-      }
-    }
-    return fallback !== undefined ? fallback : key;
-  };
-  const setTextKey = (el, key, vars, fallback) => {
-    if (!el) return;
-    if (I18N && key) {
-      el.setAttribute('data-i18n', key);
-      if (vars) {
-        el.setAttribute('data-i18n-vars', JSON.stringify(vars));
-      } else {
-        el.removeAttribute('data-i18n-vars');
-      }
-      queueRefresh();
-    } else if (fallback !== undefined) {
-      el.textContent = fallback;
-    }
-  };
-  const clearTextKey = (el) => {
-    if (!el) return;
-    el.removeAttribute('data-i18n');
-    el.removeAttribute('data-i18n-vars');
-  };
-  const getLocale = () => (I18N && typeof I18N.getLocale === 'function'
-    ? I18N.getLocale()
-    : (navigator.languages && navigator.languages[0]) || navigator.language || 'en');
-  const translateServiceNameText = (name) => {
-    if (!name) return '';
-    if (I18N && typeof I18N.translateServiceName === 'function') {
-      return I18N.translateServiceName(name);
-    }
-    return name;
-  };
-  const applyServiceNameTranslations = (root) => {
-    const scope = root || document;
-    scope.querySelectorAll('[data-service-name-original]').forEach((el) => {
-      const original = el.getAttribute('data-service-name-original') || el.textContent;
-      if (!original) return;
-      el.textContent = translateServiceNameText(original) || original;
-    });
-  };
-
-  const links = document.querySelectorAll('[data-tab]');
-  const tabs  = document.querySelectorAll('.tab');
-  const bodyEl = document.body;
-  const navToggle = document.querySelector('[data-nav-toggle]');
-  const navClose = document.querySelector('[data-nav-close]');
-  const navBackdrop = document.querySelector('[data-nav-backdrop]');
-  const sidebarNav = document.getElementById('sidebar');
-
-  const closeNav = () => bodyEl.classList.remove('nav-open');
-
-  if (navToggle) {
-    navToggle.addEventListener('click', () => {
-      bodyEl.classList.toggle('nav-open');
-    });
-  }
-  navClose?.addEventListener('click', closeNav);
-  navBackdrop?.addEventListener('click', closeNav);
-  sidebarNav?.addEventListener('click', (event) => {
-    if (event.target.closest('a')) closeNav();
-  });
-  window.addEventListener('resize', () => {
-    if (window.innerWidth >= 1024) closeNav();
-  });
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeNav();
-  });
-
-  function setActive(link, active) {
-    link.classList.toggle('is-active', active);
-    link.setAttribute('aria-current', active ? 'page' : 'false');
-  }
-  function activate(tabName) {
-    tabs.forEach(t => t.classList.toggle('hidden', t.id !== 'tab-' + tabName));
-    links.forEach(l => setActive(l, l.dataset.tab === tabName));
-  }
-
-  /* hash-навигация */
-  const allowed = ['overview','appointments','billing','forms','settings','support'];
-  const initialHash = location.hash.replace('#','');
-  const initial = allowed.includes(initialHash) ? initialHash : 'overview';
-  activate(initial);
-  links.forEach(link => link.addEventListener('click', e => {
-    e.preventDefault();
-    activate(link.dataset.tab);
-    history.replaceState(null, '', '#'+link.dataset.tab);
-    closeNav();
-  }));
-
-  document.querySelectorAll('[data-tab-jump]').forEach((btn) => {
-    btn.addEventListener('click', (event) => {
-      event.preventDefault();
-      const target = btn.getAttribute('data-tab-jump');
-      if (!target || !allowed.includes(target)) return;
-      activate(target);
-      history.replaceState(null, '', '#' + target);
-      closeNav();
-      const section = document.getElementById(`tab-${target}`);
-      if (section) {
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    });
-  });
-
-  const autofillScript = document.getElementById('autofill-defaults');
-  let autofillDefaults = {};
-  if (autofillScript) {
-    try {
-      autofillDefaults = JSON.parse(autofillScript.textContent) || {};
-    } catch (err) {
-      console.warn('[dashboard] Failed to parse autofill defaults', err);
-      autofillDefaults = {};
-    }
-  }
-  const autofillApi = window.MalvaAutofill;
-  const resolvedUserId = (document.body?.dataset?.autofillUser) ? String(document.body.dataset.autofillUser) : 'guest';
-  const paymentEndpoint = document.body?.dataset?.autofillPaymentEndpoint || '';
-  const paymentAccountCard = document.querySelector('[data-payment-account-card]');
-  const paymentAccountUpdatedEl = paymentAccountCard?.querySelector('[data-payment-account-updated]');
-  const paymentAccountFieldNodes = paymentAccountCard ? paymentAccountCard.querySelectorAll('[data-payment-account-field]') : [];
-  const autofillGroups = ['profile', 'health', 'payment'];
-  const deviceListEl = document.querySelector('[data-autofill-list]');
-  const deviceEmptyEl = document.querySelector('[data-autofill-empty]');
-  const syncButtons = document.querySelectorAll('[data-autofill-sync]');
-  const clearButtons = document.querySelectorAll('[data-autofill-clear]');
-  const clearAllButton = document.querySelector('[data-autofill-clear-all]');
-  const accountSyncButtons = document.querySelectorAll('[data-autofill-sync-account]');
-  const accountClearButtons = document.querySelectorAll('[data-autofill-clear-account]');
-  const paymentAllowedKeys = ['name', 'email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'postal_code', 'country'];
-  const defaultPayment = Object.assign({}, autofillDefaults.payment || {});
-  autofillDefaults.payment = defaultPayment;
-  const groupLabels = {
-    profile: 'Profile form',
-    health: 'Health questionnaire',
-    payment: 'Payment details',
-  };
-  const formatAutofillTimestamp = (iso) => {
-    if (!iso) return '';
-    const dt = new Date(iso);
-    if (Number.isNaN(dt.getTime())) return '';
-    return `Updated ${dt.toLocaleString(getLocale(), { dateStyle: 'medium', timeStyle: 'short' })}`;
-  };
-  const updatePaymentAccountCard = (values, updatedAt) => {
-    if (!paymentAccountCard) return;
-    const data = values || {};
-    paymentAccountFieldNodes.forEach((el) => {
-      const key = el.dataset.paymentAccountField;
-      if (!key) return;
-      let text = '—';
-      if (key === 'address') {
-        const addr = [data.address_line1, data.address_line2].filter(Boolean).join('\n');
-        if (addr) text = addr;
-      } else if (data[key]) {
-        text = data[key];
-      }
-      el.textContent = text;
-    });
-    if (paymentAccountUpdatedEl) {
-      paymentAccountUpdatedEl.textContent = updatedAt ? formatAutofillTimestamp(updatedAt) : 'Not updated yet.';
-    }
-  };
-  updatePaymentAccountCard(defaultPayment, defaultPayment.updated_at || defaultPayment.updatedAt || '');
-
-  const normalizePaymentPayload = (payload) => {
-    const result = {};
-    Object.entries(payload || {}).forEach(([key, value]) => {
-      if (!paymentAllowedKeys.includes(key)) return;
-      if (value === undefined || value === null) return;
-      let str = value;
-      if (typeof str !== 'string') {
-        str = String(str);
-      }
-      str = str.trim();
-      if (!str) return;
-      result[key] = str;
-    });
-    return result;
-  };
-
-  let paymentPersistTimer = null;
-  const sendPaymentContact = async (payload, { clear = false } = {}) => {
-    if (!paymentEndpoint) return;
-    const body = clear ? { clear: true } : normalizePaymentPayload(payload);
-    if (!clear && Object.keys(body).length === 0) {
-      return;
-    }
-    try {
-      const resp = await fetch(paymentEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': csrftoken,
-        },
-        credentials: 'same-origin',
-        body: JSON.stringify(body),
-      });
-      if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}`);
-      }
-      const data = await resp.json();
-      const contact = data?.billing_contact || {};
-      const updatedAt = data?.updated_at || '';
-      autofillDefaults.payment = Object.assign({}, contact, updatedAt ? { updated_at: updatedAt } : {});
-      updatePaymentAccountCard(autofillDefaults.payment, updatedAt);
-    } catch (err) {
-      console.warn('[dashboard] Failed to persist payment contact', err);
-    }
-  };
-
-  const persistPaymentContact = (payload, { immediate = false } = {}) => {
-    if (!paymentEndpoint) return;
-    const task = () => sendPaymentContact(payload);
-    if (immediate) {
-      task();
-      return;
-    }
-    window.clearTimeout(paymentPersistTimer);
-    paymentPersistTimer = window.setTimeout(task, 600);
-  };
-
-  const fallbackPaymentPayload = () => {
-    const profileDefaults = autofillDefaults.profile || {};
-    const paymentDefaults = Object.assign({}, autofillDefaults.payment || {});
-    const finalPayload = Object.assign({}, paymentDefaults);
-    if (!finalPayload.name) {
-      const fullName = `${profileDefaults.first_name || ''} ${profileDefaults.last_name || ''}`.trim();
-      if (fullName) finalPayload.name = fullName;
-    }
-    ['email', 'phone', 'postal_code'].forEach((key) => {
-      if (!finalPayload[key] && profileDefaults[key]) {
-        finalPayload[key] = profileDefaults[key];
-      }
-    });
-    if (!finalPayload.address_line1 && profileDefaults.address) {
-      const lines = String(profileDefaults.address).split('\n').map((line) => line.trim()).filter(Boolean);
-      if (lines.length) {
-        finalPayload.address_line1 = lines[0];
-        if (lines.length > 1) {
-          finalPayload.address_line2 = lines.slice(1).join(' ');
-        }
-      }
-    }
-    return normalizePaymentPayload(finalPayload);
-  };
-  const renderAutofillDevice = () => {
-    if (!autofillApi || !deviceListEl || !deviceEmptyEl) {
-      return;
-    }
-    deviceListEl.innerHTML = '';
-    let hasData = false;
-    autofillGroups.forEach((group) => {
-      const state = autofillApi.load(group, { userId: resolvedUserId });
-      const values = state?.values || {};
-      const savedKeys = Object.keys(values).filter((key) => {
-        const value = values[key];
-        if (Array.isArray(value)) return value.length > 0;
-        return value !== undefined && value !== null && value !== '';
-      });
-      if (!savedKeys.length) {
-        return;
-      }
-      hasData = true;
-      const row = document.createElement('div');
-      row.className = 'flex flex-wrap items-center justify-between gap-3 rounded-lg bg-white border border-[#DAD3C1] px-4 py-3';
-      const info = document.createElement('div');
-      info.innerHTML = `
-        <div class="font-semibold text-[#204029]">${groupLabels[group] || (group.charAt(0).toUpperCase() + group.slice(1))}</div>
-        <div class="text-xs text-[#4D4D4D]/70">${savedKeys.length} field${savedKeys.length === 1 ? '' : 's'} saved${state?.updatedAt ? ' • ' + formatAutofillTimestamp(state.updatedAt) : ''}</div>
-      `;
-      const actions = document.createElement('div');
-      actions.className = 'flex items-center gap-2';
-      const clearBtn = document.createElement('button');
-      clearBtn.type = 'button';
-      clearBtn.className = 'px-3 py-1 text-xs border border-[#204029]/40 rounded-lg text-[#204029] hover:border-[#204029] transition';
-      clearBtn.textContent = 'Clear';
-      clearBtn.addEventListener('click', () => autofillApi.clear(group, { userId: resolvedUserId }));
-      actions.appendChild(clearBtn);
-      row.append(info, actions);
-      deviceListEl.appendChild(row);
-    });
-    if (hasData) {
-      deviceEmptyEl.classList.add('hidden');
-      deviceListEl.classList.remove('hidden');
-    } else {
-      deviceListEl.classList.add('hidden');
-      deviceEmptyEl.classList.remove('hidden');
-    }
-  };
-  const flash = (el, message) => {
-    if (!el) return;
-    const original = el.dataset.originalText || el.textContent;
-    el.dataset.originalText = original;
-    el.textContent = message;
-    el.disabled = true;
-    el.classList.add('opacity-70');
-    window.setTimeout(() => {
-      el.textContent = el.dataset.originalText || original;
-      el.disabled = false;
-      el.classList.remove('opacity-70');
-    }, 1800);
-  };
-  if (autofillApi) {
-    autofillApi.attachAll('form[data-autofill-group]');
-  }
-
-  const storageSupported = autofillApi ? autofillApi.storageAvailable() : false;
-  if (!storageSupported) {
-    if (deviceEmptyEl) {
-      deviceEmptyEl.textContent = 'Autofill requires local storage support. Enable cookies/local storage or switch to another browser.';
-      deviceEmptyEl.classList.remove('hidden');
-    }
-    document.querySelectorAll('[data-autofill-sync],[data-autofill-clear],[data-autofill-clear-all]').forEach((btn) => {
-      btn.disabled = true;
-      btn.classList.add('opacity-50', 'cursor-not-allowed');
-    });
-  } else {
-    renderAutofillDevice();
-  }
-
-  if (autofillApi) {
-    autofillApi.subscribe(({ group, userId, state }) => {
-      if (String(userId || 'guest') !== resolvedUserId) return;
-      if (storageSupported && autofillGroups.includes(group)) {
-        renderAutofillDevice();
-      }
-      if (group === 'payment') {
-        const source = (state && state.values) || (state && state.state && state.state.values) || {};
-        persistPaymentContact(source);
-      }
-    });
-  }
-
-  const profileKeys = ['first_name', 'last_name', 'email', 'phone', 'birth_date', 'address', 'postal_code', 'how_heard', 'email_marketing_consent'];
-  if (autofillApi) {
-    syncButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const group = btn.dataset.autofillSync;
-        if (!group) return;
-        let payload = autofillDefaults[group] || {};
-        if (group === 'profile') {
-          payload = {};
-          const defaults = autofillDefaults.profile || {};
-          profileKeys.forEach((key) => {
-            if (defaults[key] !== undefined && defaults[key] !== null && defaults[key] !== '') {
-              payload[key] = defaults[key];
-            }
-          });
-        }
-        autofillApi.save(group, payload, { userId: resolvedUserId });
-        if (group === 'payment') {
-          persistPaymentContact(payload, { immediate: true });
-        }
-        flash(btn, 'Synced');
-      });
-    });
-    clearButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const group = btn.dataset.autofillClear;
-        if (!group) return;
-        autofillApi.clear(group, { userId: resolvedUserId });
-        if (group === 'payment') {
-          sendPaymentContact({}, { clear: true });
-        }
-        flash(btn, 'Cleared');
-      });
-    });
-    clearAllButton?.addEventListener('click', () => {
-      autofillGroups.forEach((group) => {
-        autofillApi.clear(group, { userId: resolvedUserId });
-        if (group === 'payment') {
-          sendPaymentContact({}, { clear: true });
-        }
-      });
-      flash(clearAllButton, 'Cleared');
-    });
-  }
-
-  accountSyncButtons.forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      if (!paymentEndpoint) {
-        flash(btn, 'Unavailable');
-        return;
-      }
-      let payload = {};
-      if (autofillApi) {
-        const state = autofillApi.load('payment', { userId: resolvedUserId });
-        payload = Object.assign({}, (state && state.values) || {});
-      }
-      if (!Object.keys(payload).length) {
-        payload = fallbackPaymentPayload();
-      }
-      await sendPaymentContact(payload);
-      flash(btn, 'Synced');
-    });
-  });
-  accountClearButtons.forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      if (!paymentEndpoint) {
-        flash(btn, 'Unavailable');
-        return;
-      }
-      await sendPaymentContact({}, { clear: true });
-      flash(btn, 'Cleared');
-    });
-  });
-
-  /* chart */
-  const el = document.getElementById('stats_chart');
-  let statsChart = null;
-  if (el) {
-    const labels = el.dataset.labels ? el.dataset.labels.split(',') : [];
-    const data   = el.dataset.data   ? el.dataset.data.split(',').map(Number) : [];
-    statsChart = new Chart(el, {
-      type: 'bar',
-      data: { labels, datasets: [{ data, label: translate('dashboard.chartLabel', null, 'Appointments'), backgroundColor: '#AF9525', borderRadius: 6 }] },
-      options: {
-        plugins: { legend: { display: false }},
-        scales : {
-          x: { ticks: { color: '#4D4D4D' }, grid: { color: '#DAD3C1' } },
-          y: { beginAtZero: true, ticks: { stepSize: 1, color: '#4D4D4D' }, grid: { color: '#DAD3C1' } }
-        }
-      }
-    });
-  }
-
-  /* helpers */
-  const csrftoken = (document.cookie.match('(^|;)\\s*csrftoken\\s*=\\s*([^;]+)')||[])[2] || '';
-  const fmtHM = d => d.toLocaleTimeString(getLocale(), {hour:'numeric', minute:'2-digit'});
-  const fmtTime = iso => { try { return new Date(iso).toLocaleTimeString(getLocale(), {hour:'2-digit', minute:'2-digit'});} catch(e){ return iso; } };
-  const ymd = d => { const m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${d.getFullYear()}-${m}-${day}`; };
-
-  /* ===== отмена с подтверждением + «перечёркивание» без перезагрузки ===== */
-  async function cancelAppointment(id){
-    if(!confirm(translate('dashboard.reschedule.confirmCancel', null, 'Cancel this appointment?'))) return;
-    const r = await fetch(`/accounts/api/appointment/${id}/cancel/`, { method:'POST', headers:{'X-CSRFToken': csrftoken}, credentials:'same-origin' });
-    if(!r.ok){
-      const text = await r.text();
-      alert(translate('dashboard.reschedule.cancelError', { detail: text }, `Cancel error: ${text}`));
-      return;
-    }
-    strikeOut(id);
-  }
-  function strikeOut(id){
-    // блоки в разделе "Upcoming" (li)
-    document.querySelectorAll(`[data-appt-id="${id}"]`).forEach(node=>{
-      node.classList.add('opacity-60');
-      node.querySelectorAll('.appt-actions a').forEach(a=>{ a.classList.add('pointer-events-none','opacity-50'); a.removeAttribute('href'); });
-      // текст перечёркнут
-      node.querySelectorAll('.appt-dt, .appt-main, p, td').forEach(el=> el.classList.add('line-through'));
-    });
-  }
-  document.addEventListener('click', async (e)=>{
-    const a = e.target.closest('.appt-cancel'); if(!a) return; e.preventDefault();
-    const id = a.dataset.apptId; if(!id) return;
-    cancelAppointment(id);
-  });
-
-  /* ===== RESCHEDULE: новый горизонтальный пикер ===== */
-  const resModal  = document.getElementById('resModal');
-  const resClose  = document.getElementById('resClose');
-  const resCancel = document.getElementById('resCancel');
-  const resSubmit = document.getElementById('resSubmit');
-  const resMaster = document.getElementById('resMaster');
-  const resErr    = document.getElementById('resErr');
-  const resOk     = document.getElementById('resOk');
-
-  const rsGrid = document.getElementById('rsGrid');
-  const rsWrap = document.getElementById('rsWrap');
-  const rsRange= document.getElementById('rsRange');
-  const rsPrev = document.getElementById('rsPrev');
-  const rsNext = document.getElementById('rsNext');
-  const rsToday= document.getElementById('rsToday');
-  const rsMobileContainer = document.getElementById('rsMobileContainer');
-  const rsMobileDays = document.getElementById('rsMobileDays');
-  const rsMobileTimes = document.getElementById('rsMobileTimes');
-  const rsMobileEmpty = document.getElementById('rsMobileEmpty');
-  const rsMobileHint = document.getElementById('rsMobileHint');
-
-  const WINDOW_DAYS = 14, START=6, END=23, STEP=30;
-
-  let resState = {
-    apptId:null, serviceId:null, masterId:null, slot:null, masters:[],
-    baseStart: (()=>{const d=new Date(); d.setHours(0,0,0,0); return d;})(),
-    cache: new Map(), // dateStr -> { set:Set('HH:MM'), iso:Map('HH:MM'->iso) }
-    selectedDayIndex:0,
-    days: [],
-    dayData: [],
-    timeRows: [],
-    locale: getLocale()
-  };
-
-  function openRes(apptId, serviceId){
-    const startOfDay = new Date();
-    startOfDay.setHours(0,0,0,0);
-    resState.apptId = apptId;
-    resState.serviceId = serviceId;
-    resState.masterId = null;
-    resState.slot = null;
-    resState.masters = [];
-    resState.cache = new Map();
-    resState.baseStart = startOfDay;
-    resState.selectedDayIndex = 0;
-    resState.days = [];
-    resState.dayData = [];
-    resState.timeRows = [];
-    resState.locale = getLocale();
-    resMaster.innerHTML = '';
-    resSubmit.disabled = true;
-    resErr.classList.add('hidden'); resOk.classList.add('hidden');
-    resModal.classList.remove('hidden'); resModal.classList.add('flex');
-    loadMastersAndRender();
-  }
-  function closeRes(){ resModal.classList.add('hidden'); resModal.classList.remove('flex'); }
-
-  async function fetchAvail(dayISO, masterId){
-    const params = new URLSearchParams({ service: resState.serviceId, date: dayISO });
-    if (masterId) params.set('master', masterId);
-    const r = await fetch(`/accounts/api/availability/?${params.toString()}`, {credentials:'same-origin'});
-    if(!r.ok) throw new Error(translate('dashboard.reschedule.loadFailed'));
-    const data = await r.json();
-
-    let slots=[];
-    if (masterId){
-      const m=(data.masters||[]).find(x=>Number(x.id)===Number(masterId)); slots = m ? (m.slots||[]) : [];
-    }else{
-      // возьмём слоты первого мастера только чтобы понять список мастеров
-      slots = (data.masters && data.masters[0] && data.masters[0].slots) ? data.masters[0].slots : [];
-    }
-    const set=new Set(), map=new Map();
-    (slots||[]).forEach(iso=>{ const d=new Date(iso); const key=`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; set.add(key); if(!map.has(key)) map.set(key, iso); });
-    return { raw:data, set, map };
-  }
-
-  async function ensureRangeLoaded(start, days){
-    const jobs=[];
-    for(let i=0;i<days;i++){
-      const d=new Date(start); d.setDate(d.getDate()+i); const ds=ymd(d);
-      if(!resState.cache.has(ds)){
-        jobs.push((async()=>{
-          resState.cache.set(ds, {loading:true});
-          const {set,map}=await fetchAvail(ds, resState.masterId);
-          resState.cache.set(ds,{set,iso:map});
-        })());
-      }
-    }
-    if (jobs.length) await Promise.allSettled(jobs);
-  }
-
-  function buildTimeRows(extraSets){
-    const out=[];
-    for(let h=START;h<=END;h++) for(let m=0;m<60;m+=STEP) out.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
-    (extraSets||[]).forEach(s=>s && s.forEach(t=>{ if(!out.includes(t)) out.push(t); }));
-    return out.sort();
-  }
-
-  async function loadMastersAndRender(){
-    resErr.classList.add('hidden');
-    clearTextKey(resErr);
-    try{
-      const first = await fetchAvail(ymd(resState.baseStart), null);
-      resState.masters = (first.raw && first.raw.masters) || [];
-      resMaster.innerHTML = '';
-      if(resState.masters.length===0){
-        const opt=document.createElement('option');
-        opt.value='';
-        opt.textContent = translate('dashboard.reschedule.noMasters', null, 'No masters available');
-        opt.setAttribute('data-i18n', 'dashboard.reschedule.noMasters');
-        resMaster.appendChild(opt);
-        rsGrid.innerHTML = `<div class="p-4 text-sm" data-i18n="dashboard.reschedule.noAvailability">${translate('dashboard.reschedule.noAvailability', null, 'No availability')}</div>`;
-        if (rsMobileDays) rsMobileDays.innerHTML='';
-        if (rsMobileTimes) rsMobileTimes.innerHTML='';
-        if (rsMobileEmpty){
-          setTextKey(rsMobileEmpty, 'dashboard.reschedule.noAvailability', null, 'No availability yet.');
-          rsMobileEmpty.classList.remove('hidden');
-        }
-        queueRefresh();
-        return;
-      }
-      resState.masters.forEach(m=>{ const opt=document.createElement('option'); opt.value=m.id; opt.textContent=m.name; resMaster.appendChild(opt); });
-      const withSlots = resState.masters.find(m=>(m.slots||[]).length) || resState.masters[0];
-      resMaster.value = withSlots.id;
-      resState.masterId = Number(resMaster.value);
-      resState.cache.clear();
-      await renderWindow();
-    }catch(e){
-      const fallback = e && e.message;
-      const defaultMsg = translate('dashboard.reschedule.errorLoad');
-      resErr.classList.remove('hidden');
-      if(fallback && fallback !== defaultMsg){
-        clearTextKey(resErr);
-        resErr.textContent = fallback;
-      }else{
-        setTextKey(resErr, 'dashboard.reschedule.errorLoad');
-      }
-    }
-  }
-
-  async function renderWindow(){
-    await ensureRangeLoaded(resState.baseStart, WINDOW_DAYS);
-
-    const locale = getLocale();
-
-    const days = Array.from({length:WINDOW_DAYS}, (_,i)=>{ const d=new Date(resState.baseStart); d.setDate(d.getDate()+i); return d;});
-    const dayStrs = days.map(ymd);
-    const dayData = dayStrs.map(ds => resState.cache.get(ds));
-    const timeRows = buildTimeRows(dayData.map(x=>x?.set));
-
-    const from = days[0].toLocaleDateString(locale, {month:'short', day:'numeric'});
-    const to   = days[days.length-1].toLocaleDateString(locale, {month:'short', day:'numeric'});
-    if (rsRange) {
-      rsRange.textContent = `${from} – ${to}`;
-    }
-
-    resState.locale = locale;
-    resState.days = days;
-    resState.dayData = dayData;
-    resState.timeRows = timeRows;
-
-    if (resState.slot){
-      let stillExists = false;
-      for (const data of dayData){
-        if (data?.iso){
-          for (const value of data.iso.values()){
-            if (value === resState.slot){ stillExists = true; break; }
-          }
-        }
-        if (stillExists) break;
-      }
-      if (!stillExists){
-        resState.slot = null;
-      }
-    }
-
-    if (typeof resState.selectedDayIndex !== 'number' || resState.selectedDayIndex < 0){
-      resState.selectedDayIndex = 0;
-    }
-    if (resState.selectedDayIndex >= days.length){
-      resState.selectedDayIndex = Math.max(days.length - 1, 0);
-    }
-    const firstAvailableIndex = dayData.findIndex(entry => entry && entry.set && entry.set.size);
-    if (firstAvailableIndex !== -1){
-      const currentData = dayData[resState.selectedDayIndex];
-      if (!currentData || !currentData.set || !currentData.set.size){
-        resState.selectedDayIndex = firstAvailableIndex;
-        resState.slot = null;
-      }
-    }
-
-    if (rsMobileHint){
-      setTextKey(rsMobileHint, 'dashboard.reschedule.mobileHint', null, 'Tap a date to see available times.');
-    }
-
-    renderDesktopGrid(locale);
-    renderMobileLayout(locale);
-
-    resSubmit.disabled = !resState.slot;
-  }
-
-  function renderDesktopGrid(locale = resState.locale || getLocale()){
-    if (!rsGrid) return;
-    const days = resState.days || [];
-    const dayData = resState.dayData || [];
-    const timeRows = resState.timeRows || [];
-
-    rsGrid.style.setProperty('--days', String(WINDOW_DAYS));
-    rsGrid.innerHTML='';
-
-    const corner=document.createElement('div');
-    corner.className='ol2__cell ol2__head time';
-    rsGrid.appendChild(corner);
-
-    const todayString = (new Date()).toDateString();
-
-    days.forEach(d=>{
-      const header=document.createElement('div');
-      const isToday = todayString === d.toDateString();
-      header.className='ol2__cell ol2__head';
-      header.innerHTML = `<div class="ol2__day ${isToday?'today':''}">
-        <div class="t">${d.toLocaleDateString(locale, {weekday:'long'})}</div>
-        <div class="s">${d.toLocaleDateString(locale, {month:'short', day:'numeric'})}</div>
-      </div>`;
-      rsGrid.appendChild(header);
-    });
-
-    timeRows.forEach(t=>{
-      const [hh,mm]=t.split(':').map(Number);
-      const fake=new Date(); fake.setHours(hh,mm,0,0);
-      const timeCell=document.createElement('div');
-      timeCell.className='ol2__cell time'; timeCell.textContent = fmtHM(fake);
-      rsGrid.appendChild(timeCell);
-
-      days.forEach((d, idx)=>{
-        const cell=document.createElement('div'); cell.className='ol2__cell';
-        const data = dayData[idx];
-        const isFree = data?.set?.has(t);
-        const chip=document.createElement('button');
-        chip.type='button'; chip.className='chip ' + (isFree?'chip--free':'chip--busy');
-        chip.textContent = fmtHM(fake);
-        chip.disabled = !isFree;
-
-        if(isFree){
-          const isoValue = data.iso.get(t);
-          if (isoValue === resState.slot){
-            chip.classList.add('chip--sel');
-            resState.selectedDayIndex = idx;
-          }
-          chip.addEventListener('click', ()=>{
-            resState.slot = isoValue;
-            resState.selectedDayIndex = idx;
-            resSubmit.disabled = false;
-            renderDesktopGrid(locale);
-            renderMobileLayout(locale);
-          });
-        }
-        cell.appendChild(chip);
-        rsGrid.appendChild(cell);
-      });
-    });
-
-    if (rsWrap){
-      const selectedChip = rsGrid.querySelector('.chip--sel');
-      if (selectedChip){
-        selectedChip.scrollIntoView({ block:'nearest', inline:'center' });
-      }else{
-        const todayIdx = days.findIndex(x=>x.toDateString()===todayString);
-        if (todayIdx>0){
-          rsWrap.scrollLeft = Math.max(todayIdx*140 - 140, 0);
-        } else {
-          rsWrap.scrollLeft = 0;
-        }
-      }
-    }
-
-    resSubmit.disabled = !resState.slot;
-  }
-
-  function renderMobileLayout(locale = resState.locale || getLocale()){
-    if (!rsMobileContainer || !rsMobileDays || !rsMobileTimes) return;
-    const days = resState.days || [];
-
-    rsMobileDays.innerHTML = '';
-
-    if (!days.length){
-      rsMobileTimes.innerHTML = '';
-      if (rsMobileEmpty){
-        setTextKey(rsMobileEmpty, 'dashboard.reschedule.noAvailability', null, 'No availability yet.');
-        rsMobileEmpty.classList.remove('hidden');
-      }
-      return;
-    }
-
-    days.forEach((day, idx) => {
-      const btn=document.createElement('button');
-      btn.type='button';
-      btn.className='rs-mobile-day';
-      if (idx === resState.selectedDayIndex){
-        btn.classList.add('rs-mobile-day--active');
-      }
-      const dateLabel = day.toLocaleDateString(locale, {month:'short', day:'numeric'});
-      const weekdayLabel = day.toLocaleDateString(locale, {weekday:'short'});
-      btn.innerHTML = `<strong>${dateLabel}</strong><span>${weekdayLabel}</span>`;
-      btn.addEventListener('click', ()=>{
-        if (resState.selectedDayIndex === idx) return;
-        resState.selectedDayIndex = idx;
-        resState.slot = null;
-        resSubmit.disabled = true;
-        renderMobileTimes(locale);
-      });
-      rsMobileDays.appendChild(btn);
-    });
-
-    renderMobileTimes(locale);
-
-    const activeBtn = rsMobileDays.querySelector('.rs-mobile-day--active');
-    if (activeBtn){
-      activeBtn.scrollIntoView({ block:'nearest', inline:'center', behavior:'smooth' });
-    }
-  }
-
-  function renderMobileTimes(locale = resState.locale || getLocale()){
-    if (!rsMobileTimes) return;
-    const dayData = resState.dayData || [];
-    const days = resState.days || [];
-
-    let idx = typeof resState.selectedDayIndex === 'number' ? resState.selectedDayIndex : 0;
-    if (idx < 0) idx = 0;
-    if (idx >= days.length) idx = Math.max(days.length - 1, 0);
-    resState.selectedDayIndex = idx;
-
-    if (rsMobileDays){
-      const buttons = rsMobileDays.querySelectorAll('.rs-mobile-day');
-      buttons.forEach((btn, buttonIdx) => {
-        btn.classList.toggle('rs-mobile-day--active', buttonIdx === idx);
-      });
-    }
-
-    rsMobileTimes.innerHTML = '';
-
-    const data = dayData[idx];
-    if (!data || !data.set || !data.set.size){
-      if (rsMobileEmpty){
-        setTextKey(rsMobileEmpty, 'dashboard.reschedule.noAvailability', null, 'No available times on this day.');
-        rsMobileEmpty.classList.remove('hidden');
-      }
-      resSubmit.disabled = true;
-      return;
-    }
-
-    if (rsMobileEmpty){
-      rsMobileEmpty.classList.add('hidden');
-    }
-
-    const times = Array.from(data.set).sort();
-    times.forEach(timeKey => {
-      const iso = data.iso.get(timeKey);
-      if (!iso) return;
-      const btn=document.createElement('button');
-      btn.type='button';
-      btn.className='rs-mobile-time';
-      btn.textContent = fmtHM(new Date(iso));
-      if (iso === resState.slot){
-        btn.classList.add('rs-mobile-time--selected');
-      }
-      btn.addEventListener('click', ()=>{
-        resState.slot = iso;
-        resState.selectedDayIndex = idx;
-        resSubmit.disabled = false;
-        rsMobileTimes.querySelectorAll('.rs-mobile-time--selected').forEach(el=>el.classList.remove('rs-mobile-time--selected'));
-        btn.classList.add('rs-mobile-time--selected');
-        renderDesktopGrid(locale);
-      });
-      rsMobileTimes.appendChild(btn);
-    });
-
-    if (!times.length){
-      if (rsMobileEmpty){
-        setTextKey(rsMobileEmpty, 'dashboard.reschedule.noAvailability', null, 'No available times on this day.');
-        rsMobileEmpty.classList.remove('hidden');
-      }
-      resSubmit.disabled = true;
-    }
-
-    resSubmit.disabled = !resState.slot;
-  }
-
-  let resWindowResizeTimer = null;
-  window.addEventListener('resize', ()=>{
-    if (!resModal || resModal.classList.contains('hidden')) return;
-    if (resWindowResizeTimer) window.clearTimeout(resWindowResizeTimer);
-    resWindowResizeTimer = window.setTimeout(()=>{
-      renderWindow().catch(()=>{});
-    }, 180);
-  });
-
-  async function shiftWindow(delta){
-    const d=new Date(resState.baseStart); d.setDate(d.getDate()+delta); d.setHours(0,0,0,0); resState.baseStart = d;
-    resState.selectedDayIndex = 0;
-    resState.slot = null;
-    resSubmit.disabled = true;
-    await renderWindow();
-  }
-
-  resMaster.addEventListener('change', async ()=>{
-    resState.masterId = Number(resMaster.value);
-    resState.slot = null; resSubmit.disabled=true; resState.cache.clear();
-    resState.selectedDayIndex = 0;
-    resErr.classList.add('hidden'); clearTextKey(resErr);
-    resOk.classList.add('hidden'); clearTextKey(resOk);
-    await renderWindow();
-  });
-  rsPrev.addEventListener('click', ()=>shiftWindow(-WINDOW_DAYS));
-  rsNext.addEventListener('click', ()=>shiftWindow(WINDOW_DAYS));
-  rsToday.addEventListener('click', async ()=>{ const d=new Date(); d.setHours(0,0,0,0); resState.baseStart=d; await renderWindow(); });
-
-  // UX: Shift+Wheel — горизонтальный скролл
-  rsWrap.addEventListener('wheel', (e)=>{ if(e.shiftKey && Math.abs(e.deltaY)>Math.abs(e.deltaX)){ e.preventDefault(); rsWrap.scrollLeft += e.deltaY; } }, {passive:false});
-
-  async function submitRes(){
-    if(!resState.apptId || !resState.slot) return;
-    resSubmit.disabled = true; resErr.classList.add('hidden'); resOk.classList.add('hidden');
-    clearTextKey(resErr); clearTextKey(resOk);
-    const r = await fetch(`/accounts/api/appointment/${resState.apptId}/reschedule/`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','X-CSRFToken': csrftoken},
-      credentials:'same-origin',
-      body: JSON.stringify({ start_time: resState.slot, master: resState.masterId })
-    });
-    const data = await r.json().catch(()=> ({}));
-    if(r.ok){
-      const startISO = data.appointment?.start_time || '';
-      const locale = getLocale();
-      const localized = startISO ? new Date(startISO).toLocaleString(locale) : '';
-      setTextKey(resOk, 'dashboard.reschedule.success', { datetime: localized }, `Rescheduled to ${localized}`);
-      resOk.classList.remove('hidden');
-      // мгновенно обновим дату в карточке (если она на странице)
-      document.querySelectorAll(`[data-appt-id="${resState.apptId}"] .appt-dt`).forEach(dt=>{
-        try{ dt.textContent = new Date(data.appointment.start_time).toLocaleString(locale); }catch(_){}
-      });
-      setTimeout(()=> location.reload(), 700);
-    }else{
-      const fallback = data.error || data.detail;
-      resErr.classList.remove('hidden');
-      if(fallback){
-        clearTextKey(resErr);
-        resErr.textContent = fallback;
-      }else{
-        setTextKey(resErr, 'dashboard.reschedule.failed');
-      }
-      resSubmit.disabled = false;
-    }
-  }
-
-  document.addEventListener('click', (e)=>{
-    const a = e.target.closest('.appt-reschedule');
-    if(!a) return; e.preventDefault();
-    openRes(a.dataset.apptId, a.dataset.serviceId);
-  });
-  resClose.addEventListener('click', closeRes);
-  resCancel.addEventListener('click', closeRes);
-  resModal.addEventListener('click', (e)=>{ if(e.target===resModal) closeRes(); });
-  resSubmit.addEventListener('click', submitRes);
-
-  applyServiceNameTranslations();
-
-  if (I18N && typeof I18N.onChange === 'function') {
-    I18N.onChange(() => {
-      applyServiceNameTranslations();
-      if (resModal && resModal.classList.contains('flex')) {
-        renderWindow().catch(()=>{});
-      }
-      if (statsChart) {
-        statsChart.data.datasets[0].label = translate('dashboard.chartLabel', null, 'Appointments');
-        statsChart.update();
-      }
-    });
-  }
-});
-</script>
+<script defer src="{% static 'js/dashboard.js' %}"></script>
 </body>
 </html>
+
+

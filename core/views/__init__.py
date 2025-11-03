@@ -4,22 +4,25 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.forms import inlineformset_factory
 from django.shortcuts import render, get_object_or_404, redirect
 from django.db.models import Prefetch, Q
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
+from django.utils.html import format_html
+from django.urls import reverse
 from datetime import datetime
 from decimal import Decimal
-from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError, PermissionDenied
 from django.db import transaction
 import json
 import stripe
 
 from core.models import (
     Appointment, ServiceCategory, Service, PromoCode,
-    AppointmentStatusHistory, MasterProfile, UserProfile, CancellationReason,
-    AppointmentItem, BookingCart, BookingCartItem, Payment, ClientIntakeForm,
+    AppointmentStatusHistory, AppointmentItemStatusHistory, MasterProfile, UserProfile, CancellationReason,
+    AppointmentItem, BookingCart, BookingCartItem, Payment, ClientIntakeForm, ServiceMaster, ProductSale,
 )
 from core.services.booking import (
     get_available_slots,
@@ -29,10 +32,19 @@ from core.services.booking import (
     _tz_aware,
     create_appointment_from_cart_items,
 )
+from core.services.item_status import record_item_status
 from accounts.utils import build_autofill_defaults
 from core.services import payments as payment_services
-from core.services.pricing import compute_cart_pricing, get_available_prepayment_percents
+from core.services.pricing import (
+    compute_cart_pricing,
+    compute_appointment_pricing,
+    get_available_prepayment_percents,
+    PricingComputationError,
+)
+from core.services.refunds import RefundService, RefundError
 from core.utils.fees import card_processing_fee
+from core.tasks import send_item_cancellation_email, send_item_confirmation_email
+from core.forms import PaymentRefundForm
 
 def _build_catalog_context(request):
     """Общий конструктор контекста каталога."""
@@ -517,6 +529,191 @@ def _status(name: str) -> AppointmentStatus:
     obj, _ = AppointmentStatus.objects.get_or_create(name=name)
     return obj
 
+
+
+def _fetch_admin_item(item_id):
+    return (
+        AppointmentItem.objects.select_related(
+            "appointment__client__user",
+            "appointment__payment_status",
+            "service",
+            "status",
+        )
+        .prefetch_related(
+            Prefetch(
+                "status_history",
+                queryset=AppointmentItemStatusHistory.objects.select_related(
+                    "status", "set_by"
+                ).order_by("-set_at", "-id"),
+                to_attr="_export_status_history",
+            )
+        )
+        .filter(pk=item_id)
+        .first()
+    )
+
+
+@staff_member_required
+@require_POST
+@csrf_protect
+def admin_item_status_update(request, item_id):
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+
+    status_value = payload.get("status") or payload.get("code") or ""
+    status_code = str(status_value).upper().strip()
+    if not status_code:
+        return JsonResponse({"error": "Status code required"}, status=400)
+    allowed_codes = {"BOOKED", "CONFIRMED", "CANCELLED", "COMPLETED"}
+    if status_code not in allowed_codes:
+        return JsonResponse({"error": f"Unsupported status '{status_code}'"}, status=400)
+
+    item = _fetch_admin_item(item_id)
+    if not item:
+        return JsonResponse({"error": "Item not found"}, status=404)
+
+    note = payload.get("note")
+    reason = payload.get("reason")
+    notify = payload.get("notify", True)
+    set_by_id = getattr(request.user, "id", None)
+
+    result = record_item_status(
+        item,
+        status_code,
+        set_by_user_id=set_by_id,
+        note=note,
+    )
+
+    item.refresh_from_db(fields=["status"])
+
+    appointment = (
+        Appointment.objects.with_aggregated_status()
+        .filter(pk=item.appointment_id)
+        .only("pk")
+        .first()
+    )
+
+    status_obj = getattr(item, "status", None) or getattr(result, "status", None)
+    status_label = getattr(status_obj, "name", "") or status_code.title()
+    status_code_resolved = getattr(status_obj, "code", "") or status_code
+
+    if status_code == "CANCELLED" and notify:
+        send_item_cancellation_email.delay(str(item.pk), reason=reason)
+    elif status_code == "CONFIRMED" and payload.get("trigger_confirmation", False):
+        send_item_confirmation_email.delay(str(item.pk))
+
+    return JsonResponse({
+        "ok": True,
+        "item": {
+            "id": str(item.pk),
+            "status": {
+                "code": status_code_resolved,
+                "label": status_label,
+            },
+        },
+        "appointment": {
+            "id": str(item.appointment_id),
+            "aggregated_status": {
+                "code": getattr(appointment, "aggregated_status_code", ""),
+                "label": getattr(appointment, "aggregated_status", ""),
+            },
+        },
+    })
+
+
+@staff_member_required
+@require_POST
+@csrf_protect
+def admin_item_reschedule(request, item_id):
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+
+    start_iso = payload.get("start_time")
+    if not start_iso:
+        return JsonResponse({"error": "start_time required"}, status=400)
+
+    try:
+        new_start = parse_datetime(start_iso) or _tz_aware(datetime.fromisoformat(start_iso))
+        if not timezone.is_aware(new_start):
+            new_start = _tz_aware(new_start)
+    except Exception:
+        return JsonResponse({"error": "invalid start_time"}, status=400)
+
+    item = _fetch_admin_item(item_id)
+    if not item:
+        return JsonResponse({"error": "Item not found"}, status=404)
+
+    master_id = payload.get("master")
+    if master_id:
+        new_master = get_object_or_404(MasterProfile, pk=master_id)
+        if not ServiceMaster.objects.filter(service=item.service, master=new_master).exists():
+            return JsonResponse({"error": "master can't perform this service"}, status=400)
+        item.master = new_master
+
+    item.start_time = new_start
+
+    try:
+        item.full_clean()
+    except ValidationError as exc:
+        return JsonResponse({"error": exc.message_dict}, status=400)
+
+    with transaction.atomic():
+        update_fields = {"start_time", "end_time", "room"}
+        if master_id:
+            update_fields.add("master")
+        item.save(update_fields=sorted(update_fields))
+        appointment = item.appointment
+        appointment.sync_start_time_from_items(save=True)
+        appointment.recompute_totals(save=True)
+        AppointmentStatusHistory.objects.create(
+            appointment=appointment,
+            status=_status("Rescheduled"),
+            set_by=request.user.userprofile,
+        )
+
+    appointment = (
+        Appointment.objects.with_aggregated_status()
+        .filter(pk=item.appointment_id)
+        .only("pk", "start_time")
+        .first()
+    )
+
+    def _master_display(appt):
+        master_obj = getattr(appt, "master", None)
+        if not master_obj:
+            return ""
+        profile = getattr(master_obj, "user", None)
+        user_obj = getattr(profile, "user", None) or profile
+        if not user_obj:
+            return ""
+        full_name = getattr(user_obj, "get_full_name", lambda: "")()
+        username = getattr(user_obj, "username", "")
+        return full_name or username or ""
+
+    item.refresh_from_db()
+
+    return JsonResponse({
+        "ok": True,
+        "item": {
+            "id": str(item.pk),
+            "start_time": item.start_time.isoformat(),
+            "master_id": str(item.master_id) if item.master_id else "",
+        },
+        "appointment": {
+            "id": str(item.appointment_id),
+            "start_time": appointment.start_time.isoformat() if appointment else "",
+            "master": _master_display(appointment) if appointment else "",
+            "aggregated_status": {
+                "code": getattr(appointment, "aggregated_status_code", ""),
+                "label": getattr(appointment, "aggregated_status", ""),
+            },
+        },
+    })
+
 @login_required
 @require_POST
 @csrf_protect
@@ -530,42 +727,107 @@ def api_appointment_cancel(request, appt_id):
         ),
         pk=appt_id,
     )
-    # только владелец или staff
-
+    # Legacy clients can call this endpoint; staff always allowed.
     if not (request.user.is_staff or appt.client_id == request.user.userprofile.id):
         return HttpResponseForbidden("not allowed")
 
     try:
-        payload = json.loads(request.body.decode("utf-8"))
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
     except Exception:
         payload = {}
 
+    item_id = payload.get("item_id")
+    reason_text = payload.get("reason") or payload.get("note")
     reason_id = payload.get("reason_id")
-    reason_obj = None
-    if reason_id:
-        reason_obj = CancellationReason.objects.filter(pk=reason_id).first()
+    reason_obj = CancellationReason.objects.filter(pk=reason_id).first() if reason_id else None
+    set_by_user_id = getattr(request.user, "id", None)
 
-    cancelled = _status("Cancelled")
-    # уже отменена?
-    if appt.appointmentstatushistory_set.filter(status=cancelled).exists():
-        return JsonResponse({"ok": True, "already": True})
-
-    with transaction.atomic():
-        AppointmentStatusHistory.objects.create(
-            appointment=appt,
-            status=cancelled,
-            set_by=request.user.userprofile,
-            cancellation_reason=reason_obj,
+    def _aggregated_payload() -> dict[str, str]:
+        row = (
+            Appointment.objects.with_aggregated_status()
+            .filter(pk=appt.pk)
+            .values("_aggregated_status_code", "_aggregated_status_label")
+            .first()
         )
-    return JsonResponse({"ok": True})
+        if not row:
+            return {"code": "", "label": ""}
+        return {"code": row["_aggregated_status_code"], "label": row["_aggregated_status_label"]}
+
+    if item_id:
+        item = (
+            appt.items.select_related("service", "master", "status")
+            .filter(pk=item_id)
+            .first()
+        )
+        if not item:
+            return JsonResponse({"error": "item not found"}, status=404)
+        result = record_item_status(
+            item,
+            "CANCELLED",
+            set_by_user_id=set_by_user_id,
+            note=reason_text,
+        )
+        send_item_cancellation_email.delay(str(item.pk), reason=reason_text)
+        aggregated_status = _aggregated_payload()
+        item_status = {"code": result.status.code, "label": result.status.name}
+        return JsonResponse(
+            {
+                "ok": True,
+                "appointment_id": str(appt.pk),
+                "item_id": str(item.pk),
+                "item_status": item_status,
+                "appointment_aggregated_status": aggregated_status,
+            }
+        )
+
+    # DEPRECATED: appointment-level cancellation path. Applies to all active items.
+    cancellable_items = list(
+        appt.items.with_current_status().select_related("service", "status")
+    )
+    updated_items: list[str] = []
+    for candidate in cancellable_items:
+        current_code = (
+            (candidate.current_status_code or "")
+            or (getattr(getattr(candidate, "status", None), "code", ""))
+        ).upper()
+        if current_code == "CANCELLED":
+            continue
+        record_item_status(
+            candidate,
+            "CANCELLED",
+            set_by_user_id=set_by_user_id,
+            note=reason_text,
+        )
+        updated_items.append(str(candidate.pk))
+        send_item_cancellation_email.delay(str(candidate.pk), reason=reason_text)
+
+    if updated_items:
+        with transaction.atomic():
+            AppointmentStatusHistory.objects.create(
+                appointment=appt,
+                status=_status("Cancelled"),
+                set_by=request.user.userprofile,
+                cancellation_reason=reason_obj,
+            )
+
+    aggregated_status = _aggregated_payload()
+    return JsonResponse(
+        {
+            "ok": True,
+            "appointment_id": str(appt.pk),
+            "item_ids": updated_items,
+            "item_status": {"code": "CANCELLED", "label": "Cancelled"},
+            "appointment_aggregated_status": aggregated_status,
+            "deprecated": True,
+        }
+    )
 
 @login_required
 @require_POST
 @csrf_protect
 def api_appointment_reschedule(request, appt_id):
     """
-    JSON: { "start_time": "<ISO8601>", "master": <user_id optional> }
-    Меняет время (и по желанию мастера) с валидацией Appointment.clean().
+    JSON: { "start_time": "<ISO8601>", "master": <user_id optional>, "item_id": <uuid optional> }
     """
     appt = get_object_or_404(
         Appointment.objects.select_related("client").prefetch_related(
@@ -588,7 +850,6 @@ def api_appointment_reschedule(request, appt_id):
     if not start_iso:
         return HttpResponseBadRequest("start_time required")
 
-    # разбираем дату/время
     try:
         new_start = parse_datetime(start_iso) or _tz_aware(datetime.fromisoformat(start_iso))
         if not timezone.is_aware(new_start):
@@ -596,41 +857,100 @@ def api_appointment_reschedule(request, appt_id):
     except Exception:
         return HttpResponseBadRequest("invalid start_time")
 
-    # смена мастера (опционально)
-    master_id = payload.get("master")
-    primary_item = appt.primary_item
-    if not primary_item:
-        return HttpResponseBadRequest("appointment has no items")
+    item_id = payload.get("item_id")
+    legacy_mode = False
+    if item_id:
+        item = (
+            appt.items.select_related("service", "master")
+            .filter(pk=item_id)
+            .first()
+        )
+        if not item:
+            return JsonResponse({"error": "item not found"}, status=404)
+    else:
+        # DEPRECATED: fallback to the primary appointment item.
+        item = appt.primary_item
+        if not item:
+            return HttpResponseBadRequest("appointment has no items")
+        legacy_mode = True
 
+    master_id = payload.get("master")
     if master_id:
         new_master = get_object_or_404(MasterProfile, pk=master_id)
-        # мастер должен уметь услугу
-        if not ServiceMaster.objects.filter(service=primary_item.service, master=new_master).exists():
+        if not ServiceMaster.objects.filter(service=item.service, master=new_master).exists():
             return HttpResponseBadRequest("master can't perform this service")
-        primary_item.master = new_master
+        item.master = new_master
 
-    primary_item.start_time = new_start
+    item.start_time = new_start
+    computed_end = getattr(item, "compute_end_time", None)
+    if callable(computed_end):
+        end_val = computed_end()
+        if end_val is not None:
+            item.end_time = end_val
 
-    # валидация пересечений/комнат/отпусков
-    primary_item.full_clean()
+    item.full_clean()
     with transaction.atomic():
-        primary_item.save()
+        item.save()
         appt.sync_start_time_from_items(save=True)
         appt.recompute_totals(save=True)
-        # история статусов
         AppointmentStatusHistory.objects.create(
             appointment=appt,
             status=_status("Rescheduled"),
             set_by=request.user.userprofile,
         )
 
-    return JsonResponse({"ok": True, "appointment": {
-        "id": str(appt.pk),
-        "start_time": appt.start_time.isoformat(),
-        "master": appt.master.user.get_full_name() or appt.master.user.username if appt.master else ""
-    }})
+    def _aggregated_payload() -> dict[str, str]:
+        row = (
+            Appointment.objects.with_aggregated_status()
+            .filter(pk=appt.pk)
+            .values("_aggregated_status_code", "_aggregated_status_label", "start_time")
+            .first()
+        )
+        if not row:
+            return {"code": "", "label": ""}
+        appt.__dict__["start_time"] = row.get("start_time") or appt.start_time
+        return {"code": row["_aggregated_status_code"], "label": row["_aggregated_status_label"]}
 
+    item.refresh_from_db()
 
+    status_obj = getattr(item, "status", None)
+    status_code = (getattr(status_obj, "code", "") or "").upper() or "BOOKED"
+    status_label = getattr(status_obj, "name", None) or status_code.title()
+    item_status = {"code": status_code, "label": status_label}
+    aggregated_status = _aggregated_payload()
+
+    appt_master = getattr(appt, "master", None)
+    master_display = ""
+    if appt_master:
+        profile = getattr(appt_master, "user", None)
+        user_obj = getattr(profile, "user", None) or profile
+        if user_obj:
+            full_name = getattr(user_obj, "get_full_name", lambda: "")()
+            username = getattr(user_obj, "username", "")
+            master_display = full_name or username or ""
+
+    return JsonResponse({
+        "ok": True,
+        "appointment_id": str(appt.pk),
+        "item_id": str(item.pk),
+        "item": {
+            "id": str(item.pk),
+            "start_time": item.start_time.isoformat(),
+            "master_id": str(item.master_id) if item.master_id else "",
+        },
+        "item_status": item_status,
+        "appointment": {
+            "id": str(appt.pk),
+            "start_time": appt.start_time.isoformat() if appt.start_time else "",
+            "master": master_display,
+            "aggregated_status": {
+                "code": aggregated_status["code"],
+                "label": aggregated_status["label"],
+            },
+        },
+        "appointment_aggregated_status": aggregated_status,
+        "deprecated": legacy_mode,
+    })
 
 @require_GET
 def service_search(request):
@@ -716,3 +1036,266 @@ def service_promocodes_api(request, service_id: str):
         for pc in qs
     ]
     return JsonResponse(data, safe=False)
+
+
+@staff_member_required
+@csrf_protect
+def payment_refund_view(request, pk):
+    """
+    Render and process the admin refund workflow for a specific payment.
+    """
+    if not request.user.has_perm("core.change_payment"):
+        raise PermissionDenied
+
+    payment = get_object_or_404(
+        Payment.objects.select_related("appointment", "method"),
+        pk=pk,
+    )
+
+    if not payment.appointment_id:
+        messages.error(request, "This payment is not linked to an appointment.")
+        return redirect("admin:core_payment_change", payment.pk)
+
+    items_qs = AppointmentItem.objects.select_related("service", "master__user").order_by("start_time")
+    product_sales_qs = ProductSale.objects.select_related("product").order_by("sold_at")
+    succeeded_payments_qs = (
+        Payment.objects.filter(status__iexact="succeeded")
+        .select_related("method")
+        .order_by("created_at")
+    )
+    appointment = (
+        Appointment.objects.filter(pk=payment.appointment_id)
+        .select_related("client__user")
+        .prefetch_related(
+            Prefetch("items", queryset=items_qs),
+            Prefetch("product_sales", queryset=product_sales_qs),
+            Prefetch("payments", queryset=succeeded_payments_qs),
+        )
+        .first()
+    )
+    if not appointment:
+        messages.error(request, "Appointment not found for this payment.")
+        return redirect("admin:core_payment_change", payment.pk)
+
+    payment.appointment = appointment
+
+    def _quantize(amount: Decimal | None) -> Decimal:
+        if amount is None:
+            return Decimal("0.00")
+        if not isinstance(amount, Decimal):
+            amount = Decimal(str(amount))
+        return amount.quantize(Decimal("0.01"))
+
+    try:
+        pricing = compute_appointment_pricing(appointment)
+    except PricingComputationError:
+        pricing = None
+
+    default_currency = (getattr(settings, "STRIPE_CURRENCY", "cad") or "cad").lower()
+    fallback_symbol = "CA$" if default_currency == "cad" else f"{default_currency.upper()} "
+    currency_symbol = pricing.get("currency_symbol") if pricing else None
+    if not currency_symbol:
+        currency_symbol = fallback_symbol
+
+    items_data: list[dict[str, object]] = []
+    if pricing:
+        for entry in pricing.get("items", []):
+            amount = _quantize(entry.get("total_with_tax"))
+            amount_minor = RefundService._to_minor_units(amount)
+            master_label = entry.get("master") or ""
+            items_data.append(
+                {
+                    "id": str(entry.get("id") or ""),
+                    "name": entry.get("name") or "",
+                    "master": master_label,
+                    "amount": amount,
+                    "amount_minor": amount_minor,
+                    "display": f"{currency_symbol}{amount:.2f}",
+                }
+            )
+    else:
+        for item in appointment.items.all():
+            total = _quantize(
+                (item.final_price or Decimal("0.00")) + (item.tax_amount or Decimal("0.00"))
+            )
+            amount_minor = RefundService._to_minor_units(total)
+            master = getattr(item, "master", None)
+            master_name = ""
+            if master:
+                master_name = getattr(master, "display_name", "") or ""
+                if not master_name:
+                    user = getattr(master, "user", None)
+                    if user:
+                        master_name = user.get_full_name() or user.username
+            items_data.append(
+                {
+                    "id": str(item.pk),
+                    "name": getattr(getattr(item, "service", None), "name", ""),
+                    "master": master_name,
+                    "amount": total,
+                    "amount_minor": amount_minor,
+                    "display": f"{currency_symbol}{total:.2f}",
+                }
+            )
+
+    products_data: list[dict[str, object]] = []
+    if pricing:
+        for entry in pricing.get("product_sales", []):
+            product_total = _quantize(entry.get("total_amount"))
+            tax_amount = _quantize(entry.get("tax_amount"))
+            combined = _quantize(product_total + tax_amount)
+            amount_minor = RefundService._to_minor_units(combined)
+            products_data.append(
+                {
+                    "id": str(entry.get("id") or ""),
+                    "name": entry.get("name") or "",
+                    "quantity": entry.get("quantity") or 0,
+                    "amount": combined,
+                    "amount_minor": amount_minor,
+                    "display": f"{currency_symbol}{combined:.2f}",
+                }
+            )
+    else:
+        for sale in appointment.product_sales.all():
+            combined = _quantize(
+                (sale.total_amount or Decimal("0.00")) + (sale.tax_amount or Decimal("0.00"))
+            )
+            amount_minor = RefundService._to_minor_units(combined)
+            products_data.append(
+                {
+                    "id": str(sale.pk),
+                    "name": getattr(getattr(sale, "product", None), "name", ""),
+                    "quantity": getattr(sale, "quantity", 0),
+                    "amount": combined,
+                    "amount_minor": amount_minor,
+                    "display": f"{currency_symbol}{combined:.2f}",
+                }
+            )
+
+    item_choices = [(entry["id"], entry["id"]) for entry in items_data if entry["id"]]
+    product_choices = [(entry["id"], entry["id"]) for entry in products_data if entry["id"]]
+
+    succeeded_payments = list(appointment.payments.all())
+    total_paid_decimal = payment_services.get_total_received_for_appointment(appointment)
+    already_refunded_decimal = sum(
+        (_quantize(p.amount_refunded) for p in succeeded_payments),
+        Decimal("0.00"),
+    )
+    already_refunded_decimal = _quantize(already_refunded_decimal)
+    available_decimal = total_paid_decimal - already_refunded_decimal
+    if available_decimal < Decimal("0.00"):
+        available_decimal = Decimal("0.00")
+
+    totals_section = (pricing or {}).get("totals") if pricing else None
+    if totals_section:
+        grand_total = _quantize(totals_section.get("grand_total"))
+    else:
+        grand_total = _quantize(getattr(appointment, "total_with_tax", Decimal("0.00")))
+
+    max_refund_minor = RefundService._to_minor_units(available_decimal)
+
+    form_kwargs = {
+        "max_refund_minor": max_refund_minor,
+        "item_choices": item_choices,
+        "product_choices": product_choices,
+    }
+
+    if request.method == "POST":
+        form = PaymentRefundForm(request.POST, **form_kwargs)
+        selected_item_ids = set(request.POST.getlist("item_ids"))
+        selected_product_ids = set(request.POST.getlist("product_ids"))
+        if form.is_valid():
+            requested_minor = form.cleaned_data["amount_minor"]
+            try:
+                print(
+                    "[Refund Debug] Initiating refund",
+                    {
+                        "payment_id": str(payment.pk),
+                        "appointment_id": str(appointment.pk),
+                        "requested_minor": requested_minor,
+                        "selected_items": list(selected_item_ids),
+                        "selected_products": list(selected_product_ids),
+                    },
+                )
+                allocations = RefundService.allocate_refund_for_appointment(
+                    appointment,
+                    requested_minor,
+                )
+                print(
+                    "[Refund Debug] Allocations resolved",
+                    [
+                        {
+                            "payment_id": str(allocation.payment.pk),
+                            "available_minor": RefundService._available_minor(allocation.payment),
+                            "allocated_minor": allocation.amount_minor,
+                        }
+                        for allocation in allocations
+                    ],
+                )
+                stripe_ids = RefundService.perform_refund(allocations, actor=request.user)
+            except RefundError as exc:
+                print("[Refund Debug] RefundError encountered:", exc)
+                form.add_error(None, str(exc))
+            else:
+                amount = form.cleaned_data["amount_to_refund"]
+                payment_url = reverse("admin:core_payment_change", args=[payment.pk])
+                appointment_url = reverse("admin:core_appointment_change", args=[appointment.pk])
+                links_html = format_html(
+                    '<a href="{}">Payment</a> · <a href="{}">Appointment</a>',
+                    payment_url,
+                    appointment_url,
+                )
+                if stripe_ids:
+                    stripe_html = format_html(" Stripe refund ID(s): {}", ", ".join(stripe_ids))
+                else:
+                    stripe_html = ""
+                amount_display = format_html(
+                    "{}{}",
+                    currency_symbol,
+                    f"{amount:.2f}",
+                )
+                messages.success(
+                    request,
+                    format_html(
+                        "Refund of {} initiated. {}{}",
+                        amount_display,
+                        links_html,
+                        stripe_html,
+                    ),
+                )
+                print(
+                    "[Refund Debug] Refund complete",
+                    {
+                        "payment_id": str(payment.pk),
+                        "appointment_id": str(appointment.pk),
+                        "refunded_minor": requested_minor,
+                        "stripe_refunds": stripe_ids,
+                    },
+                )
+                return redirect("admin-payment-refund", pk=payment.pk)
+    else:
+        form = PaymentRefundForm(
+            initial={"amount_to_refund": Decimal("0.00")},
+            **form_kwargs,
+        )
+        selected_item_ids = set()
+        selected_product_ids = set()
+
+    context = {
+        "form": form,
+        "payment": payment,
+        "appointment": appointment,
+        "items": items_data,
+        "products": products_data,
+        "currency_symbol": currency_symbol,
+        "summary": {
+            "grand_total": grand_total,
+            "total_paid": total_paid_decimal,
+            "already_refunded": already_refunded_decimal,
+            "available": available_decimal,
+        },
+        "selected_item_ids": selected_item_ids,
+        "selected_product_ids": selected_product_ids,
+        "max_refund_minor": max_refund_minor,
+    }
+    return render(request, "admin/payment_refund.html", context)

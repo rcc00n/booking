@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import logging
 from math import ceil
 from typing import Optional
 from .utils.sms import send_sms
@@ -21,9 +22,14 @@ from core.models import (
     ReminderSchedule,
     AppointmentItem,
     Payment,
+    PaymentRefund,
 )
-from core.services.mailer import send_payment_receipt_email
+from core.receipts import generate_refund_receipt_pdf
+from core.services.mailer import send_payment_receipt_email, send_refund_receipt_email
 from core.services.receipts import generate_payment_receipt_pdf, persist_payment_receipt
+from core.services.item_status import record_item_status, EMAIL_CONFIRM_NOTE
+
+logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Конфигурация
@@ -98,6 +104,83 @@ def _label_service_master(appt: Appointment) -> tuple[str, str]:
         it = items[0]
         return it.service.name, (it.master.user.get_full_name() or it.master.user.user.username)
     return f"{len(items)} services", "multiple masters"
+
+
+def _client_contact_details(appointment: Appointment) -> tuple[str, str, str, UserProfile | None]:
+    client = getattr(appointment, "client", None)
+    user = getattr(client, "user", None) if client else None
+
+    name_candidates = []
+    if client and hasattr(client, "get_full_name"):
+        val = client.get_full_name()
+        if val:
+            name_candidates.append(val)
+    if user and hasattr(user, "get_full_name"):
+        val = user.get_full_name()
+        if val:
+            name_candidates.append(val)
+    if user and getattr(user, "username", ""):
+        name_candidates.append(user.username)
+    client_name = next((n for n in name_candidates if n), "")
+
+    email_candidates = []
+    if client and getattr(client, "email", ""):
+        email_candidates.append(client.email)
+    if user and getattr(user, "email", ""):
+        email_candidates.append(user.email)
+    client_email = next(
+        (e.strip() for e in email_candidates if e and e.strip()),
+        "",
+    )
+
+    phone = ""
+    if client and getattr(client, "phone", ""):
+        phone = client.phone
+
+    return client_name, client_email, phone, client
+
+
+def _master_display(item: AppointmentItem) -> str:
+    master = getattr(item, "master", None)
+    if not master:
+        return ""
+    profile = getattr(master, "user", None)
+    candidates = []
+    if profile and hasattr(profile, "get_full_name"):
+        val = profile.get_full_name()
+        if val:
+            candidates.append(val)
+    auth_user = getattr(profile, "user", None) if profile else None
+    if auth_user and hasattr(auth_user, "get_full_name"):
+        val = auth_user.get_full_name()
+        if val:
+            candidates.append(val)
+    if auth_user and getattr(auth_user, "username", ""):
+        candidates.append(auth_user.username)
+    if profile:
+        candidates.append(str(profile))
+    return next((c for c in candidates if c), "")
+
+
+def _item_schedule(item: AppointmentItem) -> tuple[str, str | None]:
+    start_local = ""
+    end_local = None
+    start_time = getattr(item, "start_time", None)
+    if start_time:
+        start_local = timezone.localtime(start_time).strftime("%d %b %Y, %H:%M")
+
+    end_time = getattr(item, "end_time", None)
+    if not end_time and hasattr(item, "compute_end_time"):
+        end_time = item.compute_end_time()
+    if end_time:
+        end_local = timezone.localtime(end_time).strftime("%d %b %Y, %H:%M")
+    return start_local, end_local
+
+
+def _single_item_line(item: AppointmentItem) -> str:
+    start_local, _ = _item_schedule(item)
+    master_name = _master_display(item)
+    return f"• {item.service.name} with {master_name} at {start_local}"
 
 
 def _base_queryset_for_window(target_start, target_end):
@@ -491,54 +574,96 @@ def run_all_schedulers() -> dict:
 # Точечные задачи (для вызова из сигналов/вьюх)
 # ──────────────────────────────────────────────────────────────────────────────
 
-@shared_task(name="core.tasks.send_cancellation_email")
-def send_cancellation_email(appointment_id: str, reason: str | None = None) -> bool:
-    appt = Appointment.objects.select_related("client__user").filter(id=appointment_id).first()
-    if not appt:
+
+@shared_task(name="core.tasks.send_item_confirmation_email")
+def send_item_confirmation_email(item_id: str) -> bool:
+    item = (
+        AppointmentItem.objects.select_related(
+            "appointment__client__user",
+            "service",
+            "master__user__user",
+        )
+        .filter(pk=item_id)
+        .first()
+    )
+    if not item:
         return False
 
-    client = appt.client
-    email = (client.user.email or "").strip()
-    if not email:
+    appointment = getattr(item, "appointment", None)
+    if not appointment:
         return False
 
-    start_local = timezone.localtime(appt.start_time).strftime("%d %b %Y, %H:%M")
-    service_name, master_name = _label_service_master(appt)
-    items_lines = _items_summary_lines(appt)
+    client_name, client_email, client_phone, client_profile = _client_contact_details(appointment)
+    if not client_email:
+        logger.info("Skipping item confirmation email; client email missing for item %s", item_id)
+        return False
 
-    subject = "Your appointment has been cancelled"
+    service_name = getattr(getattr(item, "service", None), "name", "")
+    master_name = _master_display(item)
+    start_local, end_local = _item_schedule(item)
+    subject = f"Booking confirmed: {service_name}" if service_name else "Your booking is confirmed"
+
     text_lines = [
-        f"Hello, {client.user.get_full_name() or client.user.username}!",
+        f"Hello, {client_name or 'there'}!",
         "",
-        "Your appointment has been cancelled.",
+        "Your service is confirmed.",
         f"When: {start_local}",
     ]
-    if reason:
-        text_lines.append(f"Reason: {reason}")
-    if items_lines:
-        text_lines.append("")
-        text_lines.extend(items_lines)
+    if end_local:
+        text_lines.append(f"Ends around: {end_local}")
+    if master_name:
+        text_lines.append(f"Professional: {master_name}")
     text = "\n".join(text_lines)
 
+    html_context = {
+        "client_name": client_name or "there",
+        "service_name": service_name,
+        "master_name": master_name,
+        "start_local": start_local,
+        "end_local": end_local or "",
+        "appointment": appointment,
+        "item": item,
+        "text_fallback": text,
+        "business_name": getattr(settings, "BUSINESS_NAME", "Malva Booking"),
+    }
     try:
-        html, _ = _safe_render("email/appointment_cancelled.html", {
-            "client_name": client.user.get_full_name() or client.user.username,
-            "start_local": start_local,
-            "reason": reason or "",
-            "items_lines": items_lines,
-            "service_name": service_name,  # для совместимости со старыми шаблонами
-            "master_name": master_name,
-            "text_fallback": text,
-        }, subject)
-        kind = Notification.CANCELLED
-        marker_prefix = "[CANCELLED]"
-
-        _send_email(email, subject, text, html, tag="appointment-cancelled")
-        _record_notification(appt=appt, client=client, kind=kind, message=text, marker_prefix=marker_prefix)
-
-        sid = send_sms(client.phone, text)
+        html, _ = _safe_render("email/appointment_item_confirmed.html", html_context, subject)
+        _send_email(client_email, subject, text, html, tag="appointment-item-confirmed")
+    except Exception as exc:
+        logger.warning("Failed to send item confirmation email for %s: %s", item_id, exc, exc_info=exc)
         Notification.objects.update_or_create(
-            user=client, appointment=appt, channel="sms", kind=kind,
+            user=client_profile,
+            appointment=appointment,
+            channel="email",
+            kind=Notification.STATUS,
+            defaults={
+                "message": f"[CONFIRM-FAILED] {text}\n{exc}",
+                "status": "failed",
+                "error": str(exc),
+            },
+        )
+        return False
+
+    Notification.objects.update_or_create(
+        user=client_profile,
+        appointment=appointment,
+        channel="email",
+        kind=Notification.STATUS,
+        defaults={
+            "message": text,
+            "provider": "sendgrid",
+            "status": "sent",
+            "error": "",
+        },
+    )
+
+    if client_phone:
+        sid = send_sms(client_phone, text)
+        Notification.objects.update_or_create(
+            user=client_profile,
+            appointment=appointment,
+            channel="sms",
+            kind=Notification.STATUS,
             defaults={
                 "message": text,
                 "provider": "twilio",
@@ -547,13 +672,124 @@ def send_cancellation_email(appointment_id: str, reason: str | None = None) -> b
                 "error": "" if sid else "twilio returned no SID",
             },
         )
-        return True
-    except Exception as e:
+
+    record_item_status(item, "CONFIRMED", note=EMAIL_CONFIRM_NOTE)
+    return True
+
+
+@shared_task(name="core.tasks.send_item_cancellation_email")
+def send_item_cancellation_email(item_id: str, reason: str | None = None) -> bool:
+    item = (
+        AppointmentItem.objects.select_related(
+            "appointment__client__user",
+            "service",
+            "master__user__user",
+        )
+        .filter(pk=item_id)
+        .first()
+    )
+    if not item:
+        return False
+
+    appointment = getattr(item, "appointment", None)
+    if not appointment:
+        return False
+
+    client_name, client_email, client_phone, client_profile = _client_contact_details(appointment)
+    if not client_email:
+        logger.info("Cannot send cancellation email; client email missing for item %s", item_id)
+        return False
+
+    service_name = getattr(getattr(item, "service", None), "name", "")
+    master_name = _master_display(item)
+    start_local, end_local = _item_schedule(item)
+    subject = f"Service cancelled: {service_name}" if service_name else "Your service has been cancelled"
+
+    text_lines = [
+        f"Hello, {client_name or 'there'}!",
+        "",
+        "Your service has been cancelled.",
+        f"When: {start_local}",
+    ]
+    if end_local:
+        text_lines.append(f"Originally ending around: {end_local}")
+    if master_name:
+        text_lines.append(f"Professional: {master_name}")
+    if reason:
+        text_lines.append(f"Reason: {reason}")
+    text = "\n".join(text_lines)
+
+    items_lines = [_single_item_line(item)]
+    html_context = {
+        "client_name": client_name or "there",
+        "start_local": start_local,
+        "reason": reason or "",
+        "items_lines": items_lines,
+        "service_name": service_name,
+        "master_name": master_name,
+        "text_fallback": text,
+    }
+    try:
+        html, _ = _safe_render("email/appointment_cancelled.html", html_context, subject)
+        _send_email(client_email, subject, text, html, tag="appointment-item-cancelled")
+    except Exception as exc:
+        logger.warning("Failed to send item cancellation email for %s: %s", item_id, exc, exc_info=exc)
         Notification.objects.update_or_create(
-            user=client, appointment=appt, channel="email", kind=kind,
-            defaults={"message": f"{marker_prefix}[FAILED] {text}\n{e}", "status": "failed", "error": str(e)},
+            user=client_profile,
+            appointment=appointment,
+            channel="email",
+            kind=Notification.CANCELLED,
+            defaults={
+                "message": f"[CANCELLED-FAILED] {text}\n{exc}",
+                "status": "failed",
+                "error": str(exc),
+            },
         )
         return False
+
+    Notification.objects.update_or_create(
+        user=client_profile,
+        appointment=appointment,
+        channel="email",
+        kind=Notification.CANCELLED,
+        defaults={
+            "message": text,
+            "provider": "sendgrid",
+            "status": "sent",
+            "error": "",
+        },
+    )
+
+    if client_phone:
+        sid = send_sms(client_phone, text)
+        Notification.objects.update_or_create(
+            user=client_profile,
+            appointment=appointment,
+            channel="sms",
+            kind=Notification.CANCELLED,
+            defaults={
+                "message": text,
+                "provider": "twilio",
+                "provider_message_id": sid or "",
+                "status": "sent" if sid else "failed",
+                "error": "" if sid else "twilio returned no SID",
+            },
+        )
+
+    return True
+
+
+@shared_task(name="core.tasks.send_cancellation_email")
+def send_cancellation_email(appointment_id: str, reason: str | None = None) -> bool:
+    item_ids = list(
+        AppointmentItem.objects.filter(appointment_id=appointment_id).values_list("pk", flat=True)
+    )
+    if not item_ids:
+        return False
+
+    for item_id in item_ids:
+        send_item_cancellation_email.delay(str(item_id), reason=reason)
+    return True
 
 
 @shared_task(name="core.tasks.generate_payment_receipt")
@@ -595,3 +831,46 @@ def email_payment_receipt_task(payment_id: str, force: bool = False) -> None:
 
     if send_payment_receipt_email(payment, pdf_bytes):
         Payment.objects.filter(pk=payment_id).update(receipt_sent_at=timezone.now())
+
+
+@shared_task(name="core.tasks.generate_refund_receipt_task")
+def generate_refund_receipt_task(refund_id: str) -> bytes:
+    """
+    Generate a refund receipt PDF for the given refund.
+    """
+    try:
+        refund = (
+            PaymentRefund.objects.select_related("payment__appointment__client__user")
+            .get(pk=refund_id)
+        )
+    except PaymentRefund.DoesNotExist:
+        logger.warning("Refund %s: generate task skipped because refund record was not found", refund_id)
+        return b""
+
+    return generate_refund_receipt_pdf(refund)
+
+
+@shared_task(name="core.tasks.email_refund_receipt_task")
+def email_refund_receipt_task(refund_id: str) -> bool:
+    """
+    Generate and email a refund receipt PDF to the client.
+    """
+    try:
+        refund = (
+            PaymentRefund.objects.select_related("payment__appointment__client__user")
+            .get(pk=refund_id)
+        )
+    except PaymentRefund.DoesNotExist:
+        logger.warning("Refund %s: email task skipped because refund record was not found", refund_id)
+        return False
+
+    pdf_bytes = generate_refund_receipt_pdf(refund)
+    if not pdf_bytes:
+        logger.warning("Refund %s: PDF generation returned empty payload; skipping email", refund_id)
+        return False
+
+    if send_refund_receipt_email(refund, pdf_bytes):
+        return True
+
+    logger.warning("Refund %s: email task finished with failure", refund_id)
+    return False

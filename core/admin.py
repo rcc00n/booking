@@ -4,13 +4,13 @@ from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import Dict, Any, List, Sequence, Iterable, Tuple, Optional
 from dataclasses import dataclass, field
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse, unquote_plus
 
 from django.contrib.admin import DateFieldListFilter
 from django.contrib.admin.options import IS_POPUP_VAR, TO_FIELD_VAR
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from django.core.exceptions import FieldError, PermissionDenied
+from django.core.exceptions import FieldError, PermissionDenied, ValidationError
 from django.db import transaction, IntegrityError
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
@@ -56,10 +56,17 @@ from core.services.user_import import (
     UserImportSchemaError,
 )
 from core.services.product_import import import_products_from_file, ProductImportError
+from core.services.service_import import import_services_from_file, ServiceImportError
 from core.services.pricing import compute_appointment_pricing, PricingComputationError
 from core.services import payments as payment_services
 from core.utils.fees import CARD_PROCESSING_PERCENT, CARD_PROCESSING_FIXED, card_processing_fee
-from core.tasks import generate_payment_receipt_task, email_payment_receipt_task
+from core.tasks import (
+    generate_payment_receipt_task,
+    email_payment_receipt_task,
+    send_item_confirmation_email,
+    send_item_cancellation_email,
+)
+from core.services.item_status import record_item_status
 
 PAID_BADGE_ICON_URL = static("admin/icons/paid.png")
 PARTIAL_BADGE_ICON_URL = static("admin/icons/partially-paid.png")
@@ -310,7 +317,7 @@ def make_preset_date_filter(
     return PresetDateRangeFilter
 
 from core.models import (
-    Appointment, AppointmentItem, Payment,
+    Appointment, AppointmentItem, Payment, PaymentRefund,
     AppointmentStatus, Role, MasterProfile, Service,
     ClientIntakeForm, ClientIntakeFormSubmission,
 )
@@ -343,42 +350,22 @@ def custom_index(request):
 
         chart_data.append({"day": day.strftime("%a %d"), "sales": float(sales), "appointments": appts})
 
-    # Статусы и счётчики на ближайшие 7 дней
-
-    confirmed = AppointmentStatus.objects.filter(name="Confirmed").first()
-    cancelled = AppointmentStatus.objects.filter(name="Cancelled").first()
-
-    # Подзапрос «последний статус для визита»
-    last_status_sq_items = (
-        AppointmentStatusHistory.objects
-        .filter(appointment_id=OuterRef("appointment_id"))
-        .order_by("-set_at")
-        .values("status_id")[:1]
-    )
-
-    # берём позиции ближайшей недели (как и было), но аннотируем последний статус визита
+    # upcoming counters now rely on per-item statuses
     upcoming_items = (
-        AppointmentItem.objects
+        AppointmentItem.objects.with_current_status()
         .filter(start_time__date__range=(today, today + timedelta(days=7)))
-        .annotate(last_status_id=Subquery(last_status_sq_items))
     )
+    if is_master(request.user) and master_profile:
+        upcoming_items = upcoming_items.filter(master=master_profile)
 
-    # считаем КОЛ-ВО ВИЗИТОВ (distinct по appointment_id), где последний статус == нужному
-    confirmed_count = (
-        upcoming_items
-        .filter(last_status_id=getattr(confirmed, "id", None))
-        .values("appointment_id")
-        .distinct()
-        .count()
-    ) if confirmed else 0
+    q_booked = Q(current_status_code__isnull=True) | Q(current_status_code__iexact="BOOKED")
+    q_confirmed = Q(current_status_code__iexact="CONFIRMED")
+    q_cancelled = Q(current_status_code__iexact="CANCELLED")
 
-    cancelled_count = (
-        upcoming_items
-        .filter(last_status_id=getattr(cancelled, "id", None))
-        .values("appointment_id")
-        .distinct()
-        .count()
-    ) if cancelled else 0
+    booked_count = upcoming_items.filter(q_booked).count()
+    confirmed_count = upcoming_items.filter(q_confirmed).count()
+    cancelled_count = upcoming_items.filter(q_cancelled).count()
+    upcoming_total = booked_count
 
 
 # Top services (текущий месяц) — считаем позиции у Service через обратную связь "appointmentitem"
@@ -397,47 +384,76 @@ def custom_index(request):
     else:
         first_day_next = date(first_day.year, first_day.month + 1, 1)
 
-    # 2) Агрегация денег по мастеру из AppointmentItem.final_price
-    paid_by_appt = dict(
+    # 2) Агрегация денег по мастеру с учётом возвратов
+    zero_decimal = Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))
+    payments_by_appt = (
         Payment.objects
         .filter(created_at__date__gte=first_day, created_at__date__lt=first_day_next)
         .values("appointment_id")
-        .annotate(total=Coalesce(Sum("amount"), Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))))
-        .values_list("appointment_id", "total")
+        .annotate(
+            total_received=Coalesce(Sum("amount_received"), zero_decimal),
+            total_amount=Coalesce(Sum("amount"), zero_decimal),
+            total_refunded=Coalesce(Sum("amount_refunded"), zero_decimal),
+        )
     )
 
-    master_month_totals = {}
+    paid_by_appt: Dict[int, Decimal] = {}
+    for row in payments_by_appt:
+        appointment_id = row["appointment_id"]
+        gross = row["total_received"] or row["total_amount"] or Decimal("0.00")
+        gross_decimal = Decimal(gross).quantize(TWOPLACES)
+        refunded_decimal = Decimal(row["total_refunded"] or Decimal("0.00")).quantize(TWOPLACES)
+        net = (gross_decimal - refunded_decimal).quantize(TWOPLACES)
+        if net < Decimal("0.00"):
+            net = Decimal("0.00")
+        paid_by_appt[appointment_id] = net
+
+    master_month_totals: Dict[int, Decimal] = {}
     top_masters = []
     if paid_by_appt:
         rows = (
             AppointmentItem.objects
             .filter(appointment_id__in=paid_by_appt.keys())
             .values("appointment_id", "master_id")
-            .annotate(msum=Coalesce(Sum("final_price"), Value(0, output_field=DecimalField(max_digits=12, decimal_places=2))))
+            .annotate(
+                subtotal=Coalesce(Sum("final_price"), zero_decimal),
+                tax_total=Coalesce(Sum("tax_amount"), zero_decimal),
+            )
         )
+        rows = list(rows)
 
-        appt_total = {}
+        appt_total: Dict[int, Decimal] = {}
         for r in rows:
             aid = r["appointment_id"]
-            appt_total[aid] = (appt_total.get(aid, 0) or 0) + (r["msum"] or 0)
+            subtotal = Decimal(r.get("subtotal") or Decimal("0.00"))
+            tax_total = Decimal(r.get("tax_total") or Decimal("0.00"))
+            item_total = subtotal + tax_total
+            current_total = appt_total.get(aid, Decimal("0.00"))
+            appt_total[aid] = current_total + item_total
 
-        master_totals = {}
+        master_totals: Dict[int, Decimal] = {}
         for r in rows:
             aid = r["appointment_id"]
             mid = r["master_id"]
-            msum = r["msum"] or 0
-            paid = paid_by_appt.get(aid, 0) or 0
-            total = appt_total.get(aid, 0) or 0
-            if paid and total > 0 and msum > 0:
-                part = paid * (msum / total)
-                master_totals[mid] = (master_totals.get(mid, 0) or 0) + part
+            subtotal = Decimal(r.get("subtotal") or Decimal("0.00"))
+            tax_total = Decimal(r.get("tax_total") or Decimal("0.00"))
+            item_total = subtotal + tax_total
+            paid = paid_by_appt.get(aid, Decimal("0.00"))
+            total = appt_total.get(aid, Decimal("0.00"))
+            if paid > Decimal("0.00") and total > Decimal("0.00") and item_total > Decimal("0.00"):
+                share = item_total / total
+                part = paid * share
+                current_value = master_totals.get(mid, Decimal("0.00"))
+                master_totals[mid] = current_value + part
+
+        master_totals = {mid: value.quantize(TWOPLACES) for mid, value in master_totals.items()}
 
         master_month_totals = master_totals
         top_ids = sorted(master_month_totals.keys(), key=lambda k: master_month_totals[k], reverse=True)[:10]
         top_masters_qs = MasterProfile.objects.filter(pk__in=top_ids).select_related("user")
         top_masters = list(top_masters_qs)
         for m in top_masters:
-            m.total = master_month_totals.get(m.pk, Decimal("0"))
+            m.total = master_month_totals.get(m.pk, Decimal("0.00"))
 
         top_masters = sorted(top_masters, key=lambda m: m.total or 0, reverse=True)[:10]
 
@@ -478,25 +494,35 @@ def custom_index(request):
         AppointmentItem.objects.select_related("appointment__client__user").order_by("-start_time")[:20]
     )
 
-    # Сегодняшние предстоящие встречи (Appointment + items); мастеру — только его
-    today_appointments = (
-        AppointmentItem.objects.filter(start_time__date=today, start_time__gte=now)
-        .select_related("appointment__client__user")
-        .order_by("start_time")
+    # Сегодняшние предстоящие встречи (items); мастеру показываем только свои
+    today_items = (
+        AppointmentItem.objects.with_current_status()
+        .select_related("appointment__client__user", "service", "master__user__user")
+        .filter(
+            start_time__date=timezone.localdate(now),
+            start_time__gte=now,
+        )
     )
     if is_master(request.user) and master_profile:
-        today_appointments = today_appointments.filter(master=master_profile).distinct()
+        today_items = today_items.filter(master=master_profile)
 
-    # Ежедневная разбивка Confirmed/Cancelled (на 7 дней вперёд)
+    today_appointments = today_items.filter(
+        Q(current_status_code__isnull=True) |
+        Q(current_status_code__in=["BOOKED", "CONFIRMED"])
+    ).order_by("start_time")
+
+    # Ежедневная разбивка Confirmed/Cancelled (на 7 дней вперёд) по статусам позиций
+    daily_items = AppointmentItem.objects.with_current_status().filter(
+        start_time__date__range=[week_ago, today]
+    )
+    if is_master(request.user) and master_profile:
+        daily_items = daily_items.filter(master=master_profile)
     daily_counts = []
     for day in week_days:
-        c = Appointment.objects.filter(start_time__date=day,
-                                       appointmentstatushistory__status=confirmed) \
-            .distinct().count() if confirmed else 0
-        x = Appointment.objects.filter(start_time__date=day,
-                                       appointmentstatushistory__status=cancelled) \
-            .distinct().count() if cancelled else 0
-        daily_counts.append({"day": day.strftime("%a %d"), "confirmed": c, "cancelled": x})
+        day_items = daily_items.filter(start_time__date=day)
+        confirmed_per_day = day_items.filter(q_confirmed).count()
+        cancelled_per_day = day_items.filter(q_cancelled).count()
+        daily_counts.append({"day": day.strftime("%a %d"), "confirmed": confirmed_per_day, "cancelled": cancelled_per_day})
 
     context = admin.site.each_context(request)
     context.update({
@@ -504,7 +530,7 @@ def custom_index(request):
         "daily_appointments": daily_counts,
         "chart_data": chart_data,
         "total_sales": total_sales,
-        "upcoming_total": upcoming_items.count(),
+        "upcoming_total": upcoming_total,
         "confirmed_count": confirmed_count,
         "cancelled_count": cancelled_count,
         "top_services": top_services,      # Service с .name и .count
@@ -620,22 +646,26 @@ class ExportXlsxMixin:
         ]
         rows = []
         for appt in qs:
-            items = getattr(appt, "appointmentitem_set").all()
-            total = sum([(getattr(it, "final_price", None) or 0) for it in items])
+            prefetched_items = getattr(appt, "_export_items", None)
+            if prefetched_items is None:
+                prefetched_items = list(appt.items.select_related("service"))
+            else:
+                prefetched_items = list(prefetched_items)
+            total = sum([(getattr(it, "final_price", None) or 0) for it in prefetched_items])
             preview = " | ".join(
                 f"{getattr(getattr(it, 'service', None), 'name', getattr(it, 'service', ''))} ×{getattr(it, 'quantity', 1)}"
-                for it in items[:6]
+                for it in prefetched_items[:6]
             )
-            if items.count() > 6:
+            if len(prefetched_items) > 6:
                 preview += " …"
             rows.append([
                 str(getattr(appt, "pk", "")),
                 self._to_naive_dt(getattr(appt, "start_time", None)),
                 self._client_name(getattr(appt, "client", None)),
-                self._safe_str(getattr(appt, "status", "")),
+                getattr(appt, "aggregated_status", ""),
                 self._safe_str(getattr(appt, "payment_status", "")),
                 getattr(appt, "personal_discount", None),
-                items.count(),
+                len(prefetched_items),
                 self._as_decimal(total),
                 preview,
             ])
@@ -705,29 +735,31 @@ class ExportXlsxMixin:
         if model_name != "appointment":
             return qs
 
-        qs = qs.select_related("client__user")
+        qs = qs.with_aggregated_status().select_related("client__user")
 
-        item_qs = AppointmentItem.objects.select_related(
-            "service",
-            "service__category",
-            "master__user__user",
-        ).order_by("start_time")
-
-        history_qs = (
-            AppointmentStatusHistory.objects
-            .select_related("status", "set_by__user", "cancellation_reason")
-            .order_by("-set_at")
+        item_qs = (
+            AppointmentItem.objects.select_related(
+                "service",
+                "service__category",
+                "master__user__user",
+                "status",
+            )
+            .prefetch_related(
+                Prefetch(
+                    "status_history",
+                    queryset=AppointmentItemStatusHistory.objects.select_related(
+                        "status", "set_by__user"
+                    ).order_by("-set_at", "-id"),
+                    to_attr="_export_status_history",
+                )
+            )
+            .order_by("start_time")
         )
 
         payment_qs = Payment.objects.select_related("method")
 
         return qs.prefetch_related(
             Prefetch("items", queryset=item_qs, to_attr="_export_items"),
-            Prefetch(
-                "appointmentstatushistory_set",
-                queryset=history_qs,
-                to_attr="_export_status_history",
-            ),
             Prefetch("payments", queryset=payment_qs, to_attr="_export_payments"),
         )
 
@@ -803,30 +835,50 @@ class ExportXlsxMixin:
                     continue
             return Decimal("0.00")
 
-        def derive_status_bundle(appt):
-            status_name = getattr(getattr(appt, "status", None), "name", None)
-            history = getattr(appt, "_export_status_history", None)
+        ITEM_STATUS_TITLES = {
+            "BOOKED": "Booked",
+            "CONFIRMED": "Confirmed",
+            "CANCELLED": "Cancelled",
+            "COMPLETED": "Completed",
+            "NO_SHOW": "No show",
+        }
+
+        def derive_item_status(item):
+            status_obj = getattr(item, "status", None)
+            status_code = (getattr(status_obj, "code", None) or "").upper()
+            if not status_code:
+                status_code = (getattr(item, "current_status_code", "") or "BOOKED").upper()
+            status_label = (
+                getattr(status_obj, "name", None)
+                or getattr(item, "current_status_label", None)
+                or ITEM_STATUS_TITLES.get(status_code, status_code.title())
+            )
+
+            history = getattr(item, "_export_status_history", None)
             if history is None:
                 history = list(
-                    appt.appointmentstatushistory_set.select_related(
-                        "status", "set_by__user", "cancellation_reason"
-                    ).order_by("-set_at")
+                    item.status_history.select_related("status", "set_by__user").order_by("-set_at", "-id")
                 )
+
             cancelled_dt = None
             cancelled_by = ""
             cancel_reason = ""
-            if history:
-                latest = history[0]
-                if not status_name:
-                    status_name = getattr(getattr(latest, "status", None), "name", None)
-                for entry in history:
-                    entry_status = (getattr(getattr(entry, "status", None), "name", "") or "").lower()
-                    if entry_status in {"cancelled", "canceled"}:
-                        cancelled_dt = getattr(entry, "set_at", None)
-                        cancelled_by = person_label(getattr(entry, "set_by", None))
-                        cancel_reason = getattr(getattr(entry, "cancellation_reason", None), "name", "") or ""
-                        break
-            return status_name or "New", cancelled_dt, cancelled_by, cancel_reason
+            for entry in history or []:
+                entry_status_obj = getattr(entry, "status", None)
+                entry_code = (getattr(entry_status_obj, "code", "") or "").upper()
+                if entry_code == "CANCELLED" and cancelled_dt is None:
+                    cancelled_dt = getattr(entry, "set_at", None)
+                    cancelled_by = person_label(getattr(entry, "set_by", None))
+                    cancel_reason = getattr(entry, "note", "") or ""
+                if not status_label:
+                    status_label = (
+                        getattr(entry_status_obj, "name", None)
+                        or ITEM_STATUS_TITLES.get(entry_code, entry_code.title())
+                    )
+
+            if not status_label:
+                status_label = ITEM_STATUS_TITLES.get(status_code, status_code.title())
+            return status_label, cancelled_dt, cancelled_by, cancel_reason
 
         def uses_card_fee(appt):
             if getattr(appt, "apply_card_processing_fee", False):
@@ -861,7 +913,6 @@ class ExportXlsxMixin:
 
         rows = []
         for appt in qs:
-            status_name, cancelled_dt, cancelled_by, cancel_reason = derive_status_bundle(appt)
             created_by_display = person_label(getattr(appt, "created_by", None))
             client_display = person_label(getattr(appt, "client", None))
             fee_applicable = uses_card_fee(appt)
@@ -869,6 +920,7 @@ class ExportXlsxMixin:
             created_dt = to_excel_dt(getattr(appt, "created_at", None))
 
             for item in iter_items(appt):
+                status_label, cancelled_dt, cancelled_by, cancel_reason = derive_item_status(item)
                 service = getattr(item, "service", None)
                 category = getattr(getattr(service, "category", None), "name", "") if service else ""
                 service_name = getattr(service, "name", "") or ""
@@ -910,7 +962,7 @@ class ExportXlsxMixin:
                     appt_ref,
                     client_display,
                     person_label(getattr(item, "master", None)),
-                    status_name,
+                    status_label,
                     created_dt,
                     scheduled_dt,
                     to_excel_dt(cancelled_dt),
@@ -1257,6 +1309,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     add_form = CustomUserCreationForm
     form = CustomUserChangeForm
     change_list_template = "admin/users/changelist_cards.html"
+    add_form_template = "admin/users/add_form.html"
     export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
     list_per_page = 10
     readonly_fields = getattr(BaseUserAdmin, "readonly_fields", tuple()) + ("password_change_link",)
@@ -1348,6 +1401,16 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         return mark_safe(f'<a href="{url}">{_("Change password")}</a>')
 
     password_change_link.short_description = _("Password")
+
+    def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
+        if add and (request.GET.get(IS_POPUP_VAR) or request.POST.get(IS_POPUP_VAR)):
+            if request.GET.get("_from_custom_appt") or request.POST.get("_from_custom_appt"):
+                return_to_param = request.GET.get("return_to") or request.POST.get("return_to")
+                if return_to_param:
+                    context = {**context}
+                    context["popup_cancel_url"] = unquote_plus(return_to_param)
+                    context["popup_cancel_param"] = return_to_param
+        return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
 
     def get_queryset(self, request):
         # Prefetch the attached profile to avoid N+1 lookups.
@@ -1551,6 +1614,48 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     def _profile_popup_response(self, request, profile, *, action):
         if profile is None:
             return None
+
+        return_to = request.GET.get("return_to") or request.POST.get("return_to")
+        came_from_custom_create = request.GET.get("_from_custom_appt") or request.POST.get("_from_custom_appt")
+        redirect_url = None
+        if return_to and came_from_custom_create:
+            decoded_return_to = unquote_plus(return_to)
+            try:
+                parsed = urlparse(decoded_return_to)
+            except Exception:
+                parsed = None
+            if parsed and not parsed.netloc and parsed.path:
+                pairs = [
+                    (key, value)
+                    for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+                    if key != "client"
+                ]
+                pairs.append(("client", str(profile.pk)))
+                rebuilt_query = urlencode(pairs, doseq=True)
+                redirect_url = urlunparse(parsed._replace(query=rebuilt_query))
+
+        if redirect_url:
+            safe_redirect = json.dumps(redirect_url)
+            html = (
+                "<!DOCTYPE html><html><head><title>Popup closing</title></head>"
+                "<body><p>Popup closing...</p>"
+                "<script>"
+                "(function() {"
+                "var url = " + safe_redirect + ";"
+                "if (window.opener && !window.opener.closed) {"
+                "window.opener.location.href = url;"
+                "window.close();"
+                "} else if (window.parent && window.parent !== window) {"
+                "window.parent.location.href = url;"
+                "window.close();"
+                "} else {"
+                "window.location.href = url;"
+                "}"
+                "})();"
+                "</script></body></html>"
+            )
+            return HttpResponse(html)
+
         to_field = request.POST.get(TO_FIELD_VAR) or request.GET.get(TO_FIELD_VAR)
         if to_field:
             try:
@@ -1566,9 +1671,10 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             "value": str(value),
             "obj": str(profile),
         }
+        template_name = self.popup_response_template or "admin/popup_response.html"
         return TemplateResponse(
             request,
-            self.popup_response_template,
+            template_name,
             {
                 **self.admin_site.each_context(request),
                 "popup_response_data": json.dumps(popup_response_data),
@@ -2035,12 +2141,17 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     change_list_template = "admin/appointments_calendar.html"  # твой базовый шаблон списка
     change_form_template = "admin/custom_edit_appointment.html"
 
+
     @staticmethod
     def _validate_service_room_capacity(rows, bag):
         if not rows:
             return
 
-        service_ids = {row["service_id"] for row in rows if row.get("service_id")}
+        service_ids = {
+            row["service_id"]
+            for row in rows
+            if row.get("service_id") and row.get("validation_enabled", True)
+        }
         if not service_ids:
             return
 
@@ -2063,6 +2174,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             start = row.get("dt")
             if not sid or not start:
                 continue
+            if not row.get("validation_enabled", True):
+                continue  # CHANGED: skip capacity checks when validation is off
             meta = service_meta.get(str(sid))
             if not meta:
                 continue
@@ -2102,6 +2215,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
         service_map = {}
         for idx, item, _ in prebuilt_items:
+            if hasattr(item, "validation_enabled") and not getattr(item, "validation_enabled", True):
+                continue  # CHANGED: skip capacity checks when validation is off
             service = getattr(item, "service", None)
             if not service:
                 continue
@@ -2180,10 +2295,11 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
+        qs = qs.with_aggregated_status()
         # if is_master(request.user):
         #     # Если мастер хранится в AppointmentItem (мульти-услуги)
         #     return qs.filter(items__master=master_obj(request.user)).distinct()
-            # Если мастер хранится прямо в Appointment (одиночная услуга):
+        # Если мастер хранится прямо в Appointment (одиночная услуга):
         # return qs.filter(master=master_obj(request.user))
         return qs
 
@@ -2230,6 +2346,10 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         if object_id:
             obj = self.get_object(request, object_id)
 
+        return_to_date = request.GET.get("date") or request.POST.get("return_to_date")
+        if return_to_date:
+            extra_context["return_to_date"] = return_to_date
+
         def _safe_reverse(name, *, kwargs=None):
             try:
                 return reverse(name, kwargs=kwargs) if kwargs else reverse(name)
@@ -2258,6 +2378,9 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         adminform = ctx.get("adminform")
         if adminform:
             ctx["form"] = adminform.form
+
+        if "return_to_date" not in ctx:
+            ctx["return_to_date"] = request.GET.get("date") or request.POST.get("return_to_date")
 
         # отдаём инлайн-формсет позиций в шаблон
         # ── НАЙТИ inline formsets НАДЁЖНО ─────────────────
@@ -2402,18 +2525,73 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             }.get(str(currency_code_current).lower(), f"{str(currency_code_current).upper()} ")
 
         paid_total = Decimal("0.00")
+        refunded_total = Decimal("0.00")
+        refundable_payments: List[Dict[str, str]] = []
         if obj:
-            paid_agg = obj.payments.filter(status="succeeded").aggregate(
+            paid_total = payment_services.get_total_received_for_appointment(obj)
+            refunded_agg = obj.payments.filter(status="succeeded").aggregate(
                 total=Coalesce(
                     Sum(
-                        F("amount_received") - F("amount_refunded"),
+                        F("amount_refunded"),
                         output_field=DecimalField(max_digits=12, decimal_places=2),
                     ),
                     Value(Decimal("0.00")),
                 )
             )
-            paid_total = Decimal(paid_agg.get("total") or Decimal("0.00")).quantize(TWOPLACES)
+            refunded_total = Decimal(refunded_agg.get("total") or Decimal("0.00")).quantize(TWOPLACES)
+
+            currency_symbol_local = ctx.get("currency_symbol")
+            if not currency_symbol_local:
+                currency_code_local = ctx.get("currency_code") or getattr(settings, "CURRENCY_CODE", "CAD")
+                currency_symbol_local = {
+                    "cad": "CA$",
+                    "usd": "$",
+                }.get(str(currency_code_local).lower(), f"{str(currency_code_local).upper()} ")
+
+            succeeded_for_refund = (
+                obj.payments.filter(status__iexact="succeeded")
+                .select_related("method")
+                .order_by("-created_at")
+            )
+            for payment in succeeded_for_refund:
+                amount_received = getattr(payment, "amount_received", None) or getattr(payment, "amount", Decimal("0.00")) or Decimal("0.00")
+                amount_received = Decimal(amount_received).quantize(TWOPLACES)
+                amount_refunded = Decimal(getattr(payment, "amount_refunded", Decimal("0.00")) or Decimal("0.00")).quantize(TWOPLACES)
+                available_amount = (amount_received - amount_refunded).quantize(TWOPLACES)
+                if available_amount <= Decimal("0.00"):
+                    continue
+
+                created_at_label = ""
+                created_at = getattr(payment, "created_at", None)
+                if created_at:
+                    try:
+                        created_at_label = localtime(created_at).strftime("%Y-%m-%d")
+                    except Exception:  # pragma: no cover - fallback to raw value
+                        created_at_label = str(created_at)
+
+                method_label = (getattr(payment.method, "name", "") or "").strip() or "Payment"
+                label = (
+                    f"{method_label} - {currency_symbol_local}{available_amount:.2f} available "
+                    f"/ {currency_symbol_local}{amount_received:.2f} received"
+                )
+                if amount_refunded > Decimal("0.00"):
+                    label += f" (refunded {currency_symbol_local}{amount_refunded:.2f})"
+                if created_at_label:
+                    label += f" - {created_at_label}"
+
+                refundable_payments.append(
+                    {
+                        "payment_id": str(payment.pk),
+                        "label": label,
+                        "refund_url": reverse("admin-payment-refund", args=[payment.pk]),
+                    }
+                )
+
         ctx["paid_total"] = paid_total
+        ctx["refunded_total"] = refunded_total
+        net_paid_total = (paid_total - refunded_total).quantize(TWOPLACES)
+        if net_paid_total < Decimal("0.00"):
+            net_paid_total = Decimal("0.00")
 
         appointment_total_amount = Decimal("0.00")
         if obj:
@@ -2429,10 +2607,11 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             else:
                 appointment_total_amount = Decimal(getattr(obj, "final_price", Decimal("0.00")) or Decimal("0.00"))
         ctx["appointment_total_amount"] = appointment_total_amount.quantize(TWOPLACES)
-        outstanding_amount = (appointment_total_amount - paid_total).quantize(TWOPLACES)
+        outstanding_amount = (appointment_total_amount - net_paid_total).quantize(TWOPLACES)
         if outstanding_amount < Decimal("0.00"):
             outstanding_amount = Decimal("0.00")
         ctx["appointment_outstanding_amount"] = outstanding_amount
+        ctx["refundable_payments"] = refundable_payments
 
         ctx["card_fee_percent"] = str(CARD_PROCESSING_PERCENT)
         ctx["card_fee_fixed"] = str(CARD_PROCESSING_FIXED)
@@ -2488,7 +2667,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "svc_discounts_data": svc_discounts,
             "promos_by_service_data": dict(promos_by_service),
             "promos_global_data": promos_global,
-            "APPT_FIELDS_1": ("client", "start_time", "payment_status", "current_status"),
+            "APPT_FIELDS_1": ("client", "start_time", "payment_status"),
             "intake_forms_overview": intake_forms_overview,
             "intake_required_ids": intake_required_ids,
 
@@ -2606,28 +2785,102 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         return user
 
     def save_formset(self, request, form, formset, change):
-        # Забираем инстансы без сохранения
-        instances = formset.save(commit=False)
-        # Удаления — отдельно
-        for deleted in formset.deleted_objects:
-            deleted.delete()
+        is_item_formset = getattr(formset, "model", None) is AppointmentItem
+        staged_status_map: dict[str, dict[str, str]] = {}
+        original_status_map: dict[str, str] = {}
 
-        # Прогоняем full_clean() на каждом дочернем объекте
-        for inst in instances:
-            if isinstance(inst, ProductSale):
-                if form.instance and not inst.client_id and getattr(form.instance, "client_id", None):
-                    inst.client_id = form.instance.client_id
-                if not inst.sold_by_id:
-                    profile = getattr(request.user, "userprofile", None)
-                    if profile:
-                        inst.sold_by = profile
-                if not inst.sold_at:
-                    base_dt = getattr(form.instance, "start_time", None)
-                    inst.sold_at = base_dt or timezone.now()
-            inst.full_clean()  # вызывает AppointmentItem.clean()
-            inst.save()
+        if is_item_formset:
+            for inline_form in formset.forms:
+                prefix = getattr(inline_form, "prefix", None)
+                if not prefix:
+                    continue
+                instance = getattr(inline_form, "instance", None)
+                if isinstance(instance, AppointmentItem) and instance.pk:
+                    current_code = getattr(getattr(instance, "status", None), "code", "") or ""
+                    original_status_map[prefix] = current_code.upper()
+                raw_code = (request.POST.get(f"{prefix}-status_code") or "").strip()
+                raw_reason = (request.POST.get(f"{prefix}-status_reason") or "").strip()
+                if raw_code:
+                    staged_status_map[prefix] = {
+                        "code": raw_code.upper(),
+                        "reason": raw_reason,
+                    }
 
-        formset.save_m2m()
+        with transaction.atomic():
+            instances = formset.save(commit=False)
+            for deleted in formset.deleted_objects:
+                deleted.delete()
+
+            for inst in instances:
+                if isinstance(inst, ProductSale):
+                    if form.instance and not inst.client_id and getattr(form.instance, "client_id", None):
+                        inst.client_id = form.instance.client_id
+                    if not inst.sold_by_id:
+                        profile = getattr(request.user, "userprofile", None)
+                        if profile:
+                            inst.sold_by = profile
+                    if not inst.sold_at:
+                        base_dt = getattr(form.instance, "start_time", None)
+                        inst.sold_at = base_dt or timezone.now()
+                if isinstance(inst, AppointmentItem):
+                    if inst.pk:
+                        current_status_id = (
+                            AppointmentItem.objects.filter(pk=inst.pk).values_list("status_id", flat=True).first()
+                        )
+                        if current_status_id:
+                            inst.status_id = current_status_id
+                    if inst._state.adding:
+                        inst._created_via_admin = True
+                        inst._initial_status_code = "BOOKED"
+                        inst._initial_status_user_id = getattr(getattr(request, "user", None), "id", None)
+                        inst._initial_status_timestamp = timezone.now()
+                        inst._initial_status_note = "admin-initial"
+                inst.full_clean()
+                inst.save()
+
+            formset.save_m2m()
+
+            if is_item_formset and staged_status_map:
+                staged_updates = []
+                for inline_form in formset.forms:
+                    prefix = getattr(inline_form, "prefix", None)
+                    stage = staged_status_map.get(prefix)
+                    if not stage:
+                        continue
+                    instance = getattr(inline_form, "instance", None)
+                    if not isinstance(instance, AppointmentItem) or not instance.pk:
+                        continue
+                    cleaned = getattr(inline_form, "cleaned_data", {}) or {}
+                    if cleaned.get("DELETE"):
+                        continue
+                    code = (stage.get("code") or "").strip().upper()
+                    if not code:
+                        continue
+                    current_code = original_status_map.get(prefix, "")
+                    if not current_code:
+                        current_code = (
+                            AppointmentItem.objects.filter(pk=instance.pk)
+                            .values_list("status__code", flat=True)
+                            .first()
+                            or ""
+                        )
+                        current_code = (current_code or "").upper()
+                    if code == current_code:
+                        continue
+                    staged_updates.append((instance, code, (stage.get("reason") or "").strip()))
+
+                if staged_updates:
+                    set_by_user_id = getattr(getattr(request, "user", None), "id", None)
+                    for item, status_code, reason in staged_updates:
+                        record_item_status(
+                            item,
+                            status_code,
+                            set_by_user_id=set_by_user_id,
+                            note="admin-save",
+                        )
+                        if status_code == "CANCELLED":
+                            send_item_cancellation_email.delay(str(item.pk), reason=reason or None)
+
     def get_form(self, request, obj=None, **kwargs):
         if obj is None:
             kwargs["form"] = self.add_form
@@ -2755,19 +3008,60 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         clients_raw = (
             UserProfile.objects.select_related("user")
             .annotate(
-                first_name=Coalesce("user__first_name", Value("")),
-                last_name=Coalesce("user__last_name", Value("")),
-                username=Coalesce("user__username", Value("")),
+                first_name_value=Coalesce("user__first_name", Value("")),
+                last_name_value=Coalesce("user__last_name", Value("")),
+                username_value=Coalesce("user__username", Value("")),
+                email_value=Coalesce("user__email", Value("")),
+                phone_value=Coalesce("phone", Value("")),
             )
-            .values("id", "first_name", "last_name", "username")
+            .values(
+                "id",
+                "first_name_value",
+                "last_name_value",
+                "username_value",
+                "email_value",
+                "phone_value",
+            )
             .order_by("user__first_name", "user__last_name", "user__username")
         )
         clients = []
         for row in clients_raw:
-            label = f"{row['first_name']} {row['last_name']}".strip()
+            first_name = (row["first_name_value"] or "").strip()
+            last_name = (row["last_name_value"] or "").strip()
+            username = (row["username_value"] or "").strip()
+            email = (row["email_value"] or "").strip()
+            phone = (row["phone_value"] or "").strip()
+
+            label = f"{first_name} {last_name}".strip()
             if not label:
-                label = row["username"] or str(row["id"])
-            clients.append({"id": row["id"], "label": label})
+                label = username or str(row["id"])
+
+            phone_digits = re.sub(r"\D", "", phone)
+            search_sources = [
+                label,
+                first_name,
+                last_name,
+                username,
+                email,
+                phone,
+                phone_digits,
+            ]
+            search_blob = " ".join(filter(None, search_sources)).lower()
+            meta_parts = [p for p in (email, phone) if p]
+            meta = " • ".join(meta_parts)
+
+            clients.append(
+                {
+                    "id": row["id"],
+                    "label": label,
+                    "username": username,
+                    "email": email,
+                    "phone": phone,
+                    "meta": meta,
+                    "search_text": search_blob,
+                    "search_digits": phone_digits,
+                }
+            )
         masters = (
             MasterProfile.objects.select_related("user")
             .annotate(label=Concat("user__user__first_name", Value(" "), "user__user__last_name"))
@@ -2888,6 +3182,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
     def custom_create_view(self, request):
         # ---------------- helpers ----------------
+        return_to_date = request.GET.get("date") or request.POST.get("return_to_date")
+
         def _parse_dt(date_str: str | None, time_str: str | None):
             if not date_str or not time_str:
                 return None
@@ -3080,6 +3376,10 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
 
+            requested_client = (request.GET.get("client") or "").strip()
+            if requested_client:
+                ctx["posted_client"] = requested_client
+
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
 
@@ -3166,16 +3466,23 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         posted_items = []  # чтобы вернуть в шаблон ровно то, что вводили
         for i in range(total_forms):
             pref = f"items-{i}-"
-            posted_items.append({
-                "master":      (request.POST.get(pref + "master") or "").strip(),
-                "service":     (request.POST.get(pref + "service") or "").strip(),
-                "start_time_0": (request.POST.get(pref + "start_time_0") or "").strip(),  # date
-                "start_time_1": (request.POST.get(pref + "start_time_1") or "").strip(),  # time
-                "unit_price":  (request.POST.get(pref + "unit_price") or "").strip(),
-                "promocode":   (request.POST.get(pref + "promocode") or "").strip(),
-                "duration_override_min": (request.POST.get(pref + "duration_override_min") or "").strip(),
-                "manual_discount_percent": (request.POST.get(pref + "manual_discount_percent") or "").strip(),
-            })
+        validation_values = request.POST.getlist(pref + "validation_enabled")
+        validation_enabled = (
+            any(str(val).strip().lower() in {"1", "true", "on", "yes"} for val in validation_values)
+            if validation_values
+            else False
+        )
+        posted_items.append({
+            "master":      (request.POST.get(pref + "master") or "").strip(),
+            "service":     (request.POST.get(pref + "service") or "").strip(),
+            "start_time_0": (request.POST.get(pref + "start_time_0") or "").strip(),  # date
+            "start_time_1": (request.POST.get(pref + "start_time_1") or "").strip(),  # time
+            "unit_price":  (request.POST.get(pref + "unit_price") or "").strip(),
+            "promocode":   (request.POST.get(pref + "promocode") or "").strip(),
+            "duration_override_min": (request.POST.get(pref + "duration_override_min") or "").strip(),
+            "manual_discount_percent": (request.POST.get(pref + "manual_discount_percent") or "").strip(),
+            "validation_enabled": validation_enabled,
+        })
 
         # обязательные поля верхнего уровня
         if not client_id:
@@ -3249,6 +3556,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "promocode_id": (row["promocode"] or None),
                 "duration_override": duration_override,
                 "manual_discount": manual_discount,
+                "validation_enabled": bool(row.get("validation_enabled", True)),
             })
 
         self._validate_service_room_capacity(valid_rows, bag)
@@ -3354,6 +3662,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                         unit_price=row["unit_price"] or None,
                         duration_override_min=row.get("duration_override"),
                         manual_discount_percent=row.get("manual_discount", 0) or 0,
+                        validation_enabled=row.get("validation_enabled", True),
                     )
                     try:
                         item.full_clean()
@@ -3463,6 +3772,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "gst_enabled": getattr(settings, "GST_ENABLED", True),
                 "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
+            ctx["return_to_date"] = return_to_date
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
         except IntegrityError as ie:
@@ -3490,6 +3800,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "gst_enabled": getattr(settings, "GST_ENABLED", True),
                 "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
+            ctx["return_to_date"] = return_to_date
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
         except Exception as e:
@@ -3518,19 +3829,24 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "gst_enabled": getattr(settings, "GST_ENABLED", True),
                 "currency_code": getattr(settings, "CURRENCY_CODE", "CAD"),
             }
+            ctx["return_to_date"] = request.GET.get("date") or request.POST.get("return_to_date")
             return TemplateResponse(request, "admin/custom_create_appointment.html", ctx)
 
     def response_add(self, request, obj, post_url_continue=None):
         response = super().response_add(request, obj, post_url_continue)
         if IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET:
             return response
-        return self._redirect_to_calendar(request, date=self._calendar_date_for_obj(obj))
+        request_date = request.GET.get("date") or request.POST.get("return_to_date")
+        target_date = request_date or self._calendar_date_for_obj(obj)
+        return self._redirect_to_calendar(request, date=target_date)
 
     def response_post_save_add(self, request, obj):
         response = super().response_post_save_add(request, obj)
         if IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET:
             return response
-        return self._redirect_to_calendar(request, date=self._calendar_date_for_obj(obj))
+        request_date = request.GET.get("date") or request.POST.get("return_to_date")
+        target_date = request_date or self._calendar_date_for_obj(obj)
+        return self._redirect_to_calendar(request, date=target_date)
 
     def response_change(self, request, obj):
         response = super().response_change(request, obj)
@@ -3538,6 +3854,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             return response
         if "_saveasnew" in request.POST:
             return self._redirect_to_calendar(request, date=self._calendar_date_for_obj(obj))
+        if "_continue" in request.POST or "_addanother" in request.POST:
+            return response
+        if "_save" in request.POST:
+            request_date = request.GET.get("date") or request.POST.get("return_to_date")
+            target_date = request_date or self._calendar_date_for_obj(obj)
+            return self._redirect_to_calendar(request, date=target_date)
         return response
 
     @admin.display(description=_("Позиций"), ordering="_items_count")
@@ -3623,20 +3945,39 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             selected_date = timezone.localdate()
 
         services = Service.objects.all()
-        appointment_statuses = AppointmentStatus.objects.all()
+        appointment_statuses = AppointmentItemStatus.objects.filter(is_active=True).order_by("name")
         payment_statuses = PaymentStatus.objects.all()
 
-        appointments = AppointmentItem.objects.select_related(
-            'appointment__client', 'service', 'master'
-        ).prefetch_related(
-            'appointment__items__service',
-            'appointment__product_sales',
-            Prefetch(
-                'appointment__payments',
-                queryset=Payment.objects.filter(status="succeeded").only("amount_received", "amount_refunded", "status"),
-                to_attr='prefetched_succeeded_payments',
-            ),
+        user_profile = getattr(request.user, "userprofile", None)
+        current_master = getattr(user_profile, "master_profile", None) if user_profile else None
+
+        items_qs = (
+            AppointmentItem.objects.with_current_status()
+            .select_related(
+                "appointment__client__user",
+                "appointment__payment_status",
+                "service",
+                "master__user__user",
+                "status",
+            )
+            .prefetch_related(
+                "appointment__items__service",
+                "appointment__items__status",
+                "appointment__product_sales",
+                Prefetch(
+                    "appointment__payments",
+                    queryset=Payment.objects.filter(status="succeeded").only(
+                        "amount_received",
+                        "amount_refunded",
+                        "status",
+                    ),
+                    to_attr="prefetched_succeeded_payments",
+                ),
+            )
         )
+
+        if current_master and not request.user.is_superuser:
+            items_qs = items_qs.filter(master=current_master)
 
         start_of_day = make_aware(datetime.combine(selected_date, datetime.min.time()))
         end_of_day = make_aware(datetime.combine(selected_date, datetime.max.time()))
@@ -3646,23 +3987,46 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             end_time__gte=start_of_day
         )
 
+        items_qs = items_qs.filter(
+            start_time__lt=end_of_day,
+            end_time__gt=start_of_day,
+        )
+
         if request.GET.get("service"):
-            appointments = appointments.filter(service_id=request.GET["service"])
+            items_qs = items_qs.filter(service_id=request.GET["service"])
         if request.GET.get("status"):
-            appointments = appointments.filter(
-                appointment__appointmentstatushistory__status_id=request.GET["status"]
-            )
+            items_qs = items_qs.filter(status__id=request.GET["status"])
         if request.GET.get("payment_status"):
-            appointments = appointments.filter(
+            items_qs = items_qs.filter(
                 appointment__payment_status_id__in=request.GET.getlist("payment_status")
             )
         master_ids = request.GET.getlist("master")
-        if master_ids:
-            appointments = appointments.filter(master_id__in=master_ids)
+        base_masters_qs = (
+            MasterProfile.objects.select_related("user__user")
+            .order_by("user__user__first_name", "user__user__last_name")
+        )
+        if current_master and not request.user.is_superuser:
+            base_masters_qs = base_masters_qs.filter(pk=current_master.pk)
 
-        masters = MasterProfile.objects.filter(
-            id__in=appointments.values_list('master_id', flat=True)
-        ).distinct()
+        all_masters = list(base_masters_qs)
+
+        if master_ids:
+            master_id_set = {str(mid) for mid in master_ids}
+            masters_for_calendar = [m for m in all_masters if str(m.pk) in master_id_set]
+        else:
+            masters_for_calendar = list(all_masters)
+
+        if master_ids and not masters_for_calendar:
+            items_qs = items_qs.none()
+        else:
+            allowed_master_ids = [m.pk for m in (masters_for_calendar if master_ids else all_masters)]
+            if allowed_master_ids:
+                items_qs = items_qs.filter(master_id__in=allowed_master_ids)
+            else:
+                items_qs = items_qs.none()
+                masters_for_calendar = []
+
+        selected_masters = [str(m.pk) for m in masters_for_calendar] if master_ids else []
 
         # Слоты по 15 минут
         start_hour = 8
@@ -3674,27 +4038,29 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         if request.headers.get('x-requested-with') == 'XMLHttpRequest':
             action = request.GET.get("action")
             calendar_table = createTable(
-                selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities
+                selected_date, time_pointer, end_time, slot_times, items_qs, masters_for_calendar, availabilities
             )
 
             if action == "filter":
                 html = render_to_string('admin/appointments_calendar_partial.html', {
                     "calendar_table": calendar_table,
-                    'masters': masters,
-                    'selected_masters': master_ids,
+                    'masters': masters_for_calendar,
+                    'filter_masters': all_masters,
+                    'selected_masters': selected_masters,
                 })
                 return JsonResponse({"html": html})
 
             elif action == "calendar":
                 html = render_to_string('admin/appointments_calendar_partial.html', {
                     'calendar_table': calendar_table,
-                    'masters': masters,
-                    'selected_masters': master_ids,
+                    'masters': masters_for_calendar,
+                    'filter_masters': all_masters,
+                    'selected_masters': selected_masters,
                 }, request=request)
                 return JsonResponse({'html': html})
 
         calendar_table = createTable(
-            selected_date, time_pointer, end_time, slot_times, appointments, masters, availabilities
+            selected_date, time_pointer, end_time, slot_times, items_qs, masters_for_calendar, availabilities
         )
 
         response = super().changelist_view(request, extra_context=extra_context)
@@ -3714,8 +4080,9 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
             context.update({
                 "calendar_table": calendar_table,
-                "masters": masters,
-                "selected_masters": master_ids,
+                "masters": masters_for_calendar,
+                "filter_masters": all_masters,
+                "selected_masters": selected_masters,
                 "selected_date": selected_date,
                 "prev_date": (selected_date - timedelta(days=1)).strftime("%Y-%m-%d"),
                 "next_date": (selected_date + timedelta(days=1)).strftime("%Y-%m-%d"),
@@ -3852,6 +4219,19 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
             fields.append("resend_receipt_action")
         return fields
 
+    def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
+        show_refund = bool(
+            not add
+            and obj
+            and request.user.has_perm("core.change_payment")
+            and getattr(obj, "appointment_id", None)
+        )
+        context["show_refund_button"] = show_refund
+        context["refund_url"] = (
+            reverse("admin-payment-refund", args=[obj.pk]) if show_refund else ""
+        )
+        return super().render_change_form(request, context, add, change, form_url, obj)
+
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
@@ -3939,6 +4319,32 @@ class PaymentAdmin(ExportCsvMixin ,admin.ModelAdmin):
             self.message_user(request, f"Queued receipt emails for {count} payments.")
         else:
             self.message_user(request, "No succeeded payments selected.", level=messages.WARNING)
+
+
+@admin.register(PaymentRefund)
+class PaymentRefundAdmin(admin.ModelAdmin):
+    """Lightweight listing for refund audit entries."""
+
+    list_display = (
+        "appointment",
+        "payment",
+        "amount",
+        "method",
+        "stripe_refund_id",
+        "created_by",
+        "created_at",
+    )
+    list_filter = ("method", "created_at")
+    search_fields = (
+        "appointment__client__user__first_name",
+        "appointment__client__user__last_name",
+        "appointment__client__user__email",
+        "payment__stripe_payment_intent_id",
+        "stripe_refund_id",
+    )
+    readonly_fields = ("created_at", "created_by")
+    ordering = ("-created_at",)
+    date_hierarchy = "created_at"
 
 
 # -----------------------------
@@ -4063,6 +4469,26 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
         'extra_time_min',
         'is_taxable',
     ]
+    import_template_name = "admin/services/import.html"
+    reset_template_name = "admin/service/reset.html"
+    reset_confirm_token = "DELETE"
+
+    def get_urls(self):
+        urls = super().get_urls()
+        opts = self.model._meta
+        custom = [
+            path(
+                "import/",
+                self.admin_site.admin_view(self.import_services_view),
+                name=f"{opts.app_label}_{opts.model_name}_import",
+            ),
+            path(
+                "reset/",
+                self.admin_site.admin_view(self.reset_services_view),
+                name=f"{opts.app_label}_{opts.model_name}_reset",
+            ),
+        ]
+        return custom + urls
 
     @admin.action(description="Mark selected services as active")
     def mark_active(self, request, queryset):
@@ -4119,6 +4545,81 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
 
     def get_ordering(self, request):
         return ("name", "pk")
+
+    def import_services_view(self, request):
+        form = ServiceImportUploadForm(request.POST or None, request.FILES or None)
+        changelist_url = reverse(f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist")
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "form": form,
+            "title": "Import services",
+            "changelist_url": changelist_url,
+        }
+
+        if request.method == "POST" and form.is_valid():
+            uploaded = form.cleaned_data["import_file"]
+            try:
+                result = import_services_from_file(uploaded)
+            except ServiceImportError as exc:
+                form.add_error("import_file", str(exc))
+            else:
+                if result.created or result.updated:
+                    messages.success(
+                        request,
+                        f"Imported {result.created} new services and updated {result.updated}.",
+                    )
+                else:
+                    messages.info(request, "No services were imported. The file did not contain new data.")
+
+                if result.errors:
+                    preview = "; ".join(
+                        f"Row {msg.row_number}: {msg.message}"
+                        for msg in result.errors[:3]
+                    )
+                    if len(result.errors) > 3:
+                        preview += f" (+{len(result.errors) - 3} more rows)"
+                    messages.warning(request, f"Some rows were skipped: {preview}")
+
+                return HttpResponseRedirect(changelist_url)
+
+        return TemplateResponse(request, self.import_template_name, context)
+
+    def reset_services_view(self, request):
+        changelist_url = reverse(f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist")
+        now = timezone.now()
+        stats = {
+            "service_total": self.model.objects.count(),
+            "active_services": self.model.objects.filter(is_active=True).count(),
+            "category_total": ServiceCategory.objects.count(),
+            "service_master_total": ServiceMaster.objects.count(),
+            "appointment_items_total": AppointmentItem.objects.filter(service__isnull=False).count(),
+            "upcoming_appointment_items": AppointmentItem.objects.filter(
+                service__isnull=False,
+                start_time__gte=now,
+            ).count(),
+        }
+
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "title": "Delete all services",
+            "changelist_url": changelist_url,
+            "stats": stats,
+            "confirm_token": self.reset_confirm_token,
+        }
+
+        if request.method == "POST":
+            confirm = (request.POST.get("confirm") or "").strip()
+            if confirm != self.reset_confirm_token:
+                messages.error(request, f"Type {self.reset_confirm_token} to confirm deletion.")
+            else:
+                with transaction.atomic():
+                    self.model.objects.all().delete()
+                messages.success(request, "All services were deleted.")
+                return HttpResponseRedirect(changelist_url)
+
+        return TemplateResponse(request, self.reset_template_name, context)
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
         if request.method == "POST" and "_duplicate" in request.POST:
@@ -4240,6 +4741,27 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
             context["category_options"] = category_options
             context["current_category"] = current_category
             context["currency_symbol"] = currency_symbol
+            try:
+                import_url = reverse(f'admin:{opts.app_label}_{opts.model_name}_import')
+            except NoReverseMatch:
+                import_url = None
+            try:
+                reset_url = reverse(f'admin:{opts.app_label}_{opts.model_name}_reset')
+            except NoReverseMatch:
+                reset_url = None
+
+            if import_url:
+                context["import_url"] = import_url
+                context.setdefault("import_label", "📥 Import services")
+            else:
+                context.setdefault("import_url", None)
+
+            if reset_url:
+                context["reset_url"] = reset_url
+                context.setdefault("reset_label", "🗑 Delete all services")
+            else:
+                context.setdefault("reset_url", None)
+
             cl = context.get("cl")
             pagination = {
                 "has_previous": False,
@@ -6049,6 +6571,39 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
     master_ids = [m.id for m in masters]
     MASTER_COLORS = dict(zip(master_ids, cycle(COLOR_PALETTE)))
 
+    STATUS_TITLES = {
+        "BOOKED": "Booked",
+        "CONFIRMED": "Confirmed",
+        "CANCELLED": "Cancelled",
+        "COMPLETED": "Completed",
+    }
+
+    STATUS_CLASS_MAP = {
+        "BOOKED": "status-booked",
+        "CONFIRMED": "status-confirmed",
+        "CANCELLED": "status-cancelled",
+        "COMPLETED": "status-completed",
+    }
+
+    if isinstance(selected_date, date):
+        selected_date_str = selected_date.isoformat()
+    else:
+        try:
+            selected_date_str = selected_date.isoformat()
+        except Exception:
+            selected_date_str = str(selected_date) if selected_date else ""
+
+    def _resolve_item_status(item):
+        status_obj = getattr(item, "status", None)
+        code = getattr(status_obj, "code", None) or getattr(item, "current_status_code", None) or ""
+        code = (code or "").upper() or "BOOKED"
+        label = (
+            getattr(status_obj, "name", None)
+            or getattr(item, "current_status_label", None)
+            or STATUS_TITLES.get(code, code.title())
+        )
+        return code, label, status_obj
+
     # ───── badges для позиции ───────────────────────────────────────────────────
     def _corner_badges_for_item(item, meta):
         # скидка: если установлен промокод/персональная скидка на уровне позиции
@@ -6108,11 +6663,15 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                 if flag_url else f'<span class="badge badge--health" title="{flag_title}">{ico}</span>'
             )
         note_html = ""
-        if meta.get("has_note"):
+        appointment_obj = getattr(item, "appointment", None)
+        has_direct_note = bool(getattr(appointment_obj, "notes", "").strip()) if appointment_obj else False
+        has_item_note = bool(meta.get("appointment_has_note") or meta.get("has_note"))
+        if has_direct_note or has_item_note:
             note_html = (
-                f"<span class='badge badge--note'>"
+                f"<span class='badge badge--note' title='Notes available'>"
                 f"<img src=\"{NOTES_BADGE_ICON_URL}\" alt=\"Notes present\" class=\"badge-icon\" height=\"24\"/>"
-                f"</span>")
+                f"</span>"
+            )
         badges_html = "".join(filter(None, [promo_html, payment_html, health_html, note_html]))
         if not badges_html:
             return ""
@@ -6125,9 +6684,8 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         total_min = int(getattr(item, "duration_min", 0) or 0)
         e_local = s_local + timedelta(minutes=total_min)
 
-        # Статус — по родительскому Appointment (последний из истории)
-        last_status = item.appointment.appointmentstatushistory_set.order_by("-set_at").first()
-        status_name = last_status.status.name if last_status else "Unknown"
+        status_code, status_label, _ = _resolve_item_status(item)
+        status_class = STATUS_CLASS_MAP.get(status_code, "status-booked")
         appointment_obj = item.appointment
         items = list(appointment_obj.items.all())
         items_count = len(items)
@@ -6177,12 +6735,20 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         client = appointment_obj.client
         client_label = client.get_full_name() or client.user.username
         notes_value = getattr(appointment_obj, "notes", "") or ""
-        has_note = bool(str(notes_value).strip())
+        has_direct_note = bool(str(notes_value).strip())
+
+        # Some views may attach per-item notes (custom annotations).
+        item_note_value = getattr(item, "note", "") or getattr(item, "notes", "")
+        has_item_note = bool(str(item_note_value).strip())
+        has_note = has_direct_note or has_item_note
 
         return {
             "s_local": s_local,
             "e_local": e_local,
-            "status": status_name,
+            "status": status_label,
+            "status_label": status_label,
+            "status_code": status_code,
+            "status_class": status_class,
             "master_label": escape(str(master_obj)),
             "client_label": escape(client_label),
             "service_label": escape(item.service.name),
@@ -6201,6 +6767,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "paid_total_decimal": paid_total_cached,
             "paid_total_raw": f"{paid_total_cached:.2f}",
             "has_note": has_note,
+            "appointment_has_note": has_direct_note,
         }
 
     def _cell_html_item(item, meta, show_cancelled=False):
@@ -6224,6 +6791,10 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
 
     def _make_item_cell(kind, item, rowspan, colspan, master_obj, bg, show_cancelled=False):
         meta = _item_meta(item, master_obj)
+        edit_url = reverse("admin:core_appointment_change", args=[item.appointment_id])
+        if selected_date_str:
+            connector = "&" if "?" in edit_url else "?"
+            edit_url = f"{edit_url}{connector}date={selected_date_str}"
         return {
             "rowspan": rowspan,
             "colspan": colspan,
@@ -6231,7 +6802,6 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "appt_id": item.appointment_id,  # важно для ссылки клика по шаблону【:contentReference[oaicite:4]{index=4}】
             "html": _cell_html_item(meta=meta, item=item, show_cancelled=show_cancelled),
             "background": bg,
-            "appointment": item,  # шаблон проверяет наличие cell.appointment для ветки рендера【:contentReference[oaicite:5]{index=5}】
             "client": meta["client_label"],
             "phone": meta["phone"],
             "service": meta["service_label"],
@@ -6249,6 +6819,16 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "items_count": meta["items_count"],
             "paid_total_raw": meta.get("paid_total_raw", "0.00"),
             "has_note": meta.get("has_note", False),
+            "appointment_has_note": meta.get("appointment_has_note", False),
+            "status_code": meta.get("status_code"),
+            "status_label": meta.get("status_label"),
+            "status_class": meta.get("status_class"),
+            "item_id": str(item.pk),
+            "item_obj": item,
+            "appointment": item.appointment,
+            "start_iso": item.start_time.isoformat() if item.start_time else "",
+            "end_iso": (item.end_time.isoformat() if item.end_time else ""),
+            "edit_url": edit_url,
         }
 
     def _make_unavail_cell(kind, rowsp, colspan, avail_id, reason, from_s, to_s, until_s):
@@ -6279,53 +6859,148 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
     cancel_lanes = {}
     skip_two = {}
     skip_lane = {}
+    overlap_lanes = {}
     for m in masters:
         mid = m.id
         two_col_map[mid] = {}
         cancel_lanes[mid] = {0: {}, 1: {}}
         skip_two[mid] = {}
         skip_lane[mid] = {0: {}, 1: {}}
+        overlap_lanes[mid] = {0: {}, 1: {}}
 
-    # статус Cancelled
-    cancelled_status = AppointmentStatus.objects.filter(name="Cancelled").first()
-    cancelled_id = getattr(cancelled_status, "id", None)
-
-    # ───── позиции (AppointmentItem) ────────────────────────────────────────────
+    # ───────────────── позиции (AppointmentItem) ───────────────────────────────
+    prepared_items = []
+    entry_lookup = {}
     for item in items:
         start_local = localtime(item.start_time)
         if start_local.date() != selected_date:
             continue
 
-        mid = item.master_id
-        slot_key = start_local.strftime("%H:%M")
-        total_min = int(getattr(item, "duration_min", 0) or 0)
-        rowspan = max(1, (-(-total_min // 15)))  # ceil
+        duration_minutes = int(getattr(item, 'duration_min', 0) or 0)
+        rowspan = max(1, (-(-duration_minutes // 15)))  # ceil
+        end_local = start_local + timedelta(minutes=duration_minutes)
+        status_code, _, _ = _resolve_item_status(item)
+        prepared = {
+            'item': item,
+            'master_id': item.master_id,
+            'start': start_local,
+            'end': end_local,
+            'rowspan': rowspan,
+            'status_code': status_code,
+            'is_cancelled': status_code == 'CANCELLED',
+            'validation_enabled': getattr(item, 'validation_enabled', True),
+        }
+        prepared_items.append(prepared)
+        entry_lookup[item.pk] = prepared
 
-        last_status = item.appointment.appointmentstatushistory_set.order_by("-set_at").first()
-        is_cancelled = bool(last_status and last_status.status_id == cancelled_id)
+        for i in range(rowspan):
+            t = (start_local + timedelta(minutes=15 * i)).strftime('%H:%M')
+            if t not in slot_times:
+                slot_times.append(t)
 
-        if not is_cancelled:
-            two_col_map[mid][slot_key] = {
-                "kind": "appt_active",
-                "rowspan": rowspan,
-                "colspan": 2,
-                "item": item,
-            }
-            for i in range(rowspan):
-                t = (start_local + timedelta(minutes=15 * i)).strftime("%H:%M")
-                skip_two[mid][t] = True
-        else:
+    items_by_master = {}
+    for entry in prepared_items:
+        items_by_master.setdefault(entry['master_id'], []).append(entry)
+
+    lane_assignments = {}
+    for mid, bucket in items_by_master.items():
+        bucket.sort(key=lambda e: (e['start'], str(e['item'].pk)))
+        to_lane = set()
+        for i, first in enumerate(bucket):
+            for second in bucket[i + 1:]:
+                if second['start'] >= first['end']:
+                    break
+                if first['start'] < second['end'] and second['start'] < first['end']:
+                    if (not first['validation_enabled']) or (not second['validation_enabled']):
+                        to_lane.add(first['item'].pk)
+                        to_lane.add(second['item'].pk)
+        if not to_lane:
+            continue
+
+        graph = {pk: set() for pk in to_lane}
+        for i, first in enumerate(bucket):
+            pk_first = first['item'].pk
+            if pk_first not in to_lane:
+                continue
+            for second in bucket[i + 1:]:
+                pk_second = second['item'].pk
+                if pk_second not in to_lane:
+                    continue
+                if second['start'] >= first['end']:
+                    break
+                if first['start'] < second['end'] and second['start'] < first['end']:
+                    graph[pk_first].add(pk_second)
+                    graph[pk_second].add(pk_first)
+
+        assigned = {}
+        visited = set()
+        for pk in graph:
+            if pk in visited:
+                continue
+            component = []
+            stack = [pk]
+            visited.add(pk)
+            while stack:
+                node = stack.pop()
+                component.append(node)
+                for nbr in graph.get(node, ()):
+                    if nbr not in visited:
+                        visited.add(nbr)
+                        stack.append(nbr)
+            component.sort(key=lambda val: (entry_lookup[val]['start'], str(val)))
+            lane_toggle = 0
+            for comp_pk in component:
+                assigned[comp_pk] = lane_toggle % 2
+                lane_toggle += 1
+        if assigned:
+            lane_assignments[mid] = assigned
+
+    for entry in prepared_items:
+        item = entry['item']
+        mid = entry['master_id']
+        slot_key = entry['start'].strftime('%H:%M')
+        rowspan = entry['rowspan']
+
+        if entry['is_cancelled']:
             lane0_busy = skip_lane[mid][0].get(slot_key) or (slot_key in cancel_lanes[mid][0])
             lane = 0 if not lane0_busy else 1
             cancel_lanes[mid][lane][slot_key] = {
-                "kind": "appt_cancelled",
-                "rowspan": rowspan,
-                "colspan": 1,
-                "item": item,
+                'kind': 'appt_cancelled',
+                'rowspan': rowspan,
+                'colspan': 1,
+                'item': item,
             }
             for i in range(rowspan):
-                t = (start_local + timedelta(minutes=15 * i)).strftime("%H:%M")
+                t = (entry['start'] + timedelta(minutes=15 * i)).strftime('%H:%M')
                 skip_lane[mid][lane][t] = True
+            continue
+
+        assigned_lane = lane_assignments.get(mid, {}).get(item.pk)
+        if assigned_lane is not None:
+            lane_bucket = overlap_lanes[mid][assigned_lane]
+            if slot_key not in lane_bucket:
+                lane_bucket[slot_key] = {
+                    'kind': 'appt_active' if assigned_lane == 0 else 'appt_active_right',
+                    'rowspan': rowspan,
+                    'colspan': 1,
+                    'item': item,
+                }
+            for i in range(rowspan):
+                t = (entry['start'] + timedelta(minutes=15 * i)).strftime('%H:%M')
+                skip_lane[mid][assigned_lane][t] = True
+            continue
+
+        two_col_map[mid][slot_key] = {
+            'kind': 'appt_active',
+            'rowspan': rowspan,
+            'colspan': 2,
+            'item': item,
+        }
+        for i in range(rowspan):
+            t = (entry['start'] + timedelta(minutes=15 * i)).strftime('%H:%M')
+            skip_two[mid][t] = True
+
+    slot_times.sort()
 
     # ───── тайм-офф (перерывы/отпуска) ─────────────────────────────────────────
     for period in availabilities:
@@ -6385,6 +7060,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                     start_idx = 0
                 span_times = slot_times[start_idx:start_idx + cell["rowspan"]]
                 overlaps_cancel_left = any(skip_lane[mid][0].get(t) for t in span_times)
+                left_lane_overlap = overlap_lanes[mid][0].get(time_str)
 
                 if not overlaps_cancel_left:
                     if cell["kind"] == "appt_active":
@@ -6431,6 +7107,18 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                             show_cancelled=True,
                         )
                     )
+                elif left_lane_overlap:
+                    lane_cell = _make_item_cell(
+                        kind=left_lane_overlap["kind"],
+                        item=left_lane_overlap["item"],
+                        rowspan=left_lane_overlap["rowspan"],
+                        colspan=1,
+                        master_obj=master,
+                        bg=MASTER_COLORS.get(mid),
+                        show_cancelled=False,
+                    )
+                    lane_cell["status_class"] = f"{lane_cell.get('status_class', '')} lane-left".strip()
+                    row["cells"].append(lane_cell)
                 elif not skip_lane[mid][0].get(time_str):
                     row["cells"].append({
                         "rowspan": 1, "colspan": 1, "kind": "free_half",
@@ -6438,34 +7126,41 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                     })
 
                 # правая половина переносимого блока
-                row["cells"].append(
-                    _make_item_cell(
-                        kind="appt_active_right" if cell["kind"] == "appt_active" else "unavailable_right",
+                if cell["kind"] == "appt_active":
+                    lane_right_cell = _make_item_cell(
+                        kind="appt_active_right",
                         item=cell.get("item"),
                         rowspan=cell["rowspan"],
                         colspan=1,
                         master_obj=master,
                         bg=MASTER_COLORS.get(mid),
                         show_cancelled=False,
-                    ) if cell["kind"] == "appt_active" else
-                    _make_unavail_cell(
-                        kind="unavailable_right",
-                        rowsp=cell["rowspan"],
-                        colspan=1,
-                        avail_id=cell["availability_id"],
-                        reason=cell["reason"],
-                        from_s=cell["from"],
-                        to_s=cell["to"],
-                        until_s=cell["until"],
                     )
-                )
+                    lane_right_cell["status_class"] = f"{lane_right_cell.get('status_class', '')} lane-right".strip()
+                    row["cells"].append(lane_right_cell)
+                else:
+                    row["cells"].append(
+                        _make_unavail_cell(
+                            kind="unavailable_right",
+                            rowsp=cell["rowspan"],
+                            colspan=1,
+                            avail_id=cell["availability_id"],
+                            reason=cell["reason"],
+                            from_s=cell["from"],
+                            to_s=cell["to"],
+                            until_s=cell["until"],
+                        )
+                    )
                 continue
 
             # 2) lane-режим (отменённые/перенесённые)
             lane0_start = time_str in cancel_lanes[mid][0]
+            lane1_start = time_str in cancel_lanes[mid][1]
+            left_lane_active = overlap_lanes[mid][0].get(time_str)
+            right_lane_active = overlap_lanes[mid][1].get(time_str)
             lane0_skip = bool(skip_lane[mid][0].get(time_str))
             lane1_skip = bool(skip_lane[mid][1].get(time_str))
-            lane_mode = lane0_start or lane0_skip or lane1_skip
+            lane_mode = lane0_start or lane1_start or lane0_skip or lane1_skip or left_lane_active or right_lane_active
 
             if lane_mode:
                 # левая половинка
@@ -6482,6 +7177,18 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                             show_cancelled=True,
                         )
                     )
+                elif left_lane_active:
+                    lane_cell = _make_item_cell(
+                        kind=left_lane_active["kind"],
+                        item=left_lane_active["item"],
+                        rowspan=left_lane_active["rowspan"],
+                        colspan=1,
+                        master_obj=master,
+                        bg=MASTER_COLORS.get(mid),
+                        show_cancelled=False,
+                    )
+                    lane_cell["status_class"] = f"{lane_cell.get('status_class', '')} lane-left".strip()
+                    row["cells"].append(lane_cell)
                 elif not lane0_skip:
                     row["cells"].append({
                         "rowspan": 1, "colspan": 1, "kind": "free_half",
@@ -6489,7 +7196,33 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                     })
 
                 # правая половинка
-                if not lane1_skip:
+                c1 = cancel_lanes[mid][1].get(time_str)
+                if c1:
+                    row["cells"].append(
+                        _make_item_cell(
+                            kind="appt_cancelled",
+                            item=c1["item"],
+                            rowspan=c1["rowspan"],
+                            colspan=1,
+                            master_obj=master,
+                            bg=MASTER_COLORS.get(mid),
+                            show_cancelled=True,
+                        )
+                    )
+                elif right_lane_active:
+                    lane_cell = _make_item_cell(
+                        kind=right_lane_active["kind"],
+                        item=right_lane_active["item"],
+                        rowspan=right_lane_active["rowspan"],
+                        colspan=1,
+                        master_obj=master,
+                        bg=MASTER_COLORS.get(mid),
+                        show_cancelled=False,
+                    )
+                    if right_lane_active["kind"] == "appt_active_right":
+                        lane_cell["status_class"] = f"{lane_cell.get('status_class', '')} lane-right".strip()
+                    row["cells"].append(lane_cell)
+                elif not lane1_skip:
                     row["cells"].append({
                         "rowspan": 1, "colspan": 1, "kind": "free_half",
                         "master_id": mid, "html": "", "lane": "right"
@@ -6510,6 +7243,26 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             })
 
         calendar_table.append(row)
+
+    note_badge_html = (
+        f"<span class='badge badge--note' title='Notes available'>"
+        f"<img src=\"{NOTES_BADGE_ICON_URL}\" alt=\"Notes present\" class=\"badge-icon\" height=\"24\"/>"
+        f"</span>"
+    )
+
+    for row in calendar_table:
+        for cell in row["cells"]:
+            appt = cell.get("appointment")
+            if not appt:
+                continue
+
+            has_note = bool(getattr(appt, "notes", "").strip()) or bool(cell.get("has_note"))
+            if not has_note:
+                continue
+
+            cell["has_note"] = True
+            if "badge--note" not in cell.get("html", ""):
+                cell["html"] = cell.get("html", "") + note_badge_html
 
     return calendar_table
 

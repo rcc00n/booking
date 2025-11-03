@@ -12,6 +12,7 @@
     ar: 'ar',
     hi: 'hi-IN'
   };
+  const ATTR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]*$/;
 
   const translations = {
     en: {
@@ -53,6 +54,7 @@
           openMenu: 'Open menu',
           closeMenu: 'Close menu',
           closeMenuText: 'Close menu',
+          menuLabel: 'Main menu',
           calendar: 'Open calendar shortcuts',
           notifications: 'Notifications',
           openCart: 'Open cart'
@@ -115,6 +117,7 @@
         },
         cards: {
           addToCart: 'Add to cart',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
@@ -162,21 +165,34 @@
           noMasters: 'No masters available',
           noAvailability: 'No availability',
           mobileEmpty: 'No availability yet.',
+          mobileDate: 'Date',
+          cartPreviewLabel: 'In your cart',
+          cartPreviewEmpty: 'Add services to your cart to see them here.',
+          cartPreviewUnknownMaster: 'Any master',
+          cartPreviewMeta: '{{master}} · {{time}} · {{duration}}',
+          cartPreviewTotals: 'Total: {{total}} • {{duration}}',
+          cartPreviewFee: '{{fee}} card processing fee (3% + $0.50) included.',
           success: 'Service added to cart.',
           errorAdd: 'Could not add service to cart',
-          errorGeneric: 'Add to cart error'
+          errorGeneric: 'Add to cart error',
+          inCartShort: 'In cart',
+          slotInCart: 'Already in your cart'
         },
         cart: {
           title: 'Cart',
           empty: 'Your cart is empty.',
           summary: 'Total: {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
+          discount: 'Discount',
           checkout: 'Checkout',
           open: 'Open cart',
           loadFailed: 'Could not load cart',
           removeSuccess: 'Item removed from cart.',
           removeFailed: 'Failed to remove item',
           checkoutFailed: 'Checkout failed',
+          finalizeFailed: 'Failed to finalize booking.',
           checkoutSuccess: 'Appointment created! Redirecting…',
+          freeSuccess: 'Appointment booked. No payment required.',
           remove: 'Remove item'
         },
         payment: {
@@ -245,6 +261,7 @@
           service: 'Service',
           master: 'Master',
           status: 'Status',
+          payment: 'Payment status',
           amount: 'Amount'
         },
         myTitle: 'My appointments',
@@ -259,6 +276,15 @@
         notificationsTitle: 'Notifications',
         comingSoon: 'Coming soon.',
         profileTitle: 'Profile',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'First name',
           lastName: 'Last name',
@@ -327,6 +353,7 @@
           openMenu: 'Open menu',
           closeMenu: 'Close menu',
           closeMenuText: 'Close menu',
+          menuLabel: 'Main menu',
           calendar: 'Open calendar shortcuts',
           notifications: 'Notifications',
           openCart: 'Open cart'
@@ -389,6 +416,7 @@
         },
         cards: {
           addToCart: 'В корзину',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
@@ -436,21 +464,34 @@
           noMasters: 'Нет доступных мастеров',
           noAvailability: 'Слоты недоступны',
           mobileEmpty: 'No availability yet.',
+          mobileDate: 'Date',
+          cartPreviewLabel: 'In your cart',
+          cartPreviewEmpty: 'Add services to your cart to see them here.',
+          cartPreviewUnknownMaster: 'Any master',
+          cartPreviewMeta: '{{master}} · {{time}} · {{duration}}',
+          cartPreviewTotals: 'Total: {{total}} • {{duration}}',
+          cartPreviewFee: '{{fee}} card processing fee (3% + $0.50) included.',
           success: 'Услуга добавлена в корзину.',
           errorAdd: 'Не удалось добавить услугу в корзину',
-          errorGeneric: 'Ошибка добавления в корзину'
+          errorGeneric: 'Ошибка добавления в корзину',
+          inCartShort: 'In cart',
+          slotInCart: 'Already in your cart'
         },
         cart: {
           title: 'Корзина',
           empty: 'Ваша корзина пуста.',
           summary: 'Итого: {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
+          discount: 'Discount',
           checkout: 'Оформить',
           open: 'Open cart',
           loadFailed: 'Не удалось загрузить корзину',
           removeSuccess: 'Запись удалена из корзины.',
           removeFailed: 'Не удалось удалить запись',
           checkoutFailed: 'Не удалось оформить запись',
+          finalizeFailed: 'Failed to finalize booking.',
           checkoutSuccess: 'Запись создана! Перенаправляем…',
+          freeSuccess: 'Appointment booked. No payment required.',
           remove: 'Удалить'
         },
         userMenu: {
@@ -508,6 +549,7 @@
           service: 'Услуга',
           master: 'Мастер',
           status: 'Статус',
+          payment: 'Статус оплаты',
           amount: 'Сумма'
         },
         myTitle: 'Мои записи',
@@ -522,6 +564,15 @@
         notificationsTitle: 'Уведомления',
         comingSoon: 'Скоро появится.',
         profileTitle: 'Профиль',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'Имя',
           lastName: 'Фамилия',
@@ -590,6 +641,7 @@
           openMenu: 'Open menu',
           closeMenu: 'Close menu',
           closeMenuText: 'Close menu',
+          menuLabel: 'Main menu',
           calendar: 'Open calendar shortcuts',
           notifications: 'Notifications',
           openCart: 'Open cart'
@@ -643,6 +695,7 @@
         },
         cards: {
           addToCart: 'कार्ट में जोड़ें',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
@@ -690,21 +743,34 @@
           noMasters: 'कोई मास्टर उपलब्ध नहीं है',
           noAvailability: 'स्लॉट उपलब्ध नहीं हैं',
           mobileEmpty: 'No availability yet.',
+          mobileDate: 'Date',
+          cartPreviewLabel: 'In your cart',
+          cartPreviewEmpty: 'Add services to your cart to see them here.',
+          cartPreviewUnknownMaster: 'Any master',
+          cartPreviewMeta: '{{master}} · {{time}} · {{duration}}',
+          cartPreviewTotals: 'Total: {{total}} • {{duration}}',
+          cartPreviewFee: '{{fee}} card processing fee (3% + $0.50) included.',
           success: 'सेवा कार्ट में जोड़ दी गई है।',
           errorAdd: 'सेवा को कार्ट में जोड़ नहीं सके',
-          errorGeneric: 'कार्ट में जोड़ने में त्रुटि'
+          errorGeneric: 'कार्ट में जोड़ने में त्रुटि',
+          inCartShort: 'In cart',
+          slotInCart: 'Already in your cart'
         },
         cart: {
           title: 'कार्ट',
           empty: 'आपका कार्ट खाली है।',
           summary: 'कुल: {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
+          discount: 'Discount',
           checkout: 'चेकआउट',
           open: 'Open cart',
           loadFailed: 'कार्ट लोड नहीं हो सका',
           removeSuccess: 'आइटम कार्ट से हटाया गया।',
           removeFailed: 'आइटम हटाया नहीं जा सका',
           checkoutFailed: 'चेकआउट असफल रहा',
+          finalizeFailed: 'Failed to finalize booking.',
           checkoutSuccess: 'अपॉइंटमेंट बन गया! रीडायरेक्ट किया जा रहा है…',
+          freeSuccess: 'Appointment booked. No payment required.',
           remove: 'आइटम हटाएँ'
         },
         userMenu: {
@@ -762,6 +828,7 @@
           service: 'सेवा',
           master: 'मास्टर',
           status: 'स्थिति',
+          payment: 'भुगतान स्थिति',
           amount: 'राशि'
         },
         myTitle: 'मेरी अपॉइंटमेंट्स',
@@ -776,6 +843,15 @@
         notificationsTitle: 'सूचनाएँ',
         comingSoon: 'जल्द उपलब्ध होगा।',
         profileTitle: 'प्रोफ़ाइल',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'पहला नाम',
           lastName: 'अंतिम नाम',
@@ -844,6 +920,7 @@
           openMenu: 'Open menu',
           closeMenu: 'Close menu',
           closeMenuText: 'Close menu',
+          menuLabel: 'Main menu',
           calendar: 'Open calendar shortcuts',
           notifications: 'Notifications',
           openCart: 'Open cart'
@@ -897,6 +974,7 @@
         },
         cards: {
           addToCart: 'До кошика',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
@@ -944,21 +1022,34 @@
           noMasters: 'Немає доступних майстрів',
           noAvailability: 'Немає доступних слотів',
           mobileEmpty: 'No availability yet.',
+          mobileDate: 'Date',
+          cartPreviewLabel: 'In your cart',
+          cartPreviewEmpty: 'Add services to your cart to see them here.',
+          cartPreviewUnknownMaster: 'Any master',
+          cartPreviewMeta: '{{master}} · {{time}} · {{duration}}',
+          cartPreviewTotals: 'Total: {{total}} • {{duration}}',
+          cartPreviewFee: '{{fee}} card processing fee (3% + $0.50) included.',
           success: 'Послугу додано до кошика.',
           errorAdd: 'Не вдалося додати послугу до кошика',
-          errorGeneric: 'Помилка додавання до кошика'
+          errorGeneric: 'Помилка додавання до кошика',
+          inCartShort: 'In cart',
+          slotInCart: 'Already in your cart'
         },
         cart: {
           title: 'Кошик',
           empty: 'Ваш кошик порожній.',
           summary: 'Разом: {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
+          discount: 'Discount',
           checkout: 'Оформити',
           open: 'Open cart',
           loadFailed: 'Не вдалося завантажити кошик',
           removeSuccess: 'Послугу видалено з кошика.',
           removeFailed: 'Не вдалося видалити послугу',
           checkoutFailed: 'Не вдалося оформити запис',
+          finalizeFailed: 'Failed to finalize booking.',
           checkoutSuccess: 'Запис створено! Перенаправляємо…',
+          freeSuccess: 'Appointment booked. No payment required.',
           remove: 'Видалити'
         },
         userMenu: {
@@ -1016,6 +1107,7 @@
           service: 'Послуга',
           master: 'Майстер',
           status: 'Статус',
+          payment: 'Статус оплати',
           amount: 'Сума'
         },
         myTitle: 'Мої записи',
@@ -1030,6 +1122,15 @@
         notificationsTitle: 'Сповіщення',
         comingSoon: 'Скоро з’явиться.',
         profileTitle: 'Профіль',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'Ім’я',
           lastName: 'Прізвище',
@@ -1140,6 +1241,7 @@
         },
         cards: {
           addToCart: 'Ajouter au panier',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
@@ -1187,21 +1289,34 @@
           noMasters: 'Aucun praticien disponible',
           noAvailability: 'Aucune disponibilité',
           mobileEmpty: 'No availability yet.',
+          mobileDate: 'Date',
+          cartPreviewLabel: 'In your cart',
+          cartPreviewEmpty: 'Add services to your cart to see them here.',
+          cartPreviewUnknownMaster: 'Any master',
+          cartPreviewMeta: '{{master}} · {{time}} · {{duration}}',
+          cartPreviewTotals: 'Total: {{total}} • {{duration}}',
+          cartPreviewFee: '{{fee}} card processing fee (3% + $0.50) included.',
           success: 'Service ajouté au panier.',
           errorAdd: 'Impossible d’ajouter le service au panier',
-          errorGeneric: 'Erreur lors de l’ajout au panier'
+          errorGeneric: 'Erreur lors de l’ajout au panier',
+          inCartShort: 'In cart',
+          slotInCart: 'Already in your cart'
         },
         cart: {
           title: 'Panier',
           empty: 'Votre panier est vide.',
           summary: 'Total : {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
+          discount: 'Discount',
           checkout: 'Valider',
           open: 'Open cart',
           loadFailed: 'Impossible de charger le panier',
           removeSuccess: 'Élément retiré du panier.',
           removeFailed: 'Impossible de retirer l’élément',
           checkoutFailed: 'Impossible de finaliser la réservation',
+          finalizeFailed: 'Failed to finalize booking.',
           checkoutSuccess: 'Rendez-vous créé ! Redirection…',
+          freeSuccess: 'Appointment booked. No payment required.',
           remove: 'Retirer l’élément'
         },
         userMenu: {
@@ -1259,6 +1374,7 @@
           service: 'Service',
           master: 'Praticien',
           status: 'Statut',
+          payment: 'Statut de paiement',
           amount: 'Montant'
         },
         myTitle: 'Mes rendez-vous',
@@ -1273,6 +1389,15 @@
         notificationsTitle: 'Notifications',
         comingSoon: 'Bientôt disponible.',
         profileTitle: 'Profil',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'Prénom',
           lastName: 'Nom',
@@ -1341,6 +1466,7 @@
           openMenu: 'Open menu',
           closeMenu: 'Close menu',
           closeMenuText: 'Close menu',
+          menuLabel: 'Main menu',
           calendar: 'Open calendar shortcuts',
           notifications: 'Notifications',
           openCart: 'Open cart'
@@ -1394,6 +1520,7 @@
         },
         cards: {
           addToCart: 'أضف إلى السلة',
+          viewDetails: 'View details',
           tagPopular: 'Popular',
           noImage: 'Preview coming soon',
           imageAltFallback: 'Service preview'
@@ -1441,21 +1568,34 @@
           noMasters: 'لا يوجد خبراء متاحون',
           noAvailability: 'لا توجد مواعيد متاحة',
           mobileEmpty: 'No availability yet.',
+          mobileDate: 'Date',
+          cartPreviewLabel: 'In your cart',
+          cartPreviewEmpty: 'Add services to your cart to see them here.',
+          cartPreviewUnknownMaster: 'Any master',
+          cartPreviewMeta: '{{master}} · {{time}} · {{duration}}',
+          cartPreviewTotals: 'Total: {{total}} • {{duration}}',
+          cartPreviewFee: '{{fee}} card processing fee (3% + $0.50) included.',
           success: 'تمت إضافة الخدمة إلى السلة.',
           errorAdd: 'تعذر إضافة الخدمة إلى السلة',
-          errorGeneric: 'خطأ أثناء الإضافة إلى السلة'
+          errorGeneric: 'خطأ أثناء الإضافة إلى السلة',
+          inCartShort: 'In cart',
+          slotInCart: 'Already in your cart'
         },
         cart: {
           title: 'السلة',
           empty: 'سلتك فارغة.',
           summary: 'الإجمالي: {{total}} · {{duration}}',
+          processingFeeNotice: '{{fee}} card processing fee (3% + $0.50) is included in the total.',
+          discount: 'Discount',
           checkout: 'إتمام الحجز',
           open: 'Open cart',
           loadFailed: 'تعذر تحميل السلة',
           removeSuccess: 'تمت إزالة العنصر من السلة.',
           removeFailed: 'تعذر إزالة العنصر',
           checkoutFailed: 'تعذر إتمام الحجز',
+          finalizeFailed: 'Failed to finalize booking.',
           checkoutSuccess: 'تم إنشاء الموعد! سيتم تحويلك…',
+          freeSuccess: 'Appointment booked. No payment required.',
           remove: 'إزالة العنصر'
         },
         userMenu: {
@@ -1513,6 +1653,7 @@
           service: 'الخدمة',
           master: 'الخبير',
           status: 'الحالة',
+          payment: 'حالة الدفع',
           amount: 'المبلغ'
         },
         myTitle: 'مواعيدي',
@@ -1527,6 +1668,15 @@
         notificationsTitle: 'الإشعارات',
         comingSoon: 'قريباً.',
         profileTitle: 'الملف الشخصي',
+        forms: {
+          pending: 'Forms outstanding',
+          actionNeeded: 'Action needed: we still need your intake form.',
+          complete: 'Complete {{count}} form(s) before your next visit.',
+          completeCta: 'Complete now',
+          upToDate: 'All required forms are on file.',
+          review: 'Need to make changes? Update your answers anytime.',
+          reviewCta: 'Review forms'
+        },
         form: {
           firstName: 'الاسم الأول',
           lastName: 'اسم العائلة',
@@ -1663,24 +1813,66 @@
     }
   }
 
+  function stripWrapperChars(value) {
+    if (!value) return '';
+    let result = String(value).trim();
+    while (result.length) {
+      if (result.charAt(0) === '\\') {
+        result = result.slice(1).trim();
+        continue;
+      }
+      if (result.charAt(result.length - 1) === '\\') {
+        result = result.slice(0, -1).trim();
+        continue;
+      }
+      const first = result.charAt(0);
+      const last = result.charAt(result.length - 1);
+      if (
+        (first === '"' && last === '"') ||
+        (first === "'" && last === "'") ||
+        (first === '`' && last === '`')
+      ) {
+        result = result.slice(1, -1).trim();
+        continue;
+      }
+      break;
+    }
+    return result;
+  }
+
+  function sanitizeAttrName(name) {
+    if (!name) return '';
+    const cleaned = stripWrapperChars(name);
+    return ATTR_NAME_PATTERN.test(cleaned) ? cleaned : '';
+  }
+
+  function sanitizeAttrKey(key) {
+    if (key === undefined || key === null) return '';
+    return stripWrapperChars(key);
+  }
+
   function parseAttrSpec(spec) {
     if (!spec) return [];
+    const normalized = stripWrapperChars(spec);
     try {
-      const parsed = JSON.parse(spec);
+      const parsed = JSON.parse(normalized);
       if (parsed && typeof parsed === 'object') {
         return Object.keys(parsed).map(function (attr) {
-          return { attr: attr, key: parsed[attr] };
-        });
+          const attrName = sanitizeAttrName(attr);
+          const keyName = sanitizeAttrKey(parsed[attr]);
+          if (!attrName || !keyName) return null;
+          return { attr: attrName, key: keyName };
+        }).filter(Boolean);
       }
     } catch (err) {
       /* ignore */
     }
-    return spec.split(',').map(function (item) {
+    return normalized.split(',').map(function (item) {
       const idx = item.indexOf(':');
       if (idx === -1) return null;
-      const attr = item.slice(0, idx).trim();
-      const key = item.slice(idx + 1).trim();
-      if (!attr) return null;
+      const attr = sanitizeAttrName(item.slice(0, idx));
+      const key = sanitizeAttrKey(item.slice(idx + 1));
+      if (!attr || !key) return null;
       return { attr: attr, key: key };
     }).filter(Boolean);
   }

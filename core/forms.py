@@ -1,7 +1,7 @@
 import json
 import re
 from pathlib import Path
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from dal import autocomplete
 from django import forms
@@ -15,7 +15,7 @@ from django.contrib.auth.forms import (
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, Q
 from django.forms import BaseInlineFormSet, inlineformset_factory
 from django.template import TemplateDoesNotExist, engines
@@ -793,6 +793,69 @@ def _parse_stock_value(value: str):
     return number
 
 
+_DURATION_TOKEN_RE = re.compile(
+    r"(\d+(?:[.,]\d*)?)\s*(h(?:ours?)?|hr|hrs?|hour|hours|m(?:in(?:ute)?s?)?|mins?|minute|minutes)\b",
+    re.IGNORECASE,
+)
+
+_DURATION_FALLBACK_NUMBER = re.compile(r"\d+(?:[.,]\d*)?")
+
+
+def _raise_duration_error():
+    raise forms.ValidationError("Enter duration in minutes (e.g. '1h 30m' or '90').")
+
+
+def _parse_duration_minutes(value: str, *, required: bool) -> int | None:
+    text = _coerce_cell_value(value)
+    if not text:
+        return None if not required else _raise_duration_error()
+
+    total = Decimal("0")
+    for match in _DURATION_TOKEN_RE.finditer(text):
+        number_raw, unit_raw = match.groups()
+        try:
+            number = Decimal(number_raw.replace(",", "."))
+        except (InvalidOperation, ValueError):
+            continue
+        unit = unit_raw.lower()
+        if unit.startswith("h"):
+            total += number * Decimal("60")
+        else:
+            total += number
+
+    if total == 0:
+        fallback_match = _DURATION_FALLBACK_NUMBER.search(text)
+        if fallback_match:
+            try:
+                total = Decimal(fallback_match.group().replace(",", "."))
+            except (InvalidOperation, ValueError):
+                total = Decimal("0")
+
+    if total <= 0:
+        return None if not required else _raise_duration_error()
+
+    minutes = int(total.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return minutes if minutes > 0 else (None if not required else _raise_duration_error())
+
+
+def _parse_tax_value(value: str) -> bool:
+    text = _coerce_cell_value(value).lower()
+    if not text:
+        return False
+    if text in {"yes", "y", "true", "1"}:
+        return True
+    if text in {"no", "n", "false", "0"}:
+        return False
+    match = _DURATION_FALLBACK_NUMBER.search(text)
+    if match:
+        try:
+            number = Decimal(match.group().replace(",", "."))
+        except (InvalidOperation, ValueError):
+            return False
+        return number > 0
+    return "gst" in text or "tax" in text
+
+
 class ProductImportRowForm(forms.Form):
     name = forms.CharField(max_length=200)
     sku = forms.CharField(max_length=64, required=False)
@@ -814,6 +877,46 @@ class ProductImportRowForm(forms.Form):
 
     def clean_total_stock(self):
         return _parse_stock_value(self.cleaned_data.get("total_stock"))
+
+
+class ServiceImportUploadForm(forms.Form):
+    import_file = forms.FileField(
+        label="Services file",
+        help_text="Upload CSV or XLSX with columns: Service Name, Retail Price, Duration, Extra Time, Tax, Description, Category.",
+    )
+
+    def clean_import_file(self):
+        uploaded = self.cleaned_data["import_file"]
+        filename = (uploaded.name or "").lower()
+        if not any(filename.endswith(ext) for ext in PRODUCT_IMPORT_SUPPORTED_EXTENSIONS):
+            raise forms.ValidationError("Unsupported file type. Upload CSV or XLSX.")
+        uploaded.seek(0)
+        return uploaded
+
+
+class ServiceImportRowForm(forms.Form):
+    name = forms.CharField(max_length=100)
+    description = forms.CharField(required=False)
+    base_price = forms.CharField()
+    duration = forms.CharField()
+    extra_time = forms.CharField(required=False)
+    tax = forms.CharField(required=False)
+    category = forms.CharField(max_length=100, required=False)
+
+    def clean_base_price(self):
+        value = _parse_decimal_value(self.cleaned_data.get("base_price"))
+        if value is None:
+            raise forms.ValidationError("Retail price is required.")
+        return value
+
+    def clean_duration(self):
+        return _parse_duration_minutes(self.cleaned_data.get("duration"), required=True)
+
+    def clean_extra_time(self):
+        return _parse_duration_minutes(self.cleaned_data.get("extra_time"), required=False)
+
+    def clean_tax(self):
+        return _parse_tax_value(self.cleaned_data.get("tax"))
 # -----------------------------
 # Custom User Change Form
 # -----------------------------
@@ -1013,14 +1116,17 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         profile.address = address
         profile.save()
 
-
         uploaded_files = self.files.getlist('files')
-        for f in uploaded_files:
-            ClientFile.objects.create(
-                user=user,
-                file=f,
-                file_type=""
-            )
+        if uploaded_files:
+            with transaction.atomic():
+                for f in uploaded_files:
+                    if not f or not getattr(f, "name", None):
+                        continue
+                    ClientFile.objects.create(
+                        user=profile,
+                        file=f,
+                        uploaded_by=ClientFile.ADMIN,
+                    )
         return user
 
 
@@ -1453,3 +1559,47 @@ class ClientIntakeFormAdminForm(forms.ModelForm):
                     raise forms.ValidationError(f"Field key '{key}' is duplicated.")
                 seen_keys.add(key)
         return data
+
+
+class PaymentRefundForm(forms.Form):
+    """
+    Validate staff-selected refund amounts against appointment payment limits.
+    """
+
+    amount_to_refund = forms.DecimalField(
+        label="Amount to refund",
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+    )
+    item_ids = forms.MultipleChoiceField(required=False)
+    product_ids = forms.MultipleChoiceField(required=False)
+
+    def __init__(self, *args, **kwargs):
+        self.max_refund_minor = int(kwargs.pop("max_refund_minor", 0) or 0)
+        item_choices = kwargs.pop("item_choices", ())
+        product_choices = kwargs.pop("product_choices", ())
+        super().__init__(*args, **kwargs)
+
+        self.fields["item_ids"].choices = list(item_choices)
+        self.fields["product_ids"].choices = list(product_choices)
+
+        amount_widget = self.fields["amount_to_refund"].widget
+        amount_widget.attrs.setdefault("step", "0.01")
+        amount_widget.attrs.setdefault("min", "0.01")
+        amount_widget.attrs.setdefault("data-refund-amount-input", "1")
+        amount_widget.attrs.setdefault("autocomplete", "off")
+        amount_widget.attrs.setdefault("inputmode", "decimal")
+
+    @staticmethod
+    def _to_minor_units(amount: Decimal) -> int:
+        quantized = Decimal(amount or Decimal("0.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return int((quantized * 100).to_integral_value(rounding=ROUND_HALF_UP))
+
+    def clean_amount_to_refund(self) -> Decimal:
+        amount = self.cleaned_data["amount_to_refund"]
+        amount_minor = self._to_minor_units(amount)
+        if self.max_refund_minor and amount_minor > self.max_refund_minor:
+            raise ValidationError("Refund amount exceeds amount paid for this appointment.")
+        self.cleaned_data["amount_minor"] = amount_minor
+        return amount

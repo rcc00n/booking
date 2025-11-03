@@ -16,12 +16,22 @@
                 <p class="svc-subtitle">{% trans "Manage your service menu and pricing" %}</p>
             </div>
             <div class="svc-header__actions">
+                {% if import_url %}
+                    <a class="svc-btn svc-btn--ghost" href="{{ import_url }}">
+                        <i class="fas fa-file-upload" aria-hidden="true"></i> {{ import_label|default:"Import services" }}
+                    </a>
+                {% endif %}
                 <a class="svc-btn svc-btn--ghost" href="{{ export_url|default:'#' }}">
                     <i class="fas fa-download" aria-hidden="true"></i> {% trans "Export XLSX" %}
                 </a>
                 <a class="svc-btn svc-btn--primary" href="{% url cl.opts|admin_urlname:'add' %}">
                     <i class="fas fa-plus" aria-hidden="true"></i> {% trans "Add Service" %}
                 </a>
+                {% if reset_url %}
+                    <a class="svc-btn svc-btn--danger" href="{{ reset_url }}">
+                        <i class="fas fa-trash-alt" aria-hidden="true"></i> {{ reset_label|default:"Delete all" }}
+                    </a>
+                {% endif %}
             </div>
         </div>
 
@@ -219,6 +229,5 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 {% endblock %}
-
 
 

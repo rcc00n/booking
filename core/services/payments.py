@@ -7,12 +7,15 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable, Optional
 
 import stripe
+import logging
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.utils import timezone
 
 from core.models import Appointment, Payment, PaymentMethod, PaymentStatus
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -120,6 +123,65 @@ def _set_appointment_status_from_intent(appointment: Appointment, status: str) -
     if appointment.payment_status_id != target.id:
         appointment.payment_status = target
         appointment.save(update_fields=["payment_status"])
+
+
+def _stripe_obj_get(obj, attr, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(attr, default)
+    try:
+        return getattr(obj, attr)
+    except AttributeError:
+        getter = getattr(obj, "get", None)
+        if callable(getter):
+            try:
+                return getter(attr, default)
+            except Exception:
+                return default
+        return default
+
+
+def _normalize_intent_id(candidate) -> Optional[str]:
+    if candidate is None:
+        return None
+    if isinstance(candidate, str):
+        return candidate
+    intent_id = getattr(candidate, "id", None)
+    return intent_id or None
+
+
+def _extract_payment_intent_id(event_object) -> Optional[str]:
+    intent_candidate = _stripe_obj_get(event_object, "payment_intent")
+    intent_id = _normalize_intent_id(intent_candidate)
+    if intent_id:
+        return intent_id
+
+    charge_candidate = _stripe_obj_get(event_object, "charge")
+    charge_intent = _stripe_obj_get(charge_candidate, "payment_intent")
+    charge_intent_id = _normalize_intent_id(charge_intent)
+    if charge_intent_id:
+        return charge_intent_id
+
+    charge_id = None
+    if isinstance(charge_candidate, str):
+        charge_id = charge_candidate
+    else:
+        charge_id = _stripe_obj_get(charge_candidate, "id")
+
+    if charge_id:
+        try:
+            _require_stripe()
+            charge = stripe.Charge.retrieve(charge_id)
+        except stripe.error.StripeError:
+            logger.exception("Unable to retrieve Stripe charge %s while handling refund event", charge_id)
+            return None
+        intent_candidate = _stripe_obj_get(charge, "payment_intent")
+        intent_id = _normalize_intent_id(intent_candidate)
+        if intent_id:
+            return intent_id
+
+    return None
 
 
 def create_or_update_payment_intent(
@@ -254,29 +316,73 @@ def _apply_intent(
     *,
     amount_decimal: Optional[Decimal] = None,
 ) -> Payment:
-    capture_ts = None
-    charge = None
-    if getattr(intent, "charges", None):
-        charge = intent.charges.data[0] if intent.charges.data else None
-    if charge and charge.get("created"):
-        capture_ts = datetime.fromtimestamp(charge["created"], tz=dt_timezone.utc)
+    charges_collection = getattr(intent, "charges", None)
+    charges_data = list(getattr(charges_collection, "data", []) or [])
+    primary_charge = _stripe_obj_get(intent, "latest_charge")
 
-    payment.amount = amount_decimal if amount_decimal is not None else _from_minor_units(intent.amount)
-    payment.status = intent.status
-    payment.livemode = bool(intent.livemode)
+    if isinstance(primary_charge, str):
+        primary_charge = next(
+            (item for item in charges_data if _stripe_obj_get(item, "id") == primary_charge),
+            None,
+        )
+    if primary_charge is None and charges_data:
+        primary_charge = charges_data[0]
+
+    capture_ts = None
+    created_ts = _stripe_obj_get(primary_charge, "created")
+    if created_ts:
+        try:
+            capture_ts = datetime.fromtimestamp(int(created_ts), tz=dt_timezone.utc)
+        except (TypeError, ValueError):
+            capture_ts = None
+
+    payment.amount = amount_decimal if amount_decimal is not None else _from_minor_units(getattr(intent, "amount", None))
+    payment.status = getattr(intent, "status", payment.status)
+    payment.livemode = bool(getattr(intent, "livemode", payment.livemode))
     payment.stripe_payment_method_id = getattr(intent, "payment_method", None)
-    payment.amount_received = _from_minor_units(getattr(intent, "amount_received", None))
-    if charge:
-        payment.amount_refunded = _from_minor_units(charge.get("amount_refunded"))
-    else:
-        payment.amount_refunded = Decimal("0.00")
+    payment.amount_received = _from_minor_units(_stripe_obj_get(intent, "amount_received"))
+
+    refunded_minor_total = 0
+    for charge_obj in charges_data:
+        refunded_minor = _stripe_obj_get(charge_obj, "amount_refunded")
+        if refunded_minor:
+            try:
+                refunded_minor_total += int(refunded_minor)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Unexpected Stripe charge refund amount %s for payment %s",
+                    refunded_minor,
+                    payment.pk,
+                )
+
+    if refunded_minor_total == 0:
+        single_refund = _stripe_obj_get(primary_charge, "amount_refunded")
+        if single_refund:
+            try:
+                refunded_minor_total = int(single_refund)
+            except (TypeError, ValueError):
+                refunded_minor_total = 0
+
+    payment.amount_refunded = _from_minor_units(refunded_minor_total)
+
     payment.raw_response = intent.to_dict_recursive()
     payment.metadata = intent.metadata or {}
     payment.captured_at = capture_ts
 
-    if charge:
-        payment.stripe_charge_id = charge.get("id")
-        payment.receipt_url = charge.get("receipt_url", "") or ""
+    if primary_charge:
+        charge_id = _stripe_obj_get(primary_charge, "id")
+        if charge_id:
+            payment.stripe_charge_id = charge_id
+        receipt_url = _stripe_obj_get(primary_charge, "receipt_url")
+        if receipt_url is not None:
+            payment.receipt_url = receipt_url or ""
+
+    logger.info(
+        "Synced payment %s from intent %s (refunded_minor=%s)",
+        payment.pk,
+        getattr(intent, "id", None),
+        refunded_minor_total,
+    )
 
     payment.save()
     return payment
@@ -285,7 +391,7 @@ def _apply_intent(
 def sync_payment_from_intent(intent_id: str) -> Payment:
     """Fetch an intent from Stripe and persist its state."""
     _require_stripe()
-    intent = stripe.PaymentIntent.retrieve(intent_id, expand=["charges"])
+    intent = stripe.PaymentIntent.retrieve(intent_id, expand=["charges", "latest_charge"])
     payment = Payment.objects.filter(stripe_payment_intent_id=intent.id).first()
     if not payment:
         raise Payment.DoesNotExist(f"Payment matching intent {intent.id} not found")
@@ -296,21 +402,33 @@ def sync_payment_from_intent(intent_id: str) -> Payment:
 
 def handle_webhook_event(event: stripe.Event) -> Payment:
     """Handle relevant webhook events and update payments accordingly."""
-    if event.type not in {
+    event_type = event.type
+
+    if event_type in {
         "payment_intent.succeeded",
         "payment_intent.payment_failed",
         "payment_intent.canceled",
         "payment_intent.processing",
     }:
-        raise ValueError(f"Unhandled Stripe event type {event.type}")
+        intent = event.data.object
+        payment = Payment.objects.filter(stripe_payment_intent_id=intent.id).first()
+        if not payment:
+            raise Payment.DoesNotExist(f"Payment for intent {intent.id} not found")
+        _apply_intent(payment, intent)
+        _set_appointment_status_from_intent(payment.appointment, intent.status)
+        return payment
 
-    intent = event.data.object
-    payment = Payment.objects.filter(stripe_payment_intent_id=intent.id).first()
-    if not payment:
-        raise Payment.DoesNotExist(f"Payment for intent {intent.id} not found")
+    if event_type in {"charge.refunded", "refund.updated"}:
+        event_object = event.data.object
+        intent_id = _extract_payment_intent_id(event_object)
+        if not intent_id:
+            raise ValueError(f"Refund event {event_type} missing payment_intent reference")
+        payment = sync_payment_from_intent(intent_id)
+        logger.info(
+            "Processed Stripe refund webhook %s for payment intent %s",
+            event_type,
+            intent_id,
+        )
+        return payment
 
-    _apply_intent(payment, intent)
-
-    _set_appointment_status_from_intent(payment.appointment, intent.status)
-
-    return payment
+    raise ValueError(f"Unhandled Stripe event type {event_type}")

@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <body style="font-family: Arial, sans-serif; line-height: 1.5; color: #222;">
+    <h2 style="margin-top: 0;">{{ service_name|default:"Your service" }} is confirmed</h2>
+    <p>
+      Hello, {{ client_name|default:"there" }}!
+    </p>
+    <p>
+      We have scheduled your service{% if master_name %} with {{ master_name }}{% endif %}
+      for {{ start_local }}{% if end_local %}, finishing around {{ end_local }}{% endif %}.
+    </p>
+    <p>
+      If you need to make any changes, please contact us and we will be happy to help.
+    </p>
+    <p style="margin-bottom: 0;">
+      See you soon!<br />
+      {{ business_name|default:"Malva Booking" }}
+    </p>
+  </body>
+</html>

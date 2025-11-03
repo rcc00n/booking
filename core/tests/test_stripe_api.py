@@ -2,7 +2,7 @@
 
 import json
 from decimal import Decimal
-from datetime import time, timedelta
+from datetime import datetime, time, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -18,12 +18,82 @@ from core.models import (
     MasterProfile,
     MasterWorkDay,
     Payment,
+    PaymentMethod,
+    PaymentStatus,
     Service,
     ServiceCategory,
     ServiceMaster,
 )
 from core.tests.utils import assign_service_room
+from core.payments import stripe_api
 from core.payments.stripe_api import _ensure_appointment_from_cart
+
+
+class MetadataUtilityTests(TestCase):
+    def test_safe_meta_truncates_and_stringifies(self):
+        oversized = "x" * (stripe_api._MAX_META_LEN + 80)
+        payload = {
+            "user_id": 42,
+            "details": {"nested": ["a", "b"]},
+            "oversized": oversized,
+        }
+
+        safe = stripe_api._safe_meta(payload)
+
+        self.assertEqual(safe["user_id"], "42")
+        self.assertEqual(safe["details"], json.dumps({"nested": ["a", "b"]}, separators=(",", ":")))
+        self.assertLessEqual(len(safe["oversized"]), stripe_api._MAX_META_LEN + 1)
+        self.assertTrue(safe["oversized"].endswith("…") or safe["oversized"].endswith("..."))
+
+    def test_safe_meta_prioritizes_core_keys(self):
+        payload = {f"extra_{idx}": str(idx) for idx in range(60)}
+        payload.update(
+            {
+                "appointment_id": "appt-1",
+                "user_id": "user-1",
+                "cart_id": "cart-1",
+                "grand_total_minor": 1234,
+            }
+        )
+
+        safe = stripe_api._safe_meta(payload)
+
+        self.assertLessEqual(len(safe), 45)
+        for key in ("appointment_id", "user_id", "cart_id", "grand_total_minor"):
+            self.assertIn(key, safe)
+
+    def test_compact_cart_metadata_generates_compact_summary(self):
+        pricing = {
+            "currency": "cad",
+            "grand_total_minor": 15000,
+            "tax_minor": 900,
+            "processing_fee_minor": 300,
+            "service_fee_minor": 0,
+            "subtotal_minor": 13800,
+            "discount_minor": 0,
+            "item_count": 5,
+            "items": [
+                {"name": "Service A", "total_minor": 5000, "base_minor": 5000, "discount_minor": 0},
+                {"name": "Service B", "total_minor": 4000, "base_minor": 4500, "discount_minor": 500},
+                {"name": "Service C", "total_minor": 3000, "base_minor": 3000, "discount_minor": 0},
+            ],
+        }
+
+        meta = stripe_api._compact_cart_metadata(
+            user_id=7,
+            cart_id=11,
+            pricing=pricing,
+            prepayment_percent=50,
+            partial_total_minor=7500,
+            appointment_id="appt-7",
+            cart_finalized=True,
+        )
+
+        self.assertTrue(all(isinstance(value, str) for value in meta.values()))
+        self.assertEqual(meta["user_id"], "7")
+        self.assertEqual(meta["cart_finalized"], "true")
+        summary = json.loads(meta["cart_pricing"])
+        self.assertLessEqual(len(summary.get("items", [])), 3)
 
 
 class DummyStripeObject:
@@ -80,11 +150,15 @@ class StripeWebhookTests(TestCase):
         ServiceMaster.objects.create(service=self.service, master=self.master_profile)
 
         cart = BookingCart.for_user(self.profile)
+        start_dt = timezone.make_aware(
+            datetime.combine((timezone.now() + timedelta(days=1)).date(), time(12, 0)),
+            timezone.get_current_timezone(),
+        )
         BookingCartItem.objects.create(
             cart=cart,
             service=self.service,
             master=self.master_profile,
-            start_time=timezone.now() + timedelta(days=1),
+            start_time=start_dt,
         )
 
     def _fake_intent(self, metadata: dict, *, payment_method: str = 'pm_card_visa', amount_minor: int = 5200):
@@ -192,6 +266,86 @@ class StripeWebhookTests(TestCase):
         self.assertIsNone(payment.appointment)
         self.assertEqual(payment.amount, Decimal('52.00'))
 
+    @patch('core.payments.stripe_api.payment_services.sync_payment_from_intent')
+    @patch('core.payments.stripe_api.stripe.Webhook.construct_event')
+    def test_webhook_charge_refund_updated_syncs_payment(self, mock_construct, mock_sync):
+        method = PaymentMethod.objects.create(name="Credit card")
+        payment_status = PaymentStatus.objects.create(name="Pending")
+        appointment = Appointment.objects.create(
+            client=self.profile,
+            start_time=timezone.now(),
+            payment_status=payment_status,
+        )
+        payment = Payment.objects.create(
+            appointment=appointment,
+            amount=Decimal("100.00"),
+            amount_received=Decimal("100.00"),
+            amount_refunded=Decimal("0.00"),
+            method=method,
+            status="succeeded",
+            stripe_payment_intent_id="pi_refund",
+            stripe_charge_id="ch_refund",
+        )
+
+        def _sync(intent_id):
+            self.assertEqual(intent_id, "pi_refund")
+            payment.amount_refunded = Decimal("25.00")
+            payment.save(update_fields=["amount_refunded", "updated_at"])
+            return payment
+
+        mock_sync.side_effect = _sync
+        mock_construct.return_value = {
+            "type": "charge.refund.updated",
+            "data": {"object": {"id": "re_test", "payment_intent": "pi_refund", "charge": "ch_refund"}},
+        }
+
+        response = self.client.post(
+            "/stripe/webhook/",
+            data=b"{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="sig",
+        )
+        self.assertEqual(response.status_code, 200)
+        payment.refresh_from_db()
+        self.assertEqual(payment.amount_refunded, Decimal("25.00"))
+        mock_sync.assert_called_once_with("pi_refund")
+
+    @patch('core.payments.stripe_api.payment_services.sync_payment_from_intent')
+    @patch('core.payments.stripe_api.stripe.Webhook.construct_event')
+    def test_webhook_charge_refunded_uses_charge_lookup(self, mock_construct, mock_sync):
+        method = PaymentMethod.objects.create(name="Credit card")
+        payment_status = PaymentStatus.objects.create(name="Pending")
+        appointment = Appointment.objects.create(
+            client=self.profile,
+            start_time=timezone.now(),
+            payment_status=payment_status,
+        )
+        payment = Payment.objects.create(
+            appointment=appointment,
+            amount=Decimal("80.00"),
+            amount_received=Decimal("80.00"),
+            amount_refunded=Decimal("0.00"),
+            method=method,
+            status="succeeded",
+            stripe_payment_intent_id="pi_charge_lookup",
+            stripe_charge_id="ch_charge_lookup",
+        )
+
+        mock_sync.side_effect = lambda intent_id: payment
+        mock_construct.return_value = {
+            "type": "charge.refunded",
+            "data": {"object": {"id": "re_other", "charge": "ch_charge_lookup"}},
+        }
+
+        response = self.client.post(
+            "/stripe/webhook/",
+            data=b"{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="sig",
+        )
+        self.assertEqual(response.status_code, 200)
+        mock_sync.assert_called_once_with("pi_charge_lookup")
+
     @override_settings(STRIPE_SECRET_KEY='sk_test', STRIPE_WEBHOOK_SECRET='wh_test')
     @patch('core.payments.stripe_api.stripe.PaymentMethod.retrieve')
     @patch('core.payments.stripe_api.stripe.PaymentIntent.create')
@@ -295,8 +449,10 @@ class StripeFinalizeCartTests(TestCase):
         for offset in range(1, 8):
             candidate = base + timedelta(days=offset)
             if candidate.weekday() < 6:  # masters work Mon-Sat in tests
-                return candidate
-        return base + timedelta(days=1)
+                local_dt = datetime.combine(candidate.date(), time(12, 0))
+                return timezone.make_aware(local_dt, timezone.get_current_timezone())
+        local_dt = datetime.combine((base + timedelta(days=1)).date(), time(12, 0))
+        return timezone.make_aware(local_dt, timezone.get_current_timezone())
 
     def _create_cart_item(self, start=None):
         cart = BookingCart.for_user(self.profile)

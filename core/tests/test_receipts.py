@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 import uuid
@@ -11,9 +12,11 @@ from django.core.files.base import ContentFile
 from django.test import TestCase
 from django.utils import timezone
 
-from core.models import Appointment, Payment, PaymentMethod
+from core.models import Appointment, AppointmentItem, MasterProfile, Payment, PaymentMethod, Service, ServiceCategory
 from core.services import receipts
 from core.tasks import email_payment_receipt_task
+from core.payments import stripe_api
+from core.tests.utils import assign_service_room
 
 
 class PaymentReceiptServiceTests(TestCase):
@@ -62,6 +65,89 @@ class PaymentReceiptServiceTests(TestCase):
             self.assertEqual(payment.receipt_pdf.read(), b"second")
             payment.receipt_pdf.close()
             pdf_mock.assert_called_once()
+
+    def test_build_payment_context_with_compact_metadata(self):
+        payment = self._create_payment()
+        pricing_snapshot = {
+            "currency": "cad",
+            "grand_total_minor": 12500,
+            "tax_minor": 500,
+            "processing_fee_minor": 250,
+            "service_fee_minor": 0,
+            "subtotal_minor": 11750,
+            "discount_minor": 0,
+            "item_count": 4,
+            "items": [
+                {"name": "Facial", "total_minor": 5000, "base_minor": 5000, "discount_minor": 0, "tax_minor": 200},
+                {"name": "Massage", "total_minor": 4500, "base_minor": 4500, "discount_minor": 0, "tax_minor": 180},
+                {"name": "Add-on", "total_minor": 2000, "base_minor": 2200, "discount_minor": 200, "tax_minor": 120},
+                {"name": "Bonus", "total_minor": 1500, "base_minor": 1500, "discount_minor": 0},
+            ],
+        }
+        payment.metadata = stripe_api._compact_cart_metadata(
+            user_id=payment.pk,
+            cart_id="cart-context",
+            pricing=pricing_snapshot,
+            cart_finalized=True,
+        )
+        payment.save(update_fields=["metadata"])
+
+        context = receipts.build_payment_context(payment)
+        self.assertEqual(len(context["items"]), 3)
+        totals = context["totals"]
+        self.assertEqual(totals.total, Decimal("125.00"))
+        self.assertEqual(totals.processing_fee, Decimal("2.50"))
+
+    def test_build_payment_context_without_metadata_uses_appointment(self):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="receipt-user@example.com",
+            email="receipt-user@example.com",
+            password="pass123",
+        )
+        profile = user.userprofile
+        master_user = user_model.objects.create_user(
+            username="master-receipt@example.com",
+            email="master-receipt@example.com",
+            password="pass123",
+        )
+        master_profile = MasterProfile.objects.create(user=master_user.userprofile)
+        category = ServiceCategory.objects.create(name="Therapy")
+        service = Service.objects.create(
+            name="Therapy Session",
+            base_price=Decimal("80.00"),
+            duration_min=60,
+            category=category,
+        )
+        assign_service_room(service, room_name="Receipt Room")
+        appointment = Appointment.objects.create(
+            client=profile,
+            start_time=timezone.now(),
+        )
+        AppointmentItem.objects.create(
+            appointment=appointment,
+            service=service,
+            unit_price=Decimal("80.00"),
+            final_price=Decimal("80.00"),
+            tax_amount=Decimal("4.00"),
+            master=master_profile,
+            start_time=timezone.now(),
+        )
+
+        payment = Payment.objects.create(
+            appointment=appointment,
+            amount=Decimal("84.00"),
+            currency="cad",
+            method=PaymentMethod.objects.create(name="Card"),
+            status="succeeded",
+            metadata={},
+        )
+
+        context = receipts.build_payment_context(payment)
+        self.assertEqual(len(context["items"]), 1)
+        totals = context["totals"]
+        self.assertEqual(totals.total, Decimal("84.00"))
+        self.assertEqual(totals.tax_total, Decimal("4.00"))
 
 
 class PaymentReceiptTasksTests(TestCase):

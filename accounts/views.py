@@ -1,6 +1,8 @@
 # accounts/views.py
 from __future__ import annotations
 
+from collections import OrderedDict
+from dataclasses import dataclass
 from decimal import Decimal
 import hashlib
 import json
@@ -26,13 +28,13 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.db.models import OuterRef, Subquery, Count, Prefetch, Sum, F, Q
 from django.db.models.functions import TruncMonth
 
 from core.models import (
     Service,
     Appointment,
-    AppointmentStatusHistory,
     UserProfile,
     AppointmentItem,
     Product,
@@ -245,6 +247,149 @@ class MainMenuView(LoginRequiredMixin, TemplateView):
 # =========================
 # Личный кабинет клиента
 # =========================
+@dataclass(slots=True)
+class DashboardAppointmentCard:
+    """
+    Simple container for appointments rendered on the dashboard.
+    """
+
+    id: str
+    start_iso: str
+    start_display: str
+    service_name: str
+    service_original: str
+    service_id: str | None
+    master_name: str
+    payment_status: str | None
+    price: str | None
+    is_future: bool
+    aggregated_status_code: str
+    aggregated_status_label: str
+    items: list[dict[str, object]]
+
+
+def _dashboard_master_name(item: AppointmentItem | None) -> str:
+    if not item or not item.master:
+        return "—"
+    profile = getattr(item.master, "user", None)
+    account_user = getattr(profile, "user", None) if profile else None
+    if account_user:
+        full_name = account_user.get_full_name()
+        if full_name:
+            return full_name
+        if account_user.username:
+            return account_user.username
+    for attr in ("full_name", "name"):
+        value = getattr(item.master, attr, "")
+        if value:
+            return value
+    return "—"
+
+
+def build_dashboard_appointments(
+    appointments: Iterable[Appointment],
+    now_local: timezone.datetime,
+) -> list[dict[str, object]]:
+    grouped: OrderedDict[timezone.datetime, dict[str, object]] = OrderedDict()
+    tz = now_local.tzinfo or timezone.get_current_timezone()
+
+    for appointment in appointments:
+        if not appointment.start_time:
+            continue
+
+        start_local = timezone.localtime(appointment.start_time, tz)
+        month_anchor = start_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        bucket = grouped.get(month_anchor)
+        if bucket is None:
+            bucket = {
+                "label": date_format(month_anchor, "F Y"),
+                "iso": month_anchor.date().isoformat(),
+                "appointments": [],
+            }
+            grouped[month_anchor] = bucket
+
+        items = getattr(appointment, "prefetched_items", None)
+        if items is None:
+            items = list(
+                appointment.items.select_related("service", "master__user").order_by("start_time")
+            )
+
+        item = items[0] if items else None
+        service_original = ""
+        service_name = "Service"
+        service_id = None
+        if item and item.service:
+            service_original = item.service.name or ""
+            service_name = service_original or "Service"
+            if item.service_id:
+                service_id = str(item.service_id)
+
+        start_iso = start_local.isoformat()
+        aggregated_code = getattr(appointment, "aggregated_status_code", "") or "BOOKED"
+        aggregated_label = getattr(appointment, "aggregated_status", "") or aggregated_code.title()
+
+        items_payload: list[dict[str, object]] = []
+        for appt_item in items:
+            status_code = (getattr(appt_item, "current_status_code", "") or "").upper()
+            if not status_code:
+                status_obj = getattr(appt_item, "status", None)
+                status_code = (getattr(status_obj, "code", "") or "").upper() or "BOOKED"
+            status_label = (
+                getattr(appt_item, "current_status_label", None)
+                or getattr(getattr(appt_item, "status", None), "name", None)
+                or status_code.title()
+            )
+            item_start_display = ""
+            item_is_future = False
+            if appt_item.start_time:
+                item_start_local = timezone.localtime(appt_item.start_time, tz)
+                item_start_display = date_format(item_start_local, "d M Y, H:i")
+                item_is_future = item_start_local >= now_local
+            items_payload.append(
+                {
+                    "id": str(appt_item.pk),
+                    "service_name": getattr(appt_item.service, "name", "") if appt_item.service else "",
+                    "master_name": _dashboard_master_name(appt_item),
+                    "start_display": item_start_display,
+                    "service_id": str(appt_item.service_id) if getattr(appt_item, "service_id", None) else "",
+                    "status_code": status_code,
+                    "status_label": status_label,
+                    "is_future": item_is_future,
+                    "can_manage": item_is_future and status_code != "CANCELLED",
+                }
+            )
+
+        card = DashboardAppointmentCard(
+            id=str(appointment.pk),
+            start_iso=start_iso,
+            start_display=date_format(start_local, "d M Y, H:i"),
+            service_name=service_name,
+            service_original=service_original,
+            service_id=service_id,
+            master_name=_dashboard_master_name(item),
+            payment_status=appointment.payment_status.name if appointment.payment_status else None,
+            price=str(appointment.final_price) if appointment.final_price is not None else None,
+            is_future=start_local >= now_local,
+            aggregated_status_code=aggregated_code,
+            aggregated_status_label=aggregated_label,
+            items=items_payload,
+        )
+        bucket["appointments"].append(card)
+
+    return [
+        {
+            "label": data["label"],
+            "iso": data["iso"],
+            "appointments": sorted(
+                data["appointments"],
+                key=lambda card: card.start_iso,
+                reverse=True,
+            ),
+        }
+        for _, data in sorted(grouped.items(), key=lambda pair: pair[0], reverse=True)
+    ]
+
+
 class ClientDashboardView(LoginRequiredMixin, TemplateView):
     """
     GET  → страница и данные
@@ -256,11 +401,12 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         ctx = super().get_context_data(**kwargs)
         user = self.request.user
         now = timezone.now()
+        now_local = timezone.localtime(now)
 
         # профиль может отсутствовать → None
         profile = getattr(user, "userprofile", None)
         ctx["profile"] = profile
-        ctx["now"] = now
+        ctx["now"] = now_local
         ctx["profile_form"] = ClientProfileForm(user=user)
         ctx["support_email"] = getattr(settings, "BUSINESS_SUPPORT_EMAIL", getattr(settings, "DEFAULT_FROM_EMAIL", "support@malvabooking.com"))
         ctx["business_phone"] = getattr(settings, "BUSINESS_PHONE", "")
@@ -271,24 +417,22 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         ctx["services"] = Service.objects.filter(is_active=True).order_by("name")
 
         # подзапрос на последний статус записи
-        latest_status = (
-            AppointmentStatusHistory.objects.filter(appointment_id=OuterRef("pk"))
-            .order_by("-set_at")
-            .values("status__name")[:1]
-        )
-
         # все записи клиента (для статистики/истории)
         items_prefetch = Prefetch(
             "items",
-            queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
+            queryset=(
+                AppointmentItem.objects.with_current_status()
+                .select_related("service", "master__user")
+                .order_by("start_time")
+            ),
+            to_attr="prefetched_items",
         )
 
         qs = (
-            Appointment.objects
+            Appointment.objects.with_aggregated_status()
             .filter(client=getattr(user, "userprofile", None))
             .select_related("payment_status")
             .prefetch_related(items_prefetch)
-            .annotate(current_status=Subquery(latest_status))
             .order_by("-start_time")
         )
         ctx["appointments"] = qs
@@ -299,11 +443,42 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         # 🔹 все будущие (по возрастанию), исключая отменённые
         upcoming_qs = (
             qs.filter(start_time__gte=now)
-              .exclude(current_status="Cancelled")
+              .exclude(_aggregated_status_code="CANCELLED")
               .order_by("start_time")
         )
         ctx["upcoming_appointments"] = upcoming_qs
         ctx["next_appointment"] = upcoming_qs.first()  # для обратной совместимости
+        if profile:
+            upcoming_items_qs = (
+                AppointmentItem.objects.with_current_status()
+                .filter(
+                    appointment__client=profile,
+                    start_time__gte=now,
+                )
+                .exclude(current_status_code="CANCELLED")
+                .select_related("service", "master__user", "appointment__payment_status")
+                .order_by("start_time")
+            )
+            upcoming_items = list(upcoming_items_qs)
+            if upcoming_items:
+                appointment_ids = {item.appointment_id for item in upcoming_items}
+                aggregated_rows = (
+                    Appointment.objects.with_aggregated_status()
+                    .filter(pk__in=appointment_ids)
+                    .values("id", "_aggregated_status_code", "_aggregated_status_label")
+                )
+                aggregated_map = {row["id"]: row for row in aggregated_rows}
+                for item in upcoming_items:
+                    row = aggregated_map.get(item.appointment_id)
+                    if row and hasattr(item, "appointment"):
+                        item.appointment._cache_aggregated_status(
+                            row["_aggregated_status_code"],
+                            row["_aggregated_status_label"],
+                        )
+        else:
+            upcoming_items = []
+
+        ctx["upcoming_items"] = upcoming_items
 
         # статистика по месяцам (для графика)
         month_counts = (
@@ -334,6 +509,10 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         ctx["pending_intake_assignments"] = pending_assignments
         ctx["total_intake_assignments"] = total_assignments
 
+        ctx["appointments_by_month"] = (
+            build_dashboard_appointments(qs, now_local) if profile else []
+        )
+
         ctx["stripe_public_key"] = settings.STRIPE_PUBLIC_KEY
 
         return ctx
@@ -346,7 +525,7 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         form = ClientProfileForm(request.POST, user=request.user)
         if form.is_valid():
             form.save()
-            messages.success(request, "Профиль обновлён.")
+            messages.success(request, "Profile updated.")
             return redirect(reverse("dashboard") + "#overview")
 
         ctx = self.get_context_data()

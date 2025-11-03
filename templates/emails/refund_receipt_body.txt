@@ -1,0 +1,8 @@
+Hello {{ client_name }},
+
+We processed your refund for {{ refund.amount|floatformat:2 }} {{ refund.currency }}.
+
+Appointment: {% if appointment_datetime %}{{ appointment_datetime|date:"Y-m-d H:i" }}{% else %}N/A{% endif %}
+A PDF copy of your refund receipt is attached.
+
+Thank you!

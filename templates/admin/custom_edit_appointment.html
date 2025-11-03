@@ -108,11 +108,28 @@
         .pay-split{position:relative}
         .pay-menu{position:absolute;right:0;top:calc(100% + 6px);background:#fff;border:1px solid #d1d5db;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,0.18);padding:10px;min-width:220px;z-index:20}
         .pay-menu[hidden]{display:none}
-        .pay-menu__item{width:100%;text-align:left;padding:8px 10px;border:none;border-radius:8px;background:#f9fafb;color:#111827;font-size:14px;cursor:pointer;margin-bottom:6px}
+        .pay-menu__item{display:block;width:100%;text-align:left;padding:8px 10px;border:none;border-radius:8px;background:#f9fafb;color:#111827;font-size:14px;cursor:pointer;margin-bottom:6px;text-decoration:none}
         .pay-menu__item:last-of-type{margin-bottom:0}
         .pay-menu__item.accent{background:#111827;color:#fff}
         .pay-menu__item:hover{background:#e5e7eb;color:#0f172a}
         .pay-menu hr{border:none;border-top:1px solid #e5e7eb;margin:6px 0}
+        .pay-actions{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+        .ab-btn[disabled]{opacity:0.5;cursor:not-allowed}
+        .pay-menu__empty{padding:8px 10px;color:#6b7280;font-size:13px;text-align:left}
+        .ab-item-status{margin:14px 0 4px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+        .ab-item-status-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;background:#e0f2fe;color:#075985;font-weight:600;font-size:13px}
+        .ab-item-status-pill.status-confirmed{background:#dcfce7;color:#166534}
+        .ab-item-status-pill.status-completed{background:#ede9fe;color:#5b21b6}
+        .ab-item-status-pill.status-noshow{background:#fef3c7;color:#92400e}
+        .ab-item-status-pill.status-cancelled{background:#fee2e2;color:#991b1b}
+        .ab-item-status-actions{display:flex;gap:8px;flex-wrap:wrap}
+        .ab-item-status-btn{border:1px solid #d1d5db;background:#fff;color:#111827;padding:8px 14px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:background-color .2s,color .2s,border-color .2s}
+        .ab-item-status-btn:hover{background:#111827;color:#fff;border-color:#111827}
+        .ab-item-status-btn.danger{border-color:#fecaca;color:#b91c1c}
+        .ab-item-status-btn.danger:hover{background:#b91c1c;color:#fff;border-color:#b91c1c}
+        .ab-item-status-btn.disabled{opacity:0.5;cursor:not-allowed}
+        .ab-item-status-btn.loading{opacity:0.6;cursor:wait}
+        .ab-item-status-note{font-size:12px;color:#6b7280}
 
     </style>
 {% endblock %}
@@ -122,6 +139,7 @@
     <div class="ab-wrap">
         <form method="post" novalidate>
             {% csrf_token %}
+            <input type="hidden" name="return_to_date" value="{{ return_to_date|default:'' }}">
 
             <nav class="tabs" id="tabs">
                 <button type="button" class="tab active" data-tab="details">Appointment details</button>
@@ -217,6 +235,10 @@
                                             <span>Paid</span>
                                             <strong id="appt-paid">{{ currency_symbol|default:"CA$" }}{{ paid_total|floatformat:2 }}</strong>
                                         </div>
+                                        <div class="ab-summary-line">
+                                            <span>Refunded</span>
+                                            <strong id="appt-refunded">{{ currency_symbol|default:"CA$" }}{{ refunded_total|floatformat:2 }}</strong>
+                                        </div>
                                     {% else %}
                                         {% with gross=form.instance.final_price|default_if_none:0 tax=form.instance.tax_amount|default_if_none:0 %}
                                             <div class="ab-summary-line">
@@ -250,6 +272,10 @@
                                             <div class="ab-summary-line">
                                                 <span>Paid</span>
                                                 <strong id="appt-paid">{{ currency_symbol|default:"CA$" }}{{ paid_total|floatformat:2 }}</strong>
+                                            </div>
+                                            <div class="ab-summary-line">
+                                                <span>Refunded</span>
+                                                <strong id="appt-refunded">{{ currency_symbol|default:"CA$" }}{{ refunded_total|floatformat:2 }}</strong>
                                             </div>
                                         {% endwith %}
                                     {% endif %}
@@ -297,7 +323,14 @@
                                  data-base-price="{% if pricing %}{{ pricing.base_price|floatformat:2 }}{% elif f.instance.service %}{{ f.instance.service.base_price|floatformat:2 }}{% elif f.instance.unit_price %}{{ f.instance.unit_price|floatformat:2 }}{% else %}0.00{% endif %}"
                                  data-discount-amount="{% if pricing %}{{ pricing.discount_amount|floatformat:2 }}{% else %}0.00{% endif %}"
                                  data-final-price="{% if pricing %}{{ pricing.final_price|floatformat:2 }}{% else %}{{ f.instance.final_price|default_if_none:0|floatformat:2 }}{% endif %}"
-                                 data-tax-amount="{% if pricing %}{{ pricing.tax_amount|floatformat:2 }}{% else %}{{ f.instance.tax_amount|default_if_none:0|floatformat:2 }}{% endif %}">
+                                 data-tax-amount="{% if pricing %}{{ pricing.tax_amount|floatformat:2 }}{% else %}{{ f.instance.tax_amount|default_if_none:0|floatformat:2 }}{% endif %}"
+                                 data-status-code="{% if f.instance.status %}{{ f.instance.status.code }}{% else %}BOOKED{% endif %}"
+                                 data-status-label="{% if f.instance.status %}{{ f.instance.status.name }}{% else %}Booked{% endif %}"
+                                 {% if f.instance.pk %}
+                                 data-item-id="{{ f.instance.pk }}"
+                                 data-status-url="/admin/api/appointment-items/{{ f.instance.pk }}/status/"
+                                 data-reschedule-url="/admin/api/appointment-items/{{ f.instance.pk }}/reschedule/"
+                                 {% endif %}>
                                 {% if f.non_field_errors %}<div class="ab-err">{{ f.non_field_errors }}</div>{% endif %}
                                 {% for h in f.hidden_fields %}{{ h }}{% endfor %}
 
@@ -334,6 +367,26 @@
                                     </div>
                                 </div>
 
+                                <div class="ab-item-status" data-role="item-status">
+                                    <div class="ab-item-status-pill" data-role="status-pill">
+                                        {% if f.instance.status %}
+                                            {{ f.instance.status.name }}
+                                        {% else %}
+                                            Booked
+                                        {% endif %}
+                                    </div>
+                                    {% if f.instance.pk %}
+                                        <div class="ab-item-status-actions">
+                                            <button type="button" class="ab-item-status-btn" data-action="confirm">Confirm</button>
+                                            <button type="button" class="ab-item-status-btn" data-action="complete">Complete</button>
+                                            <button type="button" class="ab-item-status-btn" data-action="noshow">No show</button>
+                                            <button type="button" class="ab-item-status-btn danger" data-action="cancel">Cancel</button>
+                                        </div>
+                                    {% else %}
+                                        <div class="ab-item-status-note">Save this appointment to manage item status.</div>
+                                    {% endif %}
+                                </div>
+
                                 <div class="ab-row">
                                     <div class="ab-field" style="grid-column: span 2;">
                                         <label>Duration (minutes)</label>
@@ -346,6 +399,23 @@
                                         {{ f.manual_discount_percent }}
                                         {% if f.manual_discount_percent.errors %}<div class="ab-err">{{ f.manual_discount_percent.errors }}</div>{% endif %}
                                         <div class="ab-muted">Applied on top of service/promocode discounts</div>
+                                    </div>
+                                </div>
+
+                                <div class="ab-row">
+                                    <div class="ab-field" data-field="validation_enabled" style="grid-column: span 2;">
+                                        {% with vf=f|getfield:"validation_enabled" %}
+                                            <div class="ab-hidden native-validation">
+                                                <input type="hidden" value="False" name="{{ vf.html_name }}">
+                                                {{ vf }}
+                                            </div>
+                                        {% endwith %}
+                                        <label>Validation</label>
+                                        <label style="display:inline-flex;gap:6px;align-items:center;">
+                                            <input type="checkbox" class="js-validation-toggle">
+                                            Enabled
+                                        </label>
+                                        <div class="ab-muted">When off, time/room validation is skipped; overlaps are allowed.</div>
                                     </div>
                                 </div>
 
@@ -466,6 +536,23 @@
                                         <label>Manual discount (%)</label>
                                         {{ f.manual_discount_percent }}
                                         <div class="ab-muted">Applied on top of service/promocode discounts</div>
+                                    </div>
+                                </div>
+
+                                <div class="ab-row">
+                                    <div class="ab-field" data-field="validation_enabled" style="grid-column: span 2;">
+                                        <div class="ab-hidden native-validation">
+                                            {% with vf=f|getfield:"validation_enabled" %}
+                                                <input type="hidden" value="False" name="{{ vf.html_name }}">
+                                                {{ vf }}
+                                            {% endwith %}
+                                        </div>
+                                        <label>Validation</label>
+                                        <label style="display:inline-flex;gap:6px;align-items:center;">
+                                            <input type="checkbox" class="js-validation-toggle">
+                                            Enabled
+                                        </label>
+                                        <div class="ab-muted">When off, time/room validation is skipped; overlaps are allowed.</div>
                                     </div>
                                 </div>
 
@@ -806,27 +893,53 @@
                     <a href="{% url 'admin:core_appointment_changelist' %}" class="ab-btn secondary">Cancel</a>
                 </div>
                 {% if form.instance.pk %}
-                    <div class="pay-split">
-                        <button
-                            type="button"
-                            class="ab-btn secondary"
-                            id="pay-btn"
-                            data-payment-add-url="{{ payment_add_url }}"
-                            data-fee-endpoint="{{ enable_card_fee_url|default:'' }}"
-                            data-appointment-id="{{ form.instance.pk }}"
-                            data-fee-applied="{{ form.instance.apply_card_processing_fee|yesno:'true,false' }}"
-                            data-terminal-start-url="{{ terminal_start_url|default:'' }}"
-                            data-terminal-conn-url="{{ terminal_conn_token_url|default:'' }}"
-                            data-payment-verify-url="{{ payment_verify_url|default:'' }}"
-                            data-amount-due="{{ appointment_outstanding_amount|default_if_none:'0.00' }}">
-                            Pay ▾
-                        </button>
-                        <div id="pay-menu" class="pay-menu" hidden>
-                            <button type="button" class="pay-menu__item" data-pay="cash">Cash</button>
-                            <button type="button" class="pay-menu__item" data-pay="etransfer">E-transfer</button>
-                            <hr>
-                            <button type="button" class="pay-menu__item ab-btn small accent" data-pay="card-credit">Credit card (terminal)</button>
-                            <button type="button" class="pay-menu__item ab-btn small accent" data-pay="card-debit">Debit card (terminal)</button>
+                    <div class="pay-actions">
+                        <div class="pay-split">
+                            <button
+                                type="button"
+                                class="ab-btn secondary"
+                                id="pay-btn"
+                                data-payment-add-url="{{ payment_add_url }}"
+                                data-fee-endpoint="{{ enable_card_fee_url|default:'' }}"
+                                data-appointment-id="{{ form.instance.pk }}"
+                                data-fee-applied="{{ form.instance.apply_card_processing_fee|yesno:'true,false' }}"
+                                data-terminal-start-url="{{ terminal_start_url|default:'' }}"
+                                data-terminal-conn-url="{{ terminal_conn_token_url|default:'' }}"
+                                data-payment-verify-url="{{ payment_verify_url|default:'' }}"
+                                data-amount-due="{{ appointment_outstanding_amount|default_if_none:'0.00' }}">
+                                Pay ▾
+                            </button>
+                            <div id="pay-menu" class="pay-menu" hidden>
+                                <button type="button" class="pay-menu__item" data-pay="cash">Cash</button>
+                                <button type="button" class="pay-menu__item" data-pay="etransfer">E-transfer</button>
+                                <hr>
+                                <button type="button" class="pay-menu__item ab-btn small accent" data-pay="card-credit">Credit card (terminal)</button>
+                                <button type="button" class="pay-menu__item ab-btn small accent" data-pay="card-debit">Debit card (terminal)</button>
+                            </div>
+                        </div>
+                        <div class="pay-split">
+                            <button
+                                type="button"
+                                class="ab-btn secondary"
+                                id="refund-btn"
+                                data-has-refunds="{% if refundable_payments %}true{% else %}false{% endif %}"
+                                {% if not refundable_payments %}disabled{% endif %}>
+                                Refund ▾
+                            </button>
+                            <div id="refund-menu" class="pay-menu" hidden>
+                                {% if refundable_payments %}
+                                    {% for entry in refundable_payments %}
+                                        <a
+                                            href="{{ entry.refund_url }}"
+                                            class="pay-menu__item refund-menu__item"
+                                            data-payment-id="{{ entry.payment_id }}">
+                                            {{ entry.label }}
+                                        </a>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="pay-menu__empty">No refundable payments available.</div>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                 {% endif %}

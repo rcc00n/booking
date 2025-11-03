@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.contrib import admin
@@ -19,6 +19,7 @@ from core.models import (
     Service,
     UserProfile,
 )
+from core.services.item_status import record_item_status
 from core.tests.utils import assign_service_room
 
 
@@ -178,3 +179,82 @@ class AppointmentNotesFeatureTests(TestCase):
                 break
 
         self.assertTrue(found_badge, "Appointment cell with note badge not rendered")
+
+    def test_calendar_renders_multiple_items_with_cancelled_styling(self):
+        appointment = Appointment.objects.create(
+            client=self.client_profile,
+            payment_status=self.payment_status,
+            start_time=timezone.now(),
+        )
+        selected_date = timezone.localtime(appointment.start_time).date()
+        base_start = timezone.make_aware(datetime.combine(selected_date, time(9, 0)))
+
+
+        active_item = AppointmentItem.objects.create(
+            appointment=appointment,
+            service=self.service,
+            master=self.master_profile,
+            start_time=base_start,
+            unit_price=Decimal("150.00"),
+        )
+        record_item_status(
+            active_item,
+            "CONFIRMED",
+            set_by_user_id=self.admin_user.id,
+            note="test-confirm",
+        )
+
+        cancelled_item = AppointmentItem.objects.create(
+            appointment=appointment,
+            service=self.service,
+            master=self.master_profile,
+            start_time=base_start + timedelta(hours=2),
+            unit_price=Decimal("150.00"),
+        )
+        record_item_status(
+            cancelled_item,
+            "CANCELLED",
+            set_by_user_id=self.admin_user.id,
+            note="test-cancel",
+        )
+
+        current_tz = timezone.get_current_timezone()
+        day_start = timezone.make_aware(datetime.combine(selected_date, time(8, 0)), current_tz)
+        day_end = timezone.make_aware(datetime.combine(selected_date, time(21, 15)), current_tz)
+        slot_times: list[str] = []
+
+        items = list(
+            AppointmentItem.objects.filter(appointment=appointment)
+            .select_related("service", "master__user", "status")
+            .order_by("start_time")
+        )
+
+        calendar_table = createTable(
+            selected_date,
+            day_start,
+            day_end,
+            slot_times,
+            items,
+            [self.master_profile],
+            [],
+        )
+
+        event_cells = []
+        for row in calendar_table:
+            for cell in row["cells"]:
+                if cell.get("item_id"):
+                    event_cells.append(cell)
+
+        item_ids = {cell["item_id"] for cell in event_cells}
+        self.assertEqual(
+            item_ids,
+            {str(active_item.pk), str(cancelled_item.pk)},
+            "Calendar should render blocks for both items",
+        )
+
+        cancelled_cells = [cell for cell in event_cells if cell["item_id"] == str(cancelled_item.pk)]
+        self.assertTrue(cancelled_cells, "Cancelled item block not present in calendar")
+        self.assertTrue(
+            any("status-cancelled" in cell.get("status_class", "") for cell in cancelled_cells),
+            "Cancelled item block missing cancelled styling",
+        )

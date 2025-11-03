@@ -1,0 +1,233 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script defer src="{% static 'core/js/payment_refund.js' %}"></script>
+{% endblock %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <style>
+        .payment-refund__grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+        .payment-refund__left {
+            flex: 1 1 55%;
+            min-width: 22rem;
+        }
+        .payment-refund__right {
+            flex: 1 1 18rem;
+            min-width: 18rem;
+        }
+        .payment-refund__section {
+            margin-bottom: 1.75rem;
+            padding: 1.25rem;
+            border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+            border-radius: 0.5rem;
+            background: #ffffff;
+        }
+        .payment-refund__section legend,
+        .payment-refund__section-title {
+            font-size: 1.15rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+        }
+        .payment-refund__list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: grid;
+            gap: 0.5rem;
+        }
+        .payment-refund__item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 0.5rem;
+        }
+        .payment-refund__item label {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            cursor: pointer;
+            width: 100%;
+        }
+        .payment-refund__item-name {
+            font-weight: 600;
+        }
+        .payment-refund__item-meta {
+            color: #555;
+            font-size: 0.9rem;
+        }
+        .payment-refund__summary dt {
+            font-weight: 600;
+        }
+        .payment-refund__summary dd {
+            margin: 0 0 0.75rem 0;
+        }
+        .payment-refund__links {
+            margin-top: 1.25rem;
+            display: flex;
+            gap: 1rem;
+        }
+        .payment-refund__links a {
+            text-decoration: none;
+        }
+        .payment-refund__summary-selected {
+            font-size: 0.95rem;
+            color: #555;
+            margin-bottom: 1rem;
+        }
+        @media (max-width: 960px) {
+            .payment-refund__grid {
+                flex-direction: column;
+            }
+            .payment-refund__left,
+            .payment-refund__right {
+                min-width: 100%;
+            }
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="payment-refund">
+    <h1>{% blocktrans %}Refund Payment{% endblocktrans %}</h1>
+
+    <p>
+        {% blocktrans %}Refunding payment{% endblocktrans %} <strong>{{ payment.pk }}</strong>
+        {% if payment.method %}
+            · {{ payment.method.name }}
+        {% endif %}
+        · <a href="{% url 'admin:core_appointment_change' appointment.pk %}">{% trans "Appointment" %}</a>
+    </p>
+
+    <form method="post" novalidate>
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="errornote">
+                {{ form.non_field_errors }}
+            </div>
+        {% endif %}
+
+        <div class="payment-refund__grid">
+            <div class="payment-refund__left">
+                <fieldset class="payment-refund__section">
+                    <legend>{% trans "Appointment Items" %}</legend>
+                    {% if items %}
+                        <ul class="payment-refund__list">
+                            {% for item in items %}
+                                <li class="payment-refund__item">
+                                    <input
+                                        type="checkbox"
+                                        id="refund-item-{{ forloop.counter }}"
+                                        name="item_ids"
+                                        value="{{ item.id }}"
+                                        data-refund-checkbox
+                                        data-amount-minor="{{ item.amount_minor }}"
+                                        {% if item.id in selected_item_ids %}checked{% endif %}
+                                    >
+                                    <label for="refund-item-{{ forloop.counter }}">
+                                        <span class="payment-refund__item-name">{{ item.name }}</span>
+                                        {% if item.master %}
+                                            <span class="payment-refund__item-meta">
+                                                {% trans "Master" %}: {{ item.master }}
+                                            </span>
+                                        {% endif %}
+                                        <span class="payment-refund__item-meta">
+                                            {% trans "Amount" %}: {{ item.display }}
+                                        </span>
+                                    </label>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="help">{% trans "No appointment items found for this payment." %}</p>
+                    {% endif %}
+                </fieldset>
+
+                <fieldset class="payment-refund__section">
+                    <legend>{% trans "Products" %}</legend>
+                    {% if products %}
+                        <ul class="payment-refund__list">
+                            {% for product in products %}
+                                <li class="payment-refund__item">
+                                    <input
+                                        type="checkbox"
+                                        id="refund-product-{{ forloop.counter }}"
+                                        name="product_ids"
+                                        value="{{ product.id }}"
+                                        data-refund-checkbox
+                                        data-amount-minor="{{ product.amount_minor }}"
+                                        {% if product.id in selected_product_ids %}checked{% endif %}
+                                    >
+                                    <label for="refund-product-{{ forloop.counter }}">
+                                        <span class="payment-refund__item-name">{{ product.name }}</span>
+                                        <span class="payment-refund__item-meta">
+                                            {% trans "Quantity" %}: {{ product.quantity }}
+                                        </span>
+                                        <span class="payment-refund__item-meta">
+                                            {% trans "Amount" %}: {{ product.display }}
+                                        </span>
+                                    </label>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="help">{% trans "No products linked to this appointment." %}</p>
+                    {% endif %}
+                </fieldset>
+            </div>
+
+            <div class="payment-refund__right">
+                <fieldset class="payment-refund__section">
+                    <legend>{% trans "Summary" %}</legend>
+                    <div class="form-row">
+                        <label class="required" for="{{ form.amount_to_refund.id_for_label }}">
+                            {% trans "Amount to refund" %}
+                        </label>
+                        {{ form.amount_to_refund }}
+                        {% if form.amount_to_refund.errors %}
+                            <div class="errorlist">{{ form.amount_to_refund.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <p class="payment-refund__summary-selected">
+                        {% trans "Selected total" %}:
+                        <span data-selected-total data-currency-symbol="{{ currency_symbol }}">
+                            {{ currency_symbol }}0.00
+                        </span>
+                    </p>
+
+                    <dl class="payment-refund__summary">
+                        <dt>{% trans "Grand total" %}</dt>
+                        <dd>{{ currency_symbol }}{{ summary.grand_total|floatformat:2 }}</dd>
+                        <dt>{% trans "Total paid" %}</dt>
+                        <dd>{{ currency_symbol }}{{ summary.total_paid|floatformat:2 }}</dd>
+                        <dt>{% trans "Already refunded" %}</dt>
+                        <dd>{{ currency_symbol }}{{ summary.already_refunded|floatformat:2 }}</dd>
+                        <dt>{% trans "Available to refund" %}</dt>
+                        <dd>{{ currency_symbol }}{{ summary.available|floatformat:2 }}</dd>
+                    </dl>
+
+                    <div class="payment-refund__actions">
+                        <button type="submit" class="button btn btn-danger">
+                            {% trans "Confirm Refund" %}
+                        </button>
+                    </div>
+
+                    <div class="payment-refund__links">
+                        <a href="{% url 'admin:core_payment_change' payment.pk %}">{% trans "Back to payment" %}</a>
+                        <a href="{% url 'admin:core_appointment_change' appointment.pk %}">{% trans "Appointment details" %}</a>
+                    </div>
+                </fieldset>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

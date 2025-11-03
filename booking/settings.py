@@ -99,9 +99,9 @@ WSGI_APPLICATION = 'booking.wsgi.application'
 # DATABASES = {
 #     'default': {
 #         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'Malva', # Change to your local DB name
-#         'USER': 'postgres', # Change to your local user name
-#         'PASSWORD': 'admin', # Change to your local user password
+#         'NAME': 'Malva',  # Change to your local DB name
+#         'USER': 'postgres',  # Change to your local user name
+#         'PASSWORD': 'admin',  # Change to your local user password
 #         'HOST': 'localhost',
 #         'PORT': '5433',
 #     }

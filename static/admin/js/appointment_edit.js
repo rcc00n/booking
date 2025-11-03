@@ -171,6 +171,196 @@
             uiSelect.appendChild(buildOption(p.id, p.text));
         });
     }
+
+    const ITEM_STATUS_CLASSES = {
+        BOOKED: "status-booked",
+        CONFIRMED: "status-confirmed",
+        COMPLETED: "status-completed",
+        NO_SHOW: "status-noshow",
+        CANCELLED: "status-cancelled",
+    };
+    const ITEM_STATUS_LABELS = {
+        BOOKED: "Booked",
+        CONFIRMED: "Confirmed",
+        COMPLETED: "Completed",
+        NO_SHOW: "No show",
+        CANCELLED: "Cancelled",
+    };
+    const ACTION_STATUS_MAP = {
+        confirm: "CONFIRMED",
+        complete: "COMPLETED",
+        noshow: "NO_SHOW",
+        cancel: "CANCELLED",
+    };
+    const STATUS_CLASS_VALUES = Object.values(ITEM_STATUS_CLASSES);
+
+    function normaliseStatusCode(value) {
+        if (!value) return "BOOKED";
+        return String(value).trim().toUpperCase();
+    }
+
+    function resolveStatusLabel(code, fallback) {
+        const norm = normaliseStatusCode(code);
+        if (fallback && String(fallback).trim()) {
+            return String(fallback);
+        }
+        return ITEM_STATUS_LABELS[norm] || norm.charAt(0) + norm.slice(1).toLowerCase();
+    }
+
+    function statusBaseMessage(itemEl) {
+        return "";
+    }
+
+    function getStatusHiddenInput(itemEl) {
+        if (!itemEl) return null;
+        const prefix = itemEl.dataset.formPrefix || "";
+        if (prefix) {
+            const exact = itemEl.querySelector(`input[name="${prefix}-status_code"]`);
+            if (exact) return exact;
+        }
+        return itemEl.querySelector('input[name$="-status_code"]');
+    }
+
+    function getStatusReasonHiddenInput(itemEl) {
+        if (!itemEl) return null;
+        const prefix = itemEl.dataset.formPrefix || "";
+        if (prefix) {
+            const exact = itemEl.querySelector(`input[name="${prefix}-status_reason"]`);
+            if (exact) return exact;
+        }
+        return itemEl.querySelector('input[name$="-status_reason"]');
+    }
+
+    function updateStatusNote(itemEl, stagedCode, reason) {
+        const noteEl = itemEl && itemEl.querySelector('[data-role="status-note"]');
+        if (!noteEl) return;
+        noteEl.textContent = "";
+        noteEl.classList.remove("pending");
+        noteEl.style.display = "none";
+    }
+
+    function stageItemStatus(itemEl, code, options = {}) {
+        if (!itemEl) return;
+        const norm = normaliseStatusCode(code);
+        const reasonText = (options.reason || "").trim();
+        itemEl.dataset.pendingStatus = norm;
+        const hidden = getStatusHiddenInput(itemEl);
+        if (hidden) hidden.value = norm;
+        const reasonHidden = getStatusReasonHiddenInput(itemEl);
+        if (reasonHidden) reasonHidden.value = reasonText;
+        if (reasonText) {
+            itemEl.dataset.pendingCancelReason = reasonText;
+        } else {
+            delete itemEl.dataset.pendingCancelReason;
+        }
+        updateItemStatusPill(itemEl, norm);
+        syncStatusButtons(itemEl, norm);
+        updateStatusNote(itemEl, norm, reasonText);
+    }
+
+    function updateItemStatusPill(itemEl, code, label) {
+        if (!itemEl) return;
+        const pill = itemEl.querySelector('[data-role="status-pill"]');
+        if (!pill) return;
+        const normCode = normaliseStatusCode(code);
+        const resolvedLabel = resolveStatusLabel(normCode, label || itemEl.dataset.statusLabel);
+        pill.textContent = resolvedLabel;
+        STATUS_CLASS_VALUES.forEach(cls => pill.classList.remove(cls));
+        const className = ITEM_STATUS_CLASSES[normCode] || ITEM_STATUS_CLASSES.BOOKED;
+        pill.classList.add(className);
+        pill.dataset.statusCode = normCode;
+        itemEl.dataset.statusCode = normCode;
+        itemEl.dataset.statusLabel = resolvedLabel;
+    }
+
+    function syncStatusButtons(itemEl, currentCode) {
+        const norm = normaliseStatusCode(currentCode);
+        const hasItemId = !!itemEl.dataset.itemId;
+        itemEl.querySelectorAll(".ab-item-status-btn").forEach(btn => {
+            const action = btn.dataset.action || "";
+            const targetCode = ACTION_STATUS_MAP[action] || "";
+            if (!hasItemId) {
+                btn.disabled = true;
+                btn.classList.add("disabled");
+                return;
+            }
+            btn.disabled = targetCode === norm;
+            if (btn.disabled) {
+                btn.classList.add("disabled");
+            } else {
+                btn.classList.remove("disabled");
+            }
+        });
+    }
+
+    function notifyUser(message, level = "info") {
+        if (!message) return;
+        const toast = window.showToast || window.notify || null;
+        if (typeof toast === "function") {
+            toast(message, level);
+            return;
+        }
+        if (window.console) {
+            const fn = level === "error" ? console.error : console.info;
+            fn.call(console, message);
+        }
+        if (level === "error" || level === "warning") {
+            window.alert(message);
+        }
+    }
+
+    function handleStatusButtonClick(event) {
+        const btn = event.currentTarget;
+        const itemEl = btn.closest(".ab-item");
+        if (!itemEl) return;
+        const action = btn.dataset.action || "";
+        const targetStatus = ACTION_STATUS_MAP[action];
+        if (!targetStatus) return;
+        if (!itemEl.dataset.itemId) {
+            notifyUser("Save this appointment before managing item status.", "warning");
+            return;
+        }
+        let reasonValue = itemEl.dataset.pendingCancelReason || "";
+        if (targetStatus === "CANCELLED") {
+            const response = window.prompt("Cancellation reason (optional)", reasonValue);
+            if (response === null) {
+                return;
+            }
+            reasonValue = response.trim();
+        } else {
+            reasonValue = "";
+        }
+        stageItemStatus(itemEl, targetStatus, { reason: reasonValue, notify: false });
+    }
+
+    function initItemStatusControls(itemEl) {
+        if (!itemEl) return;
+        const currentCode = normaliseStatusCode(itemEl.dataset.statusCode);
+        const currentLabel = itemEl.dataset.statusLabel;
+        if (!itemEl.dataset.originalStatusCode) {
+            itemEl.dataset.originalStatusCode = currentCode;
+        }
+        const hidden = getStatusHiddenInput(itemEl);
+        const stagedCode = hidden && hidden.value ? normaliseStatusCode(hidden.value) : "";
+        const reasonHidden = getStatusReasonHiddenInput(itemEl);
+        const stagedReason = reasonHidden && reasonHidden.value ? reasonHidden.value : "";
+        if (stagedCode && stagedCode !== currentCode) {
+            stageItemStatus(itemEl, stagedCode, { reason: stagedReason, silent: true, notify: false });
+        } else {
+            updateItemStatusPill(itemEl, currentCode, currentLabel);
+            syncStatusButtons(itemEl, currentCode);
+            itemEl.dataset.pendingStatus = "";
+            if (stagedReason) {
+                itemEl.dataset.pendingCancelReason = stagedReason;
+            } else {
+                delete itemEl.dataset.pendingCancelReason;
+            }
+            updateStatusNote(itemEl, "", "");
+        }
+        itemEl.querySelectorAll(".ab-item-status-btn").forEach(btn => {
+            btn.addEventListener("click", handleStatusButtonClick);
+        });
+    }
     function updateRowSummary(row) {
         const priceInput = row.querySelector('input[name$="-unit_price"]');
         const deleteInput = row.querySelector('input[name$="-DELETE"]');
@@ -405,6 +595,16 @@
         const nativeForce  = row.querySelector(".native-promocode input[name$='-force_apply']");
         const promoForceUI = row.querySelector(".js-promo-force");
         if (nativeForce) nativeForce.checked = !!(promoForceUI && promoForceUI.checked);
+
+        const nativeValidation = row.querySelector(".native-validation input[type='checkbox'][name$='-validation_enabled']");
+        const hiddenValidation = row.querySelector(".native-validation input[type='hidden'][name$='-validation_enabled']");
+        const uiValidation = row.querySelector(".js-validation-toggle");
+        if (nativeValidation && uiValidation) {
+            nativeValidation.checked = uiValidation.checked;
+        }
+        if (hiddenValidation && uiValidation) {
+            hiddenValidation.value = uiValidation.checked ? "True" : "False";
+        }
     }
     function initRow(row) {
         // элементы
@@ -415,6 +615,9 @@
         const nativePromo  = $(".native-promocode select[name$='-promocode']", row);
         const uiPromo      = $(".js-promocode", row);
         const promoForceUI = $(".js-promo-force", row);
+        const nativeValidation = $(".native-validation input[type='checkbox'][name$='-validation_enabled']", row);
+        const hiddenValidation = $(".native-validation input[type='hidden'][name$='-validation_enabled']", row);
+        const uiValidation = $(".js-validation-toggle", row);
         const nativeStart  = $("[name$='-start_time']", row);   // реальное поле
         const nativePrice  = $("[name$='-unit_price']", row);   // реальное поле
         const durationInput = $("[name$='-duration_override_min']", row);
@@ -430,6 +633,20 @@
         row.dataset.discountAmount = roundCurrency(parseAmount(row.dataset.discountAmount)).toFixed(2);
 
         const markDirty = () => { row.dataset.pricingDirty = "1"; };
+
+        if (uiValidation && nativeValidation) {
+            uiValidation.checked = nativeValidation.checked;
+            if (hiddenValidation) {
+                hiddenValidation.value = uiValidation.checked ? "True" : "False";
+            }
+            uiValidation.addEventListener("change", () => {
+                nativeValidation.checked = uiValidation.checked;
+                if (hiddenValidation) {
+                    hiddenValidation.value = uiValidation.checked ? "True" : "False";
+                }
+                markDirty();
+            });
+        }
 
         const syncTaxableMeta = () => {
             const opt = uiSvc && uiSvc.selectedOptions ? uiSvc.selectedOptions[0] : null;
@@ -603,6 +820,8 @@
                 if (nativePrice)     disableAndClone(nativePrice);
                 if (durationInput)   disableAndClone(durationInput);
                 if (discountInput)   disableAndClone(discountInput);
+                if (nativeValidation) disableAndClone(nativeValidation);
+                if (uiValidation) uiValidation.disabled = true;
 
                 // если поверх time уже навешан четвертной селект — тоже задизейблим
 
@@ -719,6 +938,9 @@
         });
         // для удобства
         rootEl.dataset.formIndex = String(idx);
+        if (rootEl.dataset.formPrefix && rootEl.dataset.formPrefix.includes("__prefix__")) {
+            rootEl.dataset.formPrefix = rootEl.dataset.formPrefix.replace(/__prefix__/g, idx);
+        }
     }
 
     function initDefaultsForNewRow(row) {
@@ -899,6 +1121,33 @@
         }
         document.dispatchEvent(new CustomEvent("formset:added", { detail: { form: node, name: SALES_PREFIX } }));
         initSaleRow(node);
+    }
+
+    function initRefundMenu() {
+        const refundBtn = document.getElementById("refund-btn");
+        const refundMenu = document.getElementById("refund-menu");
+        if (!refundBtn || !refundMenu) return;
+
+        const hasRefunds = (refundBtn.dataset.hasRefunds || "").toLowerCase() === "true";
+        if (!hasRefunds || refundBtn.disabled) {
+            refundMenu.hidden = true;
+            return;
+        }
+
+        const toggleMenu = (visible) => {
+            refundMenu.hidden = !visible;
+        };
+
+        refundBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            toggleMenu(refundMenu.hidden);
+        });
+
+        document.addEventListener("click", (event) => {
+            if (!refundMenu.contains(event.target) && !refundBtn.contains(event.target)) {
+                toggleMenu(false);
+            }
+        });
     }
 
     function initPayMenu() {
@@ -1273,6 +1522,15 @@
             });
             mo.observe(container, { childList: true, subtree: true });
         }
+        document.querySelectorAll(".ab-item").forEach(initItemStatusControls);
+        document.addEventListener("formset:added", evt => {
+            const node = evt && evt.detail && evt.detail.form;
+            if (!node || !node.classList) return;
+            if (node.classList.contains("ab-item")) {
+                initItemStatusControls(node);
+            }
+        });
+        initRefundMenu();
         initPayMenu();
     });
 
