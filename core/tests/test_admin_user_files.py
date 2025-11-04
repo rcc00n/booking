@@ -58,7 +58,7 @@ class AdminClientFilesViewTests(TestCase):
             start_time=timezone.now(),
         )
 
-        ClientFile.objects.create(
+        cls.before_file = ClientFile.objects.create(
             user=cls.client_profile,
             appointment=cls.appointment,
             file=SimpleUploadedFile("before-session.jpg", b"\x47\x49\x46", content_type="image/jpeg"),
@@ -68,7 +68,7 @@ class AdminClientFilesViewTests(TestCase):
             uploaded_by_user=cls.admin_user,
         )
 
-        ClientFile.objects.create(
+        cls.consent_file = ClientFile.objects.create(
             user=cls.client_profile,
             file=SimpleUploadedFile("consent-form.pdf", b"%PDF", content_type="application/pdf"),
             kind=ClientFile.KIND_OTHER,
@@ -92,3 +92,24 @@ class AdminClientFilesViewTests(TestCase):
         appointment_url = reverse("admin:core_appointment_change", args=[self.appointment.pk])
         self.assertContains(response, appointment_url)
         self.assertContains(response, "Not linked to an appointment")
+
+    def test_admin_can_delete_client_file_from_profile(self):
+        self.client.force_login(self.admin_user)
+        delete_url = reverse(
+            "admin:auth_user_delete_file",
+            args=[self.client_user.pk, self.before_file.pk],
+        )
+
+        response = self.client.post(delete_url, data={})
+
+        self.assertRedirects(response, reverse("admin:auth_user_change", args=[self.client_user.pk]))
+        self.assertFalse(ClientFile.objects.filter(pk=self.before_file.pk).exists())
+
+        remaining = ClientFile.objects.filter(user=self.client_profile)
+        self.assertEqual(remaining.count(), 1)
+        self.assertEqual(remaining.first().pk, self.consent_file.pk)
+
+        follow_up = self.client.get(reverse("admin:auth_user_change", args=[self.client_user.pk]))
+        follow_up.render()
+        self.assertContains(follow_up, "Client Files (1)")
+        self.assertNotContains(follow_up, "before-session.jpg")

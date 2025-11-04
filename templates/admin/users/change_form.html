@@ -17,6 +17,7 @@
                                 <th scope="col">Category</th>
                                 <th scope="col">Uploaded at</th>
                                 <th scope="col">Uploader</th>
+                                <th scope="col" class="actions">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -66,6 +67,22 @@
                                             <div class="help">
                                                 {{ file.uploaded_by_user.get_full_name|default:file.uploaded_by_user.get_username }}
                                             </div>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if file.admin_delete_url %}
+                                            <button
+                                                type="submit"
+                                                class="button deletelink"
+                                                formaction="{{ file.admin_delete_url }}"
+                                                formmethod="post"
+                                                formnovalidate
+                                                onclick="return confirm('Delete this file?');"
+                                            >
+                                                Delete
+                                            </button>
+                                        {% else %}
+                                            <span class="quiet">Unavailable</span>
                                         {% endif %}
                                     </td>
                                 </tr>

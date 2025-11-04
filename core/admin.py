@@ -1431,10 +1431,51 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
                         except NoReverseMatch:
                             appointment_url = ""
                     setattr(file_obj, "appointment_admin_url", appointment_url)
+                    try:
+                        delete_url = reverse("admin:auth_user_delete_file", args=[obj.pk, file_obj.pk])
+                    except NoReverseMatch:
+                        delete_url = ""
+                    setattr(file_obj, "admin_delete_url", delete_url)
                     files.append(file_obj)
                 context["client_files"] = files
                 context["client_files_total"] = len(files)
         return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "<int:user_id>/files/<uuid:file_id>/delete/",
+                self.admin_site.admin_view(self.delete_client_file_view),
+                name="auth_user_delete_file",
+            ),
+        ]
+        return custom + urls
+
+    def delete_client_file_view(self, request, user_id, file_id):
+        if request.method != "POST":
+            return HttpResponseBadRequest("POST required")
+
+        user_model = get_user_model()
+        user_obj = get_object_or_404(user_model, pk=user_id)
+
+        if not self.has_change_permission(request, user_obj):
+            raise PermissionDenied
+
+        profile = getattr(user_obj, "userprofile", None)
+        if profile is None:
+            messages.error(request, "Client profile is missing.")
+            return redirect("admin:auth_user_change", user_id)
+
+        file_obj = get_object_or_404(ClientFile, pk=file_id, user=profile)
+        try:
+            file_obj.delete()
+        except Exception as exc:  # pylint: disable=broad-except
+            messages.error(request, f"Could not delete file: {exc}")
+        else:
+            messages.success(request, "File deleted.")
+
+        return redirect("admin:auth_user_change", user_id)
 
     def get_queryset(self, request):
         # Prefetch the attached profile to avoid N+1 lookups.
