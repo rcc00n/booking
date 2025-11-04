@@ -1,4 +1,5 @@
 from decimal import Decimal
+from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -28,6 +29,12 @@ class AdminDashboardTargetsTests(TestCase):
             duration_min=60,
         )
         assign_service_room(self.service, room_name="Sales Suite")
+        receipt_patcher = patch("core.services.receipts.render_html_to_pdf", return_value=b"%PDF-test")
+        self.addCleanup(receipt_patcher.stop)
+        receipt_patcher.start()
+        receipt_task_patcher = patch("core.signals.generate_payment_receipt_task.delay", return_value=None)
+        self.addCleanup(receipt_task_patcher.stop)
+        receipt_task_patcher.start()
 
     def _create_master(self, username: str, target_amount: Decimal | None) -> tuple:
         user = self.user_model.objects.create_user(

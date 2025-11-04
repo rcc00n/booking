@@ -4,6 +4,7 @@ from datetime import datetime, time
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from unittest.mock import patch
 from django.urls import reverse
 from django.utils import timezone
 
@@ -16,6 +17,7 @@ from core.models import (
     MasterWorkDay,
     Service,
     ServiceMaster,
+    Notification,
     UserProfile,
 )
 from core.tests.utils import assign_service_room
@@ -45,6 +47,28 @@ class AvailabilityRoomsApiTests(TestCase):
 
         self.status_confirmed, _ = AppointmentStatus.objects.get_or_create(name="Confirmed")
         self.status_cancelled, _ = AppointmentStatus.objects.get_or_create(name="Cancelled")
+        notification_patcher = patch(
+            "core.signals.Notification.objects.create",
+            side_effect=self._upsert_notification,
+        )
+        self.addCleanup(notification_patcher.stop)
+        notification_patcher.start()
+
+    def _upsert_notification(self, **kwargs):
+        lookup = {
+            "kind": kwargs.get("kind"),
+            "channel": kwargs.get("channel"),
+        }
+        if "appointment" in kwargs:
+            lookup["appointment"] = kwargs["appointment"]
+        elif "appointment_id" in kwargs:
+            lookup["appointment_id"] = kwargs["appointment_id"]
+        defaults = {
+            k: v
+            for k, v in kwargs.items()
+            if k not in {"appointment", "appointment_id", "kind", "channel"}
+        }
+        Notification.objects.update_or_create(defaults=defaults, **lookup)
 
     def _make_client(self, username: str) -> UserProfile:
         user = self.user_model.objects.create_user(

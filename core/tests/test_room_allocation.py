@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import unittest
 from collections import defaultdict
 from datetime import datetime, timedelta, time
 
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -25,6 +26,12 @@ from core.models import (
 
 class RoomAllocationTests(TransactionTestCase):
     reset_sequences = True
+
+    @classmethod
+    def setUpClass(cls):
+        if connection.vendor != "postgresql":
+            raise unittest.SkipTest("Room allocation relies on PostgreSQL-specific constraints")
+        super().setUpClass()
 
     def setUp(self):
         super().setUp()
@@ -260,6 +267,12 @@ class ServiceRoomTestMixin:
 
 class AppointmentItemCleanTests(ServiceRoomTestMixin, TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        if connection.vendor != "postgresql":
+            raise unittest.SkipTest("Room allocation validation relies on PostgreSQL-specific constraints")
+        super().setUpClass()
+
     def test_clean_assigns_room_when_available(self):
         master = self._make_master("clean-master")
         appointment = self._appointment(self.base_start)
@@ -295,6 +308,8 @@ class AppointmentItemCleanTests(ServiceRoomTestMixin, TestCase):
         self.assertIn("All rooms", str(ctx.exception))
 
     def test_clean_blocks_master_overlap(self):
+        if connection.vendor != "postgresql":
+            self.skipTest("Master overlap constraint relies on PostgreSQL-specific indexes")
         master = self._make_master("overlap-master")
         slot = self.base_start
         self._create_item(self._appointment(slot), master, slot)

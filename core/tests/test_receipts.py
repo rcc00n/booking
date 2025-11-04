@@ -9,6 +9,7 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.core.files.storage import FileSystemStorage
 from django.test import TestCase
 from django.utils import timezone
 
@@ -19,6 +20,20 @@ from core.payments import stripe_api
 from core.tests.utils import assign_service_room
 
 
+def _use_local_receipt_storage(testcase, media_dir: str) -> None:
+    field = Payment._meta.get_field("receipt_pdf")
+    original_storage = field.storage
+    filesystem_storage = FileSystemStorage(location=media_dir)
+    field.storage = filesystem_storage
+    field._storage = filesystem_storage
+
+    def _restore() -> None:
+        field.storage = original_storage
+        field._storage = original_storage
+
+    testcase.addCleanup(_restore)
+
+
 class PaymentReceiptServiceTests(TestCase):
     def setUp(self):
         super().setUp()
@@ -27,6 +42,13 @@ class PaymentReceiptServiceTests(TestCase):
         override = self.settings(MEDIA_ROOT=self.media_dir)
         override.enable()
         self.addCleanup(override.disable)
+        _use_local_receipt_storage(self, self.media_dir)
+        receipt_patcher = mock.patch("core.services.receipts.render_html_to_pdf", return_value=b"%PDF-test")
+        self.addCleanup(receipt_patcher.stop)
+        receipt_patcher.start()
+        receipt_task_patcher = mock.patch("core.signals.generate_payment_receipt_task.delay", return_value=None)
+        self.addCleanup(receipt_task_patcher.stop)
+        receipt_task_patcher.start()
 
     def _create_payment(self) -> Payment:
         method = PaymentMethod.objects.create(name="Card")
@@ -159,6 +181,13 @@ class PaymentReceiptTasksTests(TestCase):
         override.enable()
         self.addCleanup(override.disable)
         self.method = PaymentMethod.objects.create(name="Card")
+        _use_local_receipt_storage(self, self.media_dir)
+        receipt_patcher = mock.patch("core.services.receipts.render_html_to_pdf", return_value=b"%PDF-test")
+        self.addCleanup(receipt_patcher.stop)
+        receipt_patcher.start()
+        receipt_task_patcher = mock.patch("core.signals.generate_payment_receipt_task.delay", return_value=None)
+        self.addCleanup(receipt_task_patcher.stop)
+        receipt_task_patcher.start()
 
     def _create_payment_with_appointment(self, *, email: str | None) -> Payment:
         user_model = get_user_model()

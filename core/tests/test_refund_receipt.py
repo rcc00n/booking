@@ -16,6 +16,12 @@ class RefundReceiptTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
         user_model = get_user_model()
+        receipt_task_patcher = mock.patch("core.signals.generate_payment_receipt_task.delay", return_value=None)
+        self.addCleanup(receipt_task_patcher.stop)
+        receipt_task_patcher.start()
+        render_pdf_patcher = mock.patch("core.services.receipts.render_html_to_pdf", return_value=b"%PDF-test")
+        self.addCleanup(render_pdf_patcher.stop)
+        render_pdf_patcher.start()
         self.client_user = user_model.objects.create_user(
             username="refund-client@example.com",
             email="refund-client@example.com",

@@ -50,6 +50,12 @@ class CartTestMixin:
     def setUp(self):
         super().setUp()
         self._disconnect_signals()
+        receipt_patcher = mock.patch("core.services.receipts.render_html_to_pdf", return_value=b"%PDF-test")
+        self.addCleanup(receipt_patcher.stop)
+        receipt_patcher.start()
+        receipt_task_patcher = mock.patch("core.signals.generate_payment_receipt_task.delay", return_value=None)
+        self.addCleanup(receipt_task_patcher.stop)
+        receipt_task_patcher.start()
         current_tz = timezone.get_current_timezone()
         today = timezone.now().astimezone(current_tz).date()
         self.now = timezone.make_aware(datetime.combine(today, time(12, 0)), current_tz)
@@ -123,6 +129,12 @@ class PartialChargeTests(TestCase):
 class PaymentServiceTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
+        receipt_patcher = mock.patch("core.services.receipts.render_html_to_pdf", return_value=b"%PDF-test")
+        self.addCleanup(receipt_patcher.stop)
+        receipt_patcher.start()
+        receipt_task_patcher = mock.patch("core.signals.generate_payment_receipt_task.delay", return_value=None)
+        self.addCleanup(receipt_task_patcher.stop)
+        receipt_task_patcher.start()
         self.user = user_model.objects.create_user(
             username="client", email="client@example.com", password="testpass"
         )

@@ -11,49 +11,23 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunSQL(
-                    sql="""
-                        ALTER TABLE core_service
-                        ADD COLUMN IF NOT EXISTS image varchar(100)
-                    """,
-                    reverse_sql="""
-                        ALTER TABLE core_service
-                        DROP COLUMN IF EXISTS image
-                    """,
-                ),
-                migrations.RunSQL(
-                    sql="""
-                        ALTER TABLE core_service
-                        ADD COLUMN IF NOT EXISTS image_alt_text varchar(120)
-                    """,
-                    reverse_sql="""
-                        ALTER TABLE core_service
-                        DROP COLUMN IF EXISTS image_alt_text
-                    """,
-                ),
-            ],
-            state_operations=[
-                migrations.AddField(
-                    model_name="service",
-                    name="image",
-                    field=models.ImageField(
-                        blank=True,
-                        help_text="Shown on the public catalog cards.",
-                        null=True,
-                        upload_to=core.models.service_image_upload_to,
-                    ),
-                ),
-                migrations.AddField(
-                    model_name="service",
-                    name="image_alt_text",
-                    field=models.CharField(
-                        blank=True,
-                        help_text="Accessible text for the service image; defaults to the service name.",
-                        max_length=120,
-                    ),
-                ),
-            ],
+        migrations.AddField(
+            model_name="service",
+            name="image",
+            field=models.ImageField(
+                blank=True,
+                help_text="Shown on the public catalog cards.",
+                null=True,
+                upload_to=core.models.service_image_upload_to,
+            ),
+        ),
+        migrations.AddField(
+            model_name="service",
+            name="image_alt_text",
+            field=models.CharField(
+                blank=True,
+                help_text="Accessible text for the service image; defaults to the service name.",
+                max_length=120,
+            ),
         ),
     ]
