@@ -330,14 +330,32 @@ def custom_index(request):
     week_days = [today - timedelta(days=6 - i) for i in range(7)]
     first_day = today.replace(day=1)
 
-    # Базовые QS
-    appts_7d = Appointment.objects.filter(start_time__date__range=[week_ago, today])
-    payments_7d = Payment.objects.filter(appointment__start_time__date__range=[week_ago, today])
-
     # Роль/профиль мастера
     userprof = getattr(request.user, "userprofile", None)
 
     master_profile = getattr(userprof, "master_profile", None) if userprof else None
+
+    # Базовые QS
+    appts_7d = Appointment.objects.filter(start_time__date__range=[week_ago, today])
+    items_last_week = AppointmentItem.objects.with_current_status().filter(
+        start_time__date__range=[week_ago, today]
+    )
+    if is_master(request.user) and master_profile:
+        items_last_week = items_last_week.filter(master=master_profile)
+
+    active_appt_ids = list(
+        items_last_week.exclude(current_status_code__iexact="CANCELLED")
+        .values_list("appointment_id", flat=True)
+        .distinct()
+    )
+
+    if active_appt_ids:
+        payments_7d = Payment.objects.filter(
+            appointment__start_time__date__range=[week_ago, today],
+            appointment_id__in=active_appt_ids,
+        )
+    else:
+        payments_7d = Payment.objects.none()
 
     # График продаж/записей за 7 дней
     chart_data, total_sales = [], 0.0
@@ -489,9 +507,11 @@ def custom_index(request):
         if master_profile and master.id == master_profile.id:
             master_target_for_current_user = entry
 
-    # Недавние встречи (20) с префетчем позиций
+    # Недавние позиции (20) с актуальным статусом
     recent_appointments = (
-        AppointmentItem.objects.select_related("appointment__client__user").order_by("-start_time")[:20]
+        AppointmentItem.objects.with_current_status()
+        .select_related("appointment__client__user", "service", "master__user__user")
+        .order_by("-start_time")[:20]
     )
 
     # Сегодняшние предстоящие встречи (items); мастеру показываем только свои
@@ -512,11 +532,7 @@ def custom_index(request):
     ).order_by("start_time")
 
     # Ежедневная разбивка Confirmed/Cancelled (на 7 дней вперёд) по статусам позиций
-    daily_items = AppointmentItem.objects.with_current_status().filter(
-        start_time__date__range=[week_ago, today]
-    )
-    if is_master(request.user) and master_profile:
-        daily_items = daily_items.filter(master=master_profile)
+    daily_items = items_last_week
     daily_counts = []
     for day in week_days:
         day_items = daily_items.filter(start_time__date=day)

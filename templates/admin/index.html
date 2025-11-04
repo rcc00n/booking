@@ -104,8 +104,12 @@
                                 <div class="appt-details">
                                     <div class="appt-top">
                                         <span class="appt-time">{{ app.start_time|date:"D, d M Y H:i" }}</span>
-                                        {% with last=app.appointment.appointmentstatushistory_set.last %}
-                                            {% if last %}<span class="appt-status {{ last.status.name|lower }}">{{ last.status.name }}</span>{% endif %}
+                                        {% with code=app.current_status_code|default_if_none:"BOOKED" %}
+                                            {% if code %}
+                                                {% with label=app.current_status_label %}
+                                                    <span class="appt-status {{ code|lower }}">{{ label|default:code|title }}</span>
+                                                {% endwith %}
+                                            {% endif %}
                                         {% endwith %}
 
                                     </div>
