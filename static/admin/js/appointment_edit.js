@@ -1326,6 +1326,140 @@
         row.dataset.defaultsApplied = "1";
     }
 
+    function ensureSalePriceBinding(row) {
+        if (!row) return;
+        const productField = row.querySelector('[data-product-sale-role="product"]');
+        const unitPriceInput = row.querySelector('[data-product-sale-role="unit-price"]');
+        if (!productField || !unitPriceInput) return;
+        if (productField.dataset.salePriceFallbackBound === "1") return;
+
+        const endpointRaw = (productField.dataset.priceEndpoint || window.PRODUCT_SALE_PRICE_ENDPOINT || "").trim();
+        if (!endpointRaw) return;
+
+        productField.dataset.salePriceFallbackBound = "1";
+        productField.dataset.priceEndpoint = endpointRaw;
+
+        const jq = window.jQuery || (window.django && window.django.jQuery) || null;
+        let requestSeq = 0;
+
+        function normalizePrice(value) {
+            const raw = String(value ?? "").trim();
+            if (!raw) return null;
+            const sanitized = raw.replace(/\s+/g, "").replace(",", ".");
+            const numeric = Number(sanitized);
+            if (Number.isFinite(numeric)) {
+                return numeric.toFixed(2);
+            }
+            return raw;
+        }
+
+        function dispatchRecalc() {
+            unitPriceInput.dispatchEvent(new Event("input", { bubbles: true }));
+            unitPriceInput.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        function applyPrice(rawPrice) {
+            const normalized = normalizePrice(rawPrice);
+            if (normalized == null) return;
+            const current = (unitPriceInput.value || "").trim();
+            if (current === normalized) {
+                if (unitPriceInput.dataset.userEdited === "1") {
+                    unitPriceInput.dataset.userEdited = "";
+                }
+                return;
+            }
+            unitPriceInput.value = normalized;
+            unitPriceInput.dataset.userEdited = "";
+            dispatchRecalc();
+        }
+
+        function clearPrice() {
+            if (!unitPriceInput.value && unitPriceInput.dataset.userEdited !== "1") {
+                return;
+            }
+            unitPriceInput.value = "";
+            unitPriceInput.dataset.userEdited = "";
+            dispatchRecalc();
+        }
+
+        function buildUrl(productId) {
+            try {
+                const url = new URL(endpointRaw, window.location.origin);
+                url.searchParams.set("product", productId);
+                return url.toString();
+            } catch (error) {
+                console.warn("Invalid product price endpoint", error);
+                return "";
+            }
+        }
+
+        async function fetchAndApplyPrice(productId, seq) {
+            const url = buildUrl(productId);
+            if (!url) return;
+            try {
+                const response = await fetch(url, {
+                    credentials: "same-origin",
+                    headers: { "X-Requested-With": "XMLHttpRequest" },
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed with status ${response.status}`);
+                }
+                const payload = await response.json();
+                if (seq !== requestSeq) {
+                    return;
+                }
+                const value = payload && (payload.unit_price ?? payload.price ?? null);
+                if (value !== null && value !== undefined && value !== "") {
+                    applyPrice(value);
+                }
+            } catch (error) {
+                if (seq === requestSeq) {
+                    console.warn("Unable to auto-fill product price", error);
+                }
+            }
+        }
+
+        function shouldSkipAutoFill(force) {
+            if (force) return false;
+            const hasValue = !!(unitPriceInput.value && unitPriceInput.value.trim().length);
+            if (hasValue) return true;
+            return unitPriceInput.dataset.userEdited === "1";
+        }
+
+        function syncPrice(force) {
+            const productId = (productField.value || "").trim();
+            if (!productId) {
+                if (force) {
+                    clearPrice();
+                }
+                return;
+            }
+            if (shouldSkipAutoFill(force)) {
+                return;
+            }
+            requestSeq += 1;
+            const seq = requestSeq;
+            fetchAndApplyPrice(productId, seq);
+        }
+
+        const handleSelection = () => syncPrice(true);
+        productField.addEventListener("change", handleSelection);
+        productField.addEventListener("input", handleSelection);
+
+        if (jq && typeof jq === "function") {
+            const $field = jq(productField);
+            if (!$field.data("salePriceFallbackBound")) {
+                $field
+                    .on("select2:select", handleSelection)
+                    .on("autocompleteLightSelect", handleSelection)
+                    .on("autocompleteLightChange", handleSelection);
+                $field.data("salePriceFallbackBound", true);
+            }
+        }
+
+        syncPrice(false);
+    }
+
     function refreshSaleClientDefaultFromAppointment() {
         if (!appointmentClientSelect || !SALE_DEFAULTS) return;
         const val = appointmentClientSelect.value;
@@ -1384,6 +1518,7 @@
         const unitPriceInput = row.querySelector('input[name$="-unit_price"]');
         const deleteCheckbox = row.querySelector(`input[type="checkbox"][name$='-DELETE']`);
         const removeBtn = $(".js-sale-remove", row);
+        ensureSalePriceBinding(row);
         const handleRecompute = () => {
             updateSaleSummary(row);
             recomputeAllTotals();
