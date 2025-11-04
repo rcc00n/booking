@@ -2155,7 +2155,7 @@ class AppointmentProductSaleInline(admin.StackedInline):
     form = AppointmentProductSaleForm
     fk_name = "appointment"
     extra = 0
-    autocomplete_fields = ("product", "sold_by", "client")
+    autocomplete_fields = ("product", "client")  # // CHANGED
     verbose_name = "Product sale"
     verbose_name_plural = "Product sales"
     prefix = "product_sales"
@@ -2168,16 +2168,12 @@ class AppointmentProductSaleInline(admin.StackedInline):
                 .order_by("user__first_name", "user__last_name", "user__username")
                 .distinct()
             )
-        if db_field.name == "sold_by" and request is not None:
-            profile = getattr(request.user, "userprofile", None)
-            filters = Q(user__is_superuser=True)
-            if profile:
-                filters |= Q(pk=profile.pk)
-            kwargs["queryset"] = (
-                UserProfile.objects.select_related("user")
-                .filter(filters)
-                .order_by("user__first_name", "user__last_name", "user__username")
-            )
+        if db_field.name == "sold_by":  # // CHANGED
+            kwargs["queryset"] = (  # // CHANGED
+                UserProfile.objects.select_related("user", "master_profile")  # // CHANGED
+                .filter(master_profile__isnull=False)  # // CHANGED
+                .order_by("user__first_name", "user__last_name", "user__username")  # // CHANGED
+            )  # // CHANGED
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def get_formset(self, request, obj=None, **kwargs):
@@ -2495,6 +2491,15 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         ctx["product_sales_forms"] = sale_forms_to_render
 
         sale_defaults = {"quantity": 1}
+        sold_by_profile = None  # // CHANGED
+        if obj:  # // CHANGED
+            first_item = getattr(obj, "primary_item", None)  # // CHANGED
+            if first_item is None:  # // CHANGED
+                first_item = obj.items.order_by("start_time").first()  # // CHANGED
+            if first_item:  # // CHANGED
+                master_profile = getattr(first_item, "master", None)  # // CHANGED
+                if master_profile:  # // CHANGED
+                    sold_by_profile = getattr(master_profile, "user", None)  # // CHANGED
         if obj and getattr(obj, "client", None):
             client_obj = obj.client
             client_user = getattr(client_obj, "user", None)
@@ -2507,14 +2512,16 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "label": client_label,
             }
         profile = getattr(request.user, "userprofile", None)
-        if profile:
-            user = getattr(profile, "user", None)
+        if not sold_by_profile and profile and getattr(profile, "master_profile_id", None):  # // CHANGED
+            sold_by_profile = profile  # // CHANGED
+        if sold_by_profile:  # // CHANGED
+            user = getattr(sold_by_profile, "user", None)  # // CHANGED
             raw_sold_by_label = (
-                getattr(user, "get_full_name", lambda: "")() or getattr(user, "username", "") or str(profile)
+                getattr(user, "get_full_name", lambda: "")() or getattr(user, "username", "") or str(sold_by_profile)  # // CHANGED
             )
-            sold_by_label = (str(raw_sold_by_label) or "").strip() or str(profile)
+            sold_by_label = (str(raw_sold_by_label) or "").strip() or str(sold_by_profile)  # // CHANGED
             sale_defaults["sold_by"] = {
-                "id": str(profile.pk),
+                "id": str(sold_by_profile.pk),  # // CHANGED
                 "label": sold_by_label,
             }
         ctx["product_sale_defaults"] = sale_defaults
@@ -5519,7 +5526,7 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
     )
     ordering = ("-sold_at", "-id")
     readonly_fields = ("total_amount", "created_at", "updated_at")
-    autocomplete_fields = ("product", "sold_by", "client", "appointment")
+    autocomplete_fields = ("product", "client", "appointment")  # // CHANGED
     list_select_related = (
         "product",
         "sold_by__user",
@@ -5571,20 +5578,16 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 .order_by("user__first_name", "user__last_name", "user__username")
                 .distinct()
             )
-        if db_field.name == "sold_by":
-            current_profile = getattr(request.user, "userprofile", None)
-            sold_by_filters = Q(user__is_superuser=True)
-            if current_profile:
-                sold_by_filters |= Q(pk=current_profile.pk)
-            kwargs["queryset"] = (
-                UserProfile.objects.select_related("user")
-                .filter(sold_by_filters)
-                .order_by(
-                    "user__first_name",
-                    "user__last_name",
-                    "user__username",
-                )
-            )
+        if db_field.name == "sold_by":  # // CHANGED
+            kwargs["queryset"] = (  # // CHANGED
+                UserProfile.objects.select_related("user", "master_profile")  # // CHANGED
+                .filter(master_profile__isnull=False)  # // CHANGED
+                .order_by(  # // CHANGED
+                    "user__first_name",  # // CHANGED
+                    "user__last_name",  # // CHANGED
+                    "user__username",  # // CHANGED
+                )  # // CHANGED
+            )  # // CHANGED
         if db_field.name == "appointment":
             kwargs["queryset"] = (
                 Appointment.objects.select_related("client__user")
@@ -5595,8 +5598,13 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
         profile = getattr(request.user, "userprofile", None)
-        if not obj and profile and "sold_by" in form.base_fields:
-            form.base_fields["sold_by"].initial = profile.pk
+        if (
+            not obj
+            and profile
+            and getattr(profile, "master_profile_id", None)
+            and "sold_by" in form.base_fields
+        ):  # // CHANGED
+            form.base_fields["sold_by"].initial = profile.pk  # // CHANGED
 
         product_field = form.base_fields.get("product")
         if product_field:
@@ -5624,7 +5632,14 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
             product = Product.objects.only("price").get(pk=product_id)
         except Product.DoesNotExist:
             return JsonResponse({"error": "Product not found"}, status=404)
-        return JsonResponse({"unit_price": str(product.price)})
+        price_value = product.price if product.price is not None else Decimal("0.00")  # // CHANGED
+        try:  # // CHANGED
+            price_decimal = price_value if isinstance(price_value, Decimal) else Decimal(str(price_value))  # // CHANGED
+            price_normalized = price_decimal.quantize(Decimal("0.00"))  # // CHANGED
+        except (InvalidOperation, TypeError, ValueError):  # // CHANGED
+            price_normalized = Decimal("0.00")  # // CHANGED
+        price_str = format(price_normalized, "f")  # // CHANGED
+        return JsonResponse({"unit_price": price_str, "price": price_str})  # // CHANGED
 
     def _export_all_xlsx_view(self, request):
         queryset = (

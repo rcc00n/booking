@@ -82,9 +82,26 @@ class ProductSaleAdminForm(forms.ModelForm):
 
         sold_by = self.fields.get("sold_by")
         if sold_by:
-            sold_by.widget.attrs.setdefault(
-                "data-placeholder", "Start typing to choose an employee"
+            current_id = getattr(self.instance, "sold_by_id", None)
+            sold_by.queryset = (
+                UserProfile.objects.select_related("user", "master_profile")
+                .filter(Q(master_profile__isnull=False) | Q(pk=current_id))
+                .order_by(
+                    "user__first_name",
+                    "user__last_name",
+                    "user__username",
+                )
             )
+            sold_by_widget = autocomplete.ModelSelect2(  # // CHANGED
+                url="master-userprofile-autocomplete",
+                attrs={
+                    "data-placeholder": "Start typing to choose a master",
+                    "data-allow-clear": "true",
+                    "data-minimum-input-length": 0,
+                },
+            )  # // CHANGED
+            sold_by_widget.choices = sold_by.choices  # // CHANGED
+            sold_by.widget = sold_by_widget  # // CHANGED
 
         client = self.fields.get("client")
         if client:
@@ -171,29 +188,11 @@ class AppointmentProductSaleForm(ProductSaleAdminForm):
                 "user__username",
             )
 
-        sold_by_field = self.fields.get("sold_by")
-        if sold_by_field:
-            filters = Q(user__is_superuser=True) | Q(user__is_staff=True)
-            profile = getattr(request.user, "userprofile", None) if request else None
-            if profile:
-                filters |= Q(pk=profile.pk)
-            if self.instance and getattr(self.instance, "sold_by_id", None):
-                filters |= Q(pk=self.instance.sold_by_id)
-            sold_by_field.queryset = (
-                UserProfile.objects.select_related("user")
-                .filter(filters)
-                .order_by(
-                    "user__first_name",
-                    "user__last_name",
-                    "user__username",
-                )
-            )
-
         defaults = {}
         if appointment and appointment.client_id and "client" in self.fields:
             defaults["client"] = appointment.client_id
         profile = getattr(request.user, "userprofile", None) if request else None
-        if profile and "sold_by" in self.fields:
+        if profile and getattr(profile, "master_profile_id", None) and "sold_by" in self.fields:
             defaults["sold_by"] = profile.pk
         if "quantity" in self.fields:
             defaults.setdefault("quantity", 1)

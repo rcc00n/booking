@@ -10,7 +10,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
-from core.autocomplete import ServiceAutocomplete
+from core.autocomplete import ServiceAutocomplete, MasterUserProfileAutocomplete  # // CHANGED
 from django.views.generic import RedirectView, TemplateView
 from core.views import (
     service_search,
@@ -33,6 +33,7 @@ path("", include("core.urls")),
     # ВАЖНО: подключаем accounts БЕЗ namespace, чтобы {% url 'register' %} и т.п. работали
     path("accounts/", include("accounts.urls")),
     path("autocomplete/service/", ServiceAutocomplete.as_view(), name="service-autocomplete"),
+    path("autocomplete/master/", MasterUserProfileAutocomplete.as_view(), name="master-userprofile-autocomplete"),  # // CHANGED
     path("admin/stats/", admin.site.admin_view(stats_view), name="admin-stats"),
     path("api/service/<uuid:pk>/price/", service_price, name="service-price"),
     path(

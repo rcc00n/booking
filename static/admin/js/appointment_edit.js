@@ -1403,9 +1403,10 @@
     function ensureSalePriceBinding(row) {
         if (!row) return;
         const productField =
-            row.querySelector('[data-product-sale-role="product"]') ||
-            row.querySelector('select[name$="-product"]') ||
-            row.querySelector('input[name$="-product"]');
+            row.querySelector('input[type="hidden"][name$="-product"]') || // CHANGED
+            row.querySelector('select[name$="-product"]') || // CHANGED
+            row.querySelector('[data-product-sale-role="product"]') || // CHANGED
+            row.querySelector('input[name$="-product"]'); // CHANGED
         const unitPriceInput =
             row.querySelector('[data-product-sale-role="unit-price"]') ||
             row.querySelector('input[name$="-unit_price"]');
@@ -1417,16 +1418,41 @@
         if (!unitPriceInput.dataset.productSaleRole) {
             unitPriceInput.setAttribute("data-product-sale-role", "unit-price");
         }
-        if (productField.dataset.salePriceFallbackBound === "1") return;
+        if (unitPriceInput.dataset.salePriceUserBinding !== "1") { // CHANGED
+            const markUserEdited = (event) => { // CHANGED
+                if (event && event.isTrusted) { // CHANGED
+                    unitPriceInput.dataset.userEdited = "1"; // CHANGED
+                } // CHANGED
+            }; // CHANGED
+            unitPriceInput.addEventListener("input", markUserEdited); // CHANGED
+            unitPriceInput.addEventListener("change", markUserEdited); // CHANGED
+            unitPriceInput.dataset.salePriceUserBinding = "1"; // CHANGED
+        } // CHANGED
+        if (!unitPriceInput.dataset.userEdited && unitPriceInput.value && unitPriceInput.value.trim()) { // CHANGED
+            unitPriceInput.dataset.userEdited = "1"; // CHANGED
+        } // CHANGED
 
-        const endpointRaw = (productField.dataset.priceEndpoint || window.PRODUCT_SALE_PRICE_ENDPOINT || "").trim();
-        if (!endpointRaw) return;
+        const endpointRaw = (productField.dataset.priceEndpoint || window.PRODUCT_SALE_PRICE_ENDPOINT || "").trim(); // CHANGED
+        if (endpointRaw) { // CHANGED
+            productField.dataset.priceEndpoint = endpointRaw; // CHANGED
+        } // CHANGED
 
-        productField.dataset.salePriceFallbackBound = "1";
-        productField.dataset.priceEndpoint = endpointRaw;
+        const existingBinding = productField.__salePriceBinding; // CHANGED
+        if (existingBinding && existingBinding.unitPriceInput === unitPriceInput) { // CHANGED
+            existingBinding.sync(false); // CHANGED
+            return; // CHANGED
+        } else if (existingBinding) { // CHANGED
+            productField.removeEventListener("change", existingBinding.handleSelection); // CHANGED
+            productField.removeEventListener("input", existingBinding.handleSelection); // CHANGED
+            if (typeof existingBinding.detachJq === "function") { // CHANGED
+                existingBinding.detachJq(); // CHANGED
+            } // CHANGED
+        } // CHANGED
 
-        const jq = window.jQuery || (window.django && window.django.jQuery) || null;
-        let requestSeq = 0;
+        if (!endpointRaw) return; // CHANGED
+
+        const jq = (window.django && window.django.jQuery) || window.jQuery || null; // CHANGED
+        let requestSeq = 0; // CHANGED
 
         function normalizePrice(value) {
             const raw = String(value ?? "").trim();
@@ -1439,12 +1465,17 @@
             return raw;
         }
 
-        function dispatchRecalc() {
-            unitPriceInput.dispatchEvent(new Event("input", { bubbles: true }));
-            unitPriceInput.dispatchEvent(new Event("change", { bubbles: true }));
+        function dispatchRecalc() { // CHANGED
+            updateSaleSummary(row); // CHANGED
+            unitPriceInput.dispatchEvent(new Event("input", { bubbles: true })); // CHANGED
+            unitPriceInput.dispatchEvent(new Event("change", { bubbles: true })); // CHANGED
+            recomputeAllTotals(); // CHANGED
         }
 
         function applyPrice(rawPrice) {
+            if (unitPriceInput.dataset.userEdited === "1") { // CHANGED
+                return; // CHANGED
+            } // CHANGED
             const normalized = normalizePrice(rawPrice);
             if (normalized == null) return;
             const current = (unitPriceInput.value || "").trim();
@@ -1459,13 +1490,14 @@
             dispatchRecalc();
         }
 
-        function clearPrice() {
-            if (!unitPriceInput.value && unitPriceInput.dataset.userEdited !== "1") {
-                return;
-            }
-            unitPriceInput.value = "";
-            unitPriceInput.dataset.userEdited = "";
-            dispatchRecalc();
+        function clearPrice() { // CHANGED
+            if (unitPriceInput.dataset.userEdited === "1") { // CHANGED
+                dispatchRecalc(); // CHANGED
+                return; // CHANGED
+            } // CHANGED
+            unitPriceInput.value = ""; // CHANGED
+            unitPriceInput.dataset.userEdited = ""; // CHANGED
+            dispatchRecalc(); // CHANGED
         }
 
         function buildUrl(productId) {
@@ -1490,11 +1522,27 @@
                 if (!response.ok) {
                     throw new Error(`Request failed with status ${response.status}`);
                 }
-                const payload = await response.json();
+                let payload; // CHANGED
+                const contentType = response.headers.get("content-type") || ""; // CHANGED
+                if (contentType.includes("application/json")) { // CHANGED
+                    payload = await response.json(); // CHANGED
+                } else { // CHANGED
+                    const textPayload = await response.text(); // CHANGED
+                    try { // CHANGED
+                        payload = JSON.parse(textPayload); // CHANGED
+                    } catch { // CHANGED
+                        payload = textPayload; // CHANGED
+                    } // CHANGED
+                } // CHANGED
                 if (seq !== requestSeq) {
                     return;
                 }
-                const value = payload && (payload.unit_price ?? payload.price ?? null);
+                let value = null; // CHANGED
+                if (typeof payload === "number" || typeof payload === "string") { // CHANGED
+                    value = payload; // CHANGED
+                } else if (payload && typeof payload === "object") { // CHANGED
+                    value = payload.unit_price ?? payload.price ?? payload.value ?? null; // CHANGED
+                } // CHANGED
                 if (value !== null && value !== undefined && value !== "") {
                     applyPrice(value);
                 }
@@ -1505,8 +1553,8 @@
             }
         }
 
-        function shouldSkipAutoFill(force) {
-            if (force) return false;
+        function shouldSkipAutoFill(force, productChanged) { // CHANGED
+            if (force || productChanged) return false; // CHANGED
             const hasValue = !!(unitPriceInput.value && unitPriceInput.value.trim().length);
             if (hasValue) return true;
             return unitPriceInput.dataset.userEdited === "1";
@@ -1514,13 +1562,28 @@
 
         function syncPrice(force) {
             const productId = (productField.value || "").trim();
+            const previousProductId = productField.dataset.salePriceLastProduct || ""; // CHANGED
+            const wasInitialized = productField.dataset.salePriceInitialized === "1"; // CHANGED
+            const productChanged = productId !== previousProductId; // CHANGED
+            const hasUserValue = !!(unitPriceInput.value && unitPriceInput.value.trim()); // CHANGED
+
+            if (productChanged && (wasInitialized || force)) { // CHANGED
+                unitPriceInput.dataset.userEdited = ""; // CHANGED
+            } // CHANGED
+
+            productField.dataset.salePriceLastProduct = productId; // CHANGED
+            productField.dataset.salePriceInitialized = "1"; // CHANGED
+
             if (!productId) {
-                if (force) {
+                if (force || productChanged) { // CHANGED
                     clearPrice();
                 }
                 return;
             }
-            if (shouldSkipAutoFill(force)) {
+            if (!wasInitialized && !force && hasUserValue) { // CHANGED
+                return; // CHANGED
+            } // CHANGED
+            if (shouldSkipAutoFill(force, productChanged)) { // CHANGED
                 return;
             }
             requestSeq += 1;
@@ -1528,22 +1591,33 @@
             fetchAndApplyPrice(productId, seq);
         }
 
-        const handleSelection = () => syncPrice(true);
+        const handleSelection = () => syncPrice(true); // CHANGED
         productField.addEventListener("change", handleSelection);
         productField.addEventListener("input", handleSelection);
 
-        if (jq && typeof jq === "function") {
-            const $field = jq(productField);
-            if (!$field.data("salePriceFallbackBound")) {
-                $field
-                    .on("select2:select", handleSelection)
-                    .on("autocompleteLightSelect", handleSelection)
-                    .on("autocompleteLightChange", handleSelection);
-                $field.data("salePriceFallbackBound", true);
-            }
+        let detachJq = null; // CHANGED
+        if (jq && typeof jq === "function") { // CHANGED
+            const $field = jq(productField); // CHANGED
+            const events = ["select2:select", "autocompleteLightSelect", "autocompleteLightChange"]; // CHANGED
+            if ($field.data("salePriceBindingAttached") !== true) { // CHANGED
+                events.forEach(eventName => $field.on(eventName, handleSelection)); // CHANGED
+                $field.data("salePriceBindingAttached", true); // CHANGED
+            } // CHANGED
+            detachJq = () => { // CHANGED
+                events.forEach(eventName => $field.off(eventName, handleSelection)); // CHANGED
+                $field.removeData("salePriceBindingAttached"); // CHANGED
+            }; // CHANGED
         }
 
-        syncPrice(false);
+        productField.dataset.salePriceFallbackBound = "1"; // CHANGED
+        productField.__salePriceBinding = { // CHANGED
+            unitPriceInput, // CHANGED
+            handleSelection, // CHANGED
+            detachJq, // CHANGED
+            sync: syncPrice, // CHANGED
+        }; // CHANGED
+
+        syncPrice(false); // CHANGED
     }
 
     function refreshSaleClientDefaultFromAppointment() {
@@ -1602,6 +1676,9 @@
         }
         const quantityInput = row.querySelector('input[name$="-quantity"]');
         const unitPriceInput = row.querySelector('input[name$="-unit_price"]');
+        if (unitPriceInput && !unitPriceInput.dataset.productSaleRole) { // CHANGED
+            unitPriceInput.setAttribute("data-product-sale-role", "unit-price"); // CHANGED
+        } // CHANGED
         const deleteCheckbox = row.querySelector(`input[type="checkbox"][name$='-DELETE']`);
         const removeBtn = $(".js-sale-remove", row);
         ensureSalePriceBinding(row);
@@ -2121,11 +2198,34 @@
             mo.observe(container, { childList: true, subtree: true });
         }
         document.querySelectorAll(".ab-item").forEach(initItemStatusControls);
+        if (salesContainer) { // CHANGED
+            const salesObserver = new MutationObserver(mutations => { // CHANGED
+                mutations.forEach(mutation => { // CHANGED
+                    mutation.addedNodes.forEach(node => { // CHANGED
+                        if (node.nodeType !== 1) return; // CHANGED
+                        if (node.classList.contains("ps-item")) { // CHANGED
+                            applySaleDefaults(node); // CHANGED
+                            initSaleRow(node); // CHANGED
+                            return; // CHANGED
+                        } // CHANGED
+                        $$(".ps-item", node).forEach(child => { // CHANGED
+                            applySaleDefaults(child); // CHANGED
+                            initSaleRow(child); // CHANGED
+                        }); // CHANGED
+                    }); // CHANGED
+                }); // CHANGED
+            }); // CHANGED
+            salesObserver.observe(salesContainer, { childList: true }); // CHANGED
+        } // CHANGED
         document.addEventListener("formset:added", evt => {
             const node = evt && evt.detail && evt.detail.form;
             if (!node || !node.classList) return;
             if (node.classList.contains("ab-item")) {
                 initItemStatusControls(node);
+            } // CHANGED
+            if (node.classList.contains("ps-item")) { // CHANGED
+                applySaleDefaults(node); // CHANGED
+                initSaleRow(node); // CHANGED
             }
         });
         const deleteButton = document.getElementById("delete-appointment-btn");
