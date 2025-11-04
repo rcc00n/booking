@@ -1328,9 +1328,21 @@
 
     function ensureSalePriceBinding(row) {
         if (!row) return;
-        const productField = row.querySelector('[data-product-sale-role="product"]');
-        const unitPriceInput = row.querySelector('[data-product-sale-role="unit-price"]');
+        const productField =
+            row.querySelector('[data-product-sale-role="product"]') ||
+            row.querySelector('select[name$="-product"]') ||
+            row.querySelector('input[name$="-product"]');
+        const unitPriceInput =
+            row.querySelector('[data-product-sale-role="unit-price"]') ||
+            row.querySelector('input[name$="-unit_price"]');
         if (!productField || !unitPriceInput) return;
+
+        if (!productField.dataset.productSaleRole) {
+            productField.setAttribute("data-product-sale-role", "product");
+        }
+        if (!unitPriceInput.dataset.productSaleRole) {
+            unitPriceInput.setAttribute("data-product-sale-role", "unit-price");
+        }
         if (productField.dataset.salePriceFallbackBound === "1") return;
 
         const endpointRaw = (productField.dataset.priceEndpoint || window.PRODUCT_SALE_PRICE_ENDPOINT || "").trim();
