@@ -12,6 +12,7 @@ from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 from django.utils.html import format_html
 from django.urls import reverse
+import logging
 from datetime import datetime
 from decimal import Decimal
 from django.core.exceptions import ImproperlyConfigured, ValidationError, PermissionDenied
@@ -42,6 +43,8 @@ from core.services.pricing import (
     PricingComputationError,
 )
 from core.services.refunds import RefundService, RefundError
+
+logger = logging.getLogger(__name__)
 from core.utils.fees import card_processing_fee
 from core.tasks import send_item_cancellation_email, send_item_confirmation_email
 from core.forms import PaymentRefundForm
@@ -1207,8 +1210,9 @@ def payment_refund_view(request, pk):
         if form.is_valid():
             requested_minor = form.cleaned_data["amount_minor"]
             try:
-                print(
-                    "[Refund Debug] Initiating refund",
+                # CHANGED: log refund workflow steps instead of printing to stdout.
+                logger.debug(
+                    "Initiating refund %s",
                     {
                         "payment_id": str(payment.pk),
                         "appointment_id": str(appointment.pk),
@@ -1221,8 +1225,8 @@ def payment_refund_view(request, pk):
                     appointment,
                     requested_minor,
                 )
-                print(
-                    "[Refund Debug] Allocations resolved",
+                logger.debug(
+                    "Refund allocations resolved %s",
                     [
                         {
                             "payment_id": str(allocation.payment.pk),
@@ -1234,7 +1238,7 @@ def payment_refund_view(request, pk):
                 )
                 stripe_ids = RefundService.perform_refund(allocations, actor=request.user)
             except RefundError as exc:
-                print("[Refund Debug] RefundError encountered:", exc)
+                logger.debug("RefundError encountered %s", exc, exc_info=exc)
                 form.add_error(None, str(exc))
             else:
                 amount = form.cleaned_data["amount_to_refund"]
@@ -1263,8 +1267,8 @@ def payment_refund_view(request, pk):
                         stripe_html,
                     ),
                 )
-                print(
-                    "[Refund Debug] Refund complete",
+                logger.debug(
+                    "Refund complete %s",
                     {
                         "payment_id": str(payment.pk),
                         "appointment_id": str(appointment.pk),

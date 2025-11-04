@@ -150,7 +150,7 @@ def _room_busy_intervals(room_ids: List[int], day: datetime) -> Dict[int, List[S
             start_time__gt=window_start - timedelta(hours=24),
         )
         .annotate(_latest_appt_status=Subquery(latest_appt_status_sq))
-        .exclude(current_status_code__iexact="CANCELLED")
+        .filter(Q(current_status_code__isnull=True) | ~Q(current_status_code__iexact="CANCELLED"))  # CHANGED: continue counting items lacking status history
         .exclude(_latest_appt_status__iexact="Cancelled")
     )
 

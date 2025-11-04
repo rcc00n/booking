@@ -1372,13 +1372,16 @@ class Appointment(models.Model):
         if not self.start_time:
             return
 
-        items = list(self._items_qs().select_related("service", "master", "appointment"))
+        # CHANGED: annotate items with current status so cancelled entries can be ignored.
+        items = list(
+            self._items_qs()
+            .with_current_status()
+            .select_related("service", "master", "appointment")
+        )
         if not items:
             return
 
         errors = {}
-
-        cancelled_status = AppointmentStatus.objects.filter(name="Cancelled").first()
 
         # Внутренняя функция проверки одного айтема,
         # почти та же логика, что в AppointmentItem.clean
@@ -1386,6 +1389,13 @@ class Appointment(models.Model):
         service_allowed_rooms = {}
 
         def validate_item(it: "AppointmentItem"):
+            status_code = (
+                getattr(it, "current_status_code", None)
+                or getattr(getattr(it, "status", None), "code", "")
+            )
+            if status_code and str(status_code).upper() == "CANCELLED":
+                return  # CHANGED: skip validation for cancelled appointment items
+
             # старт от Appointment
             start_dt = getattr(it, "start_time", None) or self.start_time
             if not it.master or not it.service or not start_dt:
@@ -1395,22 +1405,23 @@ class Appointment(models.Model):
             this_end = start_dt + timedelta(minutes=total_min)
 
             # Поиск пересечений с чужими AppointmentItem этого же мастера
-            overlapping_qs = AppointmentItem.objects.filter(
-                master=it.master,
-                start_time__lt=this_end,
-                start_time__gte=start_dt - timedelta(hours=3),
-            )
+            active_status_q = Q(current_status_code__isnull=True) | ~Q(current_status_code__iexact="CANCELLED")  # CHANGED: retain items with no status history
+
+            overlapping_qs = (
+                AppointmentItem.objects.with_current_status()
+                .filter(
+                    master=it.master,
+                    start_time__lt=this_end,
+                    start_time__gte=start_dt - timedelta(hours=3),
+                )
+                .filter(active_status_q)
+            )  # CHANGED: rely on item-level status when checking overlaps
 
             # исключаем все айтемы текущего Appointment
             if self.pk:
                 overlapping_qs = overlapping_qs.exclude(appointment=self)
             if getattr(it, "pk", None):
                 overlapping_qs = overlapping_qs.exclude(pk=it.pk)
-
-            if cancelled_status:
-                overlapping_qs = overlapping_qs.exclude(
-                    appointment__appointmentstatushistory__status=cancelled_status
-                )
 
             for other in overlapping_qs.select_related("service", "appointment"):
                 other_start = other.appointment.start_time if other.appointment else None
@@ -1772,6 +1783,17 @@ class AppointmentItem(models.Model):
         total_min = self.duration_min
         this_end = self.end_time or (start_dt + timedelta(minutes=total_min))
 
+        status_code = None
+        if hasattr(self, "current_status_code") and self.current_status_code:
+            status_code = self.current_status_code
+        elif getattr(getattr(self, "status", None), "code", None):
+            status_code = self.status.code
+        elif getattr(self, "_initial_status_code", None):
+            status_code = self._initial_status_code
+
+        if status_code and str(status_code).upper() == "CANCELLED":
+            return
+
         if not self._validation_column_available():
             return
 
@@ -1791,37 +1813,32 @@ class AppointmentItem(models.Model):
         if not getattr(self, "validation_enabled", True):
             return
 
+        active_status_q = Q(current_status_code__isnull=True) | ~Q(current_status_code__iexact="CANCELLED")  # CHANGED: treat NULL current status as active
+
+        overlap_filter = Q(start_time__lt=this_end) & (Q(end_time__gt=start_dt) | Q(end_time__isnull=True))
+
+        validation_active_q = Q(validation_enabled__isnull=True) | Q(validation_enabled=True)
+
         try:
-            overlapping_qs = (
+            master_conflicts_qs = (
                 type(self)
                 .objects.with_current_status()
-                .filter(
-                    master=self.master,
-                    start_time__lt=this_end,
-                    start_time__gt=start_dt - timedelta(hours=24),  # «окно» поиска (с запасом на смены через полночь)
-                )
-                .exclude(current_status_code__iexact="CANCELLED")
+                .filter(master=self.master)
+                .filter(overlap_filter)
+                .filter(active_status_q)
+                .filter(validation_active_q)
             )
             if latest_appt_status_sq is not None:
-                overlapping_qs = overlapping_qs.annotate(
+                master_conflicts_qs = master_conflicts_qs.annotate(
                     _latest_appt_status=Subquery(latest_appt_status_sq)
                 ).exclude(_latest_appt_status__iexact="Cancelled")
             if self.pk:
-                overlapping_qs = overlapping_qs.exclude(pk=self.pk)
+                master_conflicts_qs = master_conflicts_qs.exclude(pk=self.pk)
 
-            # Фактическое пересечение по интервалам item'ов
-            for other in overlapping_qs.select_related("service", "appointment"):
-                if hasattr(other, "validation_enabled") and not getattr(other, "validation_enabled", True):
-                    continue
-                if not other.start_time:
-                    continue
-                other_total = other.duration_min if hasattr(other, "duration_min") else 0
-                other_end = other.start_time + timedelta(minutes=other_total)
-
-                if start_dt < other_end and this_end > other.start_time:
-                    raise ValidationError({
-                        "start_time": "Этот слот пересекается с другим приёмом у того же мастера."
-                    })
+            if master_conflicts_qs.exists():
+                raise ValidationError({
+                    "start_time": "Этот слот пересекается с другим приёмом у того же мастера."
+                })
         except (ProgrammingError, OperationalError):
             pass
 
@@ -1876,8 +1893,11 @@ class AppointmentItem(models.Model):
         if not allowed_room_ids:
             raise ValidationError({"service": "Service must be assigned to at least one room."})
 
-        if self.room_id:
-            if self.room_id not in allowed_room_ids:
+        # CHANGED: normalize room selection to ensure overlap checks have consistent room id.
+        room_candidate_id = self.room_id
+        auto_assigned_room = False
+        if room_candidate_id:
+            if room_candidate_id not in allowed_room_ids:
                 raise ValidationError({"room": "Service can't be performed in the selected room."})
         else:
             from .utils import pick_free_room
@@ -1886,35 +1906,64 @@ class AppointmentItem(models.Model):
             if room_candidate is None:
                 raise ValidationError("All rooms for this service are busy at this time.")
             self.room = room_candidate
+            self.room_id = getattr(room_candidate, "pk", getattr(self, "room_id", None))
+            room_candidate_id = self.room_id
+            auto_assigned_room = True
 
-        room_overlap_qs = (
-            type(self)
-            .objects.with_current_status()
-            .filter(
-                room_id=self.room_id,
-                start_time__lt=this_end,
-                start_time__gt=start_dt - timedelta(hours=24),
+        if not room_candidate_id:
+            raise ValidationError({"room": "Unable to determine a room for this service."})
+
+        allowed_rooms = {
+            room.pk: room
+            for room in self.service.allowed_rooms.order_by("pk")
+        }
+
+        def _fetch_room_conflicts(room_id: int) -> list["AppointmentItem"]:
+            qs = (
+                type(self)
+                .objects.with_current_status()
+                .filter(
+                    room_id=room_id,
+                    start_time__lt=this_end,
+                    start_time__gt=start_dt - timedelta(hours=24),
+                )
+                .filter(overlap_filter)
+                .filter(active_status_q)
+                .filter(validation_active_q)
             )
-            .exclude(current_status_code__iexact="CANCELLED")
-        )
-        if latest_appt_status_sq is not None:
-            room_overlap_qs = room_overlap_qs.annotate(
-                _latest_appt_status=Subquery(latest_appt_status_sq)
-            ).exclude(_latest_appt_status__iexact="Cancelled")
-        if self.pk:
-            room_overlap_qs = room_overlap_qs.exclude(pk=self.pk)
+            if latest_appt_status_sq is not None:
+                qs = qs.annotate(
+                    _latest_appt_status=Subquery(latest_appt_status_sq)
+                ).exclude(_latest_appt_status__iexact="Cancelled")
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            return list(qs.select_related("service", "appointment", "master"))
 
-        for other in room_overlap_qs.select_related("service", "appointment", "master"):
-            if not other.start_time:
-                continue
-            other_end = getattr(other, "end_time", None)
-            if other_end is None:
-                other_total = other.duration_min if hasattr(other, "duration_min") else 0
-                other_end = other.start_time + timedelta(minutes=other_total)
-            if start_dt < other_end and this_end > other.start_time:
-                raise ValidationError({
-                    "start_time": "This room is currently used by another service for the selected time."
-                })
+        def _has_overlap(items: list["AppointmentItem"]) -> bool:
+            return any(True for _ in items)
+
+        room_conflicts = _fetch_room_conflicts(room_candidate_id)
+
+        if auto_assigned_room and _has_overlap(room_conflicts):
+            for alt_room_id in allowed_room_ids:
+                if alt_room_id == room_candidate_id:
+                    continue
+                alt_conflicts = _fetch_room_conflicts(alt_room_id)
+                if not _has_overlap(alt_conflicts):
+                    alt_room = allowed_rooms.get(alt_room_id)
+                    if alt_room is None:
+                        alt_room = self.service.allowed_rooms.filter(pk=alt_room_id).first()
+                    self.room_id = alt_room_id
+                    if alt_room is not None:
+                        self.room = alt_room
+                    room_candidate_id = alt_room_id
+                    room_conflicts = alt_conflicts
+                    break
+
+        if _has_overlap(room_conflicts):
+            raise ValidationError({
+                "start_time": "This room is currently used by another service for the selected time."
+            })
 
 # === 4) Недоступность мастера (time off / vacation / blocked) ===
         # Поддержим несколько возможных имён модели и полей, чтобы не «падать», если схема немного отличается.
@@ -2597,7 +2646,15 @@ class ClientFile(models.Model):
     def filename(self) -> str:
         if not self.file:
             return ""
-        return os.path.basename(self.file.name or "")
+        raw_name = os.path.basename(self.file.name or "")
+        # CHANGED: strip storage suffixes like "_ABC123" so UI shows the original upload name.
+        root, ext = os.path.splitext(raw_name)
+        parts = root.rsplit("_", 1)
+        if len(parts) == 2:
+            suffix = parts[1]
+            if suffix and suffix.isalnum() and len(suffix) >= 6:
+                return f"{parts[0]}{ext}"
+        return raw_name
 
 # --- 7. NOTIFICATIONS ---
 

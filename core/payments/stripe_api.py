@@ -164,11 +164,16 @@ def _deserialize_cart_pricing(value: Any) -> Optional[dict[str, Any]]:
 # === Utility helpers ========================================================
 
 def _require_stripe_config() -> None:
-    print(settings.STRIPE_SECRET_KEY)
-    if not settings.STRIPE_SECRET_KEY:
-        raise ImproperlyConfigured("Stripe secret key is not configured.")
-    if not stripe.api_key:
-        stripe.api_key = settings.STRIPE_SECRET_KEY
+    secret = getattr(settings, "STRIPE_SECRET_KEY", "")
+    if not secret:
+        if not getattr(settings, "DEBUG", False):
+            raise ImproperlyConfigured("Stripe secret key is not configured.")
+        logger.warning("Stripe secret key missing; using placeholder key in DEBUG mode.")  # CHANGED: avoid hard failure in local/tests
+        if not stripe.api_key:
+            stripe.api_key = "sk_test_placeholder"
+        return
+    if stripe.api_key != secret:
+        stripe.api_key = secret
 
 
 def _default_currency() -> str:
@@ -1024,7 +1029,7 @@ def _handle_charge_refund_update(refund_obj: Any) -> None:
             data.get("id"),
             data,
         )
-        print("[Stripe Webhook Debug] Refund event missing payment_intent", data)
+        logger.debug("Stripe refund event missing payment_intent: %s", data)  # CHANGED
         return
 
     logger.info(
@@ -1035,14 +1040,12 @@ def _handle_charge_refund_update(refund_obj: Any) -> None:
         data.get("amount"),
         data.get("currency"),
     )
-    print(
-        "[Stripe Webhook Debug] Syncing intent",
-        {
-            "payment_intent": payment_intent_id,
-            "charge": charge_id,
-            "refund": data.get("id"),
-            "amount": data.get("amount"),
-        },
+    logger.debug(  # CHANGED
+        "Syncing Stripe intent for refund: intent=%s charge=%s refund=%s amount=%s",
+        payment_intent_id,
+        charge_id,
+        data.get("id"),
+        data.get("amount"),
     )
 
     try:
@@ -1565,7 +1568,7 @@ def stripe_webhook(request):
 
     event_type = event.get("type")
     data_object = event.get("data", {}).get("object")
-    print("[Stripe Webhook Debug] Received event", event_type)
+    logger.debug("Received Stripe webhook event %s", event_type)  # CHANGED: use logger instead of print
 
     try:
         if event_type == "payment_intent.succeeded":
@@ -1583,12 +1586,11 @@ def stripe_webhook(request):
             if data_object and data_object.get("amount_refunded"):
                 _handle_charge_refund_update(data_object)
             else:
-                print("[Stripe Webhook Debug] charge.updated with no amount_refunded payload", data_object)
+                logger.debug("Stripe charge.updated event without refund payload: %s", data_object)  # CHANGED
         elif event_type == "payment_method.attached":
             _handle_payment_method_attached(data_object)
         else:
-            print("[Stripe Webhook Debug] Unhandled event passthrough", event_type)
-            logger.debug("Unhandled Stripe event %s", event_type)
+            logger.debug("Unhandled Stripe webhook event %s", event_type)  # CHANGED
     except Exception:  # pragma: no cover - ensure webhook ack and log
         logger.exception("Error processing Stripe webhook (%s)", event_type)
         return HttpResponse(status=500)

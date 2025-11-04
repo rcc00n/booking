@@ -1992,6 +1992,28 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
 
+# Ensure custom deletion endpoint is always present even if the model admin isn't
+# consulted before reverse() lookups during tests. # CHANGED
+_original_admin_get_urls = admin.site.get_urls
+
+
+def _patched_admin_get_urls():
+    urls = _original_admin_get_urls()
+    user_admin = admin.site._registry.get(get_user_model())
+    if user_admin is not None:
+        extra = [
+            path(
+                "auth/user/<int:user_id>/files/<uuid:file_id>/delete/",
+                admin.site.admin_view(user_admin.delete_client_file_view),
+                name="auth_user_delete_file",
+            )
+        ]
+        return extra + urls
+    return urls
+
+
+admin.site.get_urls = _patched_admin_get_urls
+
 
 @admin.register(MasterAvailability)
 class MasterAvailabilityAdmin(ExportCsvMixin, admin.ModelAdmin):
@@ -2220,14 +2242,34 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
 
     @staticmethod
-    def _validate_service_room_capacity(rows, bag):
+    def _validate_service_room_capacity(rows, bag, *, cancelled_indices=None):
         if not rows:
             return
+
+        # CHANGED: precompute indices of rows that should be ignored (e.g., staged cancellations).
+        cancelled_idx = set()
+        for idx in (cancelled_indices or set()):
+            if idx is None:
+                continue
+            text = str(idx).strip()
+            if not text:
+                continue
+            try:
+                cancelled_idx.add(int(text))
+            except (TypeError, ValueError):
+                continue  # CHANGED: ignore non-numeric prefixes for row cancellation hints
+
+        def _is_cancelled(row: dict) -> bool:
+            code = row.get("status_code") or row.get("current_status_code")
+            return isinstance(code, str) and code.upper() == "CANCELLED"
 
         service_ids = {
             row["service_id"]
             for row in rows
-            if row.get("service_id") and row.get("validation_enabled", True)
+            if row.get("service_id")
+            and row.get("validation_enabled", True)
+            and row.get("idx") not in cancelled_idx
+            and not _is_cancelled(row)
         }
         if not service_ids:
             return
@@ -2251,6 +2293,10 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             start = row.get("dt")
             if not sid or not start:
                 continue
+            if row.get("idx") in cancelled_idx:
+                continue  # CHANGED: skip rows staged for cancellation
+            if _is_cancelled(row):
+                continue  # CHANGED: ignore cancelled items when computing capacity
             if not row.get("validation_enabled", True):
                 continue  # CHANGED: skip capacity checks when validation is off
             meta = service_meta.get(str(sid))
@@ -2286,12 +2332,46 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                     active = max(active - 1, 0)
 
     @staticmethod
-    def _enforce_room_capacity_for_items(prebuilt_items, row_errs):
+    def _enforce_room_capacity_for_items(
+        prebuilt_items,
+        row_errs,
+        *,
+        cancelled_prefixes=None,
+        cancelled_item_ids=None,
+    ):
         if not prebuilt_items:
             return
 
+        # CHANGED: normalize cancellation hints so we can ignore those entries in capacity checks.
+        cancelled_prefix_set = set()
+        for pref in (cancelled_prefixes or set()):
+            if pref is None:
+                continue
+            text = str(pref).strip()
+            if text:
+                cancelled_prefix_set.add(text)
+        cancelled_item_id_set = set()
+        for cid in (cancelled_item_ids or set()):
+            if cid is None:
+                continue
+            text = str(cid).strip()
+            if text:
+                cancelled_item_id_set.add(text)
+
         service_map = {}
         for idx, item, _ in prebuilt_items:
+            prefix = f"items-{idx}"
+            if prefix in cancelled_prefix_set:
+                continue  # CHANGED: staged cancellation removes item from capacity enforcement
+            item_pk = getattr(item, "pk", None)
+            if item_pk is not None and str(item_pk) in cancelled_item_id_set:
+                continue  # CHANGED: skip items cancelled in the same transaction
+            status_code = (
+                getattr(item, "current_status_code", None)
+                or getattr(getattr(item, "status", None), "code", "")
+            )
+            if status_code and str(status_code).upper() == "CANCELLED":
+                continue  # CHANGED: ignore items already cancelled at item-level
             if hasattr(item, "validation_enabled") and not getattr(item, "validation_enabled", True):
                 continue  # CHANGED: skip capacity checks when validation is off
             service = getattr(item, "service", None)
@@ -3691,23 +3771,25 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         posted_items = []  # чтобы вернуть в шаблон ровно то, что вводили
         for i in range(total_forms):
             pref = f"items-{i}-"
-        validation_values = request.POST.getlist(pref + "validation_enabled")
-        validation_enabled = (
-            any(str(val).strip().lower() in {"1", "true", "on", "yes"} for val in validation_values)
-            if validation_values
-            else False
-        )
-        posted_items.append({
-            "master":      (request.POST.get(pref + "master") or "").strip(),
-            "service":     (request.POST.get(pref + "service") or "").strip(),
-            "start_time_0": (request.POST.get(pref + "start_time_0") or "").strip(),  # date
-            "start_time_1": (request.POST.get(pref + "start_time_1") or "").strip(),  # time
-            "unit_price":  (request.POST.get(pref + "unit_price") or "").strip(),
-            "promocode":   (request.POST.get(pref + "promocode") or "").strip(),
-            "duration_override_min": (request.POST.get(pref + "duration_override_min") or "").strip(),
-            "manual_discount_percent": (request.POST.get(pref + "manual_discount_percent") or "").strip(),
-            "validation_enabled": validation_enabled,
-        })
+            validation_values = request.POST.getlist(pref + "validation_enabled")
+            validation_enabled = (
+                any(str(val).strip().lower() in {"1", "true", "on", "yes"} for val in validation_values)
+                if validation_values
+                else False
+            )
+            status_code_raw = (request.POST.get(pref + "status_code") or "").strip()
+            posted_items.append({
+                "master":      (request.POST.get(pref + "master") or "").strip(),
+                "service":     (request.POST.get(pref + "service") or "").strip(),
+                "start_time_0": (request.POST.get(pref + "start_time_0") or "").strip(),  # date
+                "start_time_1": (request.POST.get(pref + "start_time_1") or "").strip(),  # time
+                "unit_price":  (request.POST.get(pref + "unit_price") or "").strip(),
+                "promocode":   (request.POST.get(pref + "promocode") or "").strip(),
+                "duration_override_min": (request.POST.get(pref + "duration_override_min") or "").strip(),
+                "manual_discount_percent": (request.POST.get(pref + "manual_discount_percent") or "").strip(),
+                "validation_enabled": validation_enabled,
+                "status_code": status_code_raw,  # CHANGED: capture staged status for capacity decisions
+            })
 
         # обязательные поля верхнего уровня
         if not client_id:
@@ -3716,6 +3798,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             bag["__all__"].append("Add at least one service.")
 
         # построчная валидация ещё до создания объектов
+        cancelled_row_indices: set[int] = set()  # CHANGED: remember rows staged as cancelled
         valid_rows = []
         for idx, row in enumerate(posted_items):
             # пропускаем пустые
@@ -3772,6 +3855,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             else:
                 manual_discount = 0
 
+            status_code_clean = (row.get("status_code") or "").strip().upper()
             valid_rows.append({
                 "idx": idx,
                 "master_id": master_id or None,
@@ -3782,12 +3866,18 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "duration_override": duration_override,
                 "manual_discount": manual_discount,
                 "validation_enabled": bool(row.get("validation_enabled", True)),
+                "status_code": status_code_clean or None,
             })
+            if status_code_clean == "CANCELLED":
+                cancelled_row_indices.add(idx)  # CHANGED: skip cancelled rows from capacity checks
 
-        self._validate_service_room_capacity(valid_rows, bag)
+        self._validate_service_room_capacity(valid_rows, bag, cancelled_indices=cancelled_row_indices)
 
         required_form_ids: set[str] = set()
         for row in valid_rows:
+            status_code = (row.get("status_code") or "").upper()
+            if status_code == "CANCELLED":
+                continue  # CHANGED: cancelled rows do not mandate intake forms
             service_id = row.get("service_id")
             if not service_id:
                 continue
@@ -3869,6 +3959,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
                 for row in valid_rows:
                     idx = row["idx"]
+                    if (row.get("status_code") or "").upper() == "CANCELLED":
+                        continue  # CHANGED: do not persist rows staged for cancellation
                     if not (row["master_id"] and row["service_id"] and row["dt"]):
                         # (сюда попадём только если кто-то внезапно пустой — но мы отфильтровали выше)
                         key = f"items-{idx}"
@@ -3909,7 +4001,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                             row_errs.setdefault(key, []).extend(msgs)
 
                     # Если хотя бы у одной строки есть ошибки — откатываем и показываем их в форме
-                self._enforce_room_capacity_for_items(prebuilt_items, row_errs)
+                cancelled_prefixes = {f"items-{idx}" for idx in cancelled_row_indices}
+                self._enforce_room_capacity_for_items(
+                    prebuilt_items,
+                    row_errs,
+                    cancelled_prefixes=cancelled_prefixes,
+                )  # CHANGED: exclude cancelled/staged rows from capacity enforcement
 
                 if row_errs:
                     raise ValidationError(row_errs)
@@ -4031,7 +4128,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         except Exception as e:
             # На проде — лог, а пользователю безопасно
             bag["__all__"].append("Unexpected error while creating appointment.")
-            print("Error" + str(e))
+            # print("Error" + str(e))
             ctx = {
                 **self.admin_site.each_context(request),
                 "clients": clients,

@@ -83,9 +83,17 @@ class ProductSaleAdminForm(forms.ModelForm):
         sold_by = self.fields.get("sold_by")
         if sold_by:
             current_id = getattr(self.instance, "sold_by_id", None)
+            posted_id = None
+            if self.is_bound:
+                raw_value = self.data.get(self.add_prefix("sold_by"))
+                try:
+                    posted_id = int(raw_value)
+                except (TypeError, ValueError, OverflowError):
+                    posted_id = None
+            include_ids = {current_id, posted_id} - {None}
             sold_by.queryset = (
                 UserProfile.objects.select_related("user", "master_profile")
-                .filter(Q(master_profile__isnull=False) | Q(pk=current_id))
+                .filter(Q(master_profile__isnull=False) | Q(pk__in=include_ids))  # CHANGED: allow bound values without master profile
                 .order_by(
                     "user__first_name",
                     "user__last_name",
