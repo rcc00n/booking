@@ -148,6 +148,20 @@
         return Number.isNaN(dt.getTime()) ? null : dt;
     }
 
+    function normalizeTimeLabel(value) {
+        const raw = (value ?? "").trim();
+        if (!raw) return "";
+        return raw.length > 5 ? raw.slice(0, 5) : raw;
+    }
+
+    function isoFromDateAndTime(dateStr, timeStr) {
+        const label = normalizeTimeLabel(timeStr);
+        if (!dateStr || !label) return null;
+        const candidate = new Date(`${dateStr}T${label}`);
+        if (Number.isNaN(candidate.getTime())) return null;
+        return candidate.toISOString();
+    }
+
     function availabilityUrlFor(serviceId, masterId, dateStr) {
         if (!AVAILABILITY_URL) return null;
         const params = new URLSearchParams({ service: serviceId || "", date: dateStr || "" });
@@ -216,8 +230,7 @@
         }
 
         function highlightCurrent() {
-            const raw = (timeEl.value || "").trim();
-            const val = raw.length > 5 ? raw.slice(0, 5) : raw;
+            const val = normalizeTimeLabel(timeEl.value);
             if (!val) {
                 activateButton(null);
                 return null;
@@ -246,53 +259,105 @@
             return defaultMessage;
         }
 
-        function buildSlotButton(slotIso) {
-            const dt = parseIsoSlot(slotIso);
-            if (!dt) return null;
-            const label = formatSlotLabel(dt);
+        function buildSlotButton(slotIso, options = {}) {
+            const dt = slotIso ? parseIsoSlot(slotIso) : null;
+            const label = options.label || (dt ? formatSlotLabel(dt) : null);
+            if (!label) return null;
+            const isoValue = typeof slotIso === "string" && slotIso ? slotIso : (options.isoFallback || null);
             const btn = document.createElement("button");
             btn.type = "button";
             btn.className = "ab-timeslots__btn";
-            btn.dataset.iso = slotIso;
+            if (options.isCurrent) {
+                btn.classList.add("ab-timeslots__btn--current");
+                btn.dataset.current = "1";
+            }
+            if (isoValue) {
+                btn.dataset.iso = isoValue;
+            }
             btn.dataset.time = label;
             btn.setAttribute("role", "option");
             btn.setAttribute("aria-selected", "false");
-            btn.textContent = label;
+            btn.textContent = options.text || label;
+            if (options.tooltip) {
+                btn.title = options.tooltip;
+            }
             btn.addEventListener("click", () => {
                 activateButton(btn);
-                updateInput(label, slotIso, true);
-                setStatus("ready", `Selected ${label}`);
+                const nextIso = isoValue || (typeof options.buildIso === "function" ? options.buildIso(label) : null);
+                updateInput(label, nextIso, true);
+                setStatus("ready", options.selectMessage || `Selected ${label}`);
             });
             return btn;
         }
 
         function renderSlots(slots) {
             grid.innerHTML = "";
-            if (!Array.isArray(slots) || !slots.length) {
-                clearSelection({ emit: true });
-                setStatus("empty", "No available slots for this date.");
-                return;
+            const seenLabels = new Set();
+            if (Array.isArray(slots)) {
+                slots.forEach(iso => {
+                    const btn = buildSlotButton(iso);
+                    if (btn) {
+                        seenLabels.add(btn.dataset.time);
+                        grid.appendChild(btn);
+                    }
+                });
             }
-            slots.forEach(iso => {
-                const btn = buildSlotButton(iso);
-                if (btn) grid.appendChild(btn);
-            });
+
+            const currentLabel = normalizeTimeLabel(timeEl.value);
+            const originalDate = row.dataset.originalDate || "";
+            const originalTime = row.dataset.originalTime || "";
+            const allowCurrentSlot = !!(
+                row.dataset.itemId &&
+                originalDate &&
+                originalTime &&
+                currentLabel &&
+                dateEl.value === originalDate &&
+                currentLabel === originalTime
+            );
+            if (allowCurrentSlot && !seenLabels.has(currentLabel)) {
+                const fallbackIso = isoFromDateAndTime(dateEl.value, currentLabel);
+                const currentBtn = buildSlotButton(fallbackIso, {
+                    label: currentLabel,
+                    isCurrent: true,
+                    tooltip: "Current appointment time",
+                    selectMessage: `Current slot ${currentLabel} is kept for this appointment.`,
+                    buildIso: () => isoFromDateAndTime(dateEl.value, currentLabel),
+                });
+                if (currentBtn) {
+                    grid.insertBefore(currentBtn, grid.firstChild);
+                    seenLabels.add(currentLabel);
+                }
+            }
+
             const highlighted = highlightCurrent();
-            if (timeEl.value && !highlighted) {
-                clearSelection({ emit: true });
-                setStatus("warning", "Previous time is no longer available. Please choose another slot.");
+            const totalButtons = grid.querySelectorAll(".ab-timeslots__btn").length;
+
+            if (highlighted) {
+                if (highlighted.dataset.current === "1") {
+                    const others = Math.max(0, totalButtons - 1);
+                    if (others > 0) {
+                        const plural = others === 1 ? "slot" : "slots";
+                        setStatus("ready", `Current slot ${highlighted.dataset.time} is kept for this appointment. ${others} alternative ${plural} available.`);
+                    } else {
+                        setStatus("ready", `Current slot ${highlighted.dataset.time} is kept for this appointment.`);
+                    }
+                } else {
+                    const label = highlighted.dataset.time || "";
+                    const suffix = totalButtons > 1 ? ` · ${totalButtons - 1} more` : "";
+                    setStatus("ready", `Selected ${label}${suffix}`);
+                }
                 return;
             }
-            if (highlighted) {
-                const label = highlighted.dataset.time || "";
-                const count = grid.querySelectorAll(".ab-timeslots__btn").length;
-                const suffix = count > 1 ? ` · ${count - 1} more` : "";
-                setStatus("ready", `Selected ${label}${suffix}`);
-            } else {
-                const count = grid.querySelectorAll(".ab-timeslots__btn").length;
-                const info = count === 1 ? "1 available slot" : `${count} available slots`;
+
+            if (totalButtons > 0) {
+                clearSelection({ emit: true });
+                const info = totalButtons === 1 ? "1 available slot" : `${totalButtons} available slots`;
                 setStatus("ready", info);
+                return;
             }
+
+            clearSelection({ emit: true });
+            setStatus("empty", "No available slots for this date.");
         }
 
         function buildUnlockedSlots() {
@@ -899,6 +964,15 @@
         row.dataset.taxAmount = roundCurrency(parseAmount(row.dataset.taxAmount)).toFixed(2);
         row.dataset.basePrice = roundCurrency(parseAmount(row.dataset.basePrice)).toFixed(2);
         row.dataset.discountAmount = roundCurrency(parseAmount(row.dataset.discountAmount)).toFixed(2);
+
+        if (row.dataset.itemId) {
+            if (!row.dataset.originalDate && nativeStartDate && nativeStartDate.value) {
+                row.dataset.originalDate = nativeStartDate.value;
+            }
+            if (!row.dataset.originalTime && nativeStartTime && nativeStartTime.value) {
+                row.dataset.originalTime = normalizeTimeLabel(nativeStartTime.value);
+            }
+        }
 
         const markDirty = () => { row.dataset.pricingDirty = "1"; };
 
