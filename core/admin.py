@@ -748,7 +748,7 @@ class ExportXlsxMixin:
                 Prefetch(
                     "status_history",
                     queryset=AppointmentItemStatusHistory.objects.select_related(
-                        "status", "set_by__user"
+                        "status", "set_by"
                     ).order_by("-set_at", "-id"),
                     to_attr="_export_status_history",
                 )
@@ -857,7 +857,7 @@ class ExportXlsxMixin:
             history = getattr(item, "_export_status_history", None)
             if history is None:
                 history = list(
-                    item.status_history.select_related("status", "set_by__user").order_by("-set_at", "-id")
+                    item.status_history.select_related("status", "set_by").order_by("-set_at", "-id")
                 )
 
             cancelled_dt = None
@@ -2785,6 +2785,10 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "usd": "$",
         }.get(str(ctx["currency_code"]).lower(), f"{str(ctx['currency_code']).upper()} "))
         ctx["notifications"] = notifications
+        try:
+            ctx["availability_url"] = reverse("api-availability")
+        except NoReverseMatch:
+            ctx["availability_url"] = ""
         return super().render_change_form(request, ctx, add=add, change=change, form_url=form_url, obj=obj)
 
     def manage_intake_form_view(self, request, appointment_id, form_id):
@@ -4866,7 +4870,11 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 if clone is not None:
                     self.log_addition(request, clone, f"Duplicated from Service {original.pk}.")
                 messages.success(request, _("Service duplicated."))
-                return redirect(reverse("admin:core_service_changelist"))
+                preserved_filters = request.POST.get("_changelist_filters")
+                changelist_url = reverse("admin:core_service_changelist")
+                if preserved_filters:
+                    changelist_url = f"{changelist_url}?{preserved_filters}"
+                return redirect(changelist_url)
 
         return super().change_view(request, object_id, form_url=form_url, extra_context=extra_context)
 
@@ -4897,12 +4905,23 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
             "GBP": "\u00A3",
         }.get(currency_code, f"{currency_code} $")
 
+        preserved_filters_qs = ""
+        if original_params:
+            preserved_params = original_params.copy()
+            try:
+                preserved_params._mutable = True
+            except AttributeError:
+                pass
+            preserved_params.pop("_changelist_filters", None)
+            preserved_filters_qs = preserved_params.urlencode()
+
         extra_context.update(
             {
                 "category_options": category_options,
                 "current_category": current_category,
                 "currency_symbol": currency_symbol,
                 "current_search": search_term,
+                "svc_preserved_filters": preserved_filters_qs,
             }
         )
         extra_context.setdefault(
@@ -5872,7 +5891,9 @@ class EmailVerificationAdmin(admin.ModelAdmin):
         return False
 
     def has_delete_permission(self, request, obj=None):
-        return False
+        if request.user.is_superuser:
+            return True
+        return super().has_delete_permission(request, obj)
 
 class MasterWorkDayInline(admin.TabularInline):
     model = MasterWorkDay

@@ -415,6 +415,19 @@ class AppointmentItemInlineForm(forms.ModelForm):
     class Meta:
         model = AppointmentItem
         fields = "__all__"
+        widgets = {
+            "start_time": forms.SplitDateTimeWidget(
+                date_attrs={
+                    "type": "date",
+                    "class": "ab-input",
+                },
+                time_attrs={
+                    "type": "time",
+                    "step": 900,
+                    "class": "ab-input",
+                },
+            ),
+        }
 
     def __init__(self, *args, parent_obj=None, **kwargs):
         super().__init__(*args, **kwargs)

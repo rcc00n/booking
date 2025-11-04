@@ -17,6 +17,7 @@
     const MS_MAP = parseJSON("ms-map-data", {}); // { master_id: [ {id,name,base_price,svc_disc}, ... ] }
     const PROMO_BY_SERVICE = parseJSON("promos-by-service-data", {}); // { service_id: [ {id,text,discount}, ... ] }
     const PROMO_GLOBAL = parseJSON("promos-global-data", []);        // [ {id,text,discount}, ... ]
+    const AVAILABILITY_URL = parseJSON("availability-url", "");
     const GST_PERCENT = Number(parseJSON("gst-percent", "5.0")) || 5;
     const GST_ENABLED = Boolean(parseJSON("gst-enabled", true));
     const CURRENCY_CODE = String(parseJSON("currency-code", "CAD") || "CAD").toLowerCase();
@@ -133,6 +134,271 @@
         }
         const sign = numeric < 0 ? "-" : "";
         return `${sign}${money(Math.abs(numeric))}`;
+    }
+
+    function formatSlotLabel(dateObj) {
+        const h = String(dateObj.getHours()).padStart(2, "0");
+        const m = String(dateObj.getMinutes()).padStart(2, "0");
+        return `${h}:${m}`;
+    }
+
+    function parseIsoSlot(iso) {
+        if (!iso) return null;
+        const dt = new Date(iso);
+        return Number.isNaN(dt.getTime()) ? null : dt;
+    }
+
+    function availabilityUrlFor(serviceId, masterId, dateStr) {
+        if (!AVAILABILITY_URL) return null;
+        const params = new URLSearchParams({ service: serviceId || "", date: dateStr || "" });
+        if (masterId) params.append("master", masterId);
+        const divider = AVAILABILITY_URL.includes("?") ? "&" : "?";
+        return `${AVAILABILITY_URL}${divider}${params.toString()}`;
+    }
+
+    function fetchAvailability(serviceId, masterId, dateStr) {
+        const url = availabilityUrlFor(serviceId, masterId, dateStr);
+        if (!url) {
+            return Promise.reject(new Error("Availability endpoint is not configured."));
+        }
+        return fetch(url, { credentials: "same-origin" }).then(resp => {
+            if (!resp.ok) {
+                throw new Error(`Availability request failed with status ${resp.status}`);
+            }
+            return resp.json();
+        });
+    }
+
+    function initTimeslotPickerForRow({ row, masterEl, serviceEl, dateEl, timeEl, validationToggle }) {
+        if (!row || !dateEl || !timeEl) return null;
+        const wrap = row.querySelector(".js-timeslots-wrap");
+        const statusEl = row.querySelector(".js-timeslots-status");
+        const grid = row.querySelector(".js-timeslots-grid");
+        if (!wrap || !statusEl || !grid) return null;
+
+        const defaultMessage = "Select master, service and date to view availability.";
+        let activeBtn = null;
+        let requestSeq = 0;
+
+        function setStatus(state, message) {
+            wrap.dataset.state = state;
+            statusEl.textContent = message || defaultMessage;
+        }
+
+        function activateButton(btn) {
+            if (activeBtn && activeBtn !== btn) {
+                activeBtn.classList.remove("is-selected");
+                activeBtn.setAttribute("aria-selected", "false");
+            }
+            activeBtn = btn || null;
+            if (activeBtn) {
+                activeBtn.classList.add("is-selected");
+                activeBtn.setAttribute("aria-selected", "true");
+            }
+        }
+
+        function updateInput(value, iso, emit = true) {
+            timeEl.value = value || "";
+            if (iso) {
+                timeEl.dataset.selectedIso = iso;
+            } else {
+                delete timeEl.dataset.selectedIso;
+            }
+            if (emit) {
+                timeEl.dispatchEvent(new Event("input", { bubbles: true }));
+                timeEl.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+        }
+
+        function clearSelection({ emit = true } = {}) {
+            activateButton(null);
+            updateInput("", "", emit);
+        }
+
+        function highlightCurrent() {
+            const raw = (timeEl.value || "").trim();
+            const val = raw.length > 5 ? raw.slice(0, 5) : raw;
+            if (!val) {
+                activateButton(null);
+                return null;
+            }
+            const btn = grid.querySelector(`[data-time="${val}"]`);
+            if (!btn) {
+                activateButton(null);
+                return null;
+            }
+            activateButton(btn);
+            return btn;
+        }
+
+        function missingInputsMessage() {
+            const missing = [];
+            if (serviceEl && !serviceEl.value) missing.push("service");
+            if (masterEl && !masterEl.value) missing.push("master");
+            if (!dateEl.value) missing.push("date");
+            if (!missing.length) return null;
+            if (missing.length === 1) {
+                const target = missing[0];
+                if (target === "service") return "Select a service to view availability.";
+                if (target === "master") return "Select a master to view availability.";
+                return "Select a date to view availability.";
+            }
+            return defaultMessage;
+        }
+
+        function buildSlotButton(slotIso) {
+            const dt = parseIsoSlot(slotIso);
+            if (!dt) return null;
+            const label = formatSlotLabel(dt);
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "ab-timeslots__btn";
+            btn.dataset.iso = slotIso;
+            btn.dataset.time = label;
+            btn.setAttribute("role", "option");
+            btn.setAttribute("aria-selected", "false");
+            btn.textContent = label;
+            btn.addEventListener("click", () => {
+                activateButton(btn);
+                updateInput(label, slotIso, true);
+                setStatus("ready", `Selected ${label}`);
+            });
+            return btn;
+        }
+
+        function renderSlots(slots) {
+            grid.innerHTML = "";
+            if (!Array.isArray(slots) || !slots.length) {
+                clearSelection({ emit: true });
+                setStatus("empty", "No available slots for this date.");
+                return;
+            }
+            slots.forEach(iso => {
+                const btn = buildSlotButton(iso);
+                if (btn) grid.appendChild(btn);
+            });
+            const highlighted = highlightCurrent();
+            if (timeEl.value && !highlighted) {
+                clearSelection({ emit: true });
+                setStatus("warning", "Previous time is no longer available. Please choose another slot.");
+                return;
+            }
+            if (highlighted) {
+                const label = highlighted.dataset.time || "";
+                const count = grid.querySelectorAll(".ab-timeslots__btn").length;
+                const suffix = count > 1 ? ` · ${count - 1} more` : "";
+                setStatus("ready", `Selected ${label}${suffix}`);
+            } else {
+                const count = grid.querySelectorAll(".ab-timeslots__btn").length;
+                const info = count === 1 ? "1 available slot" : `${count} available slots`;
+                setStatus("ready", info);
+            }
+        }
+
+        function buildUnlockedSlots() {
+            const dateStr = dateEl.value;
+            if (!dateStr) return [];
+            const base = new Date(`${dateStr}T00:00:00`);
+            if (Number.isNaN(base.getTime())) return [];
+            const slots = [];
+            for (let minutes = 0; minutes < 24 * 60; minutes += 15) {
+                const dt = new Date(base.getTime() + minutes * 60 * 1000);
+                slots.push(dt.toISOString());
+            }
+            return slots;
+        }
+
+        function refresh(options = {}) {
+            if (wrap.dataset.disabled === "1") return;
+            const preserveSelection = !!options.preserveSelection;
+            if (!preserveSelection) {
+                clearSelection({ emit: true });
+            }
+            const bypassValidation = validationToggle && !validationToggle.checked;
+            if (bypassValidation) {
+                if (!dateEl.value) {
+                    grid.innerHTML = "";
+                    setStatus("idle", "Select a date to view all time slots.");
+                    return;
+                }
+                const slots = buildUnlockedSlots();
+                renderSlots(slots);
+                setStatus("ready", "Validation disabled: all time slots available.");
+                return;
+            }
+            const message = missingInputsMessage();
+            if (message) {
+                grid.innerHTML = "";
+                setStatus("idle", message);
+                return;
+            }
+            if (!AVAILABILITY_URL) {
+                grid.innerHTML = "";
+                setStatus("error", "Availability endpoint is not configured.");
+                return;
+            }
+
+            const masterId = masterEl ? masterEl.value : "";
+            const serviceId = serviceEl ? serviceEl.value : "";
+            const dateStr = dateEl.value;
+            const seq = ++requestSeq;
+            setStatus("loading", "Loading available slots...");
+            fetchAvailability(serviceId, masterId, dateStr)
+                .then(payload => {
+                    if (seq !== requestSeq) return;
+                    const masters = payload && Array.isArray(payload.masters) ? payload.masters : [];
+                    let slots = [];
+                    if (masters.length) {
+                        let entry = null;
+                        if (masterId) {
+                            entry = masters.find(m => String(m.id) === String(masterId)) || null;
+                        }
+                        if (!entry) {
+                            entry = masters[0] || null;
+                        }
+                        if (entry && Array.isArray(entry.slots)) {
+                            slots = entry.slots.slice();
+                        }
+                    }
+                    if (!slots.length && payload && Array.isArray(payload.slots)) {
+                        slots = payload.slots.slice();
+                    }
+                    renderSlots(slots);
+                })
+                .catch(err => {
+                    if (seq !== requestSeq) return;
+                    console.error("Unable to load availability", err);
+                    setStatus("error", "Unable to load availability. Try again.");
+                });
+        }
+
+        timeEl.addEventListener("change", highlightCurrent);
+        timeEl.addEventListener("input", highlightCurrent);
+
+        if (!AVAILABILITY_URL) {
+            setStatus("error", "Availability endpoint is not configured.");
+        } else {
+            const initial = missingInputsMessage();
+            setStatus("idle", initial || defaultMessage);
+        }
+
+        return {
+            refresh,
+            highlight: highlightCurrent,
+            clear: clearSelection,
+            setDisabled(isDisabled, message) {
+                if (isDisabled) {
+                    wrap.dataset.disabled = "1";
+                    wrap.dataset.state = "disabled";
+                    statusEl.textContent = message || "Time editing is disabled for this item.";
+                    grid.innerHTML = "";
+                } else {
+                    delete wrap.dataset.disabled;
+                    const initial = missingInputsMessage();
+                    setStatus("idle", initial || defaultMessage);
+                }
+            },
+        };
     }
     function parseAmount(value) {
         const num = Number.parseFloat(value);
@@ -618,13 +884,15 @@
         const nativeValidation = $(".native-validation input[type='checkbox'][name$='-validation_enabled']", row);
         const hiddenValidation = $(".native-validation input[type='hidden'][name$='-validation_enabled']", row);
         const uiValidation = $(".js-validation-toggle", row);
-        const nativeStart  = $("[name$='-start_time']", row);   // реальное поле
+        const nativeStartDate = $("[name$='-start_time_0']", row);
+        const nativeStartTime = $("[name$='-start_time_1']", row);
         const nativePrice  = $("[name$='-unit_price']", row);   // реальное поле
         const durationInput = $("[name$='-duration_override_min']", row);
         const discountInput = $("[name$='-manual_discount_percent']", row);
         const deleteInputToggle = $("input[name$='-DELETE']", row);
         const delWrap      = $(".js-del-wrap", row);
         const roBadge      = $(".js-ro-badge", row);
+        let timeslotPicker = null;
         row.dataset.taxable = "0";
         row.dataset.pricingDirty = row.dataset.hasPricing === "1" ? "0" : "1";
         row.dataset.finalPrice = roundCurrency(parseAmount(row.dataset.finalPrice)).toFixed(2);
@@ -633,6 +901,40 @@
         row.dataset.discountAmount = roundCurrency(parseAmount(row.dataset.discountAmount)).toFixed(2);
 
         const markDirty = () => { row.dataset.pricingDirty = "1"; };
+
+        const ensureTimeslotPicker = () => {
+            if (timeslotPicker) return timeslotPicker;
+            if (!nativeStartDate || !nativeStartTime) return null;
+            const wrap = row.querySelector(".js-timeslots-wrap");
+            if (!wrap) return null;
+            timeslotPicker = initTimeslotPickerForRow({
+                row,
+                masterEl: uiMaster,
+                serviceEl: uiSvc,
+                dateEl: nativeStartDate,
+                timeEl: nativeStartTime,
+                validationToggle: uiValidation,
+            });
+            return timeslotPicker;
+        };
+
+        const refreshTimeslots = (options = {}) => {
+            const picker = ensureTimeslotPicker();
+            if (!picker) return;
+            const isDisabled = (nativeStartDate && nativeStartDate.disabled) || (nativeStartTime && nativeStartTime.disabled);
+            if (isDisabled) {
+                picker.setDisabled(true, "Time editing is disabled for this item.");
+                return;
+            }
+            picker.setDisabled(false);
+            picker.refresh(options);
+        };
+
+        const highlightTimeslot = () => {
+            const picker = ensureTimeslotPicker();
+            if (!picker) return;
+            picker.highlight();
+        };
 
         if (uiValidation && nativeValidation) {
             uiValidation.checked = nativeValidation.checked;
@@ -645,6 +947,9 @@
                     hiddenValidation.value = uiValidation.checked ? "True" : "False";
                 }
                 markDirty();
+                if (timeslotPicker) {
+                    timeslotPicker.refresh({ preserveSelection: true });
+                }
             });
         }
 
@@ -718,39 +1023,39 @@
         updateRowSummary(row);
 
 
-// при изменении сервиса пользователем: и в native опции/значение
+        // при изменении сервиса пользователем: и в native опции/значение
         uiSvc.addEventListener("change", () => {
             mirrorOptions(nativeSvc, uiSvc);
-        const label = uiSvc.selectedOptions?.[0]?.textContent || "";
-        setSelectValueEnsuringOption(nativeSvc, uiSvc.value, label);
-        const opt = uiSvc.selectedOptions?.[0];
-        const totalDur = opt && opt.dataset ? (opt.dataset.totalDuration || opt.dataset.duration || "") : "";
-        const newBase = opt && opt.dataset ? roundCurrency(parseAmount(opt.dataset.price)) : 0;
-        row.dataset.basePrice = newBase.toFixed(2);
-        row.dataset.finalPrice = newBase.toFixed(2);
-        row.dataset.discountAmount = "0.00";
-        row.dataset.taxAmount = "0.00";
-        row.dataset.hasPricing = "0";
-        row.dataset.pricingDirty = "1";
-        const priceField = row.querySelector('input[name$="-unit_price"]');
-        if (priceField) {
-            priceField.value = newBase > 0 ? newBase.toFixed(2) : "";
-        }
-        if (durationInput) {
-            if (!durationInput.value || durationInput.dataset.auto === '1') {
-                durationInput.value = totalDur || '';
-                if (totalDur) {
-                    durationInput.dataset.auto = '1';
+            const label = uiSvc.selectedOptions?.[0]?.textContent || "";
+            setSelectValueEnsuringOption(nativeSvc, uiSvc.value, label);
+            const opt = uiSvc.selectedOptions?.[0];
+            const totalDur = opt && opt.dataset ? (opt.dataset.totalDuration || opt.dataset.duration || "") : "";
+            const newBase = opt && opt.dataset ? roundCurrency(parseAmount(opt.dataset.price)) : 0;
+            row.dataset.basePrice = newBase.toFixed(2);
+            row.dataset.finalPrice = newBase.toFixed(2);
+            row.dataset.discountAmount = "0.00";
+            row.dataset.taxAmount = "0.00";
+            row.dataset.hasPricing = "0";
+            row.dataset.pricingDirty = "1";
+            const priceField = row.querySelector('input[name$="-unit_price"]');
+            if (priceField) {
+                priceField.value = newBase > 0 ? newBase.toFixed(2) : "";
+            }
+            if (durationInput) {
+                if (!durationInput.value || durationInput.dataset.auto === '1') {
+                    durationInput.value = totalDur || '';
+                    if (totalDur) {
+                        durationInput.dataset.auto = '1';
                     }
                 }
             }
-            // и пересобрать промокоды UI (как было у тебя)
             if (typeof populatePromos === "function") {
                 populatePromos(uiPromo, uiSvc.value);
             }
             syncTaxableMeta();
             markDirty();
             recomputeAllTotals();
+            refreshTimeslots();
         });
         // промокоды (UI остаётся disabled по умолчанию, включим ниже для «моих»)
         if (nativeSvc && nativeSvc.value) {
@@ -778,6 +1083,7 @@
                     syncTaxableMeta();
                     markDirty();
                     recomputeAllTotals();
+                    refreshTimeslots();
                 });
 
                 // промо в нативу
@@ -856,6 +1162,7 @@
                 if (uiPromo) { uiPromo.value = ""; uiPromo.disabled = true; }
                 markDirty();
                 recomputeAllTotals();
+                refreshTimeslots();
             });
             uiSvc.disabled = false;
             uiSvc.addEventListener("change", () => {
@@ -873,6 +1180,7 @@
                 populatePromos(uiPromo, uiSvc.value);
                 markDirty();
                 recomputeAllTotals();
+                refreshTimeslots();
             });
             if (nativePromo) {
                 uiPromo.disabled = false;
@@ -882,15 +1190,28 @@
                     recomputeAllTotals();
                 });
             }
-            if (promoForceUI) {
-                const nativeForce = $(".native-promocode input[name$='-force_apply']", row);
-                promoForceUI.addEventListener("change", () => {
-                    if (nativeForce) nativeForce.checked = !!promoForceUI.checked;
-                    markDirty();
-                    recomputeAllTotals();
-                });
-            }
+        if (promoForceUI) {
+            const nativeForce = $(".native-promocode input[name$='-force_apply']", row);
+            promoForceUI.addEventListener("change", () => {
+                if (nativeForce) nativeForce.checked = !!promoForceUI.checked;
+                markDirty();
+                recomputeAllTotals();
+            });
         }
+    }
+
+        if (nativeStartDate) {
+            nativeStartDate.addEventListener("change", () => {
+                refreshTimeslots({ preserveSelection: true });
+            });
+        }
+        if (nativeStartTime) {
+            nativeStartTime.addEventListener("change", highlightTimeslot);
+            nativeStartTime.addEventListener("input", highlightTimeslot);
+        }
+
+        const preserveInitialSlot = !!(nativeStartTime && nativeStartTime.value);
+        refreshTimeslots({ preserveSelection: preserveInitialSlot });
     }
 
     function initExistingRows() {
@@ -1498,19 +1819,35 @@
             activateTab(tabs[0].getAttribute("data-tab"));
         }
     }
-    function stripDateTimeLabels(root=document){
-        root.querySelectorAll('p.datetime').forEach(p => {
-            // убрать <br>
-            [...p.querySelectorAll('br')].forEach(br => br.remove());
-            // убрать текстовые узлы "Date:" / "Time:"
-            [...p.childNodes].forEach(n => {
-                if (n.nodeType === Node.TEXT_NODE) {
-                    const t = n.textContent.replace(/\bDate:\s*/i, '').replace(/\bTime:\s*/i, '');
-                    if (t.trim().length === 0) {
-                        n.remove();
+    function stripDateTimeLabels(root = document) {
+        if (!root) return;
+        root.querySelectorAll("p.datetime").forEach(p => {
+            p.classList.add("js-datetime-wrapper");
+        });
+        root.querySelectorAll(".js-datetime-wrapper").forEach(wrapper => {
+            wrapper.querySelectorAll("br").forEach(br => br.remove());
+            wrapper.querySelectorAll(".datetimeshortcuts").forEach(el => el.remove());
+            Array.from(wrapper.childNodes).forEach(node => {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const cleaned = node.textContent.replace(/\bDate:\s*/i, "").replace(/\bTime:\s*/i, "");
+                    if (cleaned.trim()) {
+                        node.textContent = cleaned;
                     } else {
-                        n.textContent = t;
+                        node.remove();
                     }
+                }
+            });
+            wrapper.querySelectorAll("label").forEach(label => label.remove());
+            wrapper.querySelectorAll("input").forEach(input => {
+                if (!input.classList.contains("ab-input")) {
+                    input.classList.add("ab-input");
+                }
+                if (input.name && input.name.endsWith("_0")) {
+                    try { input.type = "date"; } catch (err) { /* ignore */ }
+                }
+                if (input.name && input.name.endsWith("_1")) {
+                    try { input.type = "time"; } catch (err) { /* ignore */ }
+                    input.setAttribute("step", "900");
                 }
             });
         });

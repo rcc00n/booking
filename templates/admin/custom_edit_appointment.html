@@ -78,6 +78,30 @@
             width: 100%;
         }
 
+        .ab-field--start-time{grid-column:1 / -1;}
+        .ab-datetime{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+        .ab-datetime input{flex:0 0 auto;min-width:160px}
+        .ab-datetime .datetimeshortcuts{display:none}
+
+        .ab-timeslots{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+        .ab-timeslots__status{font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px;min-height:18px}
+        .ab-timeslots__grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(110px,1fr))}
+        .ab-timeslots__btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 12px;border-radius:10px;border:1px solid #d1d5db;background:#f9fafb;font-weight:600;font-size:14px;color:#1f2937;cursor:pointer;transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,color .15s ease,transform .12s ease}
+        .ab-timeslots__btn:hover{border-color:#16a34a;background:#f0fdf4}
+        .ab-timeslots__btn:active{transform:scale(.97)}
+        .ab-timeslots__btn.is-selected{background:#16a34a;border-color:#16a34a;color:#fff;box-shadow:0 10px 30px rgba(22,163,74,.25)}
+        .ab-timeslots__btn.is-selected:hover{background:#16a34a}
+        .ab-timeslots__btn:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(22,163,74,.25)}
+        .ab-timeslots[data-state="loading"] .ab-timeslots__grid{pointer-events:none;opacity:.55}
+        .ab-timeslots[data-state="error"] .ab-timeslots__status,
+        .ab-timeslots[data-state="warning"] .ab-timeslots__status{color:#b91c1c}
+        .ab-timeslots[data-state="ready"] .ab-timeslots__status{color:#15803d}
+        .ab-timeslots[data-state="empty"] .ab-timeslots__status{color:#6b7280}
+        .ab-timeslots[data-state="loading"] .ab-timeslots__status::before{content:"";width:12px;height:12px;border-radius:50%;border:2px solid rgba(22,163,74,.2);border-top-color:#16a34a;animation:ab-spin .7s linear infinite}
+        .ab-timeslots[data-state="disabled"]{opacity:.45;pointer-events:none}
+
+        @keyframes ab-spin{to{transform:rotate(360deg)}}
+
         .ab-muted{color:#6b7280;font-size:12px}
         .ab-hr{height:1px;background:#eee;margin:16px 0}
         .ab-r{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:16px;flex-wrap:wrap}
@@ -370,19 +394,25 @@
                                         <div class="ab-muted">Only services available for the selected master</div>
                                     </div>
 
-                                    <!-- START TIME -->
-                                    <div class="ab-field">
-                                        <label>Start time</label>
-                                        {{ f.start_time }}
-                                        {% if f.start_time.errors %}<div class="ab-err">{{ f.start_time.errors }}</div>{% endif %}
-                                    </div>
-
                                     <!-- PRICE -->
                                     <div class="ab-field">
                                         <label>Unit price</label>
                                         {{ f.unit_price }}
                                         {% if f.unit_price.errors %}<div class="ab-err">{{ f.unit_price.errors }}</div>{% endif %}
                                         <div class="ab-muted">Leave empty to use the service base price</div>
+                                    </div>
+
+                                    <!-- START TIME -->
+                                    <div class="ab-field ab-field--start-time" data-field="start_time">
+                                        <label>Start time</label>
+                                        <div class="ab-datetime js-datetime-wrapper">
+                                            {{ f.start_time }}
+                                        </div>
+                                        {% if f.start_time.errors %}<div class="ab-err">{{ f.start_time.errors }}</div>{% endif %}
+                                        <div class="ab-timeslots js-timeslots-wrap" data-state="idle">
+                                            <div class="ab-timeslots__status js-timeslots-status" aria-live="polite">Select master, service and date to view availability.</div>
+                                            <div class="ab-timeslots__grid js-timeslots-grid" role="listbox" aria-label="Available time slots"></div>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -535,13 +565,19 @@
                                         <div class="ab-muted">Only services available for the selected master</div>
                                     </div>
                                     <div class="ab-field">
-                                        <label>Start time</label>
-                                        {{ f.start_time }}
-                                    </div>
-                                    <div class="ab-field">
                                         <label>Unit price</label>
                                         {{ f.unit_price }}
                                         <div class="ab-muted">Leave empty to use the service base price</div>
+                                    </div>
+                                    <div class="ab-field ab-field--start-time" data-field="start_time">
+                                        <label>Start time</label>
+                                        <div class="ab-datetime js-datetime-wrapper">
+                                            {{ f.start_time }}
+                                        </div>
+                                        <div class="ab-timeslots js-timeslots-wrap" data-state="idle">
+                                            <div class="ab-timeslots__status js-timeslots-status" aria-live="polite">Select master, service and date to view availability.</div>
+                                            <div class="ab-timeslots__grid js-timeslots-grid" role="listbox" aria-label="Available time slots"></div>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -1083,6 +1119,7 @@
     {{ currency_code|json_script:"currency-code" }}
     {{ card_fee_percent|json_script:"card-fee-percent" }}
     {{ card_fee_fixed|json_script:"card-fee-fixed" }}
+    {{ availability_url|json_script:"availability-url" }}
 
     <script>
         window.APPOINTMENT_CTX = {
