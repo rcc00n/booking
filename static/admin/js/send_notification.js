@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
             fetch('/admin/send_notification/', {
                 method: 'POST',
+                credentials: 'same-origin',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': getCSRFToken(),

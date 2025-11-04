@@ -44,6 +44,7 @@ function onDateChange(value) {
     const params = new URLSearchParams(formData).toString();
 
     fetch(`/admin/core/appointment/?${params}`, {
+        credentials: 'same-origin',
         headers: { 'x-requested-with': 'XMLHttpRequest' }
     })
         .then(res => res.json())
@@ -91,6 +92,7 @@ filterForm.addEventListener("submit", function (e) {
     const params = new URLSearchParams(formData).toString();
     console.log(params);
     fetch(`?${params}`, {
+        credentials: 'same-origin',
         headers: {
             "X-Requested-With": "XMLHttpRequest"
         }
@@ -374,6 +376,7 @@ function performItemReschedule(box) {
 
     fetch(rescheduleUrl, {
         method: "POST",
+        credentials: "same-origin",
         headers: {
             "Content-Type": "application/json",
             "X-CSRFToken": getCsrfToken(),
@@ -485,4 +488,3 @@ function handleAdd(type) {
     window.location.href = url;
 
 }
-

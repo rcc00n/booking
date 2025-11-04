@@ -1511,6 +1511,7 @@ if(verifyResendBtn){
     try{
       const resp=await fetch(VERIFY_ENDPOINTS.resend,{
         method:'POST',
+        credentials:'same-origin',
         headers:{
           'X-CSRFToken':getCookie('csrftoken'),
           'X-Requested-With':'XMLHttpRequest'
@@ -1559,6 +1560,7 @@ if(verifySubmitBtn){
     try{
       const resp=await fetch(VERIFY_ENDPOINTS.confirm,{
         method:'POST',
+        credentials:'same-origin',
         headers:{
           'X-CSRFToken':getCookie('csrftoken'),
           'X-Requested-With':'XMLHttpRequest'
@@ -1666,7 +1668,12 @@ if(regForm){
       submitStepBtn.classList.add('btn--loading');
     }
     try{
-      const response=await fetch(regForm.action,{method:'POST',body:formData,headers:{'X-Requested-With':'XMLHttpRequest'}});
+      const response=await fetch(regForm.action,{
+        method:'POST',
+        credentials:'same-origin',
+        body:formData,
+        headers:{'X-Requested-With':'XMLHttpRequest'}
+      });
       let payload=null;
       const contentType=response.headers.get('content-type')||'';
       if(contentType.includes('application/json')){

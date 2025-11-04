@@ -2,6 +2,7 @@
 {% load static %}
 {% load filters %}
 {% load tz %}
+{% load admin_urls %}
 
 {% if form.instance.pk %}
     {% url 'admin:core_appointment_enable_card_fee' appointment_id=form.instance.pk as enable_card_fee_url %}
@@ -1002,6 +1003,18 @@
                 <div class="ab-action-group">
                     <button type="submit" class="ab-btn">Save</button>
                     <a href="{% url 'admin:core_appointment_changelist' %}" class="ab-btn secondary">Cancel</a>
+                    {% if form.instance.pk and has_delete_permission %}
+                        {% url 'admin:core_appointment_delete' form.instance.pk as delete_url %}
+                        {% add_preserved_filters delete_url as delete_with_filters %}
+                        <button
+                            type="button"
+                            class="ab-btn danger"
+                            id="delete-appointment-btn"
+                            data-delete-url="{{ delete_with_filters }}"
+                            data-confirm-message="Are you sure you want to delete this appointment? This action cannot be undone.">
+                            Delete appointment
+                        </button>
+                    {% endif %}
                 </div>
                 {% if form.instance.pk %}
                     <div class="pay-actions">

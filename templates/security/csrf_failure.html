@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Session expired</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+        background: #f6f8fa;
+        color: #1f2933;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 24px;
+      }
+      .card {
+        background: #ffffff;
+        border-radius: 14px;
+        max-width: 460px;
+        width: 100%;
+        box-shadow: 0 12px 36px rgba(15, 23, 42, 0.12);
+        padding: 32px 28px;
+        text-align: center;
+      }
+      h1 {
+        margin: 0 0 14px;
+        font-size: 1.8rem;
+      }
+      p {
+        margin: 10px 0;
+        line-height: 1.5;
+      }
+      .actions {
+        margin-top: 24px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: center;
+      }
+      a,
+      button {
+        appearance: none;
+        cursor: pointer;
+        font-size: 1rem;
+        border-radius: 999px;
+        border: none;
+        padding: 12px 22px;
+        text-decoration: none;
+      }
+      a.primary,
+      button.primary {
+        background: #1d4ed8;
+        color: #ffffff;
+      }
+      a.secondary {
+        background: rgba(29, 78, 216, 0.1);
+        color: #1d4ed8;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #0b1120;
+          color: #e2e8f0;
+        }
+        .card {
+          background: #111827;
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+        }
+        a.primary,
+        button.primary {
+          background: #2563eb;
+        }
+        a.secondary {
+          background: rgba(59, 130, 246, 0.12);
+          color: #93c5fd;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card" role="alert">
+      <h1>Let's refresh your session</h1>
+      <p>{{ message }}</p>
+      <p>If this keeps happening, please contact support and mention "CSRF failure".</p>
+      <div class="actions">
+        <button class="primary" type="button" onclick="window.location.reload()">Refresh now</button>
+        <a class="secondary" href="{{ request.META.HTTP_REFERER|default:'/' }}">Go back</a>
+      </div>
+      {% if reason %}
+        <p style="margin-top:22px;font-size:.85rem;color:#64748b;">Technical detail: {{ reason }}</p>
+      {% endif %}
+    </main>
+  </body>
+</html>

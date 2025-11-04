@@ -1570,6 +1570,20 @@
                 initItemStatusControls(node);
             }
         });
+        const deleteButton = document.getElementById("delete-appointment-btn");
+        if (deleteButton) {
+            deleteButton.addEventListener("click", () => {
+                const message = deleteButton.dataset.confirmMessage
+                    || "Are you sure you want to delete this appointment?";
+                if (!window.confirm(message)) {
+                    return;
+                }
+                const target = deleteButton.dataset.deleteUrl;
+                if (target) {
+                    window.location.href = target;
+                }
+            });
+        }
         initRefundMenu();
         initPayMenu();
     });
