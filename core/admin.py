@@ -1335,7 +1335,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         (None, {
             'classes': ('wide',),
             'fields': (
-                'usable_password', 'password1', 'password2',
+                'password1', 'password2',
                 'email', 'first_name', 'last_name',
                 'phone', 'birth_date', 'address', 'postal_code',
                 'personal_discount_percent', 'how_heard', 'email_marketing_consent',
@@ -7238,6 +7238,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         skip_two[mid] = {}
         skip_lane[mid] = {0: {}, 1: {}}
         overlap_lanes[mid] = {0: {}, 1: {}}
+    forced_lane_items = set()
 
     # ───────────────── позиции (AppointmentItem) ───────────────────────────────
     prepared_items = []
@@ -7260,6 +7261,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             'status_code': status_code,
             'is_cancelled': status_code == 'CANCELLED',
             'validation_enabled': getattr(item, 'validation_enabled', True),
+            'slot_key': start_local.strftime('%H:%M'),
         }
         prepared_items.append(prepared)
         entry_lookup[item.pk] = prepared
@@ -7326,10 +7328,41 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         if assigned:
             lane_assignments[mid] = assigned
 
+    def _force_item_into_left_lane(entry):
+        """
+        Ensure validation-disabled appointments render in the left lane
+        so overlapping lunch/time-off blocks can slide to the right for
+        the split-lane UX.
+        """
+        item = entry.get("item")
+        item_pk = getattr(item, "pk", None)
+        if not item_pk or item_pk in forced_lane_items:
+            return
+        mid = entry["master_id"]
+        assigned_lane = lane_assignments.get(mid, {}).get(item_pk)
+        if assigned_lane is not None:
+            return
+        slot_key = entry["slot_key"]
+        cell_bucket = two_col_map.get(mid, {})
+        cell = cell_bucket.pop(slot_key, None)
+        if not cell:
+            return
+        for i in range(entry["rowspan"]):
+            t = (entry["start"] + timedelta(minutes=15 * i)).strftime("%H:%M")
+            skip_two[mid].pop(t, None)
+            skip_lane[mid][0][t] = True
+        overlap_lanes[mid][0][slot_key] = {
+            'kind': 'appt_active',
+            'rowspan': entry['rowspan'],
+            'colspan': 1,
+            'item': item,
+        }
+        forced_lane_items.add(item_pk)
+
     for entry in prepared_items:
         item = entry['item']
         mid = entry['master_id']
-        slot_key = entry['start'].strftime('%H:%M')
+        slot_key = entry['slot_key']
         rowspan = entry['rowspan']
 
         if entry['is_cancelled']:
@@ -7391,6 +7424,17 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         minutes = int((block_end - block_start).total_seconds() // 60)
         rowsp = max(1, (-(-minutes // 15)))  # ceil
         slot_key = block_start.strftime("%H:%M")
+
+        overlapping_lane_items = [
+            appt_entry
+            for appt_entry in items_by_master.get(mid, [])
+            if not appt_entry["is_cancelled"]
+            and not appt_entry["validation_enabled"]
+            and appt_entry["start"] < block_end
+            and appt_entry["end"] > block_start
+        ]
+        for overlap_entry in overlapping_lane_items:
+            _force_item_into_left_lane(overlap_entry)
 
         if slot_key not in two_col_map.get(mid, set()):
             if mid not in two_col_map:

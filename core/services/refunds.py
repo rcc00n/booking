@@ -98,26 +98,7 @@ class RefundService:
         )
         payments: List[Payment] = sorted(payments_qs, key=cls._sort_key)
 
-        # CHANGED: use logger debug instead of printing refund diagnostics.
-        logger.debug(
-            "allocate_refund_for_appointment %s",
-            {
-                "appointment_id": str(getattr(appointment, "pk", "")),
-                "requested_minor": requested_amount_minor,
-                "succeeded_payments": [
-                    {
-                        "payment_id": str(p.pk),
-                        "method": getattr(getattr(p, "method", None), "name", ""),
-                        "amount_received": str(p.amount_received),
-                        "amount_refunded": str(p.amount_refunded),
-                        "available_minor": cls._available_minor(p),
-                        "is_stripe": cls._infer_method(p) == PaymentRefund.METHOD_STRIPE,
-                        "captured_at": getattr(p, "captured_at", None),
-                    }
-                    for p in payments
-                ],
-            },
-        )
+
 
         if not payments:
             raise RefundError("No succeeded payments available for this appointment.")
@@ -199,15 +180,7 @@ class RefundService:
                 if method == PaymentRefund.METHOD_STRIPE:
                     stripe_refund = cls._create_stripe_refund(payment, allocation.amount_minor, actor)
                     stripe_ids.append(stripe_refund.id)
-                    logger.debug(
-                        "Stripe refund dispatched %s",
-                        {
-                            "payment_id": str(payment.pk),
-                            "appointment_id": str(payment.appointment_id),
-                            "amount_minor": allocation.amount_minor,
-                            "stripe_refund_id": stripe_refund.id,
-                        },
-                    )
+                    
                     cls._record_refund(
                         appointment=appointment,
                         payment=payment,
@@ -220,14 +193,7 @@ class RefundService:
                     cls._sync_payment_after_stripe_refund(payment, stripe_refund)
                 else:
                     cls._apply_offline_refund(payment, allocation.amount_minor, amount_decimal)
-                    logger.debug(
-                        "Offline refund recorded %s",
-                        {
-                            "payment_id": str(payment.pk),
-                            "appointment_id": str(payment.appointment_id),
-                            "amount_minor": allocation.amount_minor,
-                        },
-                    )
+                    
                     cls._record_refund(
                         appointment=appointment,
                         payment=payment,
@@ -253,13 +219,7 @@ class RefundService:
         payment.amount_refunded = (payment.amount_refunded or Decimal("0.00")) + amount_decimal
         payment.amount_refunded = payment.amount_refunded.quantize(TWOPLACES, rounding=ROUND_HALF_UP)
         payment.save(update_fields=["amount_refunded", "updated_at"])
-        logger.debug(
-            "Updated offline payment amount_refunded %s",
-            {
-                "payment_id": str(payment.pk),
-                "new_amount_refunded": str(payment.amount_refunded),
-            },
-        )
+        
 
     @classmethod
     def _create_stripe_refund(
@@ -286,16 +246,7 @@ class RefundService:
         if actor and getattr(actor, "pk", None):
             metadata["actor_id"] = str(actor.pk)
 
-        logger.debug(
-            "Requesting Stripe refund %s",
-            {
-                "payment_id": str(payment.pk),
-                "amount_minor": amount_minor,
-                "charge_id": payment.stripe_charge_id,
-                "intent_id": payment.stripe_payment_intent_id,
-                "metadata": metadata,
-            },
-        )
+    
         try:
             if payment.stripe_charge_id:
                 refund = stripe.Refund.create(
@@ -361,13 +312,6 @@ class RefundService:
             # keep the locked payment snapshot in sync with refreshed values
             payment.amount_refunded = updated_payment.amount_refunded
             payment.status = updated_payment.status
-        except stripe.error.AuthenticationError as exc:
-            logger.warning(
-                "Stripe authentication failed while syncing payment %s after refund %s: %s",
-                payment.pk,
-                getattr(stripe_refund, "id", None),
-                exc,
-            )
         except Exception:
             logger.exception(
                 "Failed to sync payment %s after Stripe refund %s",

@@ -1966,6 +1966,9 @@ class AppointmentItem(models.Model):
             })
 
 # === 4) Недоступность мастера (time off / vacation / blocked) ===
+        # Allow visual side-by-side rendering with lunch/time-off when validation is off.
+        if hasattr(self, "validation_enabled") and not getattr(self, "validation_enabled", True):
+            return
         # Поддержим несколько возможных имён модели и полей, чтобы не «падать», если схема немного отличается.
         timeoff_model = None
         for model_name in ("MasterAvailability", "MasterTimeOff", "MasterBlock", "MasterAbsence"):

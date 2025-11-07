@@ -686,7 +686,7 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
             'email', 'first_name', 'last_name',
             'phone', 'birth_date',
             'address',
-            'usable_password', 'password1', 'password2',
+            'password1', 'password2',
             'is_staff', 'is_active', 'is_superuser',
             'groups', "postal_code", "email_marketing_consent",
             "notes", 'personal_discount_percent'

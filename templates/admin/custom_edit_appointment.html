@@ -205,18 +205,25 @@
 
                     <div class="ab-row">
                         {% for field in form.visible_fields %}
-                            {% if APPT_FIELDS_1 %}
-                                {% if field.name in APPT_FIELDS_1 %}
+                            {% if field.name == "start_time" %}
+                                <div class="ab-hidden">
+                                    {{ field }}
+                                </div>
+                                {% if field.errors %}<div class="ab-err">{{ field.errors }}</div>{% endif %}
+                            {% else %}
+                                {% if APPT_FIELDS_1 %}
+                                    {% if field.name in APPT_FIELDS_1 %}
+                                        <div class="ab-field">
+                                            {{ field.label_tag }} {{ field }}
+                                            {% if field.errors %}<div class="ab-err">{{ field.errors }}</div>{% endif %}
+                                        </div>
+                                    {% endif %}
+                                {% else %}
                                     <div class="ab-field">
                                         {{ field.label_tag }} {{ field }}
                                         {% if field.errors %}<div class="ab-err">{{ field.errors }}</div>{% endif %}
                                     </div>
                                 {% endif %}
-                            {% else %}
-                                <div class="ab-field">
-                                    {{ field.label_tag }} {{ field }}
-                                    {% if field.errors %}<div class="ab-err">{{ field.errors }}</div>{% endif %}
-                                </div>
                             {% endif %}
                         {% endfor %}
                     </div>
@@ -414,6 +421,7 @@
                                             <div class="ab-timeslots__grid js-timeslots-grid" role="listbox" aria-label="Available time slots"></div>
                                         </div>
                                     </div>
+
                                 </div>
 
                                 <div class="ab-item-status" data-role="item-status">
