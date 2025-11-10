@@ -57,9 +57,9 @@ def _build_catalog_context(request):
     today = timezone.now().date()
     discount_window = Q(discounts__start_date__lte=today, discounts__end_date__gte=today)
 
+    base_services_qs = Service.objects.filter(is_active=True)
     services_qs = (
-        Service.objects.filter(is_active=True)
-        .select_related("category")
+        base_services_qs.select_related("category")
         .prefetch_related(
             Prefetch(
                 "pre_appointment_forms",
@@ -71,6 +71,7 @@ def _build_catalog_context(request):
     if q:
         services_qs = services_qs.filter(Q(name__icontains=q) | Q(description__icontains=q))
 
+    base_discounted_services_qs = base_services_qs.filter(discount_window).distinct()
     discounted_services_qs = services_qs.filter(discount_window).distinct()
 
     selected_category = None
@@ -88,27 +89,51 @@ def _build_catalog_context(request):
     )
     categories = []
     discounted_services = None
+    selected_only_discounted = bool(selected_category and selected_category.only_discounted_services)
+
     for category in categories_qs:
-        if category.only_discounted_services:
-            if selected_category and not getattr(selected_category, "only_discounted_services", False):
-                category.catalog_services = []
-                categories.append(category)
+        if selected_category:
+            if selected_only_discounted and not category.only_discounted_services:
                 continue
+            if not selected_only_discounted and category.pk != selected_category.pk:
+                continue
+
+        if category.only_discounted_services:
             if discounted_services is None:
                 discounted_services = list(discounted_services_qs)
-            category.catalog_services = discounted_services
+            services_for_category = discounted_services
         else:
-            if selected_category and getattr(selected_category, "only_discounted_services", False):
-                category.catalog_services = []
-            else:
-                category.catalog_services = list(category.service_set.all())
-        categories.append(category)
+            services_for_category = list(category.service_set.all())
+
+        if services_for_category:
+            category.catalog_services = services_for_category
+            categories.append(category)
+
+    categories_with_services_ids = set(
+        base_services_qs.filter(category__isnull=False).values_list("category_id", flat=True)
+    )
+    has_global_discounted_services = base_discounted_services_qs.exists()
+    filter_categories = []
+    for category in ServiceCategory.objects.for_catalog():
+        if category.only_discounted_services:
+            if has_global_discounted_services:
+                filter_categories.append(category)
+            continue
+        if category.pk in categories_with_services_ids:
+            filter_categories.append(category)
+
+    active_category = ""
+    if selected_category:
+        if selected_category.only_discounted_services and has_global_discounted_services:
+            active_category = str(selected_category.pk)
+        elif not selected_category.only_discounted_services and selected_category.pk in categories_with_services_ids:
+            active_category = str(selected_category.pk)
 
     return {
         "categories": categories,
-        "filter_categories": ServiceCategory.objects.for_catalog(),
+        "filter_categories": filter_categories,
         "q": q,
-        "active_category": str(cat),
+        "active_category": active_category,
         "search_results": services_qs if q else None,
         "has_any_services": services_qs.exists(),
         "uncategorized": services_qs.filter(category__isnull=True),

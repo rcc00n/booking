@@ -50,15 +50,14 @@ class DiscountServiceCategoryTests(TestCase):
             end_date=today + timedelta(days=1),
         )
 
-    def _get_categories_from_response(self, response):
-        categories = response.context["categories"]
-        discount_entry = next(c for c in categories if c.pk == self.discount_category.pk)
-        regular_entry = next(c for c in categories if c.pk == self.regular_category.pk)
-        return discount_entry, regular_entry
+    def _categories_by_id(self, response):
+        return {category.pk: category for category in response.context["categories"]}
 
     def test_discount_category_lists_only_discounted_services(self):
         response = self.client.get(reverse("client-dashboard"))
-        discount_entry, regular_entry = self._get_categories_from_response(response)
+        categories = self._categories_by_id(response)
+        discount_entry = categories[self.discount_category.pk]
+        regular_entry = categories[self.regular_category.pk]
 
         discount_names = {svc.name for svc in discount_entry.catalog_services}
         regular_names = {svc.name for svc in regular_entry.catalog_services}
@@ -71,7 +70,43 @@ class DiscountServiceCategoryTests(TestCase):
             reverse("client-dashboard"),
             data={"cat": str(self.discount_category.pk)},
         )
-        discount_entry, regular_entry = self._get_categories_from_response(response)
+        categories = self._categories_by_id(response)
 
-        self.assertTrue(discount_entry.catalog_services)
-        self.assertFalse(regular_entry.catalog_services)
+        self.assertIn(self.discount_category.pk, categories)
+        self.assertNotIn(self.regular_category.pk, categories)
+        self.assertTrue(categories[self.discount_category.pk].catalog_services)
+
+
+class CatalogCategoryVisibilityTests(TestCase):
+    def setUp(self):
+        self.visible_category = ServiceCategory.objects.create(name="Massage")
+        self.empty_category = ServiceCategory.objects.create(name="Hair Care")
+        self.visible_service = Service.objects.create(
+            name="Deep Tissue Massage",
+            category=self.visible_category,
+            base_price=Decimal("150.00"),
+            duration_min=90,
+        )
+
+    def test_empty_categories_removed_from_catalog_sections(self):
+        response = self.client.get(reverse("client-dashboard"))
+        category_ids = {category.pk for category in response.context["categories"]}
+
+        self.assertIn(self.visible_category.pk, category_ids)
+        self.assertNotIn(self.empty_category.pk, category_ids)
+
+    def test_filter_categories_exclude_empty_options(self):
+        response = self.client.get(reverse("client-dashboard"))
+        filter_ids = {category.pk for category in response.context["filter_categories"]}
+
+        self.assertIn(self.visible_category.pk, filter_ids)
+        self.assertNotIn(self.empty_category.pk, filter_ids)
+
+    def test_category_filter_shows_only_requested_category(self):
+        response = self.client.get(
+            reverse("client-dashboard"),
+            data={"cat": str(self.visible_category.pk)},
+        )
+        category_ids = {category.pk for category in response.context["categories"]}
+
+        self.assertEqual(category_ids, {self.visible_category.pk})
