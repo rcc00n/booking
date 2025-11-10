@@ -22,7 +22,7 @@ from django.db import transaction
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseRedirect, Http404
 from django.shortcuts import redirect, render, get_object_or_404
 from django.urls import reverse, reverse_lazy
-from django.views.generic import TemplateView, ListView, View
+from django.views.generic import TemplateView, View
 from django.views.generic.edit import CreateView
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
@@ -36,6 +36,7 @@ from core.models import (
     Service,
     Appointment,
     UserProfile,
+    Role,
     AppointmentItem,
     Product,
     ProductSale,
@@ -200,20 +201,77 @@ class AccountPasswordResetCompleteView(SupportEmailContextMixin, auth_views.Pass
     template_name = "registration/password_reset_complete.html"
 
 
+def _get_or_create_role(role_name: str) -> Role:
+    """
+    Retrieve a Role instance, creating it if necessary.
+    """
+    normalized = (role_name or "").strip()
+    if not normalized:
+        raise ValueError("role_name must be provided for role lookup")
+    role, _ = Role.objects.get_or_create(name=normalized)
+    return role
+
+
 class RoleRequiredMixin(LoginRequiredMixin):
     """
     Ограничение доступа по конкретной роли.
     """
     required_role: str | None = None
+    AUTO_ASSIGNABLE_ROLES = frozenset({"Client"})
+
+    def _resolve_profile(self, user, *, create: bool = False) -> UserProfile | None:
+        if not getattr(user, "is_authenticated", False):
+            return None
+        try:
+            return user.userprofile
+        except UserProfile.DoesNotExist:
+            if not create:
+                return None
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            return profile
+        except AttributeError:
+            return None
+
+    def _user_roles_manager(self, user, *, create_profile: bool = False):
+        profile = self._resolve_profile(user, create=create_profile)
+        if profile is None:
+            return None, None
+        return profile.userrole_set, profile
+
+    def _has_role(self, user, role_name: str) -> bool:
+        roles_qs, _ = self._user_roles_manager(user)
+        if not roles_qs:
+            return False
+        return roles_qs.filter(role__name=role_name).exists()
+
+    def _can_auto_assign(self, user, role_name: str) -> bool:
+        if role_name not in self.AUTO_ASSIGNABLE_ROLES:
+            return False
+        if not getattr(user, "is_authenticated", False):
+            return False
+        if user.is_staff or user.is_superuser:
+            return False
+        return True
+
+    def _auto_assign_role(self, user, role_name: str) -> bool:
+        if not self._can_auto_assign(user, role_name):
+            return False
+        roles_qs, _ = self._user_roles_manager(user, create_profile=True)
+        if not roles_qs:
+            return False
+        role = _get_or_create_role(role_name)
+        _, created = roles_qs.get_or_create(role=role)
+        if created:
+            logger.info("Auto-assigned role %s to user %s", role_name, user.pk)
+        return True
 
     def dispatch(self, request, *args, **kwargs):
-        role_qs = getattr(request.user, "userrole_set", None)
-        if role_qs is None:
-            profile = getattr(request.user, "userprofile", None)
-            role_qs = getattr(profile, "userrole_set", None)
-        if self.required_role and (
-            role_qs is None or not role_qs.filter(role__name=self.required_role).exists()
-        ):
+        required = self.required_role
+        if required:
+            if request.user.is_superuser or self._has_role(request.user, required):
+                return super().dispatch(request, *args, **kwargs)
+            if self._auto_assign_role(request.user, required):
+                return super().dispatch(request, *args, **kwargs)
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
 
@@ -221,15 +279,11 @@ class RoleRequiredMixin(LoginRequiredMixin):
 # =========================
 # Главная клиента (каталог)
 # =========================
-class MainMenuView(LoginRequiredMixin, TemplateView):
+class MainMenuView(RoleRequiredMixin, TemplateView):
     template_name = "client/mainmenu.html"
     login_url = reverse_lazy("login")
     redirect_field_name = "next"
-
-    def dispatch(self, request, *args, **kwargs):
-        if not request.user.userrole_set.filter(role__name="Client").exists():
-            raise PermissionDenied
-        return super().dispatch(request, *args, **kwargs)
+    required_role = "Client"
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -691,24 +745,18 @@ class ProductSalesView(RoleRequiredMixin, TemplateView):
 # =========================
 # Список записей клиента
 # =========================
-class ClientAppointmentsListView(RoleRequiredMixin, ListView):
-    required_role = "Client"
-    model = Appointment
-    template_name = "client/appointments_list.html"
-    paginate_by = 10
+class ClientAppointmentsListView(RoleRequiredMixin, View):
+    """
+    Historic URL that now points to the dashboard appointments section.
+    Keeping the view ensures bookmarks and menu links continue to work
+    after the single-page dashboard redesign.
+    """
 
-    def get_queryset(self):
-        return (
-            Appointment.objects
-            .filter(client=self.request.user.userprofile)
-            .prefetch_related(
-                Prefetch(
-                    "items",
-                    queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
-                )
-            )
-            .order_by("-start_time")
-        )
+    required_role = "Client"
+
+    def get(self, request, *args, **kwargs):
+        target = reverse("dashboard") + "#appointments"
+        return HttpResponseRedirect(target)
 
 
 class ClientIntakeAssignmentsView(RoleRequiredMixin, TemplateView):
