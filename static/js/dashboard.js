@@ -762,6 +762,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const resCancel = document.getElementById('resCancel');
   const resSubmit = document.getElementById('resSubmit');
   const resMaster = document.getElementById('resMaster');
+  const resMasterHint = document.getElementById('resMasterHint');
   const resErr    = document.getElementById('resErr');
   const resOk     = document.getElementById('resOk');
 
@@ -780,38 +781,85 @@ document.addEventListener('DOMContentLoaded', () => {
   const WINDOW_DAYS = 14, START=6, END=23, STEP=30;
   const normalizeId = (value) => (value === undefined || value === null ? "" : String(value));
 
-  let resState = {
-    apptId:null, serviceId:null, itemId:null, masterId:null, slot:null, masters:[],
-    baseStart: (()=>{const d=new Date(); d.setHours(0,0,0,0); return d;})(),
-    cache: new Map(), // dateStr -> { set:Set('HH:MM'), iso:Map('HH:MM'->iso) }
-    selectedDayIndex:0,
-    days: [],
-    dayData: [],
-    timeRows: [],
-    locale: getLocale()
+  const createDefaultResState = () => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return {
+      apptId: null,
+      serviceId: null,
+      itemId: null,
+      serviceName: '',
+      masterId: null,
+      preferredMasterId: '',
+      slot: null,
+      masters: [],
+      baseStart: start,
+      cache: new Map(),
+      selectedDayIndex: 0,
+      days: [],
+      dayData: [],
+      timeRows: [],
+      locale: getLocale(),
+      guardMessage: null,
+    };
+  };
+  let resState = createDefaultResState();
+
+  const hideResMasterHint = () => {
+    if (!resMasterHint) return;
+    resMasterHint.hidden = true;
+    resMasterHint.textContent = '';
+  };
+  const showResMasterHint = (key, vars, fallback) => {
+    if (!resMasterHint) return;
+    const fallbackText = typeof fallback === 'string' ? fallback : '';
+    const resolved = key ? translate(key, vars, fallbackText) : fallbackText;
+    resMasterHint.textContent = resolved;
+    resMasterHint.hidden = !resolved;
+  };
+  const syncResMasterHint = () => {
+    if (!resMasterHint) return;
+    const masters = Array.isArray(resState.masters) ? resState.masters : [];
+    if (!masters.length) {
+      showResMasterHint('services.modal.masterHintUnavailable', { service: resState.serviceName || '' }, 'No masters are available for this service yet.');
+      return;
+    }
+    if (!resState.masterId) {
+      showResMasterHint('services.modal.masterHintSelect', { service: resState.serviceName || '' }, 'Select a master to view availability.');
+      return;
+    }
+    const match = masters.find((entry) => normalizeId(entry.id) === normalizeId(resState.masterId));
+    const masterLabel = match?.name || translate('services.modal.masterFallbackName', null, 'selected master');
+    showResMasterHint('services.modal.masterHintActive', { master: masterLabel }, `Showing availability for ${masterLabel}.`);
+  };
+  const resolveGuardMessage = (record) => {
+    if (!record) return '';
+    const fallback = record.fallback || '';
+    return record.key ? translate(record.key, record.vars, fallback) : fallback;
   };
 
-  function openRes(apptId, serviceId, itemId){
+  function openRes(apptId, serviceId, itemId, meta = {}){
     if (!resModal || !resMaster || !rsGrid) {
       alert(translate('dashboard.reschedule.unavailable', null, 'Reschedule is temporarily unavailable.'));
       return;
     }
-    const startOfDay = new Date();
-    startOfDay.setHours(0,0,0,0);
+    if (!serviceId) {
+      alert(translate('dashboard.reschedule.errorLoad', null, 'Unable to fetch availability for this service.'));
+      return;
+    }
+    const base = meta.startIso ? parseUtc(meta.startIso) : new Date();
+    if (base && !Number.isNaN(base.getTime())) {
+      base.setHours(0,0,0,0);
+    }
+    resState = createDefaultResState();
     resState.apptId = apptId;
     resState.serviceId = serviceId;
     resState.itemId = itemId;
-    resState.masterId = null;
-    resState.slot = null;
-    resState.masters = [];
-    resState.cache = new Map();
-    resState.baseStart = startOfDay;
-    resState.selectedDayIndex = 0;
-    resState.days = [];
-    resState.dayData = [];
-    resState.timeRows = [];
-    resState.locale = getLocale();
+    resState.serviceName = meta.serviceName || '';
+    resState.preferredMasterId = normalizeId(meta.masterId || meta.preferredMasterId || '');
+    resState.baseStart = (base && !Number.isNaN(base.getTime())) ? base : resState.baseStart;
     resMaster.innerHTML = '';
+    hideResMasterHint();
     if (resSubmit) resSubmit.disabled = true;
     if (resErr) { resErr.classList.add('hidden'); clearTextKey(resErr); }
     if (resOk) { resOk.classList.add('hidden'); clearTextKey(resOk); }
@@ -826,6 +874,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function fetchAvail(dayISO, masterId){
+    if (!resState.serviceId) {
+      throw new Error(translate('dashboard.reschedule.errorLoad', null, 'Unable to fetch availability'));
+    }
     const params = new URLSearchParams({ service: resState.serviceId, date: dayISO });
     const masterParam = normalizeId(masterId);
     if (masterParam) params.set('master', masterParam);
@@ -854,13 +905,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function ensureRangeLoaded(start, days){
+    const activeMaster = normalizeId(resState.masterId);
+    if (!activeMaster) return;
     const jobs=[];
     for(let i=0;i<days;i++){
       const d=new Date(start); d.setDate(d.getDate()+i); const ds=ymd(d);
       if(!resState.cache.has(ds)){
         jobs.push((async()=>{
           resState.cache.set(ds, {loading:true});
-          const {set,map}=await fetchAvail(ds, resState.masterId);
+          const {set,map}=await fetchAvail(ds, activeMaster);
           resState.cache.set(ds,{set,iso:map});
         })());
       }
@@ -876,8 +929,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadMastersAndRender(){
+    if (!resMaster) return;
     resErr.classList.add('hidden');
     clearTextKey(resErr);
+    hideResMasterHint();
+    resState.guardMessage = null;
     try{
       const first = await fetchAvail(ymd(resState.baseStart), null);
       resState.masters = (first.raw && first.raw.masters) || [];
@@ -888,21 +944,51 @@ document.addEventListener('DOMContentLoaded', () => {
         opt.textContent = translate('dashboard.reschedule.noMasters', null, 'No masters available');
         opt.setAttribute('data-i18n', 'dashboard.reschedule.noMasters');
         resMaster.appendChild(opt);
-        rsGrid.innerHTML = `<div class="p-4 text-sm" data-i18n="dashboard.reschedule.noAvailability">${translate('dashboard.reschedule.noAvailability', null, 'No availability')}</div>`;
+        showResMasterHint('services.modal.masterHintUnavailable', { service: resState.serviceName || '' }, 'No masters are available for this service yet.');
+        rsGrid.innerHTML = `<div class="p-4 text-sm text-center" data-i18n="dashboard.reschedule.noAvailability">${translate('dashboard.reschedule.noAvailability', null, 'No availability')}</div>`;
         if (rsMobileDays) rsMobileDays.innerHTML='';
         if (rsMobileTimes) rsMobileTimes.innerHTML='';
         if (rsMobileEmpty){
           setTextKey(rsMobileEmpty, 'dashboard.reschedule.noAvailability', null, 'No availability yet.');
           rsMobileEmpty.classList.remove('hidden');
         }
+        resState.masterId = null;
         queueRefresh();
         return;
       }
+      const preferredId = normalizeId(resState.preferredMasterId);
+      const preferredMaster = preferredId ? resState.masters.find((entry) => normalizeId(entry.id) === preferredId) : null;
+      const requireManualSelection = resState.masters.length > 1 && !preferredMaster;
+      if (requireManualSelection){
+        const placeholder=document.createElement('option');
+        placeholder.value='';
+        placeholder.textContent = translate('services.modal.masterPlaceholder', null, 'Select a master');
+        placeholder.dataset.placeholder='true';
+        resMaster.appendChild(placeholder);
+      }
       resState.masters.forEach(m=>{ const opt=document.createElement('option'); opt.value=normalizeId(m.id); opt.textContent=m.name; resMaster.appendChild(opt); });
-      const withSlots = resState.masters.find(m=>(m.slots||[]).length) || resState.masters[0];
-      resMaster.value = normalizeId(withSlots.id);
-      resState.masterId = resMaster.value;
+      if (preferredMaster){
+        resMaster.value = normalizeId(preferredMaster.id);
+        resState.masterId = resMaster.value;
+      }else if (!requireManualSelection){
+        const withSlots = resState.masters.find(m=>(m.slots||[]).length) || resState.masters[0];
+        resMaster.value = normalizeId(withSlots?.id || '');
+        resState.masterId = resMaster.value || null;
+      }else{
+        resMaster.value = '';
+        resState.masterId = null;
+      }
       resState.cache.clear();
+      syncResMasterHint();
+      if (!resState.masterId){
+        resState.guardMessage = {
+          key: 'services.modal.masterHintSelect',
+          vars: { service: resState.serviceName || '' },
+          fallback: 'Select a master to view availability.'
+        };
+        renderWindow();
+        return;
+      }
       await renderWindow();
     }catch(e){
       const fallback = e && e.message;
@@ -918,19 +1004,38 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function renderWindow(){
-    await ensureRangeLoaded(resState.baseStart, WINDOW_DAYS);
-
     const locale = getLocale();
+    resState.locale = locale;
+
+    if (!resState.masterId){
+      resState.days = [];
+      resState.dayData = [];
+      resState.timeRows = [];
+      if (rsRange) {
+        rsRange.textContent = '—';
+      }
+      renderDesktopGrid(locale);
+      renderMobileLayout(locale);
+      if (resSubmit) resSubmit.disabled = true;
+      return;
+    }
+
+    resState.guardMessage = null;
+    await ensureRangeLoaded(resState.baseStart, WINDOW_DAYS);
 
     const days = Array.from({length:WINDOW_DAYS}, (_,i)=>{ const d=new Date(resState.baseStart); d.setDate(d.getDate()+i); return d;});
     const dayStrs = days.map(ymd);
     const dayData = dayStrs.map(ds => resState.cache.get(ds));
     const timeRows = buildTimeRows(dayData.map(x=>x?.set));
 
-    const from = days[0].toLocaleDateString(locale, {month:'short', day:'numeric'});
-    const to   = days[days.length-1].toLocaleDateString(locale, {month:'short', day:'numeric'});
     if (rsRange) {
-      rsRange.textContent = `${from} – ${to}`;
+      if (days.length) {
+        const from = days[0].toLocaleDateString(locale, {month:'short', day:'numeric'});
+        const to   = days[days.length-1].toLocaleDateString(locale, {month:'short', day:'numeric'});
+        rsRange.textContent = `${from} – ${to}`;
+      } else {
+        rsRange.textContent = '—';
+      }
     }
 
     resState.locale = locale;
@@ -969,7 +1074,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (rsMobileHint){
-      setTextKey(rsMobileHint, 'dashboard.reschedule.mobileHint', null, 'Tap a date to see available times.');
+      setTextKey(rsMobileHint, 'dashboard.reschedule.hint', null, 'Tap a date to see available times.');
     }
 
     renderDesktopGrid(locale);
@@ -980,9 +1085,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderDesktopGrid(locale = resState.locale || getLocale()){
     if (!rsGrid) return;
+    const guardText = resolveGuardMessage(resState.guardMessage);
+    if (guardText){
+      rsGrid.innerHTML = `<div class="p-4 text-sm text-center">${guardText}</div>`;
+      if (rsRange) rsRange.textContent = '—';
+      if (resSubmit) resSubmit.disabled = true;
+      return;
+    }
     const days = resState.days || [];
     const dayData = resState.dayData || [];
     const timeRows = resState.timeRows || [];
+    if (!days.length || !timeRows.length){
+      rsGrid.innerHTML = `<div class="p-4 text-sm text-center" data-i18n="dashboard.reschedule.noAvailability">${translate('dashboard.reschedule.noAvailability', null, 'No availability')}</div>`;
+      if (resSubmit) resSubmit.disabled = true;
+      return;
+    }
 
     rsGrid.style.setProperty('--days', String(WINDOW_DAYS));
     rsGrid.innerHTML='';
@@ -1061,6 +1178,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const days = resState.days || [];
 
     rsMobileDays.innerHTML = '';
+    const guardText = resolveGuardMessage(resState.guardMessage);
+    if (guardText){
+      rsMobileTimes.innerHTML = '';
+      if (rsMobileEmpty){
+        clearTextKey(rsMobileEmpty);
+        rsMobileEmpty.textContent = guardText;
+        rsMobileEmpty.classList.remove('hidden');
+      }
+      if (resSubmit) resSubmit.disabled = true;
+      return;
+    }
 
     if (!days.length){
       rsMobileTimes.innerHTML = '';
@@ -1069,6 +1197,10 @@ document.addEventListener('DOMContentLoaded', () => {
         rsMobileEmpty.classList.remove('hidden');
       }
       return;
+    }
+
+    if (rsMobileEmpty){
+      rsMobileEmpty.classList.add('hidden');
     }
 
     days.forEach((day, idx) => {
@@ -1183,13 +1315,26 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   bind(resMaster, 'change', async ()=>{
-    resState.masterId = resMaster.value;
+    resState.masterId = normalizeId(resMaster.value) || null;
     resState.slot = null;
     if (resSubmit) resSubmit.disabled = true;
     resState.cache.clear();
     resState.selectedDayIndex = 0;
+    resState.guardMessage = null;
     if (resErr) { resErr.classList.add('hidden'); clearTextKey(resErr); }
     if (resOk) { resOk.classList.add('hidden'); clearTextKey(resOk); }
+    if (!resState.masterId){
+      resState.guardMessage = {
+        key: 'services.modal.masterHintSelect',
+        vars: { service: resState.serviceName || '' },
+        fallback: 'Select a master to view availability.'
+      };
+      syncResMasterHint();
+      renderWindow();
+      return;
+    }
+    resState.preferredMasterId = resState.masterId;
+    syncResMasterHint();
     await renderWindow();
   });
   bind(rsPrev, 'click', ()=>shiftWindow(-WINDOW_DAYS));
@@ -1275,7 +1420,15 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     event.preventDefault();
-    openRes(trigger.dataset.apptId, trigger.dataset.serviceId, trigger.dataset.itemId || '');
+    const dataset = trigger.dataset || {};
+    const apptId = dataset.apptId;
+    const serviceId = dataset.serviceId;
+    const itemId = dataset.itemId || '';
+    const masterId = dataset.masterId || '';
+    const fallbackAppt = trigger.closest('[data-appt-start-iso]');
+    const startIso = dataset.startIso || fallbackAppt?.getAttribute('data-appt-start-iso') || '';
+    const serviceName = dataset.serviceName || trigger.getAttribute('data-service-name') || '';
+    openRes(apptId, serviceId, itemId, { masterId, startIso, serviceName });
   });
   bind(resClose, 'click', closeRes);
   bind(resCancel, 'click', closeRes);

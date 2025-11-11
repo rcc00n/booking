@@ -444,10 +444,12 @@ def build_dashboard_appointments(
             )
             item_start_display = ""
             item_is_future = False
+            item_start_iso = ""
             if appt_item.start_time:
                 item_start_local = timezone.localtime(appt_item.start_time, tz)
                 item_start_display = date_format(item_start_local, "d M Y, H:i")
                 item_is_future = item_start_local >= now_local
+                item_start_iso = item_start_local.isoformat()
             items_payload.append(
                 {
                     "id": str(appt_item.pk),
@@ -455,6 +457,8 @@ def build_dashboard_appointments(
                     "master_name": _dashboard_master_name(appt_item),
                     "start_display": item_start_display,
                     "service_id": str(appt_item.service_id) if getattr(appt_item, "service_id", None) else "",
+                    "start_iso": item_start_iso,
+                    "master_id": str(appt_item.master_id) if getattr(appt_item, "master_id", None) else "",
                     "status_code": status_code,
                     "status_label": status_label,
                     "is_future": item_is_future,

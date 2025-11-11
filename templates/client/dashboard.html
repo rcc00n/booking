@@ -252,6 +252,9 @@
                        data-appt-id="{{ it.appointment.id }}"
                        data-item-id="{{ it.id }}"
                        data-service-id="{{ it.service.id }}"
+                       data-master-id="{{ it.master_id }}"
+                       data-start-iso="{{ it.start_time|utc|date:'c' }}"
+                       data-service-name="{{ it.service.name|default_if_none:''|escape }}"
                        data-i18n="dashboard.appointment.reschedule">Reschedule</a>
                   </div>
                 </li>
@@ -554,6 +557,9 @@
                                  data-appt-id="{{ a.id }}"
                                  data-item-id="{{ item.id }}"
                                  data-service-id="{{ item.service_id }}"
+                                 data-master-id="{{ item.master_id }}"
+                                 data-start-iso="{{ item.start_iso }}"
+                                 data-service-name="{{ item.service_name|default_if_none:''|escape }}"
                                  data-i18n="dashboard.appointment.reschedule">Reschedule</a>
                             </div>
                           {% else %}
@@ -839,6 +845,7 @@
       <div>
         <label class="text-sm" data-i18n="dashboard.reschedule.masterLabel">Master</label>
         <select id="resMaster" class="w-full border border-[#DEDEDE] rounded-md px-3 py-2"></select>
+        <p class="text-xs text-[#4D4D4D]/80 mt-1" id="resMasterHint" hidden></p>
       </div>
 
       <!-- Новый горизонтальный выбор даты/времени -->

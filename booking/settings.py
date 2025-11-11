@@ -203,12 +203,24 @@ SESSION_SAVE_EVERY_REQUEST = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
+STORAGE_ROOT = Path(env.str("STORAGE_ROOT", default=str(BASE_DIR / "storage")))
+
 STATIC_URL = '/static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_DIRS = [ BASE_DIR / "static" ]
+STATIC_ROOT = Path(env.str("STATIC_ROOT", default=str(STORAGE_ROOT / "static")))
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 MEDIA_URL = env.str("MEDIA_URL", default="/media/")
-MEDIA_ROOT = env.str("MEDIA_ROOT", default=str(BASE_DIR / "media"))
+MEDIA_ROOT = Path(env.str("MEDIA_ROOT", default=str(STORAGE_ROOT / "media")))
+
+for path in (STORAGE_ROOT, STATIC_ROOT, MEDIA_ROOT):
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # In read-only deployments (e.g. slug buildpacks) the mount will provide the directory.
+        pass
+
+STATIC_ROOT = str(STATIC_ROOT)
+MEDIA_ROOT = str(MEDIA_ROOT)
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
