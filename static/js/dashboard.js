@@ -72,46 +72,55 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   const lockClickHandlers = new WeakMap();
   function enforce24hLock(root = document) {
-    const scope = root && typeof root.querySelectorAll === 'function' ? root : document;
-    const now = new Date();
-    const items = scope.querySelectorAll('.appointment-item[data-appt-start-iso]');
-    items.forEach((item) => {
-      const iso = item.getAttribute('data-appt-start-iso');
-      const start = parseUtc(iso);
-      if (!start) return;
+  const scope = root && typeof root.querySelectorAll === 'function' ? root : document;
+  const nowMs = Date.now();
 
-      const msLeft = start.getTime() - now.getTime();
-      const within24h = msLeft < 24 * 60 * 60 * 1000;
+  const items = scope.querySelectorAll('.appointment-item[data-appt-start-iso]');
+  items.forEach((item) => {
+    const iso = item.getAttribute('data-appt-start-iso') || '';
+    const start = parseUtc(iso);
+    if (!start) return;
 
-      const cancelBtn = item.querySelector('.appt-cancel');
-      const reschedBtn = item.querySelector('.appt-reschedule');
+    const msLeft = start.getTime() - nowMs;
 
-      [cancelBtn, reschedBtn].forEach((btn) => {
-        if (!btn) return;
-        const handler = lockClickHandlers.get(btn);
-        if (within24h) {
-          btn.setAttribute('disabled', 'disabled');
-          btn.setAttribute('aria-disabled', 'true');
-          btn.classList.add('is-disabled');
-          if (!handler) {
-            const prevent = (event) => {
-              event.preventDefault();
-            };
-            btn.addEventListener('click', prevent);
-            lockClickHandlers.set(btn, prevent);
-          }
-        } else {
-          btn.removeAttribute('disabled');
-          btn.removeAttribute('aria-disabled');
-          btn.classList.remove('is-disabled');
-          if (handler) {
-            btn.removeEventListener('click', handler);
-            lockClickHandlers.delete(btn);
-          }
+    // Only lock actions for FUTURE slots inside the next 24h.
+    // (Old code also locked past items by mistake.)
+    const futureWithin24h = msLeft >= 0 && msLeft < 24 * 60 * 60 * 1000;
+
+    // Also treat terminal states as non-manageable (defensive).
+    const statusCode = (item.querySelector('[data-role="item-status"]')?.getAttribute('data-status-code') || '').toUpperCase();
+    const isTerminal = statusCode === 'CANCELLED' || statusCode === 'COMPLETED';
+
+    const cancelBtn  = item.querySelector('.appt-cancel');
+    const reschedBtn = item.querySelector('.appt-reschedule');
+
+    [cancelBtn, reschedBtn].forEach((btn) => {
+      if (!btn) return;
+
+      const handler = lockClickHandlers.get(btn);
+      const shouldDisable = futureWithin24h || isTerminal;
+
+      if (shouldDisable) {
+        btn.setAttribute('aria-disabled', 'true');
+        btn.classList.add('is-disabled');
+        // Ensure the click truly does nothing
+        if (!handler) {
+          const prevent = (event) => event.preventDefault();
+          btn.addEventListener('click', prevent);
+          lockClickHandlers.set(btn, prevent);
         }
-      });
+      } else {
+        btn.removeAttribute('aria-disabled');
+        btn.classList.remove('is-disabled');
+        if (handler) {
+          btn.removeEventListener('click', handler);
+          lockClickHandlers.delete(btn);
+        }
+      }
     });
-  }
+  });
+}
+
   function observeAppointments(){
     const host = document.getElementById('upcomingAppointments');
     if (!host || !('MutationObserver' in window)) return;

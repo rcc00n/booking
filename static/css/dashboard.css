@@ -946,3 +946,112 @@ textarea { resize: vertical; min-height: 120px; }
 .whitespace-pre-line { white-space: pre-line; }
 .whitespace-nowrap { white-space: nowrap; }
 .ms-5 { margin-inline-start: 1.25rem; }
+
+/* === Sidebar & layout consistency === */
+.dashboard-shell { align-items: stretch; }
+
+.dashboard-sidebar {
+  /* Fill the viewport (with the same outer margin you already use) */
+  height: calc(100vh - 3rem);
+  min-height: 640px;            /* prevents short jumpy boxes on small screens */
+  max-height: none;             /* we control overflow instead */
+  overflow: auto;               /* scroll inside the white card when needed */
+}
+
+/* Ensure the main column is at least as tall as the sidebar */
+.dashboard-main { min-height: calc(100vh - 3rem); }
+
+/* The white overlay should always sit above everything (sidebar has z-index:60) */
+#resModal { z-index: 1000 !important; }
+
+/* Disabled action links look disabled but don't "eat" clicks around them */
+.appt-cancel.is-disabled,
+.appt-reschedule.is-disabled {
+  pointer-events: none;
+  opacity: .6;
+  text-decoration: none;
+}
+
+/* Mobile: full-height slide‑in sidebar with its own scroll */
+@media (max-width: 1023px) {
+  .dashboard-sidebar {
+    height: 100vh;
+    max-height: 100vh;
+    overflow: auto;
+  }
+}
+
+/* === Desktop: page scroll, no inner sidebar scroll === */
+@media (min-width: 1024px) {
+  .dashboard-sidebar {
+    height: auto;                          /* grow with content */
+    min-height: calc(100vh - 3rem);        /* still fill short viewports */
+    max-height: none;
+    overflow: visible;                     /* remove inner scrollbar */
+  }
+
+  /* Main column should also use the page scroll, not its own */
+  .dashboard-content {
+    overflow-y: visible;
+  }
+}
+
+
+/* === Sidebar Sign out button: full‑width & premium styling === */
+.dashboard-sidebar form[action*="logout"] button {
+  width: 100% !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+
+  padding: 0.95rem 1.15rem;
+  border-radius: 16px;
+
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #fff;
+
+  /* Rich gradient + soft elevation */
+  background: linear-gradient(135deg, #c8514b 0%, #a63a34 100%);
+  border: 1px solid rgba(0,0,0,.06);
+  box-shadow:
+    0 16px 32px rgba(166, 58, 52, .32),
+    inset 0 1px 0 rgba(255,255,255,.18);
+  transition:
+    background .2s ease,
+    transform .12s ease,
+    box-shadow .2s ease,
+    filter .2s ease;
+}
+
+.dashboard-sidebar form[action*="logout"] button:hover {
+  background: linear-gradient(135deg, #bb4a44 0%, #94332e 100%);
+  box-shadow:
+    0 22px 44px rgba(166, 58, 52, .42),
+    inset 0 1px 0 rgba(255,255,255,.22);
+  transform: translateY(-1px);
+  filter: saturate(1.05);
+}
+
+.dashboard-sidebar form[action*="logout"] button:active {
+  background: linear-gradient(135deg, #a6403a 0%, #7f2e2a 100%);
+  box-shadow:
+    0 12px 24px rgba(166, 58, 52, .28),
+    inset 0 1px 0 rgba(255,255,255,.12);
+  transform: translateY(0);
+  filter: none;
+}
+
+.dashboard-sidebar form[action*="logout"] button:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 4px rgba(185, 75, 69, .25),
+    0 16px 32px rgba(166, 58, 52, .34),
+    inset 0 1px 0 rgba(255,255,255,.18);
+}
+
+/* Icon size & spacing */
+.dashboard-sidebar form[action*="logout"] button svg {
+  width: 20px; height: 20px; flex: 0 0 auto;
+}
