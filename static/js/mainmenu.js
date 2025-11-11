@@ -284,15 +284,34 @@
         });
       };
       function translate(key, vars, fallback) {
-        if (!key) return fallback || '';
-        if (I18N) {
+        if (!key) {
+          return fallback !== undefined ? fallback : '';
+        }
+        let result;
+        if (I18N && typeof I18N.t === 'function') {
           try {
-            return I18N.t(key, vars);
+            result = I18N.t(key, vars);
           } catch (err) {
-            return fallback !== undefined ? fallback : key;
+            result = undefined;
           }
         }
-        return fallback !== undefined ? fallback : key;
+        const resultIsString = typeof result === 'string';
+        const normalized = resultIsString ? result.trim() : result;
+        const shouldFallback =
+          result === undefined ||
+          result === null ||
+          (resultIsString && normalized === '') ||
+          (resultIsString && normalized === key);
+        if (shouldFallback) {
+          if (fallback !== undefined) {
+            return fallback;
+          }
+          if (resultIsString && normalized) {
+            return result;
+          }
+          return key;
+        }
+        return result;
       }
       const mainmenuConfig = window.MalvaMainmenuConfig || {};
       const defaultPrepaymentPercent =
@@ -603,6 +622,7 @@
       const btnSubmit=document.getElementById('bookSubmit');
       const elServiceName=document.getElementById('bookServiceName');
       const elMaster=document.getElementById('bookMaster');
+      const elMasterHint=document.getElementById('bookMasterHint');
       const elSummary=document.getElementById('bookSummary');
       const bookCartPreview=document.getElementById('bookCartPreview');
       const bookCartEmpty=document.getElementById('bookCartEmpty');
@@ -669,6 +689,18 @@
       const inputState=document.getElementById('paymentState');
       const inputPostal=document.getElementById('paymentPostal');
       const inputCountry=document.getElementById('paymentCountry');
+
+      function hideMasterHint(){
+        if (!elMasterHint) return;
+        elMasterHint.hidden = true;
+        elMasterHint.textContent = '';
+      }
+
+      function showMasterHint(key, vars, fallback){
+        if (!elMasterHint) return;
+        setTextKey(elMasterHint, key, vars, fallback);
+        elMasterHint.hidden = false;
+      }
 
       syncPrepaymentInputs(currentPrepaymentPercent);
 
@@ -2462,20 +2494,43 @@ async function confirmPayment(){
         renderMobileSchedule(locale);
       }
 
+      function syncMasterHint(){
+        if (!elMasterHint) return;
+        const masters = Array.isArray(current && current.mastersData) ? current.mastersData : [];
+        if (!masters.length){
+          showMasterHint('services.modal.masterHintUnavailable', { service: current.serviceName || '' }, 'No masters are available for this service yet.');
+          return;
+        }
+        const masterKey = getSelectedMasterKey();
+        if (!masterKey){
+          showMasterHint('services.modal.masterHintSelect', { service: current.serviceName || '' }, 'Pick a master to see who is available for this service.');
+          return;
+        }
+        const match = masters.find((entry)=>String(entry.id) === masterKey);
+        const masterName = match && match.name
+          ? match.name
+          : translate('services.modal.masterFallbackName', null, 'selected master');
+        showMasterHint('services.modal.masterHintActive', { master: masterName }, `Showing availability for ${masterName}.`);
+      }
+
       async function loadMastersAndRender(){
         elError.style.display='none';
         resetSelection();
         try{
+          if (elMaster){
+            elMaster.innerHTML='';
+          }
+          hideMasterHint();
           const first = await fetchAvailability(ymd(baseStart), null);
           const masters = (first.raw && first.raw.masters) || [];
           current.mastersData = masters;
 
-          elMaster.innerHTML='';
           if(masters.length===0){
             const opt=document.createElement('option');
             opt.value='';
             opt.textContent = translate('services.modal.noMasters', null, 'No masters available');
             elMaster.appendChild(opt);
+            showMasterHint('services.modal.masterHintUnavailable', { service: current.serviceName || '' }, 'No masters are available for this service yet.');
             olGrid.innerHTML=`<div class="p-4 text-sm text-center">${translate('services.modal.noAvailability', null, 'No availability')}</div>`;
             if (mobileTimeList) mobileTimeList.innerHTML='';
             if (mobileEmpty){
@@ -2506,11 +2561,13 @@ async function confirmPayment(){
           if (requireManualSelection){
             elMaster.value='';
             current.masterId=null;
+            syncMasterHint();
           }else{
             const withSlots=masters.find(m=>(m.slots||[]).length);
             const defaultMasterId = withSlots ? withSlots.id : masters[0].id;
             elMaster.value=String(defaultMasterId);
             current.masterId=normalizeMasterValue(defaultMasterId);
+            syncMasterHint();
           }
 
           availabilityCache.clear();
@@ -2519,6 +2576,7 @@ async function confirmPayment(){
           const fallback = err && err.message;
           const defaultMsg = translate('services.modal.errorLoad');
           elError.style.display='block';
+          showMasterHint('services.modal.masterHintError', null, 'Unable to load masters. Please try again.');
           if(fallback && fallback !== defaultMsg){
             clearTextKey(elError);
             elError.textContent=fallback;
@@ -2868,6 +2926,7 @@ async function confirmPayment(){
         current.slot = null; btnSubmit.disabled = true;
         summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
         setTextKey(elSummary, 'services.modal.summaryPlaceholder');
+        syncMasterHint();
         availabilityCache.clear();
         scheduleState.selectedDate = null;
         scheduleState.days = [];
