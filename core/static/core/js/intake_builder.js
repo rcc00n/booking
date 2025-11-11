@@ -17,67 +17,6 @@
 
   const CHOICE_TYPES = new Set(['select', 'radio', 'multiselect', 'radiolist', 'multichoice']);
 
-  const SAMPLE_SCHEMA = {
-    meta: { version: 1 },
-    sections: [
-      {
-        id: 'sample-section-general',
-        title: 'Client overview',
-        fields: [
-          {
-            id: 'sample-field-full-name',
-            key: 'full_name',
-            label: 'Full name',
-            type: 'text',
-            placeholder: 'Jane Doe',
-          },
-          {
-            id: 'sample-field-medications',
-            key: 'medications',
-            label: 'Current medications',
-            type: 'textarea',
-          },
-          {
-            id: 'sample-field-consent',
-            key: 'consent',
-            label: 'Consent granted',
-            type: 'checkbox',
-          },
-        ],
-      },
-      {
-        id: 'sample-section-skin',
-        title: 'Skin profile',
-        fields: [
-          {
-            id: 'sample-field-skin-type',
-            key: 'skin_type',
-            label: 'Skin type',
-            type: 'radio',
-            choices: [
-              { value: 'normal', label: 'Normal' },
-              { value: 'dry', label: 'Dry' },
-              { value: 'oily', label: 'Oily' },
-              { value: 'combination', label: 'Combination' },
-            ],
-          },
-          {
-            id: 'sample-field-allergies',
-            key: 'allergies',
-            label: 'Known allergies',
-            type: 'multiselect',
-            choices: [
-              { value: 'pollen', label: 'Pollen' },
-              { value: 'nuts', label: 'Nuts' },
-              { value: 'fragrance', label: 'Fragrance' },
-              { value: 'lidocaine', label: 'Lidocaine' },
-            ],
-          },
-        ],
-      },
-    ],
-  };
-
   function uuid(){
     if (window.crypto && crypto.randomUUID){
       return crypto.randomUUID();
@@ -134,25 +73,23 @@
     return normalized;
   }
 
-  function normalizeSection(section){
-    const base = section && typeof section === 'object' ? section : {};
-    return {
-      id: base.id || uuid(),
-      title: base.title || '',
-      description: base.description || '',
-      fields: Array.isArray(base.fields) ? base.fields.map(normalizeField) : [],
-    };
-  }
-
   function ensureSchema(raw){
-    const schema = { sections: [], meta: { version: 1 } };
+    const schema = { fields: [], meta: { version: 1 }, singleSectionId: null };
     if (raw && typeof raw === 'object'){
       if (Array.isArray(raw.sections)){
-        schema.sections = raw.sections.map(normalizeSection);
+        raw.sections.forEach(section => {
+          if (section && Array.isArray(section.fields)){
+            if (!schema.singleSectionId && section.id){
+              schema.singleSectionId = section.id;
+            }
+            section.fields.forEach(field => schema.fields.push(normalizeField(field)));
+          }
+        });
+      } else if (Array.isArray(raw.fields)){
+        raw.fields.forEach(field => schema.fields.push(normalizeField(field)));
       }
       if (raw.meta && typeof raw.meta === 'object'){
         schema.meta = {...raw.meta};
-        if (!schema.meta.version) schema.meta.version = 1;
       }
     }
     if (!schema.meta) schema.meta = { version: 1 };
@@ -242,37 +179,31 @@
     };
   }
 
-  function createDefaultSection(){
-    return {
-      id: uuid(),
-      title: 'Section',
-      description: '',
-      fields: [],
-    };
-  }
-
   function cleanState(state){
     const cleaned = { meta: {...state.meta}, sections: [] };
-    cleaned.sections = state.sections.map(section => ({
-      id: section.id,
-      title: section.title,
-      description: section.description,
-      fields: section.fields.map(field => {
-        const f = clone(field);
-        delete f.__autoKey;
-        if (f.display && !Object.keys(f.display).length) delete f.display;
-        if (f.settings && !Object.keys(f.settings).length) delete f.settings;
-        if (f.choices && Array.isArray(f.choices)){
-          f.choices = f.choices.map(choice => {
-            const c = {...choice};
-            delete c.id;
-            return c;
-          });
-          if (!f.choices.length) delete f.choices;
-        }
-        return f;
-      }),
-    }));
+    const normalizedFields = (state.fields || []).map(field => {
+      const f = clone(field);
+      delete f.__autoKey;
+      if (f.display && !Object.keys(f.display).length) delete f.display;
+      if (f.settings && !Object.keys(f.settings).length) delete f.settings;
+      if (f.choices && Array.isArray(f.choices)){
+        f.choices = f.choices.map(choice => {
+          const c = {...choice};
+          delete c.id;
+          return c;
+        });
+        if (!f.choices.length) delete f.choices;
+      }
+      return f;
+    });
+    if (normalizedFields.length){
+      cleaned.sections.push({
+        id: state.singleSectionId || uuid(),
+        title: '',
+        description: '',
+        fields: normalizedFields,
+      });
+    }
     return cleaned;
   }
 
@@ -322,7 +253,7 @@
     constructor(root){
       this.root = root;
       this.input = root.querySelector('input[type="hidden"]');
-      this.sectionsMount = root.querySelector('[data-builder-sections]');
+      this.fieldsMount = root.querySelector('[data-builder-sections]');
       this.jsonPanel = root.querySelector('[data-json-panel]');
       this.jsonTextarea = this.jsonPanel ? this.jsonPanel.querySelector('[data-json-textarea]') : null;
       const initialPayload = (() => {
@@ -345,19 +276,13 @@
     }
 
     bindToolbar(){
-      const addSectionBtn = this.root.querySelector('[data-action="add-section"]');
-      const sampleBtn = this.root.querySelector('[data-action="load-sample"]');
+      const addFieldBtn = this.root.querySelector('[data-action="add-field"]');
       const toggleJsonBtn = this.root.querySelector('[data-action="toggle-json"]');
 
-      if (addSectionBtn){
-        addSectionBtn.addEventListener('click', () => {
-          this.state.sections.push(createDefaultSection());
-          this.render();
-        });
-      }
-      if (sampleBtn){
-        sampleBtn.addEventListener('click', () => {
-          this.state = ensureSchema(clone(SAMPLE_SCHEMA));
+      if (addFieldBtn){
+        addFieldBtn.addEventListener('click', () => {
+          this.state.fields = this.state.fields || [];
+          this.state.fields.push(createDefaultField());
           this.render();
         });
       }
@@ -383,9 +308,7 @@
       const randomSeed = slugify(`field_${Math.random().toString(36).slice(2,6)}`);
       let candidate = preferred || randomSeed || `field_${Math.random().toString(36).slice(2,6)}`;
       const root = candidate;
-      const hasDuplicate = key => this.state.sections.some(section =>
-        section.fields.some(f => f.id !== fieldId && f.key === key)
-      );
+      const hasDuplicate = key => (this.state.fields || []).some(f => f.id !== fieldId && f.key === key);
       let suffix = 1;
       while (hasDuplicate(candidate)){
         candidate = `${root}_${suffix++}`;
@@ -427,95 +350,29 @@
     }
 
     render(){
-      if (!this.sectionsMount) return;
-      this.sectionsMount.innerHTML = '';
-      this.state.sections.forEach((section, index) => {
-        if (!section.fields) section.fields = [];
-        this.sectionsMount.appendChild(this.renderSection(section, index));
-      });
+      if (!this.fieldsMount) return;
+      this.fieldsMount.innerHTML = '';
+      const list = document.createElement('div');
+      list.className = 'ibuilder-fields';
+      const fields = this.state.fields || [];
+      if (!fields.length){
+        const empty = document.createElement('div');
+        empty.className = 'ibuilder-empty';
+        empty.textContent = 'No fields yet. Click "Add field" to start building your form.';
+        list.appendChild(empty);
+      } else {
+        fields.forEach((field, index) => {
+          list.appendChild(this.renderField(field, index));
+        });
+      }
+      this.fieldsMount.appendChild(list);
       this.setInputValue();
       if (this.jsonPanel && !this.jsonPanel.hasAttribute('hidden')){
         this.populateJsonTextarea();
       }
     }
 
-    renderSection(section, index){
-      const wrap = document.createElement('div');
-      wrap.className = 'ibuilder-section';
-
-      const header = document.createElement('div');
-      header.className = 'ibuilder-section__header';
-
-      const titleWrap = document.createElement('div');
-      titleWrap.className = 'ibuilder-section__title';
-      const titleInput = document.createElement('input');
-      titleInput.type = 'text';
-      titleInput.value = section.title || '';
-      titleInput.placeholder = 'Section title';
-      titleInput.addEventListener('input', () => {
-        section.title = titleInput.value;
-        this.setInputValue();
-      });
-      titleWrap.appendChild(titleInput);
-
-      const controls = document.createElement('div');
-      controls.className = 'ibuilder-section__controls';
-
-      const upBtn = createButton('Up', 'ibuilder__btn ibuilder__btn--ghost');
-      upBtn.disabled = index === 0;
-      upBtn.addEventListener('click', () => {
-        if (index === 0) return;
-        const tmp = this.state.sections[index - 1];
-        this.state.sections[index - 1] = this.state.sections[index];
-        this.state.sections[index] = tmp;
-        this.render();
-      });
-
-      const downBtn = createButton('Down', 'ibuilder__btn ibuilder__btn--ghost');
-      downBtn.disabled = index === this.state.sections.length - 1;
-      downBtn.addEventListener('click', () => {
-        if (index === this.state.sections.length - 1) return;
-        const tmp = this.state.sections[index + 1];
-        this.state.sections[index + 1] = this.state.sections[index];
-        this.state.sections[index] = tmp;
-        this.render();
-      });
-
-      const removeBtn = createButton('Delete', 'ibuilder__btn ibuilder__btn--danger');
-      removeBtn.addEventListener('click', () => {
-        if (confirm('Remove this section?')){
-          this.state.sections.splice(index, 1);
-          this.render();
-        }
-      });
-
-      controls.appendChild(upBtn);
-      controls.appendChild(downBtn);
-      controls.appendChild(removeBtn);
-
-      header.appendChild(titleWrap);
-      header.appendChild(controls);
-      wrap.appendChild(header);
-
-      const fieldsWrap = document.createElement('div');
-      fieldsWrap.className = 'ibuilder-section__fields';
-
-      section.fields.forEach((field, fieldIndex) => {
-        fieldsWrap.appendChild(this.renderField(section, index, field, fieldIndex));
-      });
-
-      const addFieldBtn = createButton('Add field', 'ibuilder__btn');
-      addFieldBtn.addEventListener('click', () => {
-        section.fields.push(createDefaultField());
-        this.render();
-      });
-
-      fieldsWrap.appendChild(addFieldBtn);
-      wrap.appendChild(fieldsWrap);
-      return wrap;
-    }
-
-    renderField(section, sectionIndex, field, fieldIndex){
+    renderField(field, fieldIndex){
       const wrap = document.createElement('div');
       wrap.className = 'ibuilder-field';
 
@@ -556,17 +413,6 @@
       rowPrimary.appendChild(labelGroup.wrap);
       rowPrimary.appendChild(typeGroup.wrap);
       wrap.appendChild(rowPrimary);
-
-      const rowSecondary = document.createElement('div');
-      rowSecondary.className = 'ibuilder-field__row';
-      const placeholderGroup = createInputGroup('Placeholder', field.placeholder, value => {
-        field.placeholder = value;
-        this.setInputValue();
-      });
-      placeholderGroup.wrap.classList.add('ibuilder-field__row-item');
-
-      rowSecondary.appendChild(placeholderGroup.wrap);
-      wrap.appendChild(rowSecondary);
 
       if (CHOICE_TYPES.has(field.type)){
         const optionsWrap = document.createElement('div');
@@ -672,7 +518,7 @@
         const baseKey = copy.key ? `${copy.key}_copy` : slugify(copy.label || '') || '';
         copy.key = this.generateUniqueKey(baseKey, copy.id);
         copy.__autoKey = copy.key;
-        section.fields.splice(fieldIndex + 1, 0, normalizeField(copy));
+        this.state.fields.splice(fieldIndex + 1, 0, normalizeField(copy));
         this.render();
       });
 
@@ -680,26 +526,26 @@
       upBtn.disabled = fieldIndex === 0;
       upBtn.addEventListener('click', () => {
         if (fieldIndex === 0) return;
-        const tmp = section.fields[fieldIndex - 1];
-        section.fields[fieldIndex - 1] = section.fields[fieldIndex];
-        section.fields[fieldIndex] = tmp;
+        const tmp = this.state.fields[fieldIndex - 1];
+        this.state.fields[fieldIndex - 1] = this.state.fields[fieldIndex];
+        this.state.fields[fieldIndex] = tmp;
         this.render();
       });
 
       const downBtn = createButton('Down', 'ibuilder__btn ibuilder__btn--ghost');
-      downBtn.disabled = fieldIndex === section.fields.length - 1;
+      downBtn.disabled = fieldIndex === this.state.fields.length - 1;
       downBtn.addEventListener('click', () => {
-        if (fieldIndex === section.fields.length - 1) return;
-        const tmp = section.fields[fieldIndex + 1];
-        section.fields[fieldIndex + 1] = section.fields[fieldIndex];
-        section.fields[fieldIndex] = tmp;
+        if (fieldIndex === this.state.fields.length - 1) return;
+        const tmp = this.state.fields[fieldIndex + 1];
+        this.state.fields[fieldIndex + 1] = this.state.fields[fieldIndex];
+        this.state.fields[fieldIndex] = tmp;
         this.render();
       });
 
       const removeBtn = createButton('Remove', 'ibuilder__btn ibuilder__btn--danger');
       removeBtn.addEventListener('click', () => {
         if (confirm('Remove this field?')){
-          section.fields.splice(fieldIndex, 1);
+          this.state.fields.splice(fieldIndex, 1);
           this.render();
         }
       });
