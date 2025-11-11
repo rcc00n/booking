@@ -377,11 +377,19 @@ body.nav-open .dashboard-backdrop {
   height: 44px;
   border-radius: 16px;
   background: var(--dash-accent);
-  color: #fff;
-  display: grid;
-  place-items: center;
-  font-weight: 800;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  overflow: hidden;
   box-shadow: 0 22px 40px rgba(15, 63, 45, .35);
+}
+
+.sidebar-brand__logo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .sidebar-profile {

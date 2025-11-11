@@ -11,7 +11,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from core.autocomplete import ServiceAutocomplete, MasterUserProfileAutocomplete  # // CHANGED
-from django.views.generic import RedirectView, TemplateView
+from django.views.generic import RedirectView
 from core.views import (
     service_search,
     service_price,
@@ -20,10 +20,12 @@ from core.views import (
     api_terminal_start,
     admin_item_status_update,
     admin_item_reschedule,
+    SupportDocumentDetailView,
 )
 from core.payments.stripe_api import stripe_webhook
 from core.admin import stats_view
 from accounts.views import health_view, health_edit
+from core.models import SupportDocument
 urlpatterns = [
     path("admin/api/appointment-items/<uuid:item_id>/status/", admin_item_status_update, name="admin-item-status-update"),
     path("admin/api/appointment-items/<uuid:item_id>/reschedule/", admin_item_reschedule, name="admin-item-reschedule"),
@@ -51,13 +53,20 @@ path("", include("core.urls")),
     path("stripe/webhook/", stripe_webhook, name="stripe-webhook"),
     path(
         "legal/email-updates/",
-        TemplateView.as_view(template_name="legal/email_updates.html"),
+        SupportDocumentDetailView.as_view(),
+        {"document_type": SupportDocument.DocumentType.EMAIL_UPDATES},
         name="legal-email-updates",
     ),
     path(
         "legal/data-processing/",
-        TemplateView.as_view(template_name="legal/data_processing.html"),
+        SupportDocumentDetailView.as_view(),
+        {"document_type": SupportDocument.DocumentType.PRIVACY_NOTICE},
         name="legal-data-processing",
+    ),
+    path(
+        "support/<slug:slug>/",
+        SupportDocumentDetailView.as_view(),
+        name="support-document-detail",
     ),
     path("api/terminal/connection_token/", terminal_connection_token, name="terminal-conn-token"),
     path(
@@ -69,4 +78,3 @@ path("", include("core.urls")),
 
 if settings.MEDIA_URL.startswith("/") and settings.MEDIA_ROOT:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-

@@ -24,7 +24,9 @@
   <!-- ▸▸ SIDEBAR ◂◂ -->
   <aside class="dashboard-sidebar flex flex-col">
     <div class="sidebar-brand">
-      <span class="mark">MB</span>
+      <span class="mark">
+        <img src="{% static 'img/malva-dashboard-logo.png' %}" alt="Malva Booking logo" class="sidebar-brand__logo">
+      </span>
       <span data-i18n="common.brand">Malva Booking</span>
     </div>
 
@@ -821,6 +823,33 @@
           <div class="flex flex-wrap gap-3">
             <a href="#download" class="px-5 py-2.5 rounded-full bg-[#AF9525] text-white hover:bg-[#9b8521]">Download the app</a>
             <a href="#help" class="px-5 py-2.5 rounded-full border border-[#AF9525]/30 text-[#AF9525] hover:bg-white">Visit help center</a>
+          </div>
+        </article>
+        <article class="tab-card p-6 flex flex-col gap-5 xl:col-span-2">
+          <div>
+            <h2 class="text-2xl font-semibold text-[#1b392c]">Policies & privacy</h2>
+            <p class="text-sm text-[#4D4D4D]/80">Full transparency on how we handle consent, marketing emails, and stored data.</p>
+          </div>
+          <div class="space-y-4">
+            {% for doc in support_documents %}
+              <div class="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm shadow-[#1f5f44]/5">
+                <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <h3 class="text-lg font-semibold text-[#1b392c]">{{ doc.card_heading }}</h3>
+                    {% if doc.card_excerpt %}
+                      <p class="text-sm text-[#4D4D4D]/80">{{ doc.card_excerpt }}</p>
+                    {% endif %}
+                  </div>
+                  <span class="text-xs uppercase tracking-wide text-[#1b392c]/55">Updated {{ doc.updated_at|date:"M j, Y" }}</span>
+                </div>
+                <div class="flex flex-wrap gap-3 pt-3">
+                  <a href="{{ doc.get_absolute_url }}" class="px-4 py-2 rounded-full bg-[#1f5f44] text-white hover:bg-[#194f39]">{{ doc.card_cta_label }}</a>
+                  <a href="{{ doc.get_absolute_url }}" class="px-4 py-2 rounded-full border border-[#1f5f44]/20 text-[#1f5f44] hover:bg-white" aria-label="Open {{ doc.card_heading }}">View details</a>
+                </div>
+              </div>
+            {% empty %}
+              <p class="text-sm text-[#4D4D4D]/80">We're preparing updated documentation. Email <a href="mailto:{{ support_email }}" class="text-[#1f5f44] hover:underline">{{ support_email }}</a> if you need anything right away.</p>
+            {% endfor %}
           </div>
         </article>
       </div>

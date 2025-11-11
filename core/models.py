@@ -26,6 +26,7 @@ from django.db.models import (
     Exists,
 )
 from django.db.models.functions import Coalesce
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.timezone import localtime
 from core.validators import clean_phone, clean_ab_postal_code, validate_service_is_active
@@ -3001,3 +3002,91 @@ def detect_discount_source(service, client, promocode):
     if s > 0:
         return "service"
     return ""
+
+
+class SupportDocumentQuerySet(models.QuerySet):
+    """Query helpers for support/legal documents."""
+
+    def active(self):
+        return self.filter(is_active=True)
+
+
+class SupportDocument(models.Model):
+    """
+    Admin-managed legal/support documents that power the support tab and public policy pages.
+    """
+
+    class DocumentType(models.TextChoices):
+        PRIVACY_NOTICE = ("privacy_notice", "Privacy notice")
+        EMAIL_UPDATES = ("email_updates", "Email updates policy")
+        OTHER = ("other", "General support document")
+
+    document_type = models.CharField(
+        max_length=32,
+        choices=DocumentType.choices,
+        help_text="Used to reference the document from code and routes.",
+    )
+    slug = models.SlugField(
+        max_length=80,
+        unique=True,
+        help_text="Public slug used in support URLs, e.g. 'privacy-notice'.",
+    )
+    title = models.CharField(max_length=160)
+    subtitle = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Short supporting line shown under the hero title.",
+    )
+    intro = models.TextField(
+        blank=True,
+        help_text="Optional intro paragraph rendered above the sections.",
+    )
+    body = models.TextField(
+        help_text="Rich HTML content rendered on the legal/support page."
+    )
+    card_title = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Override title for the Support tab card if needed.",
+    )
+    card_excerpt = models.CharField(
+        max_length=240,
+        blank=True,
+        help_text="Short summary displayed on the Support tab card.",
+    )
+    card_cta_label = models.CharField(
+        max_length=80,
+        default="Read policy",
+        help_text="Button label for the Support tab card CTA.",
+    )
+    display_order = models.PositiveSmallIntegerField(
+        default=100,
+        help_text="Lower values surface earlier inside the Support tab.",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = SupportDocumentQuerySet.as_manager()
+
+    class Meta:
+        ordering = ("display_order", "title")
+        verbose_name = "Support document"
+        verbose_name_plural = "Support documents"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("document_type",),
+                condition=~Q(document_type="other"),
+                name="unique_support_doc_per_type",
+            )
+        ]
+
+    def __str__(self):
+        return self.title
+
+    def get_absolute_url(self):
+        return reverse("support-document-detail", kwargs={"slug": self.slug})
+
+    @property
+    def card_heading(self) -> str:
+        return self.card_title or self.title

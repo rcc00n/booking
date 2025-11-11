@@ -44,6 +44,7 @@ from core.models import (
     ClientIntakeAssignment,
     ClientIntakeFormSubmission,
     Payment,
+    SupportDocument,
 )
 from core.services.intake_assignments import ensure_universal_assignments_for_profile
 from core.services.pricing import get_available_prepayment_percents
@@ -522,6 +523,9 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
 
         # быстрые действия — список услуг
         ctx["services"] = Service.objects.filter(is_active=True).order_by("name")
+        ctx["support_documents"] = list(
+            SupportDocument.objects.active().order_by("display_order", "title")
+        )
 
         # подзапрос на последний статус записи
         # все записи клиента (для статистики/истории)

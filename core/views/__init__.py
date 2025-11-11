@@ -8,6 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt, csrf_protect
+from django.views.generic import TemplateView
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 from django.utils.html import format_html
@@ -21,9 +22,23 @@ import json
 import stripe
 
 from core.models import (
-    Appointment, ServiceCategory, Service, PromoCode,
-    AppointmentStatusHistory, AppointmentItemStatusHistory, MasterProfile, UserProfile, CancellationReason,
-    AppointmentItem, BookingCart, BookingCartItem, Payment, ClientIntakeForm, ServiceMaster, ProductSale,
+    Appointment,
+    ServiceCategory,
+    Service,
+    PromoCode,
+    AppointmentStatusHistory,
+    AppointmentItemStatusHistory,
+    MasterProfile,
+    UserProfile,
+    CancellationReason,
+    AppointmentItem,
+    BookingCart,
+    BookingCartItem,
+    Payment,
+    ClientIntakeForm,
+    ServiceMaster,
+    ProductSale,
+    SupportDocument,
 )
 from core.services.booking import (
     get_available_slots,
@@ -175,6 +190,38 @@ def public_mainmenu(request):
     ctx["default_prepayment_percent"] = options[0] if options else 100
 
     return render(request, "client/mainmenu.html", ctx)
+
+
+class SupportDocumentDetailView(TemplateView):
+    """
+    Renders admin-authored support/legal documents (privacy notice, marketing policy, etc.).
+    """
+
+    template_name = "legal/support_document.html"
+
+    def get_queryset(self):
+        return SupportDocument.objects.active()
+
+    def get_document(self):
+        slug = self.kwargs.get("slug")
+        document_type = self.kwargs.get("document_type")
+        queryset = self.get_queryset()
+        if slug:
+            return get_object_or_404(queryset, slug=slug)
+        if document_type:
+            return get_object_or_404(queryset, document_type=document_type)
+        raise Http404("Support document is not specified")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        document = self.get_document()
+        context["document"] = document
+        context.setdefault(
+            "support_email",
+            getattr(settings, "BUSINESS_SUPPORT_EMAIL", getattr(settings, "DEFAULT_FROM_EMAIL", "")),
+        )
+        context.setdefault("page_title", document.title)
+        return context
 
 # ===== API (оставляем только для авторизованных) =====
 

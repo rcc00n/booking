@@ -5394,6 +5394,30 @@ class PromoCodeAdmin(ExportCsvMixin ,admin.ModelAdmin):
 
 
 # -----------------------------
+# Support document admin
+# -----------------------------
+@admin.register(SupportDocument)
+class SupportDocumentAdmin(admin.ModelAdmin):
+    list_display = ("list_title", "document_type", "is_active", "display_order", "updated_at")
+    list_filter = ("is_active", "document_type")
+    search_fields = ("title", "subtitle", "card_excerpt", "body")
+    prepopulated_fields = {"slug": ("title",)}
+    ordering = ("display_order", "title")
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        ("Routing & status", {"fields": ("document_type", "slug", "is_active", "display_order")}),
+        ("Hero content", {"fields": ("title", "subtitle", "intro")}),
+        ("Body", {"fields": ("body",)}),
+        ("Support tab card", {"fields": ("card_title", "card_excerpt", "card_cta_label")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+    @admin.display(description="Title")
+    def list_title(self, obj):
+        return obj.card_heading
+
+
+# -----------------------------
 # Retail products & sales
 # -----------------------------
 
