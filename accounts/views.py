@@ -869,7 +869,11 @@ class ClientIntakeAssignmentsView(RoleRequiredMixin, TemplateView):
 
         ctx["profile"] = profile
         ctx["assignments"] = entries
-        ctx["pending_count"] = sum(1 for entry in entries if entry["status"] == "pending")
+        pending = sum(1 for entry in entries if entry["status"] == "pending")
+        total = len(entries)
+        ctx["pending_count"] = pending
+        ctx["total_intake_assignments"] = total
+        ctx["completed_count"] = max(total - pending, 0)
         ctx["has_assignments"] = bool(entries)
         return ctx
 
