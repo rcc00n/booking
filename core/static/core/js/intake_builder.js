@@ -23,14 +23,12 @@
       {
         id: 'sample-section-general',
         title: 'Client overview',
-        description: 'Demonstrates text, textarea and checkbox fields.',
         fields: [
           {
             id: 'sample-field-full-name',
             key: 'full_name',
             label: 'Full name',
             type: 'text',
-            required: true,
             placeholder: 'Jane Doe',
           },
           {
@@ -38,15 +36,12 @@
             key: 'medications',
             label: 'Current medications',
             type: 'textarea',
-            help_text: 'List medications separated by commas. Leave blank if none.',
           },
           {
             id: 'sample-field-consent',
             key: 'consent',
             label: 'Consent granted',
             type: 'checkbox',
-            default: true,
-            help_text: 'Toggle to confirm that the client signed consent.',
           },
         ],
       },
@@ -59,7 +54,6 @@
             key: 'skin_type',
             label: 'Skin type',
             type: 'radio',
-            required: true,
             choices: [
               { value: 'normal', label: 'Normal' },
               { value: 'dry', label: 'Dry' },
@@ -146,7 +140,6 @@
       id: base.id || uuid(),
       title: base.title || '',
       description: base.description || '',
-      collapsed: Boolean(base.collapsed),
       fields: Array.isArray(base.fields) ? base.fields.map(normalizeField) : [],
     };
   }
@@ -254,7 +247,6 @@
       id: uuid(),
       title: 'Section',
       description: '',
-      collapsed: false,
       fields: [],
     };
   }
@@ -268,7 +260,6 @@
       fields: section.fields.map(field => {
         const f = clone(field);
         delete f.__autoKey;
-        delete f.collapsed;
         if (f.display && !Object.keys(f.display).length) delete f.display;
         if (f.settings && !Object.keys(f.settings).length) delete f.settings;
         if (f.choices && Array.isArray(f.choices)){
@@ -327,26 +318,11 @@
     return { wrap, select };
   }
 
-  function createCheckboxGroup(labelText, checked, onChange){
-    const wrap = document.createElement('div');
-    wrap.className = 'ibuilder-field__row-item';
-    const label = document.createElement('label');
-    label.textContent = labelText;
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = Boolean(checked);
-    input.addEventListener('change', () => onChange(input.checked));
-    wrap.appendChild(label);
-    wrap.appendChild(input);
-    return { wrap, input };
-  }
-
   class IntakeBuilder {
     constructor(root){
       this.root = root;
       this.input = root.querySelector('input[type="hidden"]');
       this.sectionsMount = root.querySelector('[data-builder-sections]');
-      this.metaMount = root.querySelector('[data-builder-meta]');
       this.jsonPanel = root.querySelector('[data-json-panel]');
       this.jsonTextarea = this.jsonPanel ? this.jsonPanel.querySelector('[data-json-textarea]') : null;
       const initialPayload = (() => {
@@ -371,8 +347,6 @@
     bindToolbar(){
       const addSectionBtn = this.root.querySelector('[data-action="add-section"]');
       const sampleBtn = this.root.querySelector('[data-action="load-sample"]');
-      const expandAllBtn = this.root.querySelector('[data-action="expand-all"]');
-      const collapseAllBtn = this.root.querySelector('[data-action="collapse-all"]');
       const toggleJsonBtn = this.root.querySelector('[data-action="toggle-json"]');
 
       if (addSectionBtn){
@@ -384,18 +358,6 @@
       if (sampleBtn){
         sampleBtn.addEventListener('click', () => {
           this.state = ensureSchema(clone(SAMPLE_SCHEMA));
-          this.render();
-        });
-      }
-      if (expandAllBtn){
-        expandAllBtn.addEventListener('click', () => {
-          this.state.sections.forEach(section => { section.collapsed = false; });
-          this.render();
-        });
-      }
-      if (collapseAllBtn){
-        collapseAllBtn.addEventListener('click', () => {
-          this.state.sections.forEach(section => { section.collapsed = true; });
           this.render();
         });
       }
@@ -414,6 +376,21 @@
           });
         }
       }
+    }
+
+    generateUniqueKey(preferredKey, fieldId){
+      const preferred = slugify(preferredKey || '');
+      const randomSeed = slugify(`field_${Math.random().toString(36).slice(2,6)}`);
+      let candidate = preferred || randomSeed || `field_${Math.random().toString(36).slice(2,6)}`;
+      const root = candidate;
+      const hasDuplicate = key => this.state.sections.some(section =>
+        section.fields.some(f => f.id !== fieldId && f.key === key)
+      );
+      let suffix = 1;
+      while (hasDuplicate(candidate)){
+        candidate = `${root}_${suffix++}`;
+      }
+      return candidate;
     }
 
     setInputValue(){
@@ -456,29 +433,10 @@
         if (!section.fields) section.fields = [];
         this.sectionsMount.appendChild(this.renderSection(section, index));
       });
-      this.renderMeta();
       this.setInputValue();
       if (this.jsonPanel && !this.jsonPanel.hasAttribute('hidden')){
         this.populateJsonTextarea();
       }
-    }
-
-    renderMeta(){
-      if (!this.metaMount) return;
-      this.metaMount.innerHTML = '';
-      const label = document.createElement('label');
-      label.textContent = 'Schema version';
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.min = '1';
-      input.value = this.state.meta && this.state.meta.version ? this.state.meta.version : 1;
-      input.addEventListener('input', () => {
-        const val = parseInt(input.value, 10);
-        this.state.meta.version = Number.isFinite(val) && val > 0 ? val : 1;
-        this.setInputValue();
-      });
-      this.metaMount.appendChild(label);
-      this.metaMount.appendChild(input);
     }
 
     renderSection(section, index){
@@ -498,24 +456,10 @@
         section.title = titleInput.value;
         this.setInputValue();
       });
-      const descInput = document.createElement('textarea');
-      descInput.placeholder = 'Description (optional)';
-      descInput.value = section.description || '';
-      descInput.addEventListener('input', () => {
-        section.description = descInput.value;
-        this.setInputValue();
-      });
       titleWrap.appendChild(titleInput);
-      titleWrap.appendChild(descInput);
 
       const controls = document.createElement('div');
       controls.className = 'ibuilder-section__controls';
-
-      const collapseBtn = createButton(section.collapsed ? 'Expand' : 'Collapse', 'ibuilder__btn ibuilder__btn--ghost');
-      collapseBtn.addEventListener('click', () => {
-        section.collapsed = !section.collapsed;
-        this.render();
-      });
 
       const upBtn = createButton('Up', 'ibuilder__btn ibuilder__btn--ghost');
       upBtn.disabled = index === 0;
@@ -545,7 +489,6 @@
         }
       });
 
-      controls.appendChild(collapseBtn);
       controls.appendChild(upBtn);
       controls.appendChild(downBtn);
       controls.appendChild(removeBtn);
@@ -556,7 +499,6 @@
 
       const fieldsWrap = document.createElement('div');
       fieldsWrap.className = 'ibuilder-section__fields';
-      fieldsWrap.style.display = section.collapsed ? 'none' : 'block';
 
       section.fields.forEach((field, fieldIndex) => {
         fieldsWrap.appendChild(this.renderField(section, index, field, fieldIndex));
@@ -580,24 +522,22 @@
       const rowPrimary = document.createElement('div');
       rowPrimary.className = 'ibuilder-field__row';
 
+      const syncAutoKey = value => {
+        const auto = slugify(value);
+        if (!auto) return;
+        if (!field.key || field.key === field.__autoKey){
+          const nextKey = this.generateUniqueKey(auto, field.id);
+          field.key = nextKey;
+          field.__autoKey = nextKey;
+        }
+      };
+
       const labelGroup = createInputGroup('Label', field.label, value => {
         field.label = value;
-        const auto = slugify(value);
-        if (!field.key || field.key === field.__autoKey){
-          field.key = auto || field.key;
-          field.__autoKey = auto;
-          keyGroup.input.value = field.key;
-        }
+        syncAutoKey(value);
         this.setInputValue();
       });
       labelGroup.wrap.classList.add('ibuilder-field__row-item');
-
-      const keyGroup = createInputGroup('Key', field.key, value => {
-        field.key = value;
-        field.__autoKey = value;
-        this.setInputValue();
-      });
-      keyGroup.wrap.classList.add('ibuilder-field__row-item');
 
       const typeGroup = createSelectGroup('Type', field.type, FIELD_TYPES, value => {
         field.type = value;
@@ -613,16 +553,8 @@
       });
       typeGroup.wrap.classList.add('ibuilder-field__row-item');
 
-      const requiredGroup = createCheckboxGroup('Required', field.required, checked => {
-        field.required = checked;
-        this.setInputValue();
-      });
-      requiredGroup.wrap.classList.add('ibuilder-field__row-item');
-
       rowPrimary.appendChild(labelGroup.wrap);
-      rowPrimary.appendChild(keyGroup.wrap);
       rowPrimary.appendChild(typeGroup.wrap);
-      rowPrimary.appendChild(requiredGroup.wrap);
       wrap.appendChild(rowPrimary);
 
       const rowSecondary = document.createElement('div');
@@ -633,37 +565,8 @@
       });
       placeholderGroup.wrap.classList.add('ibuilder-field__row-item');
 
-      const helpGroup = createInputGroup('Help text', field.help_text, value => {
-        field.help_text = value;
-        this.setInputValue();
-      }, { textarea: true });
-      helpGroup.wrap.classList.add('ibuilder-field__row-item');
-      helpGroup.wrap.style.flex = '1 1 100%';
-
-      const defaultGroup = createInputGroup('Default', field.default, value => {
-        field.default = value;
-        this.setInputValue();
-      });
-      defaultGroup.wrap.classList.add('ibuilder-field__row-item');
-
       rowSecondary.appendChild(placeholderGroup.wrap);
-      rowSecondary.appendChild(defaultGroup.wrap);
-      rowSecondary.appendChild(helpGroup.wrap);
       wrap.appendChild(rowSecondary);
-
-      const rowLayout = document.createElement('div');
-      rowLayout.className = 'ibuilder-field__row';
-      const widthOptions = [
-        { value: 'full', label: 'Full width' },
-        { value: 'half', label: 'Half' },
-      ];
-      const widthGroup = createSelectGroup('Width', field.display && field.display.width ? field.display.width : 'full', widthOptions, value => {
-        field.display = field.display || {};
-        field.display.width = value;
-        this.setInputValue();
-      });
-      rowLayout.appendChild(widthGroup.wrap);
-      wrap.appendChild(rowLayout);
 
       if (CHOICE_TYPES.has(field.type)){
         const optionsWrap = document.createElement('div');
@@ -759,30 +662,6 @@
         wrap.appendChild(numericWrap);
       }
 
-      if (field.type === 'text' || field.type === 'textarea' || field.type === 'long_text'){
-        const textWrap = document.createElement('div');
-        textWrap.className = 'ibuilder-field__row';
-        const minLenGroup = createInputGroup('Min length', field.settings.min_length || '', value => {
-          field.settings = field.settings || {};
-          field.settings.min_length = value;
-          this.setInputValue();
-        });
-        const maxLenGroup = createInputGroup('Max length', field.settings.max_length || '', value => {
-          field.settings = field.settings || {};
-          field.settings.max_length = value;
-          this.setInputValue();
-        });
-        const patternGroup = createInputGroup('Pattern (regex)', field.settings.pattern || '', value => {
-          field.settings = field.settings || {};
-          field.settings.pattern = value;
-          this.setInputValue();
-        });
-        textWrap.appendChild(minLenGroup.wrap);
-        textWrap.appendChild(maxLenGroup.wrap);
-        textWrap.appendChild(patternGroup.wrap);
-        wrap.appendChild(textWrap);
-      }
-
       const actionBar = document.createElement('div');
       actionBar.className = 'ibuilder-field__actionbar';
 
@@ -790,7 +669,9 @@
       duplicateBtn.addEventListener('click', () => {
         const copy = clone(field);
         copy.id = uuid();
-        copy.__autoKey = copy.key = copy.key ? `${copy.key}_copy` : slugify(copy.label || '') || uuid();
+        const baseKey = copy.key ? `${copy.key}_copy` : slugify(copy.label || '') || '';
+        copy.key = this.generateUniqueKey(baseKey, copy.id);
+        copy.__autoKey = copy.key;
         section.fields.splice(fieldIndex + 1, 0, normalizeField(copy));
         this.render();
       });

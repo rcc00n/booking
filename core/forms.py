@@ -1651,6 +1651,22 @@ class ClientIntakeFormAdminForm(forms.ModelForm):
                 seen_keys.add(key)
         return data
 
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        schema = instance.schema if isinstance(instance.schema, dict) else {}
+        meta = schema.get("meta") if isinstance(schema, dict) else {}
+        version = meta.get("version")
+        try:
+            version_int = int(version)
+        except (TypeError, ValueError):
+            version_int = None
+        if version_int and version_int > 0:
+            instance.schema_version = version_int
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
+
 
 class PaymentRefundForm(forms.Form):
     """

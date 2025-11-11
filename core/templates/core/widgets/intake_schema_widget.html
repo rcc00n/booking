@@ -21,15 +21,13 @@
     <ul>
       <li><strong>Add section:</strong> Inserts a blank section at the end of the form.</li>
       <li><strong>Load sample:</strong> Replaces the current layout with a comprehensive demo schema. Use it to explore features or as a starting point.</li>
-      <li><strong>Expand all / Collapse all:</strong> Quickly toggle visibility for every section—handy for proofreading long forms.</li>
       <li><strong>JSON editor:</strong> Opens the raw configuration for backup, bulk editing, or advanced tweaks. Changes are applied only after you click <em>Apply</em>.</li>
     </ul>
 
     <h4>Section workflow</h4>
     <ol>
-      <li><strong>Title &amp; description:</strong> Clearly state the topic. The optional description appears above fields and should orient the respondent.</li>
+      <li><strong>Title:</strong> Clearly state the topic so clients know what data is requested. Sections no longer support descriptions, keeping layouts concise.</li>
       <li><strong>Reorder:</strong> Use <em>Up</em>/<em>Down</em> to relocate a section. The order here is the order presented to users.</li>
-      <li><strong>Collapse:</strong> Toggle between expanded and collapsed states for editing convenience. Collapsed sections remain saved; they just hide their fields in the builder.</li>
       <li><strong>Delete:</strong> Removes the section and every field inside it. This action cannot be undone; export the JSON first if you might need to restore it.</li>
       <li><strong>Add field:</strong> Appends a new question inside the section. Fields inherit the section order.</li>
     </ol>
@@ -37,23 +35,19 @@
     <h4>Field configuration checklist</h4>
     <ul>
       <li><strong>Label:</strong> The human-friendly prompt shown to staff/clients. Write instructions (“List medications separated by commas”) when needed.</li>
-      <li><strong>Key:</strong> A machine-friendly identifier (letters, numbers, underscores; must start with a letter). Keys must be unique across the entire form and become JSON keys. The builder auto-generates a key from the label—edit it if you need a stable API name.</li>
       <li><strong>Type:</strong> Controls rendering and validation. Changing the type may reset incompatible settings (e.g. removing choices for non-choice fields).</li>
-      <li><strong>Required:</strong> Enforces that the user provides a value. For optional questions, leave unchecked and rely on validation rules instead.</li>
       <li><strong>Placeholder:</strong> Grey helper text shown in inputs before entry. Use sparingly to avoid confusing it with actual answers.</li>
-      <li><strong>Default:</strong> Pre-fills a response (string, boolean, choice). Defaults are stored if the user leaves the field untouched.</li>
-      <li><strong>Help text:</strong> Longer guidance displayed beneath the input. Explain why you need the data, formatting expectations, or links to policies.</li>
-      <li><strong>Width:</strong> Choose <em>Full</em> for single-column layout or <em>Half</em> to place fields side-by-side on wider screens.</li>
+      <li><strong>Advanced settings:</strong> Keys, required flags, defaults, helper copy, width, and custom validation live in the JSON editor. The builder auto-generates stable keys and keeps the UI focused on the essentials.</li>
     </ul>
 
     <h4>Field type reference</h4>
     <ul>
-      <li><strong>Text:</strong> Single-line input. Optional min/max length and regex pattern enforce formatting (e.g. postal codes).</li>
-      <li><strong>Long text (textarea):</strong> Multi-line field for narratives or comments. Supports the same length/pattern settings as text.</li>
+      <li><strong>Text:</strong> Single-line input for short responses. Add regex or length rules via the JSON editor when needed.</li>
+      <li><strong>Long text (textarea):</strong> Multi-line field for narratives or comments. Advanced validation also lives in JSON.</li>
       <li><strong>Number / Integer:</strong> Numeric input with optional <em>Min</em> / <em>Max</em> constraints. The JSON alias <code>integer</code> is also accepted.</li>
       <li><strong>Decimal / Float:</strong> Number input that accepts fractional values. Use <em>Decimal places</em> to force currency-like precision.</li>
-      <li><strong>Boolean:</strong> Renders a checkbox; defaults to unchecked unless you set <em>Default</em> to <code>true</code>.</li>
-      <li><strong>Select:</strong> Single choice dropdown. Define at least one option (value/label) and optionally mark a default.</li>
+      <li><strong>Boolean:</strong> Renders a checkbox; it stays unchecked unless you prefill it in JSON.</li>
+      <li><strong>Select:</strong> Single choice dropdown. Define at least one option (value/label); defaults are configured via JSON.</li>
       <li><strong>Radio:</strong> Single choice rendered as radio buttons. Works like Select but always visible.</li>
       <li><strong>Multiselect:</strong> Multi-choice checkbox list. You may pre-select multiple defaults.</li>
       <li><strong>Date / Time / Date &amp; time:</strong> Calendar and/or time pickers. Respect locale and timezone requirements downstream.</li>
@@ -72,16 +66,15 @@
     <ul>
       <li><strong>Numeric fields:</strong> Configure <em>Min</em> / <em>Max</em> to reject out-of-range values. Decimal fields also support <em>Decimal places</em>.</li>
       <li><strong>Text fields:</strong> Control <em>Min length</em>, <em>Max length</em>, and optional <em>Pattern (regex)</em> for custom validation (e.g. <code>^[0-9]{4}$</code> for a 4-digit PIN).</li>
-      <li><strong>Display settings:</strong> Width is stored under <code>display.width</code>. Extend display rules in JSON if you need breakpoints or CSS hooks.</li>
       <li><strong>Duplication:</strong> Use <em>Duplicate</em> to clone a field; adjust the new key immediately to avoid duplicates.</li>
       <li><strong>Ordering:</strong> Up/Down buttons update the order instantly. Verify the final order before saving to guarantee a logical flow.</li>
     </ul>
 
     <h4>Meta and versioning</h4>
     <ul>
-      <li>The <strong>Schema version</strong> field increments <code>meta.version</code>. Increase this for any breaking change (key rename, field removal, meaning change).</li>
+      <li><strong>Schema version:</strong> Update <code>meta.version</code> via the JSON editor whenever you introduce a breaking change (key rename, removed question, or semantic shift).</li>
       <li>Non-breaking updates (copy edits, help text tweaks) can stay on the same version, but bumping the number still improves traceability.</li>
-      <li>Store release notes elsewhere if teams need historical context—only the version lives in the schema.</li>
+      <li>Store release notes elsewhere if teams need historical context—only the version value lives inside the schema.</li>
     </ul>
 
     <h4>Saving, testing, and publishing</h4>
@@ -108,8 +101,7 @@
         <ul>
           <li><code>id</code>: Stable identifier (UUID or slug). Optional but helps with diffing.</li>
           <li><code>title</code>: Required. Displayed heading.</li>
-          <li><code>description</code>: Optional explanatory text.</li>
-          <li><code>collapsed</code>: Optional boolean controlling default collapsed state in the builder.</li>
+          <li><code>description</code>: Optional explanatory text (JSON editor only).</li>
           <li><code>fields</code>: Array of field objects (see below).</li>
         </ul>
       </li>
@@ -124,9 +116,9 @@
       </li>
       <li><strong>Optional field attributes:</strong>
         <ul>
-          <li><code>placeholder</code>, <code>help_text</code>, <code>default</code></li>
-          <li><code>display</code>: Object with <code>width</code> (<code>full</code> or <code>half</code>). Extend as needed for custom front-ends.</li>
-          <li><code>settings</code>: Object for validation extras:
+          <li><code>placeholder</code> (builder) plus <code>help_text</code> / <code>default</code> (JSON editor only)</li>
+          <li><code>display</code>: Object with <code>width</code> (<code>full</code> or <code>half</code>)&mdash;edit in JSON if you need multi-column layouts.</li>
+          <li><code>settings</code>: Object for validation extras (JSON editor):
             <ul>
               <li><code>min_value</code> / <code>max_value</code> (numbers)</li>
               <li><code>decimal_places</code> (decimals)</li>
@@ -134,7 +126,7 @@
               <li><code>pattern</code> (regex string for text)</li>
             </ul>
           </li>
-          <li><code>choices</code>: Array for choice-based fields. Each choice has <code>value</code>, <code>label</code>, and optional <code>default</code> boolean.</li>
+          <li><code>choices</code>: Array for choice-based fields. Each choice has <code>value</code>, <code>label</code>, and optional <code>default</code> boolean (set via JSON).</li>
         </ul>
       </li>
       <li><strong>Validation rules:</strong> Respect JSON data types—numbers without quotes, booleans as <code>true</code>/<code>false</code>, and strings wrapped in quotes. Keep arrays ordered as you want options displayed.</li>
@@ -142,7 +134,7 @@
       <li><strong>Version control:</strong> Store exported JSON alongside your codebase for auditing. Commit schema version bumps with release notes to avoid accidental regressions.</li>
     </ol>
 
-    <p><strong>Complete JSON example:</strong></p>
+    <p><strong>Complete JSON example:</strong> Includes JSON-only attributes such as <code>help_text</code>, <code>required</code>, <code>display.width</code>, and custom validation for reference.</p>
     <pre><code>{
   "meta": {
     "version": 3,
@@ -153,7 +145,6 @@
     {
       "id": "general-info",
       "title": "General information",
-      "description": "Collected at every first visit.",
       "fields": [
         {
           "id": "field-full-name",
@@ -187,7 +178,6 @@
     {
       "id": "skin-profile",
       "title": "Skin profile",
-      "description": "Helps tailor skincare plans.",
       "fields": [
         {
           "id": "field-skin-type",
@@ -247,15 +237,13 @@
     }
   ]
 }</code></pre>
-    <p class="help">Always increment <em>Schema version</em> when breaking changes are introduced. Retain JSON exports for rollback or audit purposes.</p>
+    <p class="help">When breaking changes are introduced, bump <code>meta.version</code> in the JSON editor and archive exports for rollback or audits.</p>
   </div>
 
     <div class="ibuilder__toolbar">
       <div class="ibuilder__toolbar-left">
         <button type="button" class="ibuilder__btn" data-action="add-section">Add section</button>
         <button type="button" class="ibuilder__btn" data-action="load-sample">Load sample</button>
-        <button type="button" class="ibuilder__btn" data-action="expand-all">Expand all</button>
-        <button type="button" class="ibuilder__btn" data-action="collapse-all">Collapse all</button>
       </div>
     <div class="ibuilder__toolbar-right">
       <button type="button" class="ibuilder__btn ibuilder__btn--ghost" data-action="toggle-json">JSON editor</button>
@@ -263,8 +251,6 @@
   </div>
 
   <div class="ibuilder__body" data-builder-sections></div>
-
-  <div class="ibuilder__meta" data-builder-meta></div>
 
   <div class="ibuilder__json-panel" data-json-panel hidden>
     <textarea class="ibuilder__json-textarea" data-json-textarea spellcheck="false"></textarea>
