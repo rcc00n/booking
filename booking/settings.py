@@ -153,14 +153,39 @@ WSGI_APPLICATION = 'booking.wsgi.application'
 #     )
 # }
 
-
 DATABASES = {
-    "default": dj_database_url.parse(
-        os.environ["DATABASE_URL"],
-        conn_max_age=600,
-        ssl_require=False,
-    )
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "appdb",  # Change to your local DB name
+        "USER": "appuser",  # Change to your local user name
+        "PASSWORD": "strong_password",  # Change to your local user password
+        "HOST": "localhost",
+        "PORT": "5432",
+    }
 }
+
+if any(arg.startswith("test") for arg in sys.argv):
+    # Use an isolated SQLite database while running tests so they do not depend on
+    # a locally provisioned PostgreSQL instance.
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": str(BASE_DIR / "test.sqlite3"),
+        }
+    }
+    CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_TASK_EAGER_PROPAGATES = True
+    CELERY_BROKER_URL = "memory://"
+    CELERY_RESULT_BACKEND = "cache+memory://"
+    DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
+    MEDIA_ROOT = str(BASE_DIR / "test_media")
+# DATABASES = {
+#     "default": dj_database_url.parse(
+#         os.environ["DATABASE_URL"],
+#         conn_max_age=600,
+#         ssl_require=False,
+#     )
+# }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -203,24 +228,12 @@ SESSION_SAVE_EVERY_REQUEST = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STORAGE_ROOT = Path(env.str("STORAGE_ROOT", default=str(BASE_DIR / "storage")))
-
 STATIC_URL = '/static/'
-STATIC_ROOT = Path(env.str("STATIC_ROOT", default=str(STORAGE_ROOT / "static")))
-STATICFILES_DIRS = [BASE_DIR / "static"]
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_DIRS = [ BASE_DIR / "static" ]
 
 MEDIA_URL = env.str("MEDIA_URL", default="/media/")
-MEDIA_ROOT = Path(env.str("MEDIA_ROOT", default=str(STORAGE_ROOT / "media")))
-
-for path in (STORAGE_ROOT, STATIC_ROOT, MEDIA_ROOT):
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        # In read-only deployments (e.g. slug buildpacks) the mount will provide the directory.
-        pass
-
-STATIC_ROOT = str(STATIC_ROOT)
-MEDIA_ROOT = str(MEDIA_ROOT)
+MEDIA_ROOT = env.str("MEDIA_ROOT", default=str(BASE_DIR / "media"))
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
@@ -254,23 +267,23 @@ DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 
 # # AWS credentials
 
-AWS_S3_SIGNATURE_NAME  = env.str("AWS_S3_SIGNATURE_NAME")
-# Your S3 bucket name
-AWS_STORAGE_BUCKET_NAME = env.str("AWS_STORAGE_BUCKET_NAME")
-AWS_S3_REGION_NAME = env.str("AWS_S3_REGION_NAME")
-# Optional: Make files public
-AWS_QUERYSTRING_AUTH = env.bool("AWS_QUERYSTRING_AUTH")
+# AWS_S3_SIGNATURE_NAME  = env.str("AWS_S3_SIGNATURE_NAME")
+# # Your S3 bucket name
+# AWS_STORAGE_BUCKET_NAME = env.str("AWS_STORAGE_BUCKET_NAME")
+# AWS_S3_REGION_NAME = env.str("AWS_S3_REGION_NAME")
+# # Optional: Make files public
+# AWS_QUERYSTRING_AUTH = env.bool("AWS_QUERYSTRING_AUTH")
 
-# Optional: Customize file URLs
-AWS_S3_FILE_OVERWRITE = env.bool("AWS_S3_FILE_OVERWRITE")
-AWS_DEFAULT_ACL = env.str("AWS_DEFAULT_ACL", default=None)
-if isinstance(AWS_DEFAULT_ACL, str) and AWS_DEFAULT_ACL.lower() == "none":
-    AWS_DEFAULT_ACL = None
-# Optional: Specify custom domain (if you use CloudFront or static hosting)
-# AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
+# # Optional: Customize file URLs
+# AWS_S3_FILE_OVERWRITE = env.bool("AWS_S3_FILE_OVERWRITE")
+# AWS_DEFAULT_ACL = env.str("AWS_DEFAULT_ACL", default=None)
+# if isinstance(AWS_DEFAULT_ACL, str) and AWS_DEFAULT_ACL.lower() == "none":
+#     AWS_DEFAULT_ACL = None
+# # Optional: Specify custom domain (if you use CloudFront or static hosting)
+# # AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
 
-AWS_ACCESS_KEY_ID=env("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY=env("AWS_SECRET_ACCESS_KEY")
+# AWS_ACCESS_KEY_ID=env("AWS_ACCESS_KEY_ID")
+# AWS_SECRET_ACCESS_KEY=env("AWS_SECRET_ACCESS_KEY")
 
 
 # # Media URL for S3

@@ -1,0 +1,149 @@
+/* ===== Toolbar (оставил без изменений, можно сократить) ===== */
+.tm-header__actions .tm-btn--import{background:#0ea5e9;color:#fff!important;border-color:transparent}
+.tm-searchbox__actions{position:relative;display:flex;gap:10px}
+.tm-dropdown{position:relative}
+.tm-dropdown__panel{position:absolute;right:0;top:calc(100% + 8px);min-width:220px;padding:12px;border-radius:12px;border:1px solid var(--bs-border-color,#e5e7eb);background:#fff;box-shadow:0 12px 24px rgba(15,23,42,.12);display:none;z-index:20}
+.tm-dropdown.is-open .tm-dropdown__panel{display:block}
+.tm-dropdown__section+.tm-dropdown__section{margin-top:12px;border-top:1px solid var(--bs-border-color,#e5e7eb);padding-top:12px}
+.tm-dropdown__title{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:8px}
+.tm-dropdown__list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.tm-dropdown__option{width:100%;padding:8px 12px;border-radius:8px;border:1px solid transparent;background:#f8fafc;color:#0f172a;text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.tm-dropdown__option:hover{border-color:#cbd5f5;background:#eef2ff}
+.tm-dropdown__option.is-active{border-color:#6366f1;background:#eef2ff;font-weight:600}
+.tm-option-check{margin-left:auto;opacity:0;transition:opacity .15s ease}
+.tm-dropdown__option.is-active .tm-option-check{opacity:1}
+.tm-dropdown__actions{display:flex;gap:8px;margin-top:12px}
+.tm-dropdown__actions button{flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--bs-border-color,#e5e7eb);background:#fff;cursor:pointer}
+.tm-dropdown__actions button.tm-action--clear{background:#f8fafc;color:#334155}
+.tm-filter-summary{font-size:12px;color:#475569;margin-top:4px}
+.tm-filter-summary.is-hidden{display:none}
+.tm-chip.is-active{border-color:#6366f1;background:#eef2ff;color:#312e81;font-weight:600}
+@media (max-width:720px){.tm-dropdown__panel{right:auto;left:0}}
+
+/* ===== Header row (как в таблице) ===== */
+.uc-head{
+  display:flex;align-items:center;gap:24px;
+  padding:14px 18px 10px; border-bottom:1px solid #e5e7eb;
+  font-size:12px; color:#475569; font-weight:600;
+}
+.uc-head__left{flex:0 1 360px; padding-left:80px; /* 56 аватар + 24 gap */ }
+.uc-head__right{margin-left:auto;display:flex;gap:32px;flex:1 1 auto}
+.uc-head__col{flex:1 1 0;text-align:right;white-space:nowrap}
+
+/* ===== Row (карточка в строчку) ===== */
+.tm-list{margin:0;padding:0;list-style:none;border-top:1px solid #e5e7eb;}
+.tm-list>.tm-item{border-bottom:1px solid #e5e7eb;background:#fff}
+.uc-card{display:flex;align-items:center;gap:24px;padding:16px 18px;width:100%;position:relative}
+.uc-card .tm-item__overlay{position:absolute;inset:0}
+
+/* Аватар */
+.uc-avatar{width:56px;height:56px;border-radius:999px;background:#f1efff;display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:20px;color:#5b4ae0;box-shadow:inset 0 0 0 1px rgba(91,74,224,.06);text-transform:uppercase;flex:0 0 56px}
+
+/* Левая часть: Имя + Email (email справа под именем) */
+.uc-left{display:flex;flex-direction:column;justify-content:center;gap:6px;min-width:220px;max-width:480px;flex:0 1 360px;min-height:56px;align-items:flex-end}
+
+.uc-field--email{width:100%;text-align:right}
+.uc-field--email .uc-label{display:none}
+.uc-field--email .uc-value{color:#64748b;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.uc-field--email .uc-value a{color:#64748b!important;text-decoration:none}
+
+/* Правая часть — 4 колонки */
+.uc-right{display:flex;align-items:flex-start;gap:32px;margin-left:auto;flex:1 1 auto;justify-content:flex-end}
+.uc-col{display:flex;flex-direction:column;align-items:flex-end;gap:6px;min-width:0;flex:1 1 0;text-align:right}
+.uc-label{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;white-space:nowrap}
+.uc-value{font-size:14px;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.uc-value a{color:#0f172a!important;text-decoration:none}
+
+/* Адаптив */
+@media (max-width:900px){
+  .uc-left{align-items:flex-start}
+  .uc-name,.uc-field--email{text-align:left}
+  .uc-right{flex-wrap:wrap;gap:16px 24px}
+  .uc-col{align-items:flex-start;text-align:left;flex:1 1 45%}
+}
+/* ====== Табличная сетка для хедера и строк ====== */
+.uc-grid-head,
+.uc-grid-row{
+  display: grid;
+  grid-template-columns:
+    56px   /* avatar */
+    1.45fr /* name + email */
+    1fr    /* mobile */
+    1fr    /* sales */
+    1fr;   /* created */
+  column-gap: 16px;
+  align-items: center;
+}
+
+/* Хедер — ровно над данными */
+.uc-grid-head{
+  padding: 12px 18px;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  background: #f8fafc;
+}
+.uc-head-spacer{ width:56px; height:1px; }
+.uc-head-col--name{ text-align: left; }
+.uc-head-col--right{ text-align: right; white-space: nowrap; }
+
+/* Строка — чёткий нижний бордер у каждой записи */
+.uc-grid-row{
+  padding: 16px 18px;
+  border-bottom: 1px solid #d1d5db;
+  background: #F4F6F9;
+  position: relative;
+  list-style: none;
+  transition: 0.3s;
+}
+
+.uc-grid-row:hover{
+
+    background: #eef1f8;
+}
+.uc-grid-row .tm-item__overlay{ position:absolute; inset:0; }
+
+/* Аватар */
+.uc-avatar{
+  width:56px;height:56px;border-radius:999px;
+  background:#f1efff;display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:20px;color:#5b4ae0;
+  box-shadow:inset 0 0 0 1px rgba(91,74,224,.06);
+  text-transform:uppercase;
+}
+
+/* Имя + email (email под именем, ближе к аватару) */
+.uc-namewrap{ display:flex !important; flex-direction:column !important; gap:4px; min-width:180px; }
+.uc-name{ margin:0; font-size:16px; font-weight:500; line-height:1.2; color:#0f172a; }
+.uc-email{ font-size:14px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.uc-email a{ color:#64748b!important; text-decoration:none; }
+.uc-flag{
+  display:inline-flex;align-items:center;gap:6px;margin-top:4px;
+  padding:4px 10px;border-radius:999px;background:#fef3c7;color:#92400e;
+  font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+}
+
+/* Правые ячейки */
+.uc-cell{ text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.uc-cell--name{ text-align:left; display: flex; align-items: center;}
+.uc-value a{ color:#0f172a!important; text-decoration:none; }
+
+/* Показывать подписи (PHONE/SALES/CREATED) только на мобилке */
+.uc-label{ display:none; }
+@media (max-width: 980px){
+  .uc-grid-head{ display:none; }
+  .uc-grid-row{
+    grid-template-columns: 56px 1fr;
+    row-gap: 10px;
+  }
+  .uc-cell{ grid-column: 2 / span 1; text-align:left; }
+  .uc-label{
+    display:block; font-size:11px; letter-spacing:.04em;
+    text-transform:uppercase; color:#94a3b8; margin-bottom:4px;
+  }
+}
+
+/* Контейнер списка */
+.tm-list{ margin:0; padding:0; list-style:none; }
