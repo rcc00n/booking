@@ -17,7 +17,7 @@
         if (!detailCtaHandlerBound) {
           document.addEventListener('click', handleServiceCardCtaClick);
           detailCtaHandlerBound = true;
-        }
+        } 
         try {
       const I18N = window.MalvaI18n;
       const bind = (node, event, handler, options) => {
@@ -594,6 +594,42 @@
       window.addEventListener('resize', () => {
         if (window.innerWidth > 900) closeMenuDrawer();
       });
+
+            // --- Mobile drawer portal: prevent fixed-position clipping in Safari/iOS ---
+      (() => {
+        const drawer = document.querySelector('[data-menu-drawer]');
+        if (!drawer) return;
+
+        const placeholder = document.createComment('nav-drawer-placeholder');
+        let portaled = false;
+
+        const toBody = () => {
+          if (portaled) return;
+          if (drawer.parentNode) {
+            drawer.parentNode.insertBefore(placeholder, drawer);
+          }
+          document.body.appendChild(drawer);
+          portaled = true;
+        };
+
+        const toOriginal = () => {
+          if (!portaled) return;
+          if (placeholder.parentNode) {
+            placeholder.parentNode.insertBefore(drawer, placeholder);
+            placeholder.remove();
+          }
+          portaled = false;
+        };
+
+        const mq = window.matchMedia('(max-width: 900px)');
+        const sync = () => (mq.matches ? toBody() : toOriginal());
+
+        // Initial placement + responsive updates
+        sync();
+        if (mq.addEventListener) mq.addEventListener('change', sync);
+        else mq.addListener(sync);
+      })();
+
 
       const isAuth = Boolean(mainmenuConfig.isAuthenticated);
       const loginUrl =

@@ -12,7 +12,7 @@
       --border-soft:rgba(11,54,29,.12);
       --shadow:0 24px 60px rgba(11,54,29,.08);
       --shadow-card:0 30px 60px rgba(18,56,42,.12);
-
+ 
       --free:var(--green); --busy:#d6453d; --today-bg:#f4faf6; --grid-border:#e2e7df; --chip-bg:#f9fbf9;
 
       --radius-xl:2.4rem; --radius-lg:1.35rem; --radius-md:.95rem; --radius-sm:.65rem;
@@ -652,3 +652,39 @@
       .btn{width:100%;justify-content:center;}
       .services-grid{grid-template-columns:1fr;}
     }
+
+
+    /* --- Mobile drawer hardening --- */
+@media (max-width: 900px){
+  /* When the drawer is open, neutralize backdrop-filter on the header
+     to avoid Safari's fixed-position clipping bug. */
+  body.nav-open .site-header{
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  /* Stronger sizing + safe-area support for the drawer itself */
+  .header-actions{
+    /* already fixed; ensure viewport anchoring is explicit */
+    inset: 0 auto 0  auto;   /* top/bottom 0; stick to the right by default */
+    right: 0;
+    left: auto;
+
+    /* predictable width on all phones, but never full-screen */
+    width: clamp(300px, 88vw, 380px);
+
+    /* full height with modern units, with fallback below */
+    height: 100dvh;
+
+    /* keep the existing padding but ensure safe-areas are respected */
+    padding-top: calc(1.75rem + env(safe-area-inset-top));
+    padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+
+    /* performance + crisp transform animation */
+    will-change: transform;
+  }
+
+  @supports not (height: 100dvh){
+    .header-actions{ height: 100vh; }
+  }
+}
