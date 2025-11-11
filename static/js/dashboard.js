@@ -1467,3 +1467,91 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+// --- Mobile collapsible list for appointments (or any list) ---
+(() => {
+  const SELECTOR = '[data-collapse-mobile]';
+  const mql = window.matchMedia('(max-width: 900px)');
+  const instances = new Map();
+
+  function measure(container){
+    const first = container.firstElementChild;
+    if (!first) return;
+    // Height = first item + bottom spacing
+    const cr = container.getBoundingClientRect();
+    const fr = first.getBoundingClientRect();
+    const csFirst = getComputedStyle(first);
+    const gap = parseFloat(csFirst.marginBottom || '0')
+             || parseFloat(getComputedStyle(container).rowGap || '0')
+             || parseFloat(getComputedStyle(container).gap || '0')
+             || 0;
+    const h = Math.max(0, Math.ceil(fr.bottom - cr.top + gap));
+    container.style.setProperty('--collapsed-height', `${h}px`);
+    if (!container.classList.contains('is-open')) {
+      container.style.maxHeight = `${h}px`;
+    }
+  }
+
+  function attach(container){
+    if (instances.has(container)) return;
+
+    // Insert the toggle button after the container
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'collapse-toggle';
+    btn.setAttribute('aria-expanded', 'false');
+    btn.innerHTML = `<span class="collapse-toggle__label">Show more</span>
+                     <span class="collapse-toggle__icon" aria-hidden="true">▾</span>`;
+    container.parentNode.insertBefore(btn, container.nextSibling);
+
+    const toggle = () => {
+      const open = btn.getAttribute('aria-expanded') === 'true';
+      if (open) {
+        btn.setAttribute('aria-expanded', 'false');
+        container.classList.remove('is-open');
+        const h = container.style.getPropertyValue('--collapsed-height') || '0px';
+        container.style.maxHeight = h;
+        btn.querySelector('.collapse-toggle__label').textContent = 'Show more';
+      } else {
+        btn.setAttribute('aria-expanded', 'true');
+        container.classList.add('is-open');
+        container.style.maxHeight = 'none';
+        btn.querySelector('.collapse-toggle__label').textContent = 'Show less';
+      }
+    };
+    btn.addEventListener('click', toggle);
+
+    // Keep size correct on content changes/resizes
+    let ro = null;
+    if ('ResizeObserver' in window) {
+      ro = new ResizeObserver(() => measure(container));
+      ro.observe(container);
+      if (container.firstElementChild) ro.observe(container.firstElementChild);
+    }
+    const sync = () => {
+      if (mql.matches) {
+        container.classList.remove('is-open');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.style.display = '';
+        measure(container);
+      } else {
+        container.style.maxHeight = '';
+        btn.style.display = 'none';
+      }
+    };
+    sync();
+    if (mql.addEventListener) mql.addEventListener('change', sync);
+    else mql.addListener(sync);
+
+    instances.set(container, { btn, ro, sync });
+  }
+
+  function init(){
+    document.querySelectorAll(SELECTOR).forEach(attach);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
+})();

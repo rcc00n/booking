@@ -1055,3 +1055,61 @@ textarea { resize: vertical; min-height: 120px; }
 .dashboard-sidebar form[action*="logout"] button svg {
   width: 20px; height: 20px; flex: 0 0 auto;
 }
+
+/* Mobile-only collapsible list */
+@media (max-width: 900px){
+  [data-collapse-mobile]{
+    --collapsed-height: 0px;         /* set by JS */
+    position: relative;
+    overflow: hidden;
+    max-height: var(--collapsed-height);
+    border-radius: inherit;          /* keep parent rounding if any */
+  }
+
+  /* Fade + slight blur hinting more content below */
+  [data-collapse-mobile]::after{
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 72px;
+    background:
+      linear-gradient(to bottom,
+        rgba(255,255,255,0) 0%,
+        rgba(255,255,255,.78) 45%,
+        rgba(255,255,255,1) 95%);
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+    transition: opacity .2s ease;
+  }
+
+  /* When expanded, remove the fade */
+  [data-collapse-mobile].is-open{
+    max-height: none;
+  }
+  [data-collapse-mobile].is-open::after{
+    opacity: 0;
+  }
+
+  /* Toggle button */
+  .collapse-toggle{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .5rem;
+    width: 100%;
+    margin-top: .6rem;
+    padding: .65rem .95rem;
+    border-radius: 999px;
+    border: 1px solid var(--grid-border);
+    background: #fff;
+    font-weight: 800;
+    box-shadow: 0 12px 26px rgba(18,56,42,.10);
+  }
+  .collapse-toggle__icon{
+    display:inline-block;
+    transition: transform .2s ease;
+  }
+  .collapse-toggle[aria-expanded="true"] .collapse-toggle__icon{
+    transform: rotate(180deg);
+  }
+}
