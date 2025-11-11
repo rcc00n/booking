@@ -492,10 +492,11 @@ document.addEventListener('DOMContentLoaded', () => {
   /* chart */
   const el = document.getElementById('stats_chart');
   let statsChart = null;
-  if (el) {
+  const ChartLib = window.Chart;
+  if (el && typeof ChartLib === 'function') {
     const labels = el.dataset.labels ? el.dataset.labels.split(',') : [];
     const data   = el.dataset.data   ? el.dataset.data.split(',').map(Number) : [];
-    statsChart = new Chart(el, {
+    statsChart = new ChartLib(el, {
       type: 'bar',
       data: { labels, datasets: [{ data, label: translate('dashboard.chartLabel', null, 'Appointments'), backgroundColor: '#AF9525', borderRadius: 6 }] },
       options: {
@@ -506,6 +507,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     });
+  } else if (el && !ChartLib) {
+    console.warn('[dashboard] Chart.js is not available, stats chart disabled.');
   }
 
   /* helpers */

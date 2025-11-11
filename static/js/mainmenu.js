@@ -673,6 +673,10 @@
       syncPrepaymentInputs(currentPrepaymentPercent);
 
       const BODY_MODAL_CLASS = 'modal-open';
+      const MASTER_REQUIRED_GUARD = {
+        key: 'services.modal.masterRequired',
+        fallback: 'Select a master to view availability.'
+      };
 
       const modalState = {
         current: null,
@@ -932,6 +936,7 @@
         timeRows: [],
         locale: getLocale(),
         selectedDate: null,
+        guardMessage: null,
       };
       let lastCartOpener = null;
 
@@ -969,14 +974,30 @@
         return cartSlotsNoMaster.has(ts);
       }
 
-      function getSelectedMasterKey(){
-        if (elMaster && elMaster.value){
-          return elMaster.value;
+      function normalizeMasterValue(value){
+        if (value === undefined || value === null) return null;
+        const str = typeof value === 'string' ? value.trim() : String(value).trim();
+        if (!str) return null;
+        const num = Number(str);
+        return Number.isFinite(num) ? num : str;
+      }
+
+      function getActiveMasterValue(){
+        if (elMaster){
+          const normalized = normalizeMasterValue(elMaster.value);
+          if (normalized !== null && normalized !== undefined){
+            return normalized;
+          }
         }
         if (current && current.masterId !== null && current.masterId !== undefined){
-          return String(current.masterId);
+          return current.masterId;
         }
         return null;
+      }
+
+      function getSelectedMasterKey(){
+        const active = getActiveMasterValue();
+        return active !== null && active !== undefined ? String(active) : null;
       }
 
       function updateBookCartPreview(){
@@ -2127,6 +2148,7 @@ async function confirmPayment(){
         timeRows: [],
         locale: getLocale(),
         selectedDate: null,
+        guardMessage: null,
       };
       let activeServiceDetail = null;
 
@@ -2296,6 +2318,7 @@ async function confirmPayment(){
           timeRows: [],
           locale: getLocale(),
           selectedDate: null,
+          guardMessage: null,
         };
         if (mobileTimeList) mobileTimeList.innerHTML = '';
         if (mobileEmpty) mobileEmpty.style.display = 'none';
@@ -2377,6 +2400,10 @@ async function confirmPayment(){
       }
 
       async function ensureRangeLoaded(startDate, daysCount){
+        const masterValue = getActiveMasterValue();
+        if (masterValue === null || masterValue === undefined){
+          return;
+        }
         const tasks=[];
         for(let i=0;i<daysCount;i++){
           const d=new Date(startDate); d.setDate(d.getDate()+i);
@@ -2384,7 +2411,7 @@ async function confirmPayment(){
           if(!availabilityCache.has(ds)){
             tasks.push((async()=>{
               availabilityCache.set(ds, {loading:true});
-              const res=await fetchAvailability(ds, Number(elMaster.value||current.masterId));
+              const res=await fetchAvailability(ds, masterValue);
               availabilityCache.set(ds,{set:res.set, iso:res.map});
             })());
           }
@@ -2405,9 +2432,10 @@ async function confirmPayment(){
 
       function applySelection(day, iso, locale){
         if (!iso || !day) return;
-        const selectedMasterValue = elMaster && elMaster.value !== undefined ? elMaster.value : null;
-        const fallbackMasterId = current.masterId || 0;
-        current.masterId = Number(selectedMasterValue !== null && selectedMasterValue !== '' ? selectedMasterValue : fallbackMasterId);
+        const normalizedMaster = normalizeMasterValue(elMaster ? elMaster.value : current.masterId);
+        if (normalizedMaster !== null && normalizedMaster !== undefined){
+          current.masterId = normalizedMaster;
+        }
         current.slot = iso;
         const masterOption = elMaster && elMaster.selectedOptions && elMaster.selectedOptions.length ? elMaster.selectedOptions[0] : null;
         const masterText = masterOption ? masterOption.text : '';
@@ -2461,12 +2489,29 @@ async function confirmPayment(){
             btnSubmit.disabled = true;
             return;
           }
+          const requireManualSelection = masters.length > 1;
+          if (requireManualSelection){
+            const placeholder=document.createElement('option');
+            placeholder.value='';
+            placeholder.textContent = translate('services.modal.masterPlaceholder', null, 'Select a master');
+            placeholder.dataset.placeholder='true';
+            elMaster.appendChild(placeholder);
+          }
           masters.forEach(m=>{
-            const opt=document.createElement('option'); opt.value=m.id; opt.textContent=m.name; elMaster.appendChild(opt);
+            const opt=document.createElement('option');
+            opt.value=m.id;
+            opt.textContent=m.name;
+            elMaster.appendChild(opt);
           });
-          const withSlots=masters.find(m=>(m.slots||[]).length);
-          elMaster.value=(withSlots?withSlots.id:masters[0].id);
-          current.masterId=Number(elMaster.value);
+          if (requireManualSelection){
+            elMaster.value='';
+            current.masterId=null;
+          }else{
+            const withSlots=masters.find(m=>(m.slots||[]).length);
+            const defaultMasterId = withSlots ? withSlots.id : masters[0].id;
+            elMaster.value=String(defaultMasterId);
+            current.masterId=normalizeMasterValue(defaultMasterId);
+          }
 
           availabilityCache.clear();
           await renderWindow();
@@ -2484,9 +2529,31 @@ async function confirmPayment(){
       }
 
       async function renderWindow(){
-        await ensureRangeLoaded(baseStart, WINDOW_DAYS);
-
         const locale = getLocale();
+        const masterKey = getSelectedMasterKey();
+
+        if (!masterKey){
+          scheduleState = {
+            days: [],
+            dayData: [],
+            timeRows: [],
+            locale,
+            selectedDate: null,
+            guardMessage: Object.assign({}, MASTER_REQUIRED_GUARD),
+          };
+          if (mobileDateInput){
+            mobileDateInput.value = '';
+            mobileDateInput.disabled = true;
+            mobileDateInput.min = '';
+            mobileDateInput.max = '';
+          }
+          renderDesktopSchedule(locale);
+          renderMobileSchedule(locale);
+          return;
+        }
+
+        scheduleState.guardMessage = null;
+        await ensureRangeLoaded(baseStart, WINDOW_DAYS);
 
         const days = Array.from({length:WINDOW_DAYS}, (_,i)=>{ const d=new Date(baseStart); d.setDate(d.getDate()+i); return d;});
         const dayStrs=days.map(ymd);
@@ -2546,8 +2613,26 @@ async function confirmPayment(){
         renderMobileSchedule(locale);
       }
 
+      function resolveGuardMessage(record){
+        if (!record) return null;
+        const key = record.key || null;
+        const fallback = record.fallback || '';
+        const vars = record.vars || null;
+        if (key){
+          return translate(key, vars, fallback);
+        }
+        return fallback;
+      }
+
       function renderDesktopSchedule(locale = scheduleState.locale || getLocale()){
         if (!olGrid) return;
+        const guardText = resolveGuardMessage(scheduleState.guardMessage);
+        if (guardText){
+          olGrid.innerHTML = `<div class="p-4 text-sm text-center">${guardText}</div>`;
+          if (olRange) olRange.textContent = '—';
+          btnSubmit.disabled = true;
+          return;
+        }
         const days = scheduleState.days;
         const dayData = scheduleState.dayData;
         const timeRows = scheduleState.timeRows;
@@ -2650,8 +2735,30 @@ async function confirmPayment(){
         if (!mobileScheduleContainer || !mobileTimeList) return;
         const days = scheduleState.days;
         const dayData = scheduleState.dayData;
+        const guardRecord = scheduleState.guardMessage;
+        const guardText = resolveGuardMessage(guardRecord);
 
         mobileTimeList.innerHTML = '';
+
+        if (guardText){
+          if (mobileEmpty){
+            mobileEmpty.style.display = 'block';
+            if (guardRecord && guardRecord.key){
+              setTextKey(mobileEmpty, guardRecord.key, guardRecord.vars || null, guardRecord.fallback || guardText);
+            }else{
+              clearTextKey(mobileEmpty);
+              mobileEmpty.textContent = guardText;
+            }
+          }
+          btnSubmit.disabled = true;
+          if (mobileDateInput){
+            mobileDateInput.value = '';
+            mobileDateInput.disabled = true;
+            mobileDateInput.min = '';
+            mobileDateInput.max = '';
+          }
+          return;
+        }
 
         if (!days.length){
           if (mobileEmpty){
@@ -2757,7 +2864,7 @@ async function confirmPayment(){
       bind(olToday,'click', async ()=>{ baseStart = new Date(); baseStart.setHours(0,0,0,0); await renderWindow(); });
 
       bind(elMaster,'change', async ()=>{
-        current.masterId = Number(elMaster.value);
+        current.masterId = normalizeMasterValue(elMaster.value);
         current.slot = null; btnSubmit.disabled = true;
         summaryState = { key: 'services.modal.summaryPlaceholder', vars: null };
         setTextKey(elSummary, 'services.modal.summaryPlaceholder');
@@ -2766,12 +2873,13 @@ async function confirmPayment(){
         scheduleState.days = [];
         scheduleState.dayData = [];
         scheduleState.timeRows = [];
+        scheduleState.guardMessage = null;
         await renderWindow();
       });
 
       // ===== add to cart =====
       async function addToCart(){
-        if(!current.serviceId||!current.masterId||!current.slot) return;
+        if(!current.serviceId || current.masterId === null || current.masterId === undefined || !current.slot) return;
         btnSubmit.disabled=true; elError.style.display='none'; elSuccess.style.display='none';
         clearTextKey(elError); clearTextKey(elSuccess);
         try{
