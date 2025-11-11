@@ -15,9 +15,12 @@
         {% for obj in cl.result_list %}
             <tr>
                 <td class="svc-name">
-                    <a href="{% url cl.opts|admin_urlname:'change' obj.pk %}">
+                    {% url cl.opts|admin_urlname:'change' obj.pk as svc_change_url %}
+                    {% with preserved=svc_preserved_filters|urlencode %}
+                    <a href="{{ svc_change_url }}{% if svc_preserved_filters %}?_changelist_filters={{ preserved }}{% endif %}">
                         {{ obj.name }}
                     </a>
+                    {% endwith %}
                 </td>
                 <td>{{ obj.category.name|default:"-" }}</td>
                 <td>{{ obj|service_duration }}</td>
@@ -44,9 +47,11 @@
                     {% endif %}
                 </td>
                 <td class="svc-actions">
-                    <a class="svc-action-link" href="{% url cl.opts|admin_urlname:'change' obj.pk %}">
+                    {% with preserved=svc_preserved_filters|urlencode %}
+                    <a class="svc-action-link" href="{{ svc_change_url }}{% if svc_preserved_filters %}?_changelist_filters={{ preserved }}{% endif %}">
                         <i class="fas fa-ellipsis-h" aria-hidden="true"></i>
                     </a>
+                    {% endwith %}
                 </td>
             </tr>
         {% empty %}

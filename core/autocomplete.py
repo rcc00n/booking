@@ -1,7 +1,7 @@
 from dal import autocomplete
 from django.db.models import Q
 
-from .models import Service
+from .models import Service, UserProfile
 
 
 class ServiceAutocomplete(autocomplete.Select2QuerySetView):
@@ -36,3 +36,38 @@ class ServiceAutocomplete(autocomplete.Select2QuerySetView):
                 entry["duration_min"] = service_obj.duration_min
 
         return results
+
+
+class MasterUserProfileAutocomplete(autocomplete.Select2QuerySetView):
+    """Autocomplete view returning only user profiles that have a master profile attached."""  # // CHANGED
+
+    def get_queryset(self):
+        if not (self.request.user and self.request.user.is_staff):  # // CHANGED
+            return UserProfile.objects.none()  # // CHANGED
+
+        qs = (
+            UserProfile.objects.select_related("user", "master_profile")  # // CHANGED
+            .filter(master_profile__isnull=False)  # // CHANGED
+            .order_by("user__first_name", "user__last_name", "user__username")  # // CHANGED
+        )  # // CHANGED
+
+        query = (self.q or "").strip()  # // CHANGED
+        if query:  # // CHANGED
+            qs = qs.filter(  # // CHANGED
+                Q(user__first_name__icontains=query)  # // CHANGED
+                | Q(user__last_name__icontains=query)  # // CHANGED
+                | Q(user__username__icontains=query)  # // CHANGED
+            )  # // CHANGED
+
+        return qs  # // CHANGED
+
+    def get_result_label(self, obj):  # // CHANGED
+        user = getattr(obj, "user", None)  # // CHANGED
+        full_name = (user.get_full_name() if user else "") or str(obj)  # // CHANGED
+        username = getattr(user, "username", "") if user else ""  # // CHANGED
+        if username and username not in full_name:  # // CHANGED
+            return f"{full_name} ({username})"  # // CHANGED
+        return full_name or username or str(obj)  # // CHANGED
+
+    def get_selected_result_label(self, obj):  # // CHANGED
+        return self.get_result_label(obj)  # // CHANGED

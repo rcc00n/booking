@@ -135,18 +135,24 @@ def _room_busy_intervals(room_ids: List[int], day: datetime) -> Dict[int, List[S
     window_start = _tz_aware(datetime(day.year, day.month, day.day, 0, 0)) - timedelta(hours=3)
     window_end = window_start + timedelta(days=1, hours=3)
 
-    cancelled = AppointmentStatus.objects.filter(name__iexact="Cancelled").first()
+    latest_appt_status_sq = (
+        AppointmentStatusHistory.objects.filter(appointment_id=OuterRef("appointment_id"))
+        .order_by("-set_at", "-id")
+        .values("status__name")[:1]
+    )
+
     qs = (
-        AppointmentItem.objects
+        AppointmentItem.objects.with_current_status()
         .select_related("appointment", "service")
         .filter(
             room_id__in=room_ids,
             start_time__lt=window_end,
             start_time__gt=window_start - timedelta(hours=24),
         )
+        .annotate(_latest_appt_status=Subquery(latest_appt_status_sq))
+        .filter(Q(current_status_code__isnull=True) | ~Q(current_status_code__iexact="CANCELLED"))  # CHANGED: continue counting items lacking status history
+        .exclude(_latest_appt_status__iexact="Cancelled")
     )
-    if cancelled:
-        qs = qs.exclude(appointment__appointmentstatushistory__status=cancelled)
 
     busy: Dict[int, List[Slot]] = {room_id: [] for room_id in room_ids}
     for item in qs:

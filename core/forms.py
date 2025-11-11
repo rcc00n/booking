@@ -52,6 +52,12 @@ HEALTH_CONTRA_CHOICES = [
     ("allergy_unknown", "Allergy to unknown agents"),
 ]
 
+
+class MultiFileInput(forms.ClearableFileInput):
+    """File input widget that supports selecting multiple files."""
+
+    allow_multiple_selected = True
+
 EDITABLE_FIELDS_FOR_MASTER = (
     "service", "start_time", "end_time", "unit_price", "promocode",
 )
@@ -76,9 +82,34 @@ class ProductSaleAdminForm(forms.ModelForm):
 
         sold_by = self.fields.get("sold_by")
         if sold_by:
-            sold_by.widget.attrs.setdefault(
-                "data-placeholder", "Start typing to choose an employee"
+            current_id = getattr(self.instance, "sold_by_id", None)
+            posted_id = None
+            if self.is_bound:
+                raw_value = self.data.get(self.add_prefix("sold_by"))
+                try:
+                    posted_id = int(raw_value)
+                except (TypeError, ValueError, OverflowError):
+                    posted_id = None
+            include_ids = {current_id, posted_id} - {None}
+            sold_by.queryset = (
+                UserProfile.objects.select_related("user", "master_profile")
+                .filter(Q(master_profile__isnull=False) | Q(pk__in=include_ids))  # CHANGED: allow bound values without master profile
+                .order_by(
+                    "user__first_name",
+                    "user__last_name",
+                    "user__username",
+                )
             )
+            sold_by_widget = autocomplete.ModelSelect2(  # // CHANGED
+                url="master-userprofile-autocomplete",
+                attrs={
+                    "data-placeholder": "Start typing to choose a master",
+                    "data-allow-clear": "true",
+                    "data-minimum-input-length": 0,
+                },
+            )  # // CHANGED
+            sold_by_widget.choices = sold_by.choices  # // CHANGED
+            sold_by.widget = sold_by_widget  # // CHANGED
 
         client = self.fields.get("client")
         if client:
@@ -99,11 +130,14 @@ class ProductSaleAdminForm(forms.ModelForm):
 
         unit_price = self.fields.get("unit_price")
         if unit_price:
+            unit_price.required = False
+            unit_price.empty_value = None
             unit_price.widget.attrs.update(
                 {
                     "data-unit-price-input": "1",
                     "autocomplete": "off",
                     "data-product-sale-role": "unit-price",
+                    "inputmode": "decimal",
                 }
             )
 
@@ -115,6 +149,28 @@ class ProductSaleAdminForm(forms.ModelForm):
                     "data-product-sale-role": "quantity",
                 }
             )
+
+    def clean_unit_price(self):
+        unit_price = self.cleaned_data.get("unit_price")
+        product = self.cleaned_data.get("product") or getattr(self.instance, "product", None)
+
+        if unit_price in (None, ""):
+            if product and getattr(product, "price", None) is not None:
+                try:
+                    return Decimal(product.price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                except (TypeError, InvalidOperation) as exc:
+                    raise forms.ValidationError("Could not derive unit price from the product.") from exc
+            raise forms.ValidationError("Unit price is required for the selected product.")
+
+        try:
+            decimal_price = Decimal(unit_price)
+        except (TypeError, InvalidOperation) as exc:
+            raise forms.ValidationError("Enter a valid unit price.") from exc
+
+        if decimal_price < Decimal("0.00"):
+            raise forms.ValidationError("Unit price cannot be negative.")
+
+        return decimal_price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class AppointmentProductSaleForm(ProductSaleAdminForm):
@@ -140,29 +196,11 @@ class AppointmentProductSaleForm(ProductSaleAdminForm):
                 "user__username",
             )
 
-        sold_by_field = self.fields.get("sold_by")
-        if sold_by_field:
-            filters = Q(user__is_superuser=True) | Q(user__is_staff=True)
-            profile = getattr(request.user, "userprofile", None) if request else None
-            if profile:
-                filters |= Q(pk=profile.pk)
-            if self.instance and getattr(self.instance, "sold_by_id", None):
-                filters |= Q(pk=self.instance.sold_by_id)
-            sold_by_field.queryset = (
-                UserProfile.objects.select_related("user")
-                .filter(filters)
-                .order_by(
-                    "user__first_name",
-                    "user__last_name",
-                    "user__username",
-                )
-            )
-
         defaults = {}
         if appointment and appointment.client_id and "client" in self.fields:
             defaults["client"] = appointment.client_id
         profile = getattr(request.user, "userprofile", None) if request else None
-        if profile and "sold_by" in self.fields:
+        if profile and getattr(profile, "master_profile_id", None) and "sold_by" in self.fields:
             defaults["sold_by"] = profile.pk
         if "quantity" in self.fields:
             defaults.setdefault("quantity", 1)
@@ -334,6 +372,46 @@ class AppointmentAddForm(forms.ModelForm):
         model = Appointment
         fields = ("client",)
 
+
+class AppointmentPhotoUploadForm(forms.Form):
+    """Upload form for internal Before/After appointment photos."""
+
+    kind = forms.ChoiceField(
+        label="Category",
+        choices=ClientFile.KIND_CHOICES,
+        initial=ClientFile.KIND_BEFORE,
+    )
+    files = forms.Field(
+        label="Photos",
+        required=False,
+        widget=MultiFileInput(
+            attrs={
+                "multiple": True,
+                "accept": "image/*",
+            }
+        ),
+        help_text="Upload one or more images to attach to this appointment.",
+    )
+    description = forms.CharField(
+        label="Description",
+        max_length=255,
+        required=False,
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "Optional note visible to staff only",
+            }
+        ),
+    )
+
+    def clean_files(self):
+        uploaded_files = self.files.getlist("files")
+        if not uploaded_files:
+            raise forms.ValidationError("Select at least one file to upload.")
+        for file_obj in uploaded_files:
+            if not getattr(file_obj, "name", None):
+                raise forms.ValidationError("One of the selected files has no name.")
+        return uploaded_files
+
 class AppointmentItemInlineForm(forms.ModelForm):
     promocode = forms.ModelChoiceField(
         label="Promocode",
@@ -344,6 +422,19 @@ class AppointmentItemInlineForm(forms.ModelForm):
     class Meta:
         model = AppointmentItem
         fields = "__all__"
+        widgets = {
+            "start_time": forms.SplitDateTimeWidget(
+                date_attrs={
+                    "type": "date",
+                    "class": "ab-input",
+                },
+                time_attrs={
+                    "type": "time",
+                    "step": 900,
+                    "class": "ab-input",
+                },
+            ),
+        }
 
     def __init__(self, *args, parent_obj=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -595,7 +686,7 @@ class CustomUserCreationForm(HealthFieldsMixin, AdminUserCreationForm):
             'email', 'first_name', 'last_name',
             'phone', 'birth_date',
             'address',
-            'usable_password', 'password1', 'password2',
+            'password1', 'password2',
             'is_staff', 'is_active', 'is_superuser',
             'groups', "postal_code", "email_marketing_consent",
             "notes", 'personal_discount_percent'

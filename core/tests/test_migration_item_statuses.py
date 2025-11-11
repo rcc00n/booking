@@ -4,6 +4,8 @@ from datetime import timedelta
 
 from decimal import Decimal
 
+import unittest
+
 from django.db import connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
@@ -14,6 +16,12 @@ class AppointmentItemStatusMigrationTests(TransactionTestCase):
     migrate_from = ("core", "0038_alter_clientsource_source")
     migrate_to = ("core", "0042_appointmentitem_validation_enabled")
     databases = {"default"}
+
+    @classmethod
+    def setUpClass(cls):
+        if connection.vendor != "postgresql":
+            raise unittest.SkipTest("Migration semantics verified only against PostgreSQL")
+        super().setUpClass()
 
     def setUp(self):
         self.executor = MigrationExecutor(connection)
@@ -230,6 +238,4 @@ class AppointmentItemStatusMigrationTests(TransactionTestCase):
 
         finally:
             self._migrate_to_head()
-
-
 

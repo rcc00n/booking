@@ -1,6 +1,8 @@
 {% extends "admin/base_site.html" %}
 {% load static %}
 {% load filters %}
+{% load tz %}
+{% load admin_urls %}
 
 {% if form.instance.pk %}
     {% url 'admin:core_appointment_enable_card_fee' appointment_id=form.instance.pk as enable_card_fee_url %}
@@ -76,6 +78,30 @@
             width: 100%;
         }
 
+        .ab-field--start-time{grid-column:1 / -1;}
+        .ab-datetime{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+        .ab-datetime input{flex:0 0 auto;min-width:160px}
+        .ab-datetime .datetimeshortcuts{display:none}
+
+        .ab-timeslots{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+        .ab-timeslots__status{font-size:12px;color:#6b7280;display:flex;align-items:center;gap:6px;min-height:18px}
+        .ab-timeslots__grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(110px,1fr))}
+        .ab-timeslots__btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 12px;border-radius:10px;border:1px solid #d1d5db;background:#f9fafb;font-weight:600;font-size:14px;color:#1f2937;cursor:pointer;transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,color .15s ease,transform .12s ease}
+        .ab-timeslots__btn:hover{border-color:#16a34a;background:#f0fdf4}
+        .ab-timeslots__btn:active{transform:scale(.97)}
+        .ab-timeslots__btn.is-selected{background:#16a34a;border-color:#16a34a;color:#fff;box-shadow:0 10px 30px rgba(22,163,74,.25)}
+        .ab-timeslots__btn.is-selected:hover{background:#16a34a}
+        .ab-timeslots__btn:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(22,163,74,.25)}
+        .ab-timeslots[data-state="loading"] .ab-timeslots__grid{pointer-events:none;opacity:.55}
+        .ab-timeslots[data-state="error"] .ab-timeslots__status,
+        .ab-timeslots[data-state="warning"] .ab-timeslots__status{color:#b91c1c}
+        .ab-timeslots[data-state="ready"] .ab-timeslots__status{color:#15803d}
+        .ab-timeslots[data-state="empty"] .ab-timeslots__status{color:#6b7280}
+        .ab-timeslots[data-state="loading"] .ab-timeslots__status::before{content:"";width:12px;height:12px;border-radius:50%;border:2px solid rgba(22,163,74,.2);border-top-color:#16a34a;animation:ab-spin .7s linear infinite}
+        .ab-timeslots[data-state="disabled"]{opacity:.45;pointer-events:none}
+
+        @keyframes ab-spin{to{transform:rotate(360deg)}}
+
         .ab-muted{color:#6b7280;font-size:12px}
         .ab-hr{height:1px;background:#eee;margin:16px 0}
         .ab-r{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:16px;flex-wrap:wrap}
@@ -130,6 +156,22 @@
         .ab-item-status-btn.disabled{opacity:0.5;cursor:not-allowed}
         .ab-item-status-btn.loading{opacity:0.6;cursor:wait}
         .ab-item-status-note{font-size:12px;color:#6b7280}
+        .ab-empty{padding:16px;border:1px dashed #d1d5db;border-radius:14px;text-align:center;color:#6b7280;background:#f9fafb}
+        .ab-divider{height:1px;background:#e5e7eb;margin:24px 0}
+        .ab-photo-groups{display:flex;flex-direction:column;gap:24px}
+        .ab-photo-group__title{margin:0 0 12px;font-weight:700;font-size:16px;color:#1f2937}
+        .ab-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:16px}
+        .ab-photo-card{border:1px solid #e5e7eb;border-radius:14px;background:#fff;padding:12px;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 10px rgba(15,23,42,0.05)}
+        .ab-photo-card img{width:100%;height:160px;object-fit:cover;border-radius:10px;background:#f3f4f6}
+        .ab-photo-card__file{display:flex;align-items:center;justify-content:center;height:160px;border-radius:10px;background:#f3f4f6;color:#1f2937;font-weight:600;text-decoration:none}
+        .ab-photo-card__file:hover{text-decoration:underline}
+        .ab-photo-card__meta{font-size:12px;color:#4b5563}
+        .ab-photo-card__desc{font-size:13px;color:#111827}
+        .ab-photo-card__actions{margin-top:4px}
+        .ab-btn-link{display:inline-flex;align-items:center;gap:6px;background:none;border:none;color:#2563eb;padding:0;cursor:pointer;font-weight:600}
+        .ab-btn-link:hover{text-decoration:underline}
+        .ab-photo-upload .ab-field{margin-bottom:16px}
+        .ab-photo-upload input[type="file"]{display:block}
 
     </style>
 {% endblock %}
@@ -152,6 +194,7 @@
                     <button type="button" class="tab" data-tab="product-sales">Product sales</button>
                 {% endif %}
                 <button type="button" class="tab" data-tab="notes">Notes</button>
+                <button type="button" class="tab" data-tab="before-after" id="tab-before-after">Before &amp; After</button>
                 <button type="button" class="tab" data-tab="messages">Messages</button>
             </nav>
 
@@ -162,18 +205,25 @@
 
                     <div class="ab-row">
                         {% for field in form.visible_fields %}
-                            {% if APPT_FIELDS_1 %}
-                                {% if field.name in APPT_FIELDS_1 %}
+                            {% if field.name == "start_time" %}
+                                <div class="ab-hidden">
+                                    {{ field }}
+                                </div>
+                                {% if field.errors %}<div class="ab-err">{{ field.errors }}</div>{% endif %}
+                            {% else %}
+                                {% if APPT_FIELDS_1 %}
+                                    {% if field.name in APPT_FIELDS_1 %}
+                                        <div class="ab-field">
+                                            {{ field.label_tag }} {{ field }}
+                                            {% if field.errors %}<div class="ab-err">{{ field.errors }}</div>{% endif %}
+                                        </div>
+                                    {% endif %}
+                                {% else %}
                                     <div class="ab-field">
                                         {{ field.label_tag }} {{ field }}
                                         {% if field.errors %}<div class="ab-err">{{ field.errors }}</div>{% endif %}
                                     </div>
                                 {% endif %}
-                            {% else %}
-                                <div class="ab-field">
-                                    {{ field.label_tag }} {{ field }}
-                                    {% if field.errors %}<div class="ab-err">{{ field.errors }}</div>{% endif %}
-                                </div>
                             {% endif %}
                         {% endfor %}
                     </div>
@@ -351,13 +401,6 @@
                                         <div class="ab-muted">Only services available for the selected master</div>
                                     </div>
 
-                                    <!-- START TIME -->
-                                    <div class="ab-field">
-                                        <label>Start time</label>
-                                        {{ f.start_time }}
-                                        {% if f.start_time.errors %}<div class="ab-err">{{ f.start_time.errors }}</div>{% endif %}
-                                    </div>
-
                                     <!-- PRICE -->
                                     <div class="ab-field">
                                         <label>Unit price</label>
@@ -365,6 +408,20 @@
                                         {% if f.unit_price.errors %}<div class="ab-err">{{ f.unit_price.errors }}</div>{% endif %}
                                         <div class="ab-muted">Leave empty to use the service base price</div>
                                     </div>
+
+                                    <!-- START TIME -->
+                                    <div class="ab-field ab-field--start-time" data-field="start_time">
+                                        <label>Start time</label>
+                                        <div class="ab-datetime js-datetime-wrapper">
+                                            {{ f.start_time }}
+                                        </div>
+                                        {% if f.start_time.errors %}<div class="ab-err">{{ f.start_time.errors }}</div>{% endif %}
+                                        <div class="ab-timeslots js-timeslots-wrap" data-state="idle">
+                                            <div class="ab-timeslots__status js-timeslots-status" aria-live="polite">Select master, service and date to view availability.</div>
+                                            <div class="ab-timeslots__grid js-timeslots-grid" role="listbox" aria-label="Available time slots"></div>
+                                        </div>
+                                    </div>
+
                                 </div>
 
                                 <div class="ab-item-status" data-role="item-status">
@@ -516,13 +573,19 @@
                                         <div class="ab-muted">Only services available for the selected master</div>
                                     </div>
                                     <div class="ab-field">
-                                        <label>Start time</label>
-                                        {{ f.start_time }}
-                                    </div>
-                                    <div class="ab-field">
                                         <label>Unit price</label>
                                         {{ f.unit_price }}
                                         <div class="ab-muted">Leave empty to use the service base price</div>
+                                    </div>
+                                    <div class="ab-field ab-field--start-time" data-field="start_time">
+                                        <label>Start time</label>
+                                        <div class="ab-datetime js-datetime-wrapper">
+                                            {{ f.start_time }}
+                                        </div>
+                                        <div class="ab-timeslots js-timeslots-wrap" data-state="idle">
+                                            <div class="ab-timeslots__status js-timeslots-status" aria-live="polite">Select master, service and date to view availability.</div>
+                                            <div class="ab-timeslots__grid js-timeslots-grid" role="listbox" aria-label="Available time slots"></div>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -825,6 +888,99 @@
                 </div>
             </section>
 
+            <section class="tab-panel" data-tab-panel="before-after" id="before-after">
+                <div class="ab-section ab-card">
+                    <h3 class="ab-h">
+                        Before &amp; After photos
+                        {% if photo_total_count %}
+                            <span class="ab-pill">{{ photo_total_count }}</span>
+                        {% endif %}
+                    </h3>
+                    <p class="ab-sub">Photos stay internal and help document progress for each appointment.</p>
+
+                    {% if photo_upload_disabled %}
+                        <div class="ab-empty">Save this appointment before managing photo uploads.</div>
+                    {% else %}
+                        {% if photo_groups %}
+                            <div class="ab-photo-groups">
+                                {% for group in photo_groups %}
+                                    <div class="ab-photo-group">
+                                        <h4 class="ab-photo-group__title">{{ group.label }} ({{ group.files|length }})</h4>
+                                        <div class="ab-photo-grid">
+                                            {% for file in group.files %}
+                                                <figure class="ab-photo-card" data-file-id="{{ file.pk }}">
+                                                    {% if file.is_image %}
+                                                        <a href="{{ file.file.url }}" target="_blank" rel="noopener" title="Open image in a new tab">
+                                                            <img src="{{ file.file.url }}" alt="{{ group.label }} photo {{ forloop.counter }}" loading="lazy">
+                                                        </a>
+                                                    {% else %}
+                                                        <a href="{{ file.file.url }}" target="_blank" rel="noopener" class="ab-photo-card__file">View file</a>
+                                                    {% endif %}
+                                                    <figcaption>
+                                                        <span class="ab-photo-card__meta">
+                                                            Uploaded {{ file.uploaded_at|localtime|date:"Y-m-d H:i" }}
+                                                            {% if file.uploader_display %}
+                                                                — {{ file.uploader_display }}
+                                                            {% endif %}
+                                                        </span>
+                                                        {% if file.description %}
+                                                            <span class="ab-photo-card__desc">{{ file.description }}</span>
+                                                        {% endif %}
+                                                        <div class="ab-photo-card__actions">
+                                                            <button
+                                                                type="submit"
+                                                                class="ab-btn-link"
+                                                                formaction="{% url photo_delete_url_name form.instance.pk file.pk %}"
+                                                                formmethod="post"
+                                                                formnovalidate
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        </div>
+                                                    </figcaption>
+                                                </figure>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <div class="ab-empty">No photos uploaded yet.</div>
+                        {% endif %}
+
+                        <div class="ab-divider"></div>
+
+                        <div class="ab-photo-upload">
+                            <div class="ab-field">
+                                {{ photo_upload_form.kind.label_tag }} {{ photo_upload_form.kind }}
+                                {% if photo_upload_form.kind.errors %}<div class="ab-err">{{ photo_upload_form.kind.errors }}</div>{% endif %}
+                            </div>
+                            <div class="ab-field">
+                                {{ photo_upload_form.files.label_tag }} {{ photo_upload_form.files }}
+                                {% if photo_upload_form.files.errors %}<div class="ab-err">{{ photo_upload_form.files.errors }}</div>{% endif %}
+                                {% if photo_upload_form.files.help_text %}<p class="ab-muted">{{ photo_upload_form.files.help_text }}</p>{% endif %}
+                            </div>
+                            <div class="ab-field">
+                                {{ photo_upload_form.description.label_tag }} {{ photo_upload_form.description }}
+                                {% if photo_upload_form.description.errors %}<div class="ab-err">{{ photo_upload_form.description.errors }}</div>{% endif %}
+                            </div>
+                            <div class="ab-r" style="justify-content:flex-end">
+                                <button
+                                    type="submit"
+                                    class="ab-btn"
+                                    formaction="{{ photo_upload_url }}"
+                                    formmethod="post"
+                                    formenctype="multipart/form-data"
+                                    formnovalidate
+                                >
+                                    Upload photos
+                                </button>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            </section>
+
             <section class="tab-panel" data-tab-panel="messages">
                 <div class="ab-section ab-card">
                     <h3 class="ab-h">Messages</h3>
@@ -891,6 +1047,18 @@
                 <div class="ab-action-group">
                     <button type="submit" class="ab-btn">Save</button>
                     <a href="{% url 'admin:core_appointment_changelist' %}" class="ab-btn secondary">Cancel</a>
+                    {% if form.instance.pk and has_delete_permission %}
+                        {% url 'admin:core_appointment_delete' form.instance.pk as delete_url %}
+                        {% add_preserved_filters delete_url as delete_with_filters %}
+                        <button
+                            type="button"
+                            class="ab-btn danger"
+                            id="delete-appointment-btn"
+                            data-delete-url="{{ delete_with_filters }}"
+                            data-confirm-message="Are you sure you want to delete this appointment? This action cannot be undone.">
+                            Delete appointment
+                        </button>
+                    {% endif %}
                 </div>
                 {% if form.instance.pk %}
                     <div class="pay-actions">
@@ -959,6 +1127,7 @@
     {{ currency_code|json_script:"currency-code" }}
     {{ card_fee_percent|json_script:"card-fee-percent" }}
     {{ card_fee_fixed|json_script:"card-fee-fixed" }}
+    {{ availability_url|json_script:"availability-url" }}
 
     <script>
         window.APPOINTMENT_CTX = {

@@ -25,6 +25,14 @@ from core.tests.utils import assign_service_room
 
 
 class RefundServiceTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        receipt_task_patcher = patch("core.signals.generate_payment_receipt_task.delay", return_value=None)
+        self.addCleanup(receipt_task_patcher.stop)
+        receipt_task_patcher.start()
+        render_pdf_patcher = patch("core.services.receipts.render_html_to_pdf", return_value=b"%PDF-test")
+        self.addCleanup(render_pdf_patcher.stop)
+        render_pdf_patcher.start()
     @classmethod
     def setUpTestData(cls):
         user_model = get_user_model()
@@ -210,6 +218,16 @@ class PaymentRefundViewTests(TestCase):
         logged_in = self.client.login(username="admin", password="adminpass")
         self.assertTrue(logged_in)
         self.assertTrue(self.staff_user.is_staff)
+        receipt_task_patcher = patch("core.signals.generate_payment_receipt_task.delay", return_value=None)
+        self.addCleanup(receipt_task_patcher.stop)
+        receipt_task_patcher.start()
+        render_pdf_patcher = patch("core.services.receipts.render_html_to_pdf", return_value=b"%PDF-test")
+        self.addCleanup(render_pdf_patcher.stop)
+        render_pdf_patcher.start()
+        sync_patcher = patch("core.services.refunds.payment_services.sync_payment_from_intent", autospec=True)
+        sync_mock = sync_patcher.start()
+        sync_mock.side_effect = lambda intent_id: Payment.objects.filter(stripe_payment_intent_id=intent_id).first()
+        self.addCleanup(sync_patcher.stop)
         self.appointment = Appointment.objects.create(
             client=self.client_user.userprofile,
             start_time=timezone.now(),

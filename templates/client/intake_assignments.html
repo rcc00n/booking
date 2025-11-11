@@ -3,95 +3,399 @@
 {% block content %}
 <style>
   :root {
-    --bg:#f4f5f7; --card:#ffffff; --muted:#64748b; --ink:#1e293b;
-    --brand:#1F5C3A; --brand-600:#184a2f; --brand-200:#dbece3;
-    --warn:#b45309; --success:#15803d; --ring:#cbd5e1;
+    --bg:#f4f6fb;
+    --surface:#ffffff;
+    --surface-alt:#f9fbff;
+    --ink:#0f172a;
+    --muted:#5f6b7d;
+    --brand:#1f5c3a;
+    --brand-soft:#dbece3;
+    --brand-dark:#18452d;
+    --border:#e2e8f0;
+    --warn:#b45309;
+    --warn-soft:#fef3c7;
+    --success:#15803d;
+    --success-soft:#dcfce7;
+    --shadow:0 22px 45px rgba(15, 23, 42, 0.13);
   }
-  body{background:var(--bg);}
-  .page{max-width:960px;margin:32px auto;padding:0 16px;}
-  .hdr{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px;}
-  .title{font-size:2rem;font-weight:800;color:var(--ink);margin:0;}
-  .meta{color:var(--muted);font-size:.95rem;}
-  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:12px;font-weight:700;text-decoration:none;border:1px solid transparent;cursor:pointer;transition:.2s;}
-  .btn--primary{background:var(--brand);color:#fff;}
-  .btn--primary:hover{background:var(--brand-600);}
-  .btn--ghost{border-color:var(--ring);color:var(--ink);background:#fff;}
-  .btn--ghost:hover{background:#f8fafc;}
-  .badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;}
-  .badge--warn{background:#fef3c7;color:var(--warn);}
-  .badge--brand{background:var(--brand-200);color:var(--brand-600);}
-  .list{display:flex;flex-direction:column;gap:16px;margin:0;padding:0;list-style:none;}
-  .card{background:var(--card);border:1px solid var(--ring);border-radius:20px;padding:20px 24px;display:flex;gap:20px;align-items:flex-start;justify-content:space-between;box-shadow:0 12px 28px rgba(15,23,42,.08);}
-  .card--completed{opacity:.85;}
-  .card__head{display:flex;flex-direction:column;gap:8px;flex:1;}
-  .card__title{font-size:1.15rem;font-weight:700;color:var(--ink);margin:0;}
-  .card__desc{color:var(--muted);font-size:.95rem;}
-  .card__meta{display:flex;flex-wrap:wrap;gap:12px;font-size:.85rem;color:var(--muted);}
-  .state{display:inline-flex;align-items:center;gap:6px;font-weight:700;}
-  .state svg{width:18px;height:18px;}
-  .empty{background:var(--card);border:1px dashed var(--ring);border-radius:18px;padding:32px;text-align:center;color:var(--muted);}
-  @media (max-width:720px){
-    .card{flex-direction:column;align-items:stretch;}
-    .hdr{align-items:flex-start;}
-    .btn{width:100%;justify-content:center;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Inter","Segoe UI",system,-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+  }
+  .page{
+    max-width:1100px;
+    margin:40px auto 64px;
+    padding:0 24px 40px;
+  }
+  .hero{
+    display:flex;
+    gap:32px;
+    padding:32px 36px;
+    border-radius:28px;
+    background:var(--surface);
+    border:1px solid var(--border);
+    box-shadow:var(--shadow);
+    margin-bottom:32px;
+    align-items:flex-start;
+    flex-wrap:wrap;
+  }
+  .hero__copy{flex:2;min-width:260px;}
+  .eyebrow{
+    font-size:.85rem;
+    letter-spacing:.3em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin-bottom:8px;
+  }
+  .hero__title{font-size:2.5rem;margin:0 0 12px;font-weight:800;color:var(--ink);}
+  .lead{color:var(--muted);font-size:1.05rem;margin:0 0 16px;max-width:560px;}
+  .hero__panel{
+    flex:1;
+    min-width:240px;
+    background:linear-gradient(135deg,#f9fbff, #eef7f1);
+    border-radius:22px;
+    padding:24px;
+    border:1px solid var(--border);
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  .stat-card{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:12px 16px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+  }
+  .stat-card__label{
+    font-size:.85rem;
+    font-weight:600;
+    color:var(--muted);
+    text-transform:uppercase;
+  }
+  .stat-card__value{
+    font-size:1.8rem;
+    font-weight:700;
+    color:var(--brand);
+  }
+  .alert{
+    display:flex;
+    gap:12px;
+    border-radius:18px;
+    padding:14px 18px;
+    border:1px solid var(--border);
+    align-items:flex-start;
+  }
+  .alert--warn{
+    background:var(--warn-soft);
+    border-color:#fcd34d;
+    color:var(--warn);
+  }
+  .alert--success{
+    background:var(--success-soft);
+    border-color:#86efac;
+    color:var(--success);
+  }
+  .alert__icon{
+    font-size:1.4rem;
+    line-height:1;
+  }
+  .alert__title{
+    font-weight:700;
+    margin:0 0 4px;
+  }
+  .alert__text{
+    margin:0;
+    color:var(--muted);
+    font-size:.95rem;
+  }
+  .btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    padding:12px 18px;
+    border-radius:999px;
+    font-weight:600;
+    text-decoration:none;
+    border:1px solid transparent;
+    cursor:pointer;
+    transition:transform .15s ease, box-shadow .15s ease, background .15s ease;
+    font-size:.95rem;
+  }
+  .btn:focus-visible{
+    outline:3px solid rgba(59,130,246,.4);
+    outline-offset:2px;
+  }
+  .btn--primary{
+    background:var(--brand);
+    color:#fff;
+    box-shadow:0 10px 20px rgba(31,92,58,.25);
+  }
+  .btn--primary:hover{background:var(--brand-dark);transform:translateY(-1px);}
+  .btn--ghost{
+    border-color:var(--border);
+    color:var(--ink);
+    background:#fff;
+  }
+  .btn--ghost:hover{background:var(--surface-alt);}
+  .list{
+    display:flex;
+    flex-direction:column;
+    gap:20px;
+    padding:0;
+    margin:0;
+    list-style:none;
+  }
+  .card{
+    background:var(--surface);
+    border-radius:24px;
+    border:1px solid var(--border);
+    padding:24px;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:20px 32px;
+    box-shadow:var(--shadow);
+  }
+  .card--completed{
+    background:#f8fafc;
+  }
+  .card__status{
+    grid-column:1 / -1;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+  }
+  .status-pill{
+    padding:8px 14px;
+    border-radius:999px;
+    font-weight:600;
+    font-size:.9rem;
+    text-transform:capitalize;
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+  }
+  .status-pill--pending{
+    background:#fff6e6;
+    color:var(--warn);
+  }
+  .status-pill--completed{
+    background:var(--success-soft);
+    color:var(--success);
+  }
+  .status-note{
+    font-size:.9rem;
+    color:var(--muted);
+  }
+  .card__body{
+    grid-column:1 / 2;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  .card__title-row{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:flex-start;
+    gap:12px;
+  }
+  .card__title{
+    font-size:1.35rem;
+    font-weight:700;
+    margin:0;
+  }
+  .card__tags{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .pill{
+    padding:4px 10px;
+    border-radius:12px;
+    font-size:.75rem;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:.05em;
+  }
+  .pill--brand{background:var(--brand-soft);color:var(--brand);}
+  .pill--warn{background:#fee2e2;color:#b91c1c;}
+  .card__desc{color:var(--muted);margin:0;}
+  .detail-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+    gap:12px 20px;
+    margin:0;
+  }
+  .detail-grid div{
+    background:var(--surface-alt);
+    border-radius:14px;
+    padding:10px 12px;
+    border:1px solid var(--border);
+  }
+  .detail-grid dt{
+    font-size:.75rem;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    color:var(--muted);
+    margin-bottom:4px;
+  }
+  .detail-grid dd{margin:0;font-weight:600;color:var(--ink);}
+  .card__actions{
+    grid-column:2 / 3;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    align-items:flex-end;
+  }
+  .card__hint{
+    font-size:.85rem;
+    color:var(--muted);
+    text-align:right;
+  }
+  .empty{
+    background:var(--surface);
+    border-radius:24px;
+    border:1px dashed var(--border);
+    padding:48px 32px;
+    text-align:center;
+    color:var(--muted);
+    box-shadow:var(--shadow);
+  }
+  .empty__icon{font-size:2rem;margin-bottom:12px;}
+  .empty__title{font-size:1.4rem;font-weight:700;margin-bottom:8px;color:var(--ink);}
+  .empty__text{margin:0 auto 18px;max-width:420px;}
+  @media (max-width:860px){
+    .card{
+      grid-template-columns:1fr;
+    }
+    .card__actions{
+      align-items:flex-start;
+      width:100%;
+    }
+    .card__actions .btn{width:100%;justify-content:center;}
+    .card__hint{text-align:left;}
+  }
+  @media (max-width:640px){
+    .hero{padding:24px;}
+    .hero__panel{padding:20px;}
+    .card{padding:20px;}
   }
 </style>
 
 <div class="page">
-  <div class="hdr">
-    <div>
-      <p class="meta">Client Portal</p>
-      <h1 class="title">Intake forms</h1>
+  <section class="hero">
+    <div class="hero__copy">
+      <p class="eyebrow">Client Portal</p>
+      <h1 class="hero__title">Intake forms</h1>
+      <p class="lead">Complete these forms before your visit so your care team can focus on you from the very first minute.</p>
       {% if pending_count %}
-        <div class="badge badge--warn" role="status">
-          ⚠️ {{ pending_count }} form{{ pending_count|pluralize }} awaiting completion
+        <div class="alert alert--warn" role="status">
+          <div class="alert__icon">⚠️</div>
+          <div>
+            <p class="alert__title">{{ pending_count }} form{{ pending_count|pluralize }} awaiting completion</p>
+            <p class="alert__text">Save a few minutes today to finish them. You can pause and resume anytime.</p>
+          </div>
+        </div>
+      {% else %}
+        <div class="alert alert--success" role="status">
+          <div class="alert__icon">✅</div>
+          <div>
+            <p class="alert__title">You're all caught up</p>
+            <p class="alert__text">No pending forms right now. We'll let you know the moment something new arrives.</p>
+          </div>
         </div>
       {% endif %}
     </div>
-    <div class="actions">
+    <div class="hero__panel">
+      <div class="stat-card">
+        <span class="stat-card__label">Pending</span>
+        <span class="stat-card__value">{{ pending_count|default:0 }}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-card__label">Completed</span>
+        <span class="stat-card__value">{{ completed_count|default:0 }}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-card__label">Total assigned</span>
+        <span class="stat-card__value">{{ total_intake_assignments|default:0 }}</span>
+      </div>
       <a class="btn btn--ghost" href="{% url 'dashboard' %}">Back to dashboard</a>
     </div>
-  </div>
+  </section>
 
   {% if assignments %}
-    <ul class="list">
+    <ul class="list" aria-live="polite">
       {% for entry in assignments %}
         {% with assignment=entry.assignment form=entry.form latest=entry.latest_submission %}
-          <li class="card{% if assignment.is_completed %} card--completed{% endif %}">
-            <div class="card__head">
-              <div class="card__labels">
-                {% if form.is_universal %}
-                  <span class="badge badge--brand">Required for all clients</span>
+          <li class="card card--{{ entry.status }}">
+            <div class="card__status">
+              <span class="status-pill status-pill--{{ entry.status }}">
+                {% if assignment.is_completed %}
+                  ✅ Completed
+                {% else %}
+                  ⏳ Awaiting submission
                 {% endif %}
-                {% if not form.is_active %}
-                  <span class="badge badge--warn">Inactive</span>
-                {% endif %}
+              </span>
+              {% if assignment.due_at %}
+                <span class="status-note">Due {{ assignment.due_at|localtime|date:"M d, Y" }}</span>
+              {% elif assignment.is_completed %}
+                <span class="status-note">Finished {{ assignment.completed_at|localtime|date:"M d, Y" }}</span>
+              {% endif %}
+            </div>
+            <div class="card__body">
+              <div class="card__title-row">
+                <h2 class="card__title">{{ form.name }}</h2>
+                <div class="card__tags">
+                  {% if form.is_universal %}
+                    <span class="pill pill--brand">Required for all clients</span>
+                  {% endif %}
+                  {% if not form.is_active %}
+                    <span class="pill pill--warn">Inactive</span>
+                  {% endif %}
+                </div>
               </div>
-              <h2 class="card__title">{{ form.name }}</h2>
               {% if form.description %}
                 <p class="card__desc">{{ form.description }}</p>
               {% endif %}
-              <div class="card__meta">
-                <span class="state">
-                  {% if assignment.is_completed %}
-                    ✅ Completed {{ assignment.completed_at|localtime|date:"M d, Y H:i" }}
-                  {% else %}
-                    ⏳ Awaiting submission{% if assignment.due_at %} · due {{ assignment.due_at|localtime|date:"M d, Y" }}{% endif %}
-                  {% endif %}
-                </span>
-                <span>Assigned {{ assignment.assigned_at|localtime|date:"M d, Y H:i" }}</span>
-                {% if latest %}
-                  <span>Last submitted {{ latest.submitted_at|localtime|date:"M d, Y H:i" }}</span>
-                {% endif %}
+              <dl class="detail-grid">
+                <div>
+                  <dt>Assigned</dt>
+                  <dd>{{ assignment.assigned_at|localtime|date:"M d, Y H:i" }}</dd>
+                </div>
                 {% if assignment.assigned_by %}
-                  <span>Assigned by {{ assignment.assigned_by.get_full_name|default:assignment.assigned_by.username }}</span>
+                  <div>
+                    <dt>Assigned by</dt>
+                    <dd>{{ assignment.assigned_by.get_full_name|default:assignment.assigned_by.username }}</dd>
+                  </div>
                 {% endif %}
-              </div>
+                {% if latest %}
+                  <div>
+                    <dt>Last submitted</dt>
+                    <dd>{{ latest.submitted_at|localtime|date:"M d, Y H:i" }}</dd>
+                  </div>
+                {% endif %}
+                {% if assignment.is_completed %}
+                  <div>
+                    <dt>Completed on</dt>
+                    <dd>{{ assignment.completed_at|localtime|date:"M d, Y H:i" }}</dd>
+                  </div>
+                {% endif %}
+              </dl>
             </div>
             <div class="card__actions">
               {% if assignment.is_completed %}
+                <span class="card__hint">Need a refresher? Your answers stay available for review.</span>
                 <a class="btn btn--ghost" href="{{ entry.fill_url }}">Review answers</a>
               {% else %}
+                <span class="card__hint">Set aside a few minutes to finish before your next visit.</span>
                 <a class="btn btn--primary" href="{{ entry.fill_url }}">Fill now</a>
               {% endif %}
             </div>
@@ -101,7 +405,10 @@
     </ul>
   {% else %}
     <div class="empty">
-      <p>No intake forms assigned yet. Your team will let you know when something needs your attention.</p>
+      <div class="empty__icon">📝</div>
+      <p class="empty__title">No intake forms yet</p>
+      <p class="empty__text">Your care team will assign forms here whenever they need more information from you.</p>
+      <a class="btn btn--ghost" href="{% url 'dashboard' %}">Return to dashboard</a>
     </div>
   {% endif %}
 </div>

@@ -54,6 +54,16 @@ Test accounts:
     
 P: useruser!!!
 
+### Persistent media storage (Dokku)
+
+Uploads now live under `/app/storage/media` (configurable via `STORAGE_ROOT`, `MEDIA_ROOT`, and `STATIC_ROOT`). Mount a persistent volume in Dokku once so rebuilds no longer wipe user files:
+
+1. `dokku storage:ensure-directory malva-storage`
+2. `dokku storage:mount malva /var/lib/dokku/data/storage/malva-storage:/app/storage`
+3. `dokku ps:rebuild malva`
+
+Replace `malva`/`malva-storage` with your Dokku app name if it differs. After the mount, existing and future uploads survive deploys.
+
 ### Stripe payments
 
 Add these variables to your `.env` (or environment) before running the server:

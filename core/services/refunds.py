@@ -98,25 +98,7 @@ class RefundService:
         )
         payments: List[Payment] = sorted(payments_qs, key=cls._sort_key)
 
-        print(
-            "[Refund Debug] allocate_refund_for_appointment",
-            {
-                "appointment_id": str(getattr(appointment, "pk", "")),
-                "requested_minor": requested_amount_minor,
-                "succeeded_payments": [
-                    {
-                        "payment_id": str(p.pk),
-                        "method": getattr(getattr(p, "method", None), "name", ""),
-                        "amount_received": str(p.amount_received),
-                        "amount_refunded": str(p.amount_refunded),
-                        "available_minor": cls._available_minor(p),
-                        "is_stripe": cls._infer_method(p) == PaymentRefund.METHOD_STRIPE,
-                        "captured_at": getattr(p, "captured_at", None),
-                    }
-                    for p in payments
-                ],
-            },
-        )
+
 
         if not payments:
             raise RefundError("No succeeded payments available for this appointment.")
@@ -198,15 +180,7 @@ class RefundService:
                 if method == PaymentRefund.METHOD_STRIPE:
                     stripe_refund = cls._create_stripe_refund(payment, allocation.amount_minor, actor)
                     stripe_ids.append(stripe_refund.id)
-                    print(
-                        "[Refund Debug] Stripe refund dispatched",
-                        {
-                            "payment_id": str(payment.pk),
-                            "appointment_id": str(payment.appointment_id),
-                            "amount_minor": allocation.amount_minor,
-                            "stripe_refund_id": stripe_refund.id,
-                        },
-                    )
+                    
                     cls._record_refund(
                         appointment=appointment,
                         payment=payment,
@@ -219,14 +193,7 @@ class RefundService:
                     cls._sync_payment_after_stripe_refund(payment, stripe_refund)
                 else:
                     cls._apply_offline_refund(payment, allocation.amount_minor, amount_decimal)
-                    print(
-                        "[Refund Debug] Offline refund recorded",
-                        {
-                            "payment_id": str(payment.pk),
-                            "appointment_id": str(payment.appointment_id),
-                            "amount_minor": allocation.amount_minor,
-                        },
-                    )
+                    
                     cls._record_refund(
                         appointment=appointment,
                         payment=payment,
@@ -252,13 +219,7 @@ class RefundService:
         payment.amount_refunded = (payment.amount_refunded or Decimal("0.00")) + amount_decimal
         payment.amount_refunded = payment.amount_refunded.quantize(TWOPLACES, rounding=ROUND_HALF_UP)
         payment.save(update_fields=["amount_refunded", "updated_at"])
-        print(
-            "[Refund Debug] Updated offline payment amount_refunded",
-            {
-                "payment_id": str(payment.pk),
-                "new_amount_refunded": str(payment.amount_refunded),
-            },
-        )
+        
 
     @classmethod
     def _create_stripe_refund(
@@ -285,16 +246,7 @@ class RefundService:
         if actor and getattr(actor, "pk", None):
             metadata["actor_id"] = str(actor.pk)
 
-        print(
-            "[Refund Debug] Requesting Stripe refund",
-            {
-                "payment_id": str(payment.pk),
-                "amount_minor": amount_minor,
-                "charge_id": payment.stripe_charge_id,
-                "intent_id": payment.stripe_payment_intent_id,
-                "metadata": metadata,
-            },
-        )
+    
         try:
             if payment.stripe_charge_id:
                 refund = stripe.Refund.create(

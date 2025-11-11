@@ -330,14 +330,32 @@ def custom_index(request):
     week_days = [today - timedelta(days=6 - i) for i in range(7)]
     first_day = today.replace(day=1)
 
-    # Базовые QS
-    appts_7d = Appointment.objects.filter(start_time__date__range=[week_ago, today])
-    payments_7d = Payment.objects.filter(appointment__start_time__date__range=[week_ago, today])
-
     # Роль/профиль мастера
     userprof = getattr(request.user, "userprofile", None)
 
     master_profile = getattr(userprof, "master_profile", None) if userprof else None
+
+    # Базовые QS
+    appts_7d = Appointment.objects.filter(start_time__date__range=[week_ago, today])
+    items_last_week = AppointmentItem.objects.with_current_status().filter(
+        start_time__date__range=[week_ago, today]
+    )
+    if is_master(request.user) and master_profile:
+        items_last_week = items_last_week.filter(master=master_profile)
+
+    active_appt_ids = list(
+        items_last_week.exclude(current_status_code__iexact="CANCELLED")
+        .values_list("appointment_id", flat=True)
+        .distinct()
+    )
+
+    if active_appt_ids:
+        payments_7d = Payment.objects.filter(
+            appointment__start_time__date__range=[week_ago, today],
+            appointment_id__in=active_appt_ids,
+        )
+    else:
+        payments_7d = Payment.objects.none()
 
     # График продаж/записей за 7 дней
     chart_data, total_sales = [], 0.0
@@ -489,9 +507,11 @@ def custom_index(request):
         if master_profile and master.id == master_profile.id:
             master_target_for_current_user = entry
 
-    # Недавние встречи (20) с префетчем позиций
+    # Недавние позиции (20) с актуальным статусом
     recent_appointments = (
-        AppointmentItem.objects.select_related("appointment__client__user").order_by("-start_time")[:20]
+        AppointmentItem.objects.with_current_status()
+        .select_related("appointment__client__user", "service", "master__user__user")
+        .order_by("-start_time")[:20]
     )
 
     # Сегодняшние предстоящие встречи (items); мастеру показываем только свои
@@ -512,11 +532,7 @@ def custom_index(request):
     ).order_by("start_time")
 
     # Ежедневная разбивка Confirmed/Cancelled (на 7 дней вперёд) по статусам позиций
-    daily_items = AppointmentItem.objects.with_current_status().filter(
-        start_time__date__range=[week_ago, today]
-    )
-    if is_master(request.user) and master_profile:
-        daily_items = daily_items.filter(master=master_profile)
+    daily_items = items_last_week
     daily_counts = []
     for day in week_days:
         day_items = daily_items.filter(start_time__date=day)
@@ -748,7 +764,7 @@ class ExportXlsxMixin:
                 Prefetch(
                     "status_history",
                     queryset=AppointmentItemStatusHistory.objects.select_related(
-                        "status", "set_by__user"
+                        "status", "set_by"
                     ).order_by("-set_at", "-id"),
                     to_attr="_export_status_history",
                 )
@@ -857,7 +873,7 @@ class ExportXlsxMixin:
             history = getattr(item, "_export_status_history", None)
             if history is None:
                 history = list(
-                    item.status_history.select_related("status", "set_by__user").order_by("-set_at", "-id")
+                    item.status_history.select_related("status", "set_by").order_by("-set_at", "-id")
                 )
 
             cancelled_dt = None
@@ -1310,6 +1326,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     form = CustomUserChangeForm
     change_list_template = "admin/users/changelist_cards.html"
     add_form_template = "admin/users/add_form.html"
+    change_form_template = "admin/users/change_form.html"
     export_fields = ['username', 'email', 'first_name', 'last_name', 'phone', 'birth_date', 'address', 'postal_code', 'is_staff', 'is_superuser', 'is_active', 'source', 'consent']
     list_per_page = 10
     readonly_fields = getattr(BaseUserAdmin, "readonly_fields", tuple()) + ("password_change_link",)
@@ -1318,7 +1335,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         (None, {
             'classes': ('wide',),
             'fields': (
-                'usable_password', 'password1', 'password2',
+                'password1', 'password2',
                 'email', 'first_name', 'last_name',
                 'phone', 'birth_date', 'address', 'postal_code',
                 'personal_discount_percent', 'how_heard', 'email_marketing_consent',
@@ -1403,14 +1420,78 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
     password_change_link.short_description = _("Password")
 
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
+        context = dict(context or {})
+        context.setdefault("client_files", None)
+        context.setdefault("client_files_total", 0)
+
         if add and (request.GET.get(IS_POPUP_VAR) or request.POST.get(IS_POPUP_VAR)):
             if request.GET.get("_from_custom_appt") or request.POST.get("_from_custom_appt"):
                 return_to_param = request.GET.get("return_to") or request.POST.get("return_to")
                 if return_to_param:
-                    context = {**context}
                     context["popup_cancel_url"] = unquote_plus(return_to_param)
                     context["popup_cancel_param"] = return_to_param
+        if not add and obj:
+            profile = getattr(obj, "userprofile", None)
+            if profile:
+                files_qs = (
+                    ClientFile.objects.filter(user=profile)
+                    .select_related("appointment", "uploaded_by_user")
+                    .order_by("-uploaded_at", "-id")
+                )
+                files = []
+                for file_obj in files_qs:
+                    appointment_url = ""
+                    if file_obj.appointment_id:
+                        try:
+                            appointment_url = reverse("admin:core_appointment_change", args=[file_obj.appointment_id])
+                        except NoReverseMatch:
+                            appointment_url = ""
+                    setattr(file_obj, "appointment_admin_url", appointment_url)
+                    try:
+                        delete_url = reverse("admin:auth_user_delete_file", args=[obj.pk, file_obj.pk])
+                    except NoReverseMatch:
+                        delete_url = ""
+                    setattr(file_obj, "admin_delete_url", delete_url)
+                    files.append(file_obj)
+                context["client_files"] = files
+                context["client_files_total"] = len(files)
         return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "<int:user_id>/files/<uuid:file_id>/delete/",
+                self.admin_site.admin_view(self.delete_client_file_view),
+                name="auth_user_delete_file",
+            ),
+        ]
+        return custom + urls
+
+    def delete_client_file_view(self, request, user_id, file_id):
+        if request.method != "POST":
+            return HttpResponseBadRequest("POST required")
+
+        user_model = get_user_model()
+        user_obj = get_object_or_404(user_model, pk=user_id)
+
+        if not self.has_change_permission(request, user_obj):
+            raise PermissionDenied
+
+        profile = getattr(user_obj, "userprofile", None)
+        if profile is None:
+            messages.error(request, "Client profile is missing.")
+            return redirect("admin:auth_user_change", user_id)
+
+        file_obj = get_object_or_404(ClientFile, pk=file_id, user=profile)
+        try:
+            file_obj.delete()
+        except Exception as exc:  # pylint: disable=broad-except
+            messages.error(request, f"Could not delete file: {exc}")
+        else:
+            messages.success(request, "File deleted.")
+
+        return redirect("admin:auth_user_change", user_id)
 
     def get_queryset(self, request):
         # Prefetch the attached profile to avoid N+1 lookups.
@@ -1911,6 +1992,28 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
 
+# Ensure custom deletion endpoint is always present even if the model admin isn't
+# consulted before reverse() lookups during tests. # CHANGED
+_original_admin_get_urls = admin.site.get_urls
+
+
+def _patched_admin_get_urls():
+    urls = _original_admin_get_urls()
+    user_admin = admin.site._registry.get(get_user_model())
+    if user_admin is not None:
+        extra = [
+            path(
+                "auth/user/<int:user_id>/files/<uuid:file_id>/delete/",
+                admin.site.admin_view(user_admin.delete_client_file_view),
+                name="auth_user_delete_file",
+            )
+        ]
+        return extra + urls
+    return urls
+
+
+admin.site.get_urls = _patched_admin_get_urls
+
 
 @admin.register(MasterAvailability)
 class MasterAvailabilityAdmin(ExportCsvMixin, admin.ModelAdmin):
@@ -2074,7 +2177,7 @@ class AppointmentProductSaleInline(admin.StackedInline):
     form = AppointmentProductSaleForm
     fk_name = "appointment"
     extra = 0
-    autocomplete_fields = ("product", "sold_by", "client")
+    autocomplete_fields = ("product", "client")  # // CHANGED
     verbose_name = "Product sale"
     verbose_name_plural = "Product sales"
     prefix = "product_sales"
@@ -2087,16 +2190,12 @@ class AppointmentProductSaleInline(admin.StackedInline):
                 .order_by("user__first_name", "user__last_name", "user__username")
                 .distinct()
             )
-        if db_field.name == "sold_by" and request is not None:
-            profile = getattr(request.user, "userprofile", None)
-            filters = Q(user__is_superuser=True)
-            if profile:
-                filters |= Q(pk=profile.pk)
-            kwargs["queryset"] = (
-                UserProfile.objects.select_related("user")
-                .filter(filters)
-                .order_by("user__first_name", "user__last_name", "user__username")
-            )
+        if db_field.name == "sold_by":  # // CHANGED
+            kwargs["queryset"] = (  # // CHANGED
+                UserProfile.objects.select_related("user", "master_profile")  # // CHANGED
+                .filter(master_profile__isnull=False)  # // CHANGED
+                .order_by("user__first_name", "user__last_name", "user__username")  # // CHANGED
+            )  # // CHANGED
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def get_formset(self, request, obj=None, **kwargs):
@@ -2143,14 +2242,34 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
 
     @staticmethod
-    def _validate_service_room_capacity(rows, bag):
+    def _validate_service_room_capacity(rows, bag, *, cancelled_indices=None):
         if not rows:
             return
+
+        # CHANGED: precompute indices of rows that should be ignored (e.g., staged cancellations).
+        cancelled_idx = set()
+        for idx in (cancelled_indices or set()):
+            if idx is None:
+                continue
+            text = str(idx).strip()
+            if not text:
+                continue
+            try:
+                cancelled_idx.add(int(text))
+            except (TypeError, ValueError):
+                continue  # CHANGED: ignore non-numeric prefixes for row cancellation hints
+
+        def _is_cancelled(row: dict) -> bool:
+            code = row.get("status_code") or row.get("current_status_code")
+            return isinstance(code, str) and code.upper() == "CANCELLED"
 
         service_ids = {
             row["service_id"]
             for row in rows
-            if row.get("service_id") and row.get("validation_enabled", True)
+            if row.get("service_id")
+            and row.get("validation_enabled", True)
+            and row.get("idx") not in cancelled_idx
+            and not _is_cancelled(row)
         }
         if not service_ids:
             return
@@ -2174,6 +2293,10 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             start = row.get("dt")
             if not sid or not start:
                 continue
+            if row.get("idx") in cancelled_idx:
+                continue  # CHANGED: skip rows staged for cancellation
+            if _is_cancelled(row):
+                continue  # CHANGED: ignore cancelled items when computing capacity
             if not row.get("validation_enabled", True):
                 continue  # CHANGED: skip capacity checks when validation is off
             meta = service_meta.get(str(sid))
@@ -2209,12 +2332,46 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                     active = max(active - 1, 0)
 
     @staticmethod
-    def _enforce_room_capacity_for_items(prebuilt_items, row_errs):
+    def _enforce_room_capacity_for_items(
+        prebuilt_items,
+        row_errs,
+        *,
+        cancelled_prefixes=None,
+        cancelled_item_ids=None,
+    ):
         if not prebuilt_items:
             return
 
+        # CHANGED: normalize cancellation hints so we can ignore those entries in capacity checks.
+        cancelled_prefix_set = set()
+        for pref in (cancelled_prefixes or set()):
+            if pref is None:
+                continue
+            text = str(pref).strip()
+            if text:
+                cancelled_prefix_set.add(text)
+        cancelled_item_id_set = set()
+        for cid in (cancelled_item_ids or set()):
+            if cid is None:
+                continue
+            text = str(cid).strip()
+            if text:
+                cancelled_item_id_set.add(text)
+
         service_map = {}
         for idx, item, _ in prebuilt_items:
+            prefix = f"items-{idx}"
+            if prefix in cancelled_prefix_set:
+                continue  # CHANGED: staged cancellation removes item from capacity enforcement
+            item_pk = getattr(item, "pk", None)
+            if item_pk is not None and str(item_pk) in cancelled_item_id_set:
+                continue  # CHANGED: skip items cancelled in the same transaction
+            status_code = (
+                getattr(item, "current_status_code", None)
+                or getattr(getattr(item, "status", None), "code", "")
+            )
+            if status_code and str(status_code).upper() == "CANCELLED":
+                continue  # CHANGED: ignore items already cancelled at item-level
             if hasattr(item, "validation_enabled") and not getattr(item, "validation_enabled", True):
                 continue  # CHANGED: skip capacity checks when validation is off
             service = getattr(item, "service", None)
@@ -2414,6 +2571,15 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         ctx["product_sales_forms"] = sale_forms_to_render
 
         sale_defaults = {"quantity": 1}
+        sold_by_profile = None  # // CHANGED
+        if obj:  # // CHANGED
+            first_item = getattr(obj, "primary_item", None)  # // CHANGED
+            if first_item is None:  # // CHANGED
+                first_item = obj.items.order_by("start_time").first()  # // CHANGED
+            if first_item:  # // CHANGED
+                master_profile = getattr(first_item, "master", None)  # // CHANGED
+                if master_profile:  # // CHANGED
+                    sold_by_profile = getattr(master_profile, "user", None)  # // CHANGED
         if obj and getattr(obj, "client", None):
             client_obj = obj.client
             client_user = getattr(client_obj, "user", None)
@@ -2426,14 +2592,16 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "label": client_label,
             }
         profile = getattr(request.user, "userprofile", None)
-        if profile:
-            user = getattr(profile, "user", None)
+        if not sold_by_profile and profile and getattr(profile, "master_profile_id", None):  # // CHANGED
+            sold_by_profile = profile  # // CHANGED
+        if sold_by_profile:  # // CHANGED
+            user = getattr(sold_by_profile, "user", None)  # // CHANGED
             raw_sold_by_label = (
-                getattr(user, "get_full_name", lambda: "")() or getattr(user, "username", "") or str(profile)
+                getattr(user, "get_full_name", lambda: "")() or getattr(user, "username", "") or str(sold_by_profile)  # // CHANGED
             )
-            sold_by_label = (str(raw_sold_by_label) or "").strip() or str(profile)
+            sold_by_label = (str(raw_sold_by_label) or "").strip() or str(sold_by_profile)  # // CHANGED
             sale_defaults["sold_by"] = {
-                "id": str(profile.pk),
+                "id": str(sold_by_profile.pk),  # // CHANGED
                 "label": sold_by_label,
             }
         ctx["product_sale_defaults"] = sale_defaults
@@ -2661,6 +2829,43 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 .order_by("-sent_at", "-id")
             )
 
+        photo_upload_form = AppointmentPhotoUploadForm()
+        photo_kind_labels = dict(ClientFile.KIND_CHOICES)
+        photo_groups: list[dict[str, Any]] = []
+        photo_total_count = 0
+        if obj:
+            appointment_files = (
+                ClientFile.objects.filter(appointment=obj)
+                .select_related("uploaded_by_user", "user__user")
+                .order_by("-uploaded_at", "-id")
+            )
+            photo_total_count = appointment_files.count()
+            grouped: dict[str, list[ClientFile]] = {key: [] for key in photo_kind_labels}
+            for file_obj in appointment_files:
+                grouped.setdefault(file_obj.kind, []).append(file_obj)
+            photo_groups = [
+                {
+                    "key": kind,
+                    "label": photo_kind_labels.get(kind, kind.title()),
+                    "files": grouped.get(kind, []),
+                }
+                for kind in photo_kind_labels
+                if grouped.get(kind)
+            ]
+            try:
+                ctx["photo_upload_url"] = reverse("admin:core_appointment_upload_photos", args=[obj.pk])
+            except NoReverseMatch:
+                ctx["photo_upload_url"] = ""
+            ctx["photo_delete_url_name"] = "admin:core_appointment_delete_photo"
+        else:
+            ctx["photo_upload_url"] = ""
+            ctx["photo_delete_url_name"] = ""
+
+        ctx["photo_groups"] = photo_groups
+        ctx["photo_upload_form"] = photo_upload_form
+        ctx["photo_upload_disabled"] = obj is None
+        ctx["photo_total_count"] = photo_total_count
+
         ctx.update({
             "masters_data": masters,
             "ms_map_data": dict(ms_map),
@@ -2683,6 +2888,10 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             "usd": "$",
         }.get(str(ctx["currency_code"]).lower(), f"{str(ctx['currency_code']).upper()} "))
         ctx["notifications"] = notifications
+        try:
+            ctx["availability_url"] = reverse("api-availability")
+        except NoReverseMatch:
+            ctx["availability_url"] = ""
         return super().render_change_form(request, ctx, add=add, change=change, form_url=form_url, obj=obj)
 
     def manage_intake_form_view(self, request, appointment_id, form_id):
@@ -2912,6 +3121,16 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 name="core_appointment_manage_form",
             ),
             path(
+                "<uuid:appointment_id>/photos/upload/",
+                self.admin_site.admin_view(self.before_after_upload_view),
+                name="core_appointment_upload_photos",
+            ),
+            path(
+                "<uuid:appointment_id>/photos/<uuid:file_id>/delete/",
+                self.admin_site.admin_view(self.before_after_delete_view),
+                name="core_appointment_delete_photo",
+            ),
+            path(
                 "create/custom/",
                 self.admin_site.admin_view(self.custom_create_view),
                 name="core_appointment_custom_create",
@@ -2972,6 +3191,92 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "apply_card_processing_fee": True,
             }
         )
+
+    def _change_view_url(self, appointment, request, *, anchor: str | None = None) -> str:
+        base_url = reverse("admin:core_appointment_change", args=[appointment.pk])
+        date_value = request.GET.get("date") or request.POST.get("return_to_date")
+        if date_value:
+            separator = "&" if "?" in base_url else "?"
+            base_url = f"{base_url}{separator}date={date_value}"
+        if anchor:
+            base_url = f"{base_url}#{anchor}"
+        return base_url
+
+    def _redirect_to_change_view(self, request, appointment, *, anchor: str | None = None) -> HttpResponseRedirect:
+        return redirect(self._change_view_url(appointment, request, anchor=anchor))
+
+    def before_after_upload_view(self, request, appointment_id):
+        if request.method != "POST":
+            return HttpResponseBadRequest("POST required")
+
+        appointment = get_object_or_404(Appointment, pk=appointment_id)
+        if not self.has_change_permission(request, appointment):
+            raise PermissionDenied
+
+        form = AppointmentPhotoUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            uploaded_files = form.cleaned_data["files"]
+            kind = form.cleaned_data["kind"]
+            description = (form.cleaned_data.get("description") or "").strip()
+            uploader_flag = ClientFile.ADMIN if request.user.is_staff else ClientFile.USER
+            uploader_user = request.user if request.user.is_authenticated else None
+            created = 0
+            try:
+                with transaction.atomic():
+                    for uploaded in uploaded_files:
+                        instance = ClientFile(
+                            user=appointment.client,
+                            appointment=appointment,
+                            file=uploaded,
+                            kind=kind,
+                            description=description,
+                            uploaded_by=uploader_flag,
+                            uploaded_by_user=uploader_user,
+                        )
+                        instance.save()
+                        created += 1
+            except ValidationError as exc:
+                messages.error(
+                    request,
+                    "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc),
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                messages.error(request, f"Could not upload photos: {exc}")
+            else:
+                if created == 1:
+                    messages.success(request, "Photo uploaded.")
+                elif created > 1:
+                    messages.success(request, f"{created} photos uploaded.")
+                else:
+                    messages.warning(request, "No files were uploaded.")
+        else:
+            for field, errors in form.errors.items():
+                label = form.fields.get(field).label if field in form.fields else field
+                for message_text in errors:
+                    if field == "__all__":
+                        messages.error(request, message_text)
+                    else:
+                        messages.error(request, f"{label}: {message_text}")
+
+        return self._redirect_to_change_view(request, appointment, anchor="before-after")
+
+    def before_after_delete_view(self, request, appointment_id, file_id):
+        if request.method != "POST":
+            return HttpResponseBadRequest("POST required")
+
+        appointment = get_object_or_404(Appointment, pk=appointment_id)
+        if not self.has_change_permission(request, appointment):
+            raise PermissionDenied
+
+        file_obj = get_object_or_404(ClientFile, pk=file_id, appointment=appointment)
+        try:
+            file_obj.delete()
+        except Exception as exc:  # pylint: disable=broad-except
+            messages.error(request, f"Could not delete the photo: {exc}")
+        else:
+            messages.success(request, "Photo deleted.")
+
+        return self._redirect_to_change_view(request, appointment, anchor="before-after")
 
 
     def _calendar_date_for_obj(self, obj) -> str | None:
@@ -3466,23 +3771,25 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         posted_items = []  # чтобы вернуть в шаблон ровно то, что вводили
         for i in range(total_forms):
             pref = f"items-{i}-"
-        validation_values = request.POST.getlist(pref + "validation_enabled")
-        validation_enabled = (
-            any(str(val).strip().lower() in {"1", "true", "on", "yes"} for val in validation_values)
-            if validation_values
-            else False
-        )
-        posted_items.append({
-            "master":      (request.POST.get(pref + "master") or "").strip(),
-            "service":     (request.POST.get(pref + "service") or "").strip(),
-            "start_time_0": (request.POST.get(pref + "start_time_0") or "").strip(),  # date
-            "start_time_1": (request.POST.get(pref + "start_time_1") or "").strip(),  # time
-            "unit_price":  (request.POST.get(pref + "unit_price") or "").strip(),
-            "promocode":   (request.POST.get(pref + "promocode") or "").strip(),
-            "duration_override_min": (request.POST.get(pref + "duration_override_min") or "").strip(),
-            "manual_discount_percent": (request.POST.get(pref + "manual_discount_percent") or "").strip(),
-            "validation_enabled": validation_enabled,
-        })
+            validation_values = request.POST.getlist(pref + "validation_enabled")
+            validation_enabled = (
+                any(str(val).strip().lower() in {"1", "true", "on", "yes"} for val in validation_values)
+                if validation_values
+                else False
+            )
+            status_code_raw = (request.POST.get(pref + "status_code") or "").strip()
+            posted_items.append({
+                "master":      (request.POST.get(pref + "master") or "").strip(),
+                "service":     (request.POST.get(pref + "service") or "").strip(),
+                "start_time_0": (request.POST.get(pref + "start_time_0") or "").strip(),  # date
+                "start_time_1": (request.POST.get(pref + "start_time_1") or "").strip(),  # time
+                "unit_price":  (request.POST.get(pref + "unit_price") or "").strip(),
+                "promocode":   (request.POST.get(pref + "promocode") or "").strip(),
+                "duration_override_min": (request.POST.get(pref + "duration_override_min") or "").strip(),
+                "manual_discount_percent": (request.POST.get(pref + "manual_discount_percent") or "").strip(),
+                "validation_enabled": validation_enabled,
+                "status_code": status_code_raw,  # CHANGED: capture staged status for capacity decisions
+            })
 
         # обязательные поля верхнего уровня
         if not client_id:
@@ -3491,6 +3798,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             bag["__all__"].append("Add at least one service.")
 
         # построчная валидация ещё до создания объектов
+        cancelled_row_indices: set[int] = set()  # CHANGED: remember rows staged as cancelled
         valid_rows = []
         for idx, row in enumerate(posted_items):
             # пропускаем пустые
@@ -3547,6 +3855,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
             else:
                 manual_discount = 0
 
+            status_code_clean = (row.get("status_code") or "").strip().upper()
             valid_rows.append({
                 "idx": idx,
                 "master_id": master_id or None,
@@ -3557,12 +3866,18 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "duration_override": duration_override,
                 "manual_discount": manual_discount,
                 "validation_enabled": bool(row.get("validation_enabled", True)),
+                "status_code": status_code_clean or None,
             })
+            if status_code_clean == "CANCELLED":
+                cancelled_row_indices.add(idx)  # CHANGED: skip cancelled rows from capacity checks
 
-        self._validate_service_room_capacity(valid_rows, bag)
+        self._validate_service_room_capacity(valid_rows, bag, cancelled_indices=cancelled_row_indices)
 
         required_form_ids: set[str] = set()
         for row in valid_rows:
+            status_code = (row.get("status_code") or "").upper()
+            if status_code == "CANCELLED":
+                continue  # CHANGED: cancelled rows do not mandate intake forms
             service_id = row.get("service_id")
             if not service_id:
                 continue
@@ -3644,6 +3959,8 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
 
                 for row in valid_rows:
                     idx = row["idx"]
+                    if (row.get("status_code") or "").upper() == "CANCELLED":
+                        continue  # CHANGED: do not persist rows staged for cancellation
                     if not (row["master_id"] and row["service_id"] and row["dt"]):
                         # (сюда попадём только если кто-то внезапно пустой — но мы отфильтровали выше)
                         key = f"items-{idx}"
@@ -3684,7 +4001,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                             row_errs.setdefault(key, []).extend(msgs)
 
                     # Если хотя бы у одной строки есть ошибки — откатываем и показываем их в форме
-                self._enforce_room_capacity_for_items(prebuilt_items, row_errs)
+                cancelled_prefixes = {f"items-{idx}" for idx in cancelled_row_indices}
+                self._enforce_room_capacity_for_items(
+                    prebuilt_items,
+                    row_errs,
+                    cancelled_prefixes=cancelled_prefixes,
+                )  # CHANGED: exclude cancelled/staged rows from capacity enforcement
 
                 if row_errs:
                     raise ValidationError(row_errs)
@@ -3806,7 +4128,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         except Exception as e:
             # На проде — лог, а пользователю безопасно
             bag["__all__"].append("Unexpected error while creating appointment.")
-            print("Error" + str(e))
+            # print("Error" + str(e))
             ctx = {
                 **self.admin_site.each_context(request),
                 "clients": clients,
@@ -4668,7 +4990,11 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
                 if clone is not None:
                     self.log_addition(request, clone, f"Duplicated from Service {original.pk}.")
                 messages.success(request, _("Service duplicated."))
-                return redirect(reverse("admin:core_service_changelist"))
+                preserved_filters = request.POST.get("_changelist_filters")
+                changelist_url = reverse("admin:core_service_changelist")
+                if preserved_filters:
+                    changelist_url = f"{changelist_url}?{preserved_filters}"
+                return redirect(changelist_url)
 
         return super().change_view(request, object_id, form_url=form_url, extra_context=extra_context)
 
@@ -4699,12 +5025,23 @@ class ServiceAdmin(ExportCsvMixin, admin.ModelAdmin):
             "GBP": "\u00A3",
         }.get(currency_code, f"{currency_code} $")
 
+        preserved_filters_qs = ""
+        if original_params:
+            preserved_params = original_params.copy()
+            try:
+                preserved_params._mutable = True
+            except AttributeError:
+                pass
+            preserved_params.pop("_changelist_filters", None)
+            preserved_filters_qs = preserved_params.urlencode()
+
         extra_context.update(
             {
                 "category_options": category_options,
                 "current_category": current_category,
                 "currency_symbol": currency_symbol,
                 "current_search": search_term,
+                "svc_preserved_filters": preserved_filters_qs,
             }
         )
         extra_context.setdefault(
@@ -4955,13 +5292,37 @@ class ClientFileAdmin(admin.ModelAdmin):
     """
     Admin interface for managing user-uploaded files.
     """
-    list_display = ('user', "uploaded_by" ,'file_type', 'file')
-    fields = ('user', 'file',"uploaded_by", 'file_type')
-    readonly_fields = ('file_type',)  # 👈 делаем только для чтения
-    exclude = ('file_type',)  # 👈 скрываем из формы создания
-    list_filter = (('uploaded_at', DateFieldListFilter), 'file_type')
-    search_fields = ('user__user__first_name', 'user__user__last_name')
-    ordering = ['-uploaded_at']
+    list_display = (
+        "user",
+        "appointment",
+        "kind",
+        "uploaded_by",
+        "uploaded_by_user",
+        "file_type",
+        "uploaded_at",
+        "file",
+    )
+    fields = (
+        "user",
+        "appointment",
+        "kind",
+        "description",
+        "file",
+        "uploaded_by",
+        "uploaded_by_user",
+        "file_type",
+        "uploaded_at",
+    )
+    readonly_fields = ("file_type", "uploaded_at", "uploaded_by_user")
+    list_filter = (("uploaded_at", DateFieldListFilter), "kind", "uploaded_by")
+    search_fields = (
+        "user__user__first_name",
+        "user__user__last_name",
+        "user__user__email",
+        "appointment__id",
+    )
+    ordering = ["-uploaded_at", "-id"]
+    list_select_related = ("user__user", "appointment__client__user", "uploaded_by_user")
 
 
 
@@ -5030,6 +5391,30 @@ class PromoCodeAdmin(ExportCsvMixin ,admin.ModelAdmin):
     @admin.display(boolean=True)
     def is_active(self, obj):
         return obj.is_active()
+
+
+# -----------------------------
+# Support document admin
+# -----------------------------
+@admin.register(SupportDocument)
+class SupportDocumentAdmin(admin.ModelAdmin):
+    list_display = ("list_title", "document_type", "is_active", "display_order", "updated_at")
+    list_filter = ("is_active", "document_type")
+    search_fields = ("title", "subtitle", "card_excerpt", "body")
+    prepopulated_fields = {"slug": ("title",)}
+    ordering = ("display_order", "title")
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        ("Routing & status", {"fields": ("document_type", "slug", "is_active", "display_order")}),
+        ("Hero content", {"fields": ("title", "subtitle", "intro")}),
+        ("Body", {"fields": ("body",)}),
+        ("Support tab card", {"fields": ("card_title", "card_excerpt", "card_cta_label")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+    @admin.display(description="Title")
+    def list_title(self, obj):
+        return obj.card_heading
 
 
 # -----------------------------
@@ -5262,7 +5647,7 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
     )
     ordering = ("-sold_at", "-id")
     readonly_fields = ("total_amount", "created_at", "updated_at")
-    autocomplete_fields = ("product", "sold_by", "client", "appointment")
+    autocomplete_fields = ("product", "client", "appointment")  # // CHANGED
     list_select_related = (
         "product",
         "sold_by__user",
@@ -5314,20 +5699,16 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 .order_by("user__first_name", "user__last_name", "user__username")
                 .distinct()
             )
-        if db_field.name == "sold_by":
-            current_profile = getattr(request.user, "userprofile", None)
-            sold_by_filters = Q(user__is_superuser=True)
-            if current_profile:
-                sold_by_filters |= Q(pk=current_profile.pk)
-            kwargs["queryset"] = (
-                UserProfile.objects.select_related("user")
-                .filter(sold_by_filters)
-                .order_by(
-                    "user__first_name",
-                    "user__last_name",
-                    "user__username",
-                )
-            )
+        if db_field.name == "sold_by":  # // CHANGED
+            kwargs["queryset"] = (  # // CHANGED
+                UserProfile.objects.select_related("user", "master_profile")  # // CHANGED
+                .filter(master_profile__isnull=False)  # // CHANGED
+                .order_by(  # // CHANGED
+                    "user__first_name",  # // CHANGED
+                    "user__last_name",  # // CHANGED
+                    "user__username",  # // CHANGED
+                )  # // CHANGED
+            )  # // CHANGED
         if db_field.name == "appointment":
             kwargs["queryset"] = (
                 Appointment.objects.select_related("client__user")
@@ -5338,8 +5719,13 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
         profile = getattr(request.user, "userprofile", None)
-        if not obj and profile and "sold_by" in form.base_fields:
-            form.base_fields["sold_by"].initial = profile.pk
+        if (
+            not obj
+            and profile
+            and getattr(profile, "master_profile_id", None)
+            and "sold_by" in form.base_fields
+        ):  # // CHANGED
+            form.base_fields["sold_by"].initial = profile.pk  # // CHANGED
 
         product_field = form.base_fields.get("product")
         if product_field:
@@ -5367,7 +5753,14 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
             product = Product.objects.only("price").get(pk=product_id)
         except Product.DoesNotExist:
             return JsonResponse({"error": "Product not found"}, status=404)
-        return JsonResponse({"unit_price": str(product.price)})
+        price_value = product.price if product.price is not None else Decimal("0.00")  # // CHANGED
+        try:  # // CHANGED
+            price_decimal = price_value if isinstance(price_value, Decimal) else Decimal(str(price_value))  # // CHANGED
+            price_normalized = price_decimal.quantize(Decimal("0.00"))  # // CHANGED
+        except (InvalidOperation, TypeError, ValueError):  # // CHANGED
+            price_normalized = Decimal("0.00")  # // CHANGED
+        price_str = format(price_normalized, "f")  # // CHANGED
+        return JsonResponse({"unit_price": price_str, "price": price_str})  # // CHANGED
 
     def _export_all_xlsx_view(self, request):
         queryset = (
@@ -5650,7 +6043,9 @@ class EmailVerificationAdmin(admin.ModelAdmin):
         return False
 
     def has_delete_permission(self, request, obj=None):
-        return False
+        if request.user.is_superuser:
+            return True
+        return super().has_delete_permission(request, obj)
 
 class MasterWorkDayInline(admin.TabularInline):
     model = MasterWorkDay
@@ -6867,6 +7262,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         skip_two[mid] = {}
         skip_lane[mid] = {0: {}, 1: {}}
         overlap_lanes[mid] = {0: {}, 1: {}}
+    forced_lane_items = set()
 
     # ───────────────── позиции (AppointmentItem) ───────────────────────────────
     prepared_items = []
@@ -6889,6 +7285,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             'status_code': status_code,
             'is_cancelled': status_code == 'CANCELLED',
             'validation_enabled': getattr(item, 'validation_enabled', True),
+            'slot_key': start_local.strftime('%H:%M'),
         }
         prepared_items.append(prepared)
         entry_lookup[item.pk] = prepared
@@ -6955,10 +7352,41 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         if assigned:
             lane_assignments[mid] = assigned
 
+    def _force_item_into_left_lane(entry):
+        """
+        Ensure validation-disabled appointments render in the left lane
+        so overlapping lunch/time-off blocks can slide to the right for
+        the split-lane UX.
+        """
+        item = entry.get("item")
+        item_pk = getattr(item, "pk", None)
+        if not item_pk or item_pk in forced_lane_items:
+            return
+        mid = entry["master_id"]
+        assigned_lane = lane_assignments.get(mid, {}).get(item_pk)
+        if assigned_lane is not None:
+            return
+        slot_key = entry["slot_key"]
+        cell_bucket = two_col_map.get(mid, {})
+        cell = cell_bucket.pop(slot_key, None)
+        if not cell:
+            return
+        for i in range(entry["rowspan"]):
+            t = (entry["start"] + timedelta(minutes=15 * i)).strftime("%H:%M")
+            skip_two[mid].pop(t, None)
+            skip_lane[mid][0][t] = True
+        overlap_lanes[mid][0][slot_key] = {
+            'kind': 'appt_active',
+            'rowspan': entry['rowspan'],
+            'colspan': 1,
+            'item': item,
+        }
+        forced_lane_items.add(item_pk)
+
     for entry in prepared_items:
         item = entry['item']
         mid = entry['master_id']
-        slot_key = entry['start'].strftime('%H:%M')
+        slot_key = entry['slot_key']
         rowspan = entry['rowspan']
 
         if entry['is_cancelled']:
@@ -7020,6 +7448,17 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         minutes = int((block_end - block_start).total_seconds() // 60)
         rowsp = max(1, (-(-minutes // 15)))  # ceil
         slot_key = block_start.strftime("%H:%M")
+
+        overlapping_lane_items = [
+            appt_entry
+            for appt_entry in items_by_master.get(mid, [])
+            if not appt_entry["is_cancelled"]
+            and not appt_entry["validation_enabled"]
+            and appt_entry["start"] < block_end
+            and appt_entry["end"] > block_start
+        ]
+        for overlap_entry in overlapping_lane_items:
+            _force_item_into_left_lane(overlap_entry)
 
         if slot_key not in two_col_map.get(mid, set()):
             if mid not in two_col_map:

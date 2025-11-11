@@ -22,7 +22,7 @@ from django.db import transaction
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseRedirect, Http404
 from django.shortcuts import redirect, render, get_object_or_404
 from django.urls import reverse, reverse_lazy
-from django.views.generic import TemplateView, ListView, View
+from django.views.generic import TemplateView, View
 from django.views.generic.edit import CreateView
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
@@ -36,12 +36,15 @@ from core.models import (
     Service,
     Appointment,
     UserProfile,
+    Role,
     AppointmentItem,
     Product,
     ProductSale,
     EmailVerification,
     ClientIntakeAssignment,
     ClientIntakeFormSubmission,
+    Payment,
+    SupportDocument,
 )
 from core.services.intake_assignments import ensure_universal_assignments_for_profile
 from core.services.pricing import get_available_prepayment_percents
@@ -119,6 +122,54 @@ def _is_rate_limited(action: str, email: str, ip: str) -> bool:
     if ip and ip_limit:
         limited = limited or _limit_hit(action, f"ip:{ip}", *ip_limit)
     return limited
+
+
+def _resolve_payment_receipt_url(payment) -> str | None:
+    """Return the most user-friendly receipt URL for a payment."""
+    receipt_file = getattr(payment, "receipt_pdf", None)
+    if receipt_file:
+        try:
+            url = receipt_file.url
+        except Exception as err:  # pragma: no cover - storage edge cases
+            logger.warning("Failed to resolve receipt pdf for payment %s: %s", payment.pk, err)
+        else:
+            if url:
+                return url
+    url = getattr(payment, "receipt_url", "") or ""
+    return url or None
+
+
+def _attach_receipt_links(appointments: list[Appointment]) -> None:
+    """Attach client_receipt_url/client_receipt_payment_id attrs to appointments."""
+    if not appointments:
+        return
+    appointment_ids = [appt.pk for appt in appointments if appt.pk]
+    if not appointment_ids:
+        for appt in appointments:
+            appt.client_receipt_url = None
+            appt.client_receipt_payment_id = None
+        return
+
+    payments_by_appt: dict = {}
+    payment_qs = (
+        Payment.objects.filter(appointment_id__in=appointment_ids)
+        .order_by("-created_at")
+        .only("id", "appointment_id", "created_at", "receipt_url", "receipt_pdf")
+    )
+    for payment in payment_qs:
+        payments_by_appt.setdefault(payment.appointment_id, []).append(payment)
+
+    for appointment in appointments:
+        receipt_url = None
+        receipt_payment = None
+        for payment in payments_by_appt.get(appointment.id, ()):
+            url_candidate = _resolve_payment_receipt_url(payment)
+            if url_candidate:
+                receipt_url = url_candidate
+                receipt_payment = payment
+                break
+        appointment.client_receipt_url = receipt_url
+        appointment.client_receipt_payment_id = str(receipt_payment.pk) if (receipt_payment and receipt_url) else None
 
 # =========================
 # Аутентификация и доступ
@@ -200,20 +251,77 @@ class AccountPasswordResetCompleteView(SupportEmailContextMixin, auth_views.Pass
     template_name = "registration/password_reset_complete.html"
 
 
+def _get_or_create_role(role_name: str) -> Role:
+    """
+    Retrieve a Role instance, creating it if necessary.
+    """
+    normalized = (role_name or "").strip()
+    if not normalized:
+        raise ValueError("role_name must be provided for role lookup")
+    role, _ = Role.objects.get_or_create(name=normalized)
+    return role
+
+
 class RoleRequiredMixin(LoginRequiredMixin):
     """
     Ограничение доступа по конкретной роли.
     """
     required_role: str | None = None
+    AUTO_ASSIGNABLE_ROLES = frozenset({"Client"})
+
+    def _resolve_profile(self, user, *, create: bool = False) -> UserProfile | None:
+        if not getattr(user, "is_authenticated", False):
+            return None
+        try:
+            return user.userprofile
+        except UserProfile.DoesNotExist:
+            if not create:
+                return None
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            return profile
+        except AttributeError:
+            return None
+
+    def _user_roles_manager(self, user, *, create_profile: bool = False):
+        profile = self._resolve_profile(user, create=create_profile)
+        if profile is None:
+            return None, None
+        return profile.userrole_set, profile
+
+    def _has_role(self, user, role_name: str) -> bool:
+        roles_qs, _ = self._user_roles_manager(user)
+        if not roles_qs:
+            return False
+        return roles_qs.filter(role__name=role_name).exists()
+
+    def _can_auto_assign(self, user, role_name: str) -> bool:
+        if role_name not in self.AUTO_ASSIGNABLE_ROLES:
+            return False
+        if not getattr(user, "is_authenticated", False):
+            return False
+        if user.is_staff or user.is_superuser:
+            return False
+        return True
+
+    def _auto_assign_role(self, user, role_name: str) -> bool:
+        if not self._can_auto_assign(user, role_name):
+            return False
+        roles_qs, _ = self._user_roles_manager(user, create_profile=True)
+        if not roles_qs:
+            return False
+        role = _get_or_create_role(role_name)
+        _, created = roles_qs.get_or_create(role=role)
+        if created:
+            logger.info("Auto-assigned role %s to user %s", role_name, user.pk)
+        return True
 
     def dispatch(self, request, *args, **kwargs):
-        role_qs = getattr(request.user, "userrole_set", None)
-        if role_qs is None:
-            profile = getattr(request.user, "userprofile", None)
-            role_qs = getattr(profile, "userrole_set", None)
-        if self.required_role and (
-            role_qs is None or not role_qs.filter(role__name=self.required_role).exists()
-        ):
+        required = self.required_role
+        if required:
+            if request.user.is_superuser or self._has_role(request.user, required):
+                return super().dispatch(request, *args, **kwargs)
+            if self._auto_assign_role(request.user, required):
+                return super().dispatch(request, *args, **kwargs)
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
 
@@ -221,15 +329,11 @@ class RoleRequiredMixin(LoginRequiredMixin):
 # =========================
 # Главная клиента (каталог)
 # =========================
-class MainMenuView(LoginRequiredMixin, TemplateView):
+class MainMenuView(RoleRequiredMixin, TemplateView):
     template_name = "client/mainmenu.html"
     login_url = reverse_lazy("login")
     redirect_field_name = "next"
-
-    def dispatch(self, request, *args, **kwargs):
-        if not request.user.userrole_set.filter(role__name="Client").exists():
-            raise PermissionDenied
-        return super().dispatch(request, *args, **kwargs)
+    required_role = "Client"
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -341,10 +445,12 @@ def build_dashboard_appointments(
             )
             item_start_display = ""
             item_is_future = False
+            item_start_iso = ""
             if appt_item.start_time:
                 item_start_local = timezone.localtime(appt_item.start_time, tz)
                 item_start_display = date_format(item_start_local, "d M Y, H:i")
                 item_is_future = item_start_local >= now_local
+                item_start_iso = item_start_local.isoformat()
             items_payload.append(
                 {
                     "id": str(appt_item.pk),
@@ -352,6 +458,8 @@ def build_dashboard_appointments(
                     "master_name": _dashboard_master_name(appt_item),
                     "start_display": item_start_display,
                     "service_id": str(appt_item.service_id) if getattr(appt_item, "service_id", None) else "",
+                    "start_iso": item_start_iso,
+                    "master_id": str(appt_item.master_id) if getattr(appt_item, "master_id", None) else "",
                     "status_code": status_code,
                     "status_label": status_label,
                     "is_future": item_is_future,
@@ -415,6 +523,9 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
 
         # быстрые действия — список услуг
         ctx["services"] = Service.objects.filter(is_active=True).order_by("name")
+        ctx["support_documents"] = list(
+            SupportDocument.objects.active().order_by("display_order", "title")
+        )
 
         # подзапрос на последний статус записи
         # все записи клиента (для статистики/истории)
@@ -438,7 +549,9 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         ctx["appointments"] = qs
 
         # прошлые и будущие
-        ctx["recent_appointments"] = qs.filter(start_time__lt=now)[:5]
+        recent_appointments = list(qs.filter(start_time__lt=now)[:5])
+        _attach_receipt_links(recent_appointments)
+        ctx["recent_appointments"] = recent_appointments
 
         # 🔹 все будущие (по возрастанию), исключая отменённые
         upcoming_qs = (
@@ -691,24 +804,18 @@ class ProductSalesView(RoleRequiredMixin, TemplateView):
 # =========================
 # Список записей клиента
 # =========================
-class ClientAppointmentsListView(RoleRequiredMixin, ListView):
-    required_role = "Client"
-    model = Appointment
-    template_name = "client/appointments_list.html"
-    paginate_by = 10
+class ClientAppointmentsListView(RoleRequiredMixin, View):
+    """
+    Historic URL that now points to the dashboard appointments section.
+    Keeping the view ensures bookmarks and menu links continue to work
+    after the single-page dashboard redesign.
+    """
 
-    def get_queryset(self):
-        return (
-            Appointment.objects
-            .filter(client=self.request.user.userprofile)
-            .prefetch_related(
-                Prefetch(
-                    "items",
-                    queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
-                )
-            )
-            .order_by("-start_time")
-        )
+    required_role = "Client"
+
+    def get(self, request, *args, **kwargs):
+        target = reverse("dashboard") + "#appointments"
+        return HttpResponseRedirect(target)
 
 
 class ClientIntakeAssignmentsView(RoleRequiredMixin, TemplateView):
@@ -766,7 +873,11 @@ class ClientIntakeAssignmentsView(RoleRequiredMixin, TemplateView):
 
         ctx["profile"] = profile
         ctx["assignments"] = entries
-        ctx["pending_count"] = sum(1 for entry in entries if entry["status"] == "pending")
+        pending = sum(1 for entry in entries if entry["status"] == "pending")
+        total = len(entries)
+        ctx["pending_count"] = pending
+        ctx["total_intake_assignments"] = total
+        ctx["completed_count"] = max(total - pending, 0)
         ctx["has_assignments"] = bool(entries)
         return ctx
 

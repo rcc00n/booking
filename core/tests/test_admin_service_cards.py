@@ -1,5 +1,6 @@
 import json
 import re
+from urllib.parse import quote
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -64,8 +65,8 @@ class ServiceAdminListTests(TestCase):
             last_name="Master",
         )
         master_profile, _ = UserProfile.objects.get_or_create(user=master_user, defaults={"phone": "+15550123456"})
-        room = MasterRoom.objects.create(room="Room 1")
-        self.active_service.allowed_rooms.add(room)
+        self.room = MasterRoom.objects.create(room="Room 1")
+        self.active_service.allowed_rooms.add(self.room)
         master = MasterProfile.objects.create(user=master_profile)
         ServiceMaster.objects.create(master=master, service=self.active_service)
 
@@ -173,6 +174,39 @@ class ServiceAdminListTests(TestCase):
         self.assertIn(f"svc_category={self.category_skin.pk}", prev_link.group(1))
         self.assertNotIn("p=1", prev_link.group(1))
 
+    def test_change_links_include_preserved_filters(self):
+        response = self.client.get(self.url, {"svc_category": str(self.category_skin.pk)}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        encoded_filters = quote(f"svc_category={self.category_skin.pk}")
+        html = response.content.decode()
+        self.assertIn(f"_changelist_filters={encoded_filters}", html)
+
+    def test_save_redirect_preserves_category_filter(self):
+        filter_qs = f"svc_category={self.category_skin.pk}"
+        encoded_filters = quote(filter_qs)
+        change_url = reverse("admin:core_service_change", args=[self.active_service.pk])
+        change_url_with_filters = f"{change_url}?_changelist_filters={encoded_filters}"
+        get_response = self.client.get(change_url_with_filters)
+        self.assertEqual(get_response.status_code, 200)
+
+        post_data = {
+            "name": self.active_service.name,
+            "description": self.active_service.description,
+            "category": str(self.category_skin.pk),
+            "base_price": "120.00",
+            "duration_min": "60",
+            "extra_time_min": "15",
+            "allowed_rooms": [str(self.room.pk)],
+            "pre_appointment_forms": [],
+            "_save": "Save",
+            "_changelist_filters": filter_qs,
+        }
+
+        response = self.client.post(change_url_with_filters, post_data, follow=False)
+        expected_redirect = f"{reverse('admin:core_service_changelist')}?{filter_qs}"
+        self.assertRedirects(response, expected_redirect, fetch_redirect_response=False)
+        self.active_service.refresh_from_db()
+        self.assertFalse(self.active_service.is_active)
     def test_ajax_fragment_search(self):
         response = self.client.get(self.url, {"q": "Hydra"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
         self.assertEqual(response.status_code, 200)

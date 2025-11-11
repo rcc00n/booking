@@ -40,6 +40,46 @@ DEBUG = True
 ALLOWED_HOSTS = ["malvabeauty.duckdns.org", "127.0.0.1", "localhost"]
 
 
+def _build_csrf_trusted_origins(hosts: list[str]) -> list[str]:
+    """
+    Generate CSRF origin list from allowed hosts.
+    Ensures HTTPS origins for public hosts and both schemes for local dev.
+    """
+    origins: list[str] = []
+    for raw in hosts:
+        host = str(raw or "").strip()
+        if not host:
+            continue
+        if host.startswith(("http://", "https://")):
+            origins.append(host)
+            continue
+        hostname = host.lstrip(".")
+        schemes = ["https://"]
+        if hostname in {"localhost", "127.0.0.1"} or hostname.endswith(".local"):
+            schemes.append("http://")
+        for scheme in schemes:
+            origins.append(f"{scheme}{hostname}")
+    # preserve order but drop duplicates
+    seen = set()
+    unique = []
+    for origin in origins:
+        if origin in seen:
+            continue
+        seen.add(origin)
+        unique.append(origin)
+    return unique
+
+
+DEFAULT_CSRF_TRUSTED_ORIGINS = _build_csrf_trusted_origins(ALLOWED_HOSTS)
+CSRF_TRUSTED_ORIGINS = env.list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=DEFAULT_CSRF_TRUSTED_ORIGINS,
+)
+CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=not DEBUG)
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=not DEBUG)
+CSRF_FAILURE_VIEW = "booking.csrf.csrf_failure_view"
+
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -163,12 +203,24 @@ SESSION_SAVE_EVERY_REQUEST = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
+STORAGE_ROOT = Path(env.str("STORAGE_ROOT", default=str(BASE_DIR / "storage")))
+
 STATIC_URL = '/static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_DIRS = [ BASE_DIR / "static" ]
+STATIC_ROOT = Path(env.str("STATIC_ROOT", default=str(STORAGE_ROOT / "static")))
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 MEDIA_URL = env.str("MEDIA_URL", default="/media/")
-MEDIA_ROOT = env.str("MEDIA_ROOT", default=str(BASE_DIR / "media"))
+MEDIA_ROOT = Path(env.str("MEDIA_ROOT", default=str(STORAGE_ROOT / "media")))
+
+for path in (STORAGE_ROOT, STATIC_ROOT, MEDIA_ROOT):
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # In read-only deployments (e.g. slug buildpacks) the mount will provide the directory.
+        pass
+
+STATIC_ROOT = str(STATIC_ROOT)
+MEDIA_ROOT = str(MEDIA_ROOT)
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

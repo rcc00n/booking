@@ -164,7 +164,6 @@ def _deserialize_cart_pricing(value: Any) -> Optional[dict[str, Any]]:
 # === Utility helpers ========================================================
 
 def _require_stripe_config() -> None:
-    print(settings.STRIPE_SECRET_KEY)
     if not settings.STRIPE_SECRET_KEY:
         raise ImproperlyConfigured("Stripe secret key is not configured.")
     if not stripe.api_key:
@@ -1019,12 +1018,7 @@ def _handle_charge_refund_update(refund_obj: Any) -> None:
         )
 
     if not payment_intent_id:
-        logger.info(
-            "Stripe refund event without payment_intent or charge match: %s payload=%s",
-            data.get("id"),
-            data,
-        )
-        print("[Stripe Webhook Debug] Refund event missing payment_intent", data)
+
         return
 
     logger.info(
@@ -1035,15 +1029,7 @@ def _handle_charge_refund_update(refund_obj: Any) -> None:
         data.get("amount"),
         data.get("currency"),
     )
-    print(
-        "[Stripe Webhook Debug] Syncing intent",
-        {
-            "payment_intent": payment_intent_id,
-            "charge": charge_id,
-            "refund": data.get("id"),
-            "amount": data.get("amount"),
-        },
-    )
+    
 
     try:
         payment_services.sync_payment_from_intent(payment_intent_id)
@@ -1307,7 +1293,6 @@ def stripe_finalize_cart_booking(request):
     except ImproperlyConfigured as exc:
         return JsonResponse({"error": str(exc)}, status=503)
     except stripe.error.StripeError as exc:
-        logger.exception("Failed to retrieve intent %s during cart finalization.", payment_intent_id)
         return JsonResponse({"error": getattr(exc, "user_message", str(exc))}, status=502)
 
     metadata = dict(getattr(intent, "metadata", {}) or {})
@@ -1374,11 +1359,7 @@ def stripe_finalize_cart_booking(request):
     try:
         stripe.PaymentIntent.modify(payment_intent_id, metadata=safe_metadata)
     except stripe.error.StripeError as exc:
-        logger.warning(
-            "Failed to update metadata for payment intent %s: %s",
-            payment_intent_id,
-            exc,
-        )
+        pass
     metadata = safe_metadata
 
     with transaction.atomic():
@@ -1458,7 +1439,6 @@ def stripe_set_default_card(request):
             invoice_settings={"default_payment_method": card.stripe_payment_method_id},
         )
     except stripe.error.StripeError as exc:
-        logger.exception("Failed to set default payment method for customer %s", customer_id)
         return JsonResponse({"error": getattr(exc, "user_message", str(exc))}, status=502)
 
     return JsonResponse({"ok": True})
@@ -1524,10 +1504,8 @@ def stripe_no_show_charge(request):
             ),
         )
     except stripe.error.CardError as exc:
-        logger.warning("Card error during no-show charge for appointment %s: %s", appointment.pk, exc)
         return JsonResponse({"error": getattr(exc, "user_message", str(exc))}, status=402)
     except stripe.error.StripeError as exc:
-        logger.exception("Stripe error during no-show charge for appointment %s", appointment.pk)
         return JsonResponse({"error": getattr(exc, "user_message", str(exc))}, status=502)
 
     payment_method_id, payment_method_data = _retrieve_payment_method(intent.payment_method)
@@ -1555,17 +1533,14 @@ def stripe_webhook(request):
     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE", "")
     payload = request.body
     if not settings.STRIPE_WEBHOOK_SECRET:
-        logger.warning("Stripe webhook secret is not configured")
         return HttpResponse(status=503)
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, settings.STRIPE_WEBHOOK_SECRET)
     except (ValueError, stripe.error.SignatureVerificationError):
-        logger.warning("Invalid Stripe webhook signature")
         return HttpResponse(status=400)
 
     event_type = event.get("type")
     data_object = event.get("data", {}).get("object")
-    print("[Stripe Webhook Debug] Received event", event_type)
 
     try:
         if event_type == "payment_intent.succeeded":
@@ -1582,15 +1557,11 @@ def stripe_webhook(request):
         elif event_type == "charge.updated":
             if data_object and data_object.get("amount_refunded"):
                 _handle_charge_refund_update(data_object)
-            else:
-                print("[Stripe Webhook Debug] charge.updated with no amount_refunded payload", data_object)
+       
         elif event_type == "payment_method.attached":
             _handle_payment_method_attached(data_object)
-        else:
-            print("[Stripe Webhook Debug] Unhandled event passthrough", event_type)
-            logger.debug("Unhandled Stripe event %s", event_type)
+
     except Exception:  # pragma: no cover - ensure webhook ack and log
-        logger.exception("Error processing Stripe webhook (%s)", event_type)
         return HttpResponse(status=500)
 
     return HttpResponse(status=200)

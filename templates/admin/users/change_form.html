@@ -1,0 +1,98 @@
+{% extends "admin/change_form.html" %}
+{% load i18n tz %}
+
+{% block after_field_sets %}
+    {{ block.super }}
+    {% if client_files is not None %}
+        <div class="module" id="client-files-panel">
+            <h2>Client Files{% if client_files_total %} ({{ client_files_total }}){% endif %}</h2>
+            <p class="help">Files uploaded for this client across all appointments.</p>
+            {% if client_files %}
+                <div class="results">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th scope="col">File</th>
+                                <th scope="col">Appointment</th>
+                                <th scope="col">Category</th>
+                                <th scope="col">Uploaded at</th>
+                                <th scope="col">Uploader</th>
+                                <th scope="col" class="actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for file in client_files %}
+                                <tr>
+                                    <td>
+                                        {% if file.file %}
+                                            <a href="{{ file.file.url }}" target="_blank" rel="noopener">
+                                                {{ file.filename|default:file.file.name }}
+                                            </a>
+                                        {% else %}
+                                            <span class="quiet">Unavailable</span>
+                                        {% endif %}
+                                        {% if file.description %}
+                                            <div class="help">{{ file.description }}</div>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if file.appointment %}
+                                            {% if file.appointment_admin_url %}
+                                                <a href="{{ file.appointment_admin_url }}" class="nowrap">
+                                                    Appointment {{ file.appointment.pk }}
+                                                </a>
+                                            {% else %}
+                                                <span class="nowrap">Appointment {{ file.appointment.pk }}</span>
+                                            {% endif %}
+                                            {% if file.appointment.start_time %}
+                                                <div class="help">
+                                                    {{ file.appointment.start_time|localtime|date:"Y-m-d H:i" }}
+                                                </div>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="quiet">Not linked to an appointment</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ file.get_kind_display }}</td>
+                                    <td>
+                                        {% if file.uploaded_at %}
+                                            {{ file.uploaded_at|localtime|date:"Y-m-d H:i" }}
+                                        {% else %}
+                                            <span class="quiet">—</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {{ file.uploader_display }}
+                                        {% if file.uploaded_by_user %}
+                                            <div class="help">
+                                                {{ file.uploaded_by_user.get_full_name|default:file.uploaded_by_user.get_username }}
+                                            </div>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if file.admin_delete_url %}
+                                            <button
+                                                type="submit"
+                                                class="button deletelink"
+                                                formaction="{{ file.admin_delete_url }}"
+                                                formmethod="post"
+                                                formnovalidate
+                                                onclick="return confirm('Delete this file?');"
+                                            >
+                                                Delete
+                                            </button>
+                                        {% else %}
+                                            <span class="quiet">Unavailable</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="help">No files uploaded yet.</div>
+            {% endif %}
+        </div>
+    {% endif %}
+{% endblock %}

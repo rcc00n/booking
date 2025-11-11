@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import unittest
 from collections import defaultdict
 from datetime import datetime, timedelta, time
 
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -14,6 +15,7 @@ from core.admin import AppointmentAdmin
 from core.models import (
     Appointment,
     AppointmentItem,
+    AppointmentItemStatus,
     MasterProfile,
     MasterWorkDay,
     MasterRoom,
@@ -24,6 +26,12 @@ from core.models import (
 
 class RoomAllocationTests(TransactionTestCase):
     reset_sequences = True
+
+    @classmethod
+    def setUpClass(cls):
+        if connection.vendor != "postgresql":
+            raise unittest.SkipTest("Room allocation relies on PostgreSQL-specific constraints")
+        super().setUpClass()
 
     def setUp(self):
         super().setUp()
@@ -259,6 +267,12 @@ class ServiceRoomTestMixin:
 
 class AppointmentItemCleanTests(ServiceRoomTestMixin, TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        if connection.vendor != "postgresql":
+            raise unittest.SkipTest("Room allocation validation relies on PostgreSQL-specific constraints")
+        super().setUpClass()
+
     def test_clean_assigns_room_when_available(self):
         master = self._make_master("clean-master")
         appointment = self._appointment(self.base_start)
@@ -294,6 +308,8 @@ class AppointmentItemCleanTests(ServiceRoomTestMixin, TestCase):
         self.assertIn("All rooms", str(ctx.exception))
 
     def test_clean_blocks_master_overlap(self):
+        if connection.vendor != "postgresql":
+            self.skipTest("Master overlap constraint relies on PostgreSQL-specific indexes")
         master = self._make_master("overlap-master")
         slot = self.base_start
         self._create_item(self._appointment(slot), master, slot)
@@ -341,6 +357,10 @@ class AppointmentAdminRoomValidationTests(ServiceRoomTestMixin, TestCase):
     def setUp(self):
         super().setUp()
         self.admin_view = AppointmentAdmin(Appointment, django_admin.site)
+        self.cancelled_status, _ = AppointmentItemStatus.objects.get_or_create(
+            code="CANCELLED",
+            defaults={"name": "Cancelled"},
+        )
 
     def _empty_bag(self):
         return {
@@ -376,6 +396,18 @@ class AppointmentAdminRoomValidationTests(ServiceRoomTestMixin, TestCase):
         self.admin_view._validate_service_room_capacity(rows, bag)
         self.assertFalse(bag["items"])
 
+    def test_helper_skips_cancelled_rows(self):
+        self.service.allowed_rooms.set([self.room_a])
+        start = self.base_start
+        # CHANGED: cancelled rows must be ignored when tallying usage.
+        rows = [
+            {"idx": 0, "service_id": str(self.service.pk), "dt": start, "duration_override": None, "status_code": "CANCELLED"},
+            {"idx": 1, "service_id": str(self.service.pk), "dt": start, "duration_override": None},
+        ]
+        bag = self._empty_bag()
+        self.admin_view._validate_service_room_capacity(rows, bag)
+        self.assertFalse(bag["items"])
+
     def test_enforce_room_capacity_for_items_blocks_conflicts(self):
         self.service.allowed_rooms.set([self.room_a])
         appointment = self._appointment(self.base_start)
@@ -400,3 +432,64 @@ class AppointmentAdminRoomValidationTests(ServiceRoomTestMixin, TestCase):
         row_errs = {}
         self.admin_view._enforce_room_capacity_for_items(prebuilt, row_errs)
         self.assertIn("items-1-start_time_1", row_errs)
+
+    def test_enforce_room_capacity_skips_cancelled_items(self):
+        self.service.allowed_rooms.set([self.room_a])
+        appointment = self._appointment(self.base_start)
+        master_one = self._make_master("admin-room-master-cancelled")
+        master_two = self._make_master("admin-room-master-active")
+        # CHANGED: cancelled AppointmentItem instances should not reduce available capacity.
+        cancelled_item = AppointmentItem(
+            appointment=appointment,
+            service=self.service,
+            master=master_one,
+            start_time=self.base_start,
+        )
+        active_item = AppointmentItem(
+            appointment=appointment,
+            service=self.service,
+            master=master_two,
+            start_time=self.base_start,
+        )
+        cancelled_item.full_clean()
+        cancelled_item.save()
+        active_item.full_clean()
+        active_item.save()
+        cancelled_item.status = self.cancelled_status
+        cancelled_item.save(update_fields=["status"])
+        cancelled_item.current_status_code = "CANCELLED"
+
+        prebuilt = [(0, cancelled_item, ""), (1, active_item, "")]
+        row_errs = {}
+        self.admin_view._enforce_room_capacity_for_items(prebuilt, row_errs)
+        self.assertFalse(row_errs)
+
+    def test_enforce_room_capacity_honors_staged_cancellations(self):
+        self.service.allowed_rooms.set([self.room_a])
+        appointment = self._appointment(self.base_start)
+        master_one = self._make_master("admin-room-master-stage-one")
+        master_two = self._make_master("admin-room-master-stage-two")
+        # CHANGED: staged cancellations passed from the form should be skipped.
+        item_one = AppointmentItem(
+            appointment=appointment,
+            service=self.service,
+            master=master_one,
+            start_time=self.base_start,
+        )
+        item_two = AppointmentItem(
+            appointment=appointment,
+            service=self.service,
+            master=master_two,
+            start_time=self.base_start,
+        )
+        item_one.full_clean()
+        item_two.full_clean()
+
+        prebuilt = [(0, item_one, ""), (1, item_two, "")]
+        row_errs = {}
+        self.admin_view._enforce_room_capacity_for_items(
+            prebuilt,
+            row_errs,
+            cancelled_prefixes={"items-0"},
+        )
+        self.assertFalse(row_errs)

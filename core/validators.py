@@ -14,7 +14,7 @@ ALBERTA_POSTAL_RE = re.compile(rf"^T\d{_CANADA_PC_PART[1:]}[ ]?\d[ABCEGHJ-NPRSTV
 def clean_phone(value):
     """Проверяет, что телефон соответствует международному формату."""
     if not PHONE_RE.fullmatch(value):
-        raise ValidationError("Введите телефон в формате +79991234567")
+        raise ValidationError(_("Enter a phone number in the +79991234567 format."))
     return value
 
 
@@ -46,14 +46,14 @@ def validate_quantity_positive(qty: Optional[int]) -> None:
     if qty is None:
         return
     if qty <= 0:
-        raise ValidationError(_("Количество должно быть положительным."))
+        raise ValidationError(_("Quantity must be greater than zero."))
 
 
 def validate_master_can_provide_service(master, service) -> None:
     if not master or not service or ServiceMaster is None:
         return
     if not ServiceMaster.objects.filter(master=master, service=service).exists():
-        raise ValidationError(_("Выбранный мастер не оказывает эту услугу."))
+        raise ValidationError(_("The selected provider cannot perform this service."))
 
 
 def validate_discount_vs_promocode_rule(service_discount, promocode, *, allow_override: bool) -> None:
@@ -62,7 +62,7 @@ def validate_discount_vs_promocode_rule(service_discount, promocode, *, allow_ov
     Одновременное применение допустимо только при allow_override=True (админ).
     """
     if service_discount and promocode and not allow_override:
-        raise ValidationError(_("Нельзя одновременно применять скидку услуги и промокод для одной позиции."))
+        raise ValidationError(_("Choose either a service discount or a promo code for the same item."))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ def validate_appointment_has_items_on_save(appt) -> None:
     mgr = _items_manager(appt)
     count = mgr.count() if mgr is not None else 0
     if count == 0:
-        raise ValidationError(_("У приёма должна быть хотя бы одна позиция услуги."))
+        raise ValidationError(_("Add at least one service item before saving the appointment."))
 
 
 def validate_no_duplicate_services_in_items(appt) -> None:
@@ -88,7 +88,7 @@ def validate_no_duplicate_services_in_items(appt) -> None:
         return
     ids = list(mgr.values_list("service_id", flat=True))
     if len(ids) != len(set(ids)):
-        raise ValidationError(_("В приёме обнаружены дублирующиеся услуги. Объедините их количеством."))
+        raise ValidationError(_("Duplicate services detected. Combine them into a single line with the correct quantity."))
 
 
 def validate_items_prices_nonnegative(appt) -> None:
@@ -96,7 +96,7 @@ def validate_items_prices_nonnegative(appt) -> None:
     if not mgr:
         return
     if mgr.filter(final_price__lt=Decimal("0")).exists():
-        raise ValidationError(_("Обнаружена позиция с отрицательной итоговой ценой."))
+        raise ValidationError(_("At least one item has a negative final price."))
 
 
 def validate_no_time_overlap_for_same_master(appt) -> None:
@@ -132,6 +132,5 @@ def validate_no_time_overlap_for_same_master(appt) -> None:
         prev_start, prev_end = intervals[0]
         for cur_start, cur_end in intervals[1:]:
             if cur_start < prev_end:
-                raise ValidationError(_("Найдены пересечения по времени у одного мастера внутри приёма."))
+                raise ValidationError(_("Schedule conflict: a provider has overlapping services in this appointment."))
             prev_start, prev_end = cur_start, cur_end
-

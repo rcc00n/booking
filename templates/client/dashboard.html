@@ -24,7 +24,9 @@
   <!-- ▸▸ SIDEBAR ◂◂ -->
   <aside class="dashboard-sidebar flex flex-col">
     <div class="sidebar-brand">
-      <span class="mark">MB</span>
+      <span class="mark">
+        <img src="{% static 'img/malva-dashboard-logo.png' %}" alt="Malva Booking logo" class="sidebar-brand__logo">
+      </span>
       <span data-i18n="common.brand">Malva Booking</span>
     </div>
 
@@ -49,14 +51,17 @@
       <select id="dashLangSelect" class="lang-picker__select" data-lang-switch></select>
     </div>
 
-    <nav id="sidebar" class="account-menu" aria-label="Account menu">
+    <nav id="sidebar"
+         class="account-menu"
+         aria-label="Account menu"
+         data-i18n-attr="aria-label:dashboard.nav.accountMenu">
       <a href="#" data-tab="overview" class="account-menu__link">
         <span class="account-menu__icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 11h16M4 16h10"/><path d="M12 7h8"/><path d="M6 7h.01"/><path d="M8 7h.01"/><path d="M10 7h.01"/><path d="M4 21h16a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1Z"/></svg>
         </span>
         <div class="account-menu__meta">
-          <span>Overview</span>
-          <small>Insights & quick actions</small>
+          <span data-i18n="dashboard.nav.overview">Overview</span>
+          <small data-i18n="dashboard.nav.overviewHint">Insights & quick actions</small>
         </div>
       </a>
       <a href="#" data-tab="appointments" class="account-menu__link">
@@ -65,7 +70,7 @@
         </span>
         <div class="account-menu__meta">
           <span data-i18n="services.userMenu.appointments">Appointments</span>
-          <small>Upcoming & history</small>
+          <small data-i18n="dashboard.nav.appointmentsHint">Upcoming & history</small>
         </div>
         {% with count=upcoming_items|length %}
           {% if count %}
@@ -78,12 +83,12 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3z"/><path d="M16 11h4v4h-4z"/><path d="M3 7l2-4h13"/></svg>
         </span>
         <div class="account-menu__meta">
-          <span>Billing & payments</span>
-          <small>Wallet & saved details</small>
+          <span data-i18n="dashboard.nav.billing">Billing & payments</span>
+          <small data-i18n="dashboard.nav.billingHint">Wallet & saved details</small>
         </div>
         {% with billing=autofill_defaults.payment %}
           {% if not billing.name %}
-            <span class="account-menu__badge">Setup</span>
+            <span class="account-menu__badge" data-i18n="dashboard.nav.setup">Setup</span>
           {% endif %}
         {% endwith %}
       </a>
@@ -93,7 +98,7 @@
         </span>
         <div class="account-menu__meta">
           <span data-i18n="services.userMenu.forms">Forms</span>
-          <small>Intake & updates</small>
+          <small data-i18n="dashboard.nav.formsHint">Intake & updates</small>
         </div>
         {% if pending_intake_assignments %}
           <span class="account-menu__badge">{{ pending_intake_assignments }}</span>
@@ -105,7 +110,7 @@
         </span>
         <div class="account-menu__meta">
           <span data-i18n="services.userMenu.settings">Settings</span>
-          <small>Preferences & privacy</small>
+          <small data-i18n="dashboard.nav.settingsHint">Preferences & privacy</small>
         </div>
       </a>
       <a href="#" data-tab="support" class="account-menu__link">
@@ -113,8 +118,8 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.09 9a3 3 0 0 1 5.82 1c0 2-3 2-3 4"/><path d="M12 17h.01"/></svg>
         </span>
         <div class="account-menu__meta">
-          <span>Support</span>
-          <small>Help & resources</small>
+          <span data-i18n="dashboard.nav.support">Support</span>
+          <small data-i18n="dashboard.nav.supportHint">Help & resources</small>
         </div>
       </a>
     </nav>
@@ -139,12 +144,19 @@
   <main class="dashboard-main flex-1 flex flex-col bg-[#F7F6F1]">
 
     <div class="dashboard-mobile-bar lg:hidden">
-      <button type="button" class="dashboard-mobile-bar__btn" data-nav-toggle aria-label="Open menu">☰</button>
+      <button type="button"
+              class="dashboard-mobile-bar__btn"
+              data-nav-toggle
+              aria-label="Open menu"
+              data-i18n-attr="aria-label:services.header.openMenu">☰</button>
+      <div class="dashboard-mobile-logo" aria-hidden="true">
+        <img src="{% static 'img/malva-dashboard-logo.png' %}" alt="Malva Booking logo">
+      </div>
       {% with user_display=request.user.first_name|default:request.user.username %}
         <div class="dashboard-mobile-user">
           <span class="badge" aria-hidden="true">{{ user_display|slice:":1"|upper }}</span>
           <div>
-            <small>Client Portal</small>
+            <small data-i18n="dashboard.mobile.portalLabel">Client Portal</small>
             <strong>{{ user_display }}</strong>
           </div>
         </div>
@@ -159,7 +171,7 @@
       <div class="tab-card p-8 bg-gradient-to-br from-white via-[#f8fbf8] to-[#eef6f1] border border-white/50 shadow-[0_35px_80px_rgba(15,47,35,.12)] mb-8">
         <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <span class="account-tag mb-3">Luxury wellness</span>
+            <span class="account-tag mb-3" data-i18n="services.hero.badge">Luxury wellness</span>
             {% if request.user.first_name %}
               <h1 class="dashboard-heading text-3xl sm:text-4xl font-extrabold text-[#1b392c]" data-i18n="dashboard.greetingNamed" data-i18n-vars='{"name":"{{ request.user.first_name|escapejs }}"}'>Hello, {{ request.user.first_name }}!</h1>
             {% else %}
@@ -173,7 +185,7 @@
                data-i18n="dashboard.book">Book now</a>
             <a href="/accounts/#categories"
                class="inline-flex items-center justify-center px-5 py-3 rounded-full border border-[#1f5f44]/30 text-[#1f5f44] hover:bg-white">
-              Explore categories
+              <span data-i18n="services.hero.ctaSecondary">Explore categories</span>
             </a>
           </div>
         </div>
@@ -211,7 +223,7 @@
         <article class="tab-card p-6 flex flex-col gap-4">
           <div class="flex items-center justify-between gap-4">
             <h2 class="text-lg font-semibold text-[#1b392c]" data-i18n="dashboard.upcomingTitle">Upcoming appointments</h2>
-            <a href="#" class="text-sm text-[#1f5f44] font-semibold" data-tab-jump="appointments">View all</a>
+            <a href="#" class="text-sm text-[#1f5f44] font-semibold" data-tab-jump="appointments" data-i18n="dashboard.overview.viewAll">View all</a>
           </div>
           {% if upcoming_items %}
             <ul id="upcomingAppointments" class="space-y-4 max-h-64 overflow-y-auto pr-1">
@@ -219,7 +231,7 @@
                 <li class="appointment-item"
                     data-appt-id="{{ it.appointment.id }}"
                     data-item-id="{{ it.id }}"
-                    data-appt-start-iso="{{ it.start_time|utc|date:'c' }}">
+                    data-appt-start-iso="{{ it.start_time|localtime|date:'c' }}">
                   <div class="flex items-start justify-between gap-3">
                     <div>
                       <p class="font-semibold text-[#1b392c] appt-dt">
@@ -252,6 +264,9 @@
                        data-appt-id="{{ it.appointment.id }}"
                        data-item-id="{{ it.id }}"
                        data-service-id="{{ it.service.id }}"
+                       data-master-id="{{ it.master_id }}"
+                       data-start-iso="{{ it.start_time|localtime|date:'c' }}"
+                       data-service-name="{{ it.service.name|default_if_none:''|escape }}"
                        data-i18n="dashboard.appointment.reschedule">Reschedule</a>
                   </div>
                 </li>
@@ -265,7 +280,7 @@
         <article class="tab-card p-6 xl:col-span-2">
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold text-[#1b392c]" data-i18n="dashboard.statsTitle">Stats</h2>
-            <span class="text-sm text-[#4D4D4D]/70">Last 6 months</span>
+            <span class="text-sm text-[#4D4D4D]/70" data-i18n="dashboard.stats.range">Last 6 months</span>
           </div>
           <canvas id="stats_chart"
                   data-labels="{{ chart_labels|join:',' }}"
@@ -277,8 +292,8 @@
       <div class="tab-card p-6 mt-8">
         <h2 class="text-lg font-semibold mb-4 text-[#1b392c]" data-i18n="dashboard.recentTitle">Recent appointments</h2>
         {% if recent_appointments %}
-          <div class="overflow-x-auto">
-            <table class="recent-table min-w-full text-sm">
+          <div class="overflow-x-auto" >
+            <table class="recent-table min-w-full text-sm" data-collapse-mobile>
               <thead>
                 <tr class="text-left bg-[#dfe7de] text-[#1b392c]">
                   <th class="py-2 pl-3 pr-4 rounded-l-lg" data-i18n="dashboard.table.date">Date</th>
@@ -286,7 +301,7 @@
                   <th class="py-2 pr-4" data-i18n="dashboard.table.master">Master</th>
                   <th class="py-2 pr-4" data-i18n="dashboard.table.status">Status</th>
                   <th class="py-2 pr-4" data-i18n="dashboard.table.payment">Payment</th>
-                  <th class="py-2 pr-3 rounded-r-lg" data-i18n="dashboard.table.amount">Amount</th>
+                  <th class="py-2 pr-3 rounded-r-lg" data-i18n="dashboard.table.receipt">Receipt</th>
                 </tr>
               </thead>
               <tbody class="[&>tr]:border-b [&>tr]:border-[#DEDEDE]">
@@ -319,8 +334,18 @@
                       <span class="table-value">{{ a.payment_status.name|default:"—" }}</span>
                     </td>
                     <td class="py-2 pr-3">
-                      <span class="table-label" data-i18n="dashboard.table.amount">Amount</span>
-                      <span class="table-value">{{ a.price|default:"—" }}</span>
+                      <span class="table-label" data-i18n="dashboard.table.receipt">Receipt</span>
+                      {% if a.client_receipt_url %}
+                        <a href="{{ a.client_receipt_url }}"
+                           class="table-value text-[#1f5f44] font-semibold hover:underline"
+                           target="_blank"
+                           rel="noopener noreferrer"
+                           data-i18n="dashboard.table.receiptCta">
+                          View receipt
+                        </a>
+                      {% else %}
+                        <span class="table-value text-[#4D4D4D]/60" data-i18n="dashboard.table.noReceipt">Not available yet</span>
+                      {% endif %}
                     </td>
                   </tr>
                 {% endfor %}
@@ -353,7 +378,7 @@
       <form method="post" class="tab-card p-6 mt-8" data-autofill-group="profile">
         <div class="mb-6">
           <h2 class="text-2xl font-semibold text-[#1b392c]" data-i18n="dashboard.profileTitle">Profile</h2>
-          <p class="text-sm text-[#4D4D4D]/80">Update your personal details to keep bookings seamless.</p>
+          <p class="text-sm text-[#4D4D4D]/80" data-i18n="dashboard.profile.subtitle">Update your personal details to keep bookings seamless.</p>
         </div>
         {% csrf_token %}
         <div class="grid md:grid-cols-2 gap-6">
@@ -366,6 +391,7 @@
                    class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
                    autocomplete="given-name"
                    placeholder="Jane"
+                   data-i18n-attr="placeholder:dashboard.form.firstNamePlaceholder"
                    data-autofill-key="first_name">
             {% if profile_form.first_name.errors %}
               <p class="mt-1 text-sm text-red-600">{{ profile_form.first_name.errors.0 }}</p>
@@ -381,6 +407,7 @@
                    class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
                    autocomplete="family-name"
                    placeholder="Doe"
+                   data-i18n-attr="placeholder:dashboard.form.lastNamePlaceholder"
                    data-autofill-key="last_name">
             {% if profile_form.last_name.errors %}
               <p class="mt-1 text-sm text-red-600">{{ profile_form.last_name.errors.0 }}</p>
@@ -432,7 +459,7 @@
           </div>
 
           <div>
-            <label class="block text-sm font-medium" for="{{ profile_form.postal_code.id_for_label }}">Postal code</label>
+            <label class="block text-sm font-medium" for="{{ profile_form.postal_code.id_for_label }}" data-i18n="dashboard.form.postalCode">Postal code</label>
             <input type="text"
                    name="{{ profile_form.postal_code.html_name }}"
                    id="{{ profile_form.postal_code.id_for_label }}"
@@ -441,6 +468,7 @@
                    class="w-full mt-1 uppercase tracking-wide rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
                    autocomplete="postal-code"
                    placeholder="T2X1A1"
+                   data-i18n-attr="placeholder:dashboard.form.postalPlaceholder"
                    data-autofill-key="postal_code">
             {% if profile_form.postal_code.errors %}
               <p class="mt-1 text-sm text-red-600">{{ profile_form.postal_code.errors.0 }}</p>
@@ -448,7 +476,7 @@
           </div>
 
           <div class="md:col-span-2">
-            <label class="block text-sm font-medium" for="{{ profile_form.address.id_for_label }}">Address</label>
+            <label class="block text-sm font-medium" for="{{ profile_form.address.id_for_label }}" data-i18n="dashboard.form.address">Address</label>
             <textarea
                    name="{{ profile_form.address.html_name }}"
                    id="{{ profile_form.address.id_for_label }}"
@@ -456,6 +484,7 @@
                    class="w-full mt-1 rounded-lg border-[#DEDEDE] px-3 py-2 text-sm focus:border-[#AF9525] focus:ring-2 focus:ring-[#AF9525]/30"
                    autocomplete="street-address"
                    placeholder="123 Main St"
+                   data-i18n-attr="placeholder:dashboard.form.addressPlaceholder"
                    data-autofill-key="address">{{ profile_form.address.value|default_if_none:'' }}</textarea>
             {% if profile_form.address.errors %}
               <p class="mt-1 text-sm text-red-600">{{ profile_form.address.errors.0 }}</p>
@@ -471,7 +500,7 @@
 
         <div>
 
-          <p class="uppercase text-xs tracking-[0.2em] text-[#4D4D4D]/70">Schedule</p>
+          <p class="uppercase text-xs tracking-[0.2em] text-[#4D4D4D]/70" data-i18n="dashboard.appointments.scheduleLabel">Schedule</p>
 
           <h2 class="text-2xl font-semibold text-[#1b392c]" data-i18n="dashboard.myTitle">My appointments</h2>
 
@@ -496,7 +525,7 @@
           {% for month in appointments_by_month %}
             <div class="tab-card p-5" data-month="{{ month.iso }}">
               <h3 class="text-lg font-bold text-[#1b392c] mb-3">{{ month.label }}</h3>
-              <div class="appointments-list grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <div class="appointments-list grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-collapse-mobile> 
                 {% for a in month.appointments %}
                   <div class="tab-card p-5 flex flex-col gap-4 appointment-item{% if not a.is_future %} opacity-70{% endif %}"
                        data-appt-id="{{ a.id }}"
@@ -504,7 +533,16 @@
                     <div class="flex items-start justify-between gap-3">
                       <div>
                         <p class="font-medium text-[#1b392c] appt-dt">{{ a.start_display }}</p>
-                        <p class="text-xs text-[#4D4D4D]/70">Payment status: {{ a.payment_status|default:"Pending" }}</p>
+                        {% with pay_status=a.payment_status|default:'' %}
+                          <p class="text-xs text-[#4D4D4D]/70">
+                            <span data-i18n="dashboard.appointment.paymentStatusLabel">Payment status:</span>
+                            {% if pay_status %}
+                              <span class="ms-1">{{ pay_status }}</span>
+                            {% else %}
+                              <span class="ms-1" data-i18n="dashboard.appointment.pending">Pending</span>
+                            {% endif %}
+                          </p>
+                        {% endwith %}
                       </div>
                       <span class="inline-flex items-center rounded-full bg-[#E8E8FD] px-2 py-1 text-xs font-semibold text-[#2F2F99]"
                             data-role="appointment-status"
@@ -522,7 +560,7 @@
                               <p class="text-xs text-[#4D4D4D]/80">
                                 {{ item.master_name }}
                                 {% if item.start_display %}
-                                  &middot; {{ item.start_display }}
+                                  &middot; <span data-role="item-start">{{ item.start_display }}</span>
                                 {% endif %}
                               </p>
                             </div>
@@ -544,6 +582,9 @@
                                  data-appt-id="{{ a.id }}"
                                  data-item-id="{{ item.id }}"
                                  data-service-id="{{ item.service_id }}"
+                                 data-master-id="{{ item.master_id }}"
+                                 data-start-iso="{{ item.start_iso }}"
+                                 data-service-name="{{ item.service_name|default_if_none:''|escape }}"
                                  data-i18n="dashboard.appointment.reschedule">Reschedule</a>
                             </div>
                           {% else %}
@@ -551,20 +592,20 @@
                               {% if item.status_code == "CANCELLED" %}
                                 {{ item.status_label }}
                               {% elif item.is_future %}
-                                Actions unavailable
+                                <span data-i18n="dashboard.appointment.actionsUnavailable">Actions unavailable</span>
                               {% else %}
-                                Completed
+                                <span data-i18n="dashboard.appointment.completed">Completed</span>
                               {% endif %}
                             </span>
                           {% endif %}
                         </li>
                       {% empty %}
-                        <li class="text-sm text-[#4D4D4D]/70">No services recorded.</li>
+                        <li class="text-sm text-[#4D4D4D]/70" data-i18n="dashboard.appointment.noItems">No services recorded.</li>
                       {% endfor %}
                     </ul>
                   </div>
                 {% empty %}
-                  <p class="col-span-full text-sm text-[#4D4D4D]/70">No appointments this month.</p>
+                  <p class="col-span-full text-sm text-[#4D4D4D]/70" data-i18n="dashboard.appointment.noMonth">No appointments this month.</p>
                 {% endfor %}
               </div>
             </div>
@@ -582,38 +623,38 @@
     <section id="tab-billing" class="tab hidden">
       <div class="tab-card p-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
-          <p class="uppercase text-xs tracking-[0.2em] text-[#4D4D4D]/70">Wallet</p>
-          <h2 class="text-2xl font-semibold text-[#1b392c]">Balance & billing</h2>
-          <p class="text-sm text-[#4D4D4D]/80">Store your payment details for lightning-fast checkout.</p>
+          <p class="uppercase text-xs tracking-[0.2em] text-[#4D4D4D]/70" data-i18n="dashboard.billing.sectionLabel">Wallet</p>
+          <h2 class="text-2xl font-semibold text-[#1b392c]" data-i18n="dashboard.billing.title">Balance & billing</h2>
+          <p class="text-sm text-[#4D4D4D]/80" data-i18n="dashboard.billing.subtitle">Store your payment details for lightning-fast checkout.</p>
         </div>
         <div class="text-4xl font-extrabold text-[#1f5f44]">—</div>
       </div>
 
       <article class="tab-card p-6 flex flex-col gap-4" data-payment-account-card>
         <div>
-          <h3 class="text-lg font-semibold text-[#1b392c]">Billing details saved to your account</h3>
-          <p class="text-sm text-[#4D4D4D]/70">We reuse these fields across invoices and checkout on every device.</p>
+          <h3 class="text-lg font-semibold text-[#1b392c]" data-i18n="dashboard.billing.cardTitle">Billing details saved to your account</h3>
+          <p class="text-sm text-[#4D4D4D]/70" data-i18n="dashboard.billing.cardSubtitle">We reuse these fields across invoices and checkout on every device.</p>
         </div>
         {% with billing=autofill_defaults.payment %}
           <dl class="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm" data-payment-account-list>
             <div>
-              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Billing name</dt>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.billing.fields.name">Billing name</dt>
               <dd class="text-[#1b392c]" data-payment-account-field="name">{{ billing.name|default:"—" }}</dd>
             </div>
             <div>
-              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Email</dt>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.form.email">Email</dt>
               <dd class="text-[#1b392c] break-words" data-payment-account-field="email">{{ billing.email|default:"—" }}</dd>
             </div>
             <div>
-              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Phone</dt>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.form.phone">Phone</dt>
               <dd class="text-[#1b392c]" data-payment-account-field="phone">{{ billing.phone|default:"—" }}</dd>
             </div>
             <div>
-              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Postal code</dt>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.form.postalCode">Postal code</dt>
               <dd class="text-[#1b392c]" data-payment-account-field="postal_code">{{ billing.postal_code|default:"—" }}</dd>
             </div>
             <div class="sm:col-span-2">
-              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Address</dt>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.form.address">Address</dt>
               <dd class="text-[#1b392c] whitespace-pre-line" data-payment-account-field="address">
                 {% if billing.address_line1 or billing.address_line2 %}
                   {% if billing.address_line1 %}{{ billing.address_line1 }}{% endif %}
@@ -624,35 +665,37 @@
               </dd>
             </div>
             <div>
-              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">City</dt>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.billing.fields.city">City</dt>
               <dd class="text-[#1b392c]" data-payment-account-field="city">{{ billing.city|default:"—" }}</dd>
             </div>
             <div>
-              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Province / State</dt>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.billing.fields.state">Province / State</dt>
               <dd class="text-[#1b392c]" data-payment-account-field="state">{{ billing.state|default:"—" }}</dd>
             </div>
             <div>
-              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Country</dt>
+              <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.billing.fields.country">Country</dt>
               <dd class="text-[#1b392c]" data-payment-account-field="country">{{ billing.country|default:"—" }}</dd>
             </div>
           </dl>
           <p class="text-xs text-[#4D4D4D]/60" data-payment-account-updated>
             {% if billing.updated_at %}
-              Updated {{ billing.updated_at }}
+              {% with updated_ts=billing.updated_at|stringformat:"s" %}
+                <span data-i18n="dashboard.billing.updated" data-i18n-vars='{"date":"{{ updated_ts|escapejs }}"}'>Updated {{ billing.updated_at }}</span>
+              {% endwith %}
             {% else %}
-              Not updated yet.
+              <span data-i18n="dashboard.billing.notUpdated">Not updated yet.</span>
             {% endif %}
           </p>
           <div class="flex flex-wrap gap-3 pt-2">
             <button type="button"
                     class="px-4 py-2 bg-[#1f5f44] text-white rounded-lg hover:bg-[#194f39] transition"
                     data-autofill-sync-account="payment">
-              Sync this device to account
+              <span data-i18n="dashboard.billing.syncDevice">Sync this device to account</span>
             </button>
             <button type="button"
                     class="px-4 py-2 border border-[#1f5f44]/30 text-[#1f5f44] rounded-lg hover:border-[#1f5f44]"
                     data-autofill-clear-account="payment">
-              Clear account copy
+              <span data-i18n="dashboard.billing.clearDevice">Clear account copy</span>
             </button>
           </div>
         {% endwith %}
@@ -663,19 +706,19 @@
     <!-- FORMS -->
     <section id="tab-forms" class="tab hidden">
       <div class="tab-card p-6 flex flex-col gap-5">
-        <h2 class="text-2xl font-semibold text-[#1b392c]">Forms & questionnaires</h2>
-        <p class="text-[#4D4D4D]/80">We use these forms to tailor every appointment. Update them anytime to keep your preferences fresh.</p>
+        <h2 class="text-2xl font-semibold text-[#1b392c]" data-i18n="dashboard.formsTab.title">Forms & questionnaires</h2>
+        <p class="text-[#4D4D4D]/80" data-i18n="dashboard.formsTab.subtitle">We use these forms to tailor every appointment. Update them anytime to keep your preferences fresh.</p>
         <div class="grid sm:grid-cols-2 gap-4">
           <div class="rounded-2xl border border-[#1f5f44]/25 p-4">
-            <p class="text-xs uppercase tracking-[0.2em] text-[#4D4D4D]/70">Pending</p>
+            <p class="text-xs uppercase tracking-[0.2em] text-[#4D4D4D]/70" data-i18n="dashboard.formsTab.pending">Pending</p>
             <p class="text-4xl font-bold text-[#1f5f44]">{{ pending_intake_assignments|default:0 }}</p>
           </div>
           <div class="rounded-2xl border border-[#1f5f44]/25 p-4">
-            <p class="text-xs uppercase tracking-[0.2em] text-[#4D4D4D]/70">Submitted</p>
+            <p class="text-xs uppercase tracking-[0.2em] text-[#4D4D4D]/70" data-i18n="dashboard.formsTab.submitted">Submitted</p>
             <p class="text-4xl font-bold text-[#1f5f44]">{{ total_intake_assignments|default:0 }}</p>
           </div>
         </div>
-        <a href="{% url 'client-intake-forms' %}" class="inline-flex items-center gap-2 self-start px-5 py-2.5 rounded-full border border-[#1f5f44] text-[#1f5f44] hover:bg-[#1f5f44] hover:text-white transition">
+        <a href="{% url 'client-intake-forms' %}" class="inline-flex items-center gap-2 self-start px-5 py-2.5 rounded-full border border-[#1f5f44] text-[#1f5f44] hover:bg-[#1f5f44] hover:text-white transition" data-i18n="dashboard.formsTab.open">
           Open forms
         </a>
       </div>
@@ -687,43 +730,47 @@
       <div class="grid gap-6 xl:grid-cols-2">
         <article class="tab-card p-6 flex flex-col gap-4">
           <div>
-            <h3 class="text-lg font-semibold text-[#1b392c]">Account profile (server copy)</h3>
-            <p class="text-sm text-[#4D4D4D]/70">These details live securely in your Malva account.</p>
+            <h3 class="text-lg font-semibold text-[#1b392c]" data-i18n="dashboard.settings.accountTitle">Account profile (server copy)</h3>
+            <p class="text-sm text-[#4D4D4D]/70" data-i18n="dashboard.settings.accountSubtitle">These details live securely in your Malva account.</p>
           </div>
           {% with defaults=autofill_defaults.profile %}
             <dl class="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <div>
-                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Name</dt>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.form.name">Name</dt>
                 <dd class="text-[#1b392c]">{{ defaults.first_name }} {{ defaults.last_name }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Phone</dt>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.form.phone">Phone</dt>
                 <dd class="text-[#1b392c]">{{ defaults.phone|default:"—" }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Email</dt>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.form.email">Email</dt>
                 <dd class="text-[#1b392c] break-words">{{ defaults.email|default:"—" }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Birth date</dt>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.form.birthDate">Birth date</dt>
                 <dd class="text-[#1b392c]">{{ defaults.birth_date|default:"—" }}</dd>
               </div>
               <div class="sm:col-span-2">
-                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Address</dt>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.form.address">Address</dt>
                 <dd class="text-[#1b392c] whitespace-pre-line">{{ defaults.address|default:"—" }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Postal code</dt>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.form.postalCode">Postal code</dt>
                 <dd class="text-[#1b392c]">{{ defaults.postal_code|default:"—" }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">How heard</dt>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.settings.howHeard">How heard</dt>
                 <dd class="text-[#1b392c]">{{ defaults.how_heard|default:"—" }}</dd>
               </div>
               <div>
-                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide">Marketing consent</dt>
+                <dt class="font-semibold text-[#1b392c]/70 uppercase text-xs tracking-wide" data-i18n="dashboard.settings.marketingConsent">Marketing consent</dt>
                 <dd class="text-[#1b392c]">
-                  {% if defaults.email_marketing_consent %}Subscribed{% else %}Not subscribed{% endif %}
+                  {% if defaults.email_marketing_consent %}
+                    <span data-i18n="dashboard.settings.marketingSubscribed">Subscribed</span>
+                  {% else %}
+                    <span data-i18n="dashboard.settings.marketingUnsubscribed">Not subscribed</span>
+                  {% endif %}
                 </dd>
               </div>
             </dl>
@@ -732,43 +779,43 @@
             <button type="button"
                     class="px-4 py-2 bg-[#1f5f44] text-white rounded-lg hover:bg-[#194f39] transition"
                     data-autofill-sync="profile">
-              Sync profile to this device
+              <span data-i18n="dashboard.settings.syncProfile">Sync profile to this device</span>
             </button>
             <button type="button"
                     class="px-4 py-2 border border-[#1f5f44]/30 text-[#1f5f44] rounded-lg hover:border-[#1f5f44]"
                     data-autofill-clear="profile">
-              Clear device copy
+              <span data-i18n="dashboard.settings.clearProfile">Clear device copy</span>
             </button>
           </div>
         </article>
 
         <article class="tab-card p-6 flex flex-col gap-4">
           <div>
-            <h3 class="text-lg font-semibold text-[#1b392c]">Device autofill</h3>
-            <p class="text-sm text-[#4D4D4D]/70">Saved form data never leaves this browser. Clear it if you are on a shared computer.</p>
+            <h3 class="text-lg font-semibold text-[#1b392c]" data-i18n="dashboard.device.title">Device autofill</h3>
+            <p class="text-sm text-[#4D4D4D]/70" data-i18n="dashboard.device.subtitle">Saved form data never leaves this browser. Clear it if you are on a shared computer.</p>
           </div>
           <div class="rounded-xl border border-[#DAD3C1] bg-[#F7F6F1] p-4" data-autofill-device>
-            <div class="text-sm text-[#4D4D4D]/70" data-autofill-empty>No autofill data stored on this device yet.</div>
+            <div class="text-sm text-[#4D4D4D]/70" data-autofill-empty data-i18n="dashboard.device.empty">No autofill data stored on this device yet.</div>
             <div class="space-y-3 hidden" data-autofill-list></div>
           </div>
           <div class="flex flex-wrap gap-3 pt-2">
             <button type="button"
                     class="px-4 py-2 border border-[#AF9525] text-[#AF9525] rounded-lg hover:bg-[#AF9525] hover:text-white transition"
                     data-autofill-clear-all>
-              Clear all device data
+              <span data-i18n="dashboard.device.clear">Clear all device data</span>
             </button>
           </div>
         </article>
         <article class="tab-card p-6 flex flex-col gap-4 xl:col-span-2">
           <div>
-            <h3 class="text-lg font-semibold text-[#1b392c]">Language & alerts</h3>
-            <p class="text-sm text-[#4D4D4D]/70">Keep every touchpoint consistent by picking a preferred language.</p>
+            <h3 class="text-lg font-semibold text-[#1b392c]" data-i18n="dashboard.settings.languageTitle">Language & alerts</h3>
+            <p class="text-sm text-[#4D4D4D]/70" data-i18n="dashboard.settings.languageSubtitle">Keep every touchpoint consistent by picking a preferred language.</p>
           </div>
           <div class="lang-picker max-w-sm" data-i18n-attr="aria-label:common.language">
             <label for="dashLangSelectPanel" class="lang-picker__label" data-i18n="common.language">Language</label>
             <select id="dashLangSelectPanel" class="lang-picker__select" data-lang-switch></select>
           </div>
-          <p class="text-sm text-[#4D4D4D]/70">Changes apply instantly and sync across all of your signed-in sessions.</p>
+          <p class="text-sm text-[#4D4D4D]/70" data-i18n="dashboard.settings.languageNote">Changes apply instantly and sync across all of your signed-in sessions.</p>
         </article>
       </div>
     </section>
@@ -777,34 +824,75 @@
       <div class="grid gap-6 xl:grid-cols-2">
         <article class="tab-card p-6 flex flex-col gap-4">
           <div>
-            <h2 class="text-2xl font-semibold text-[#1b392c]">Concierge support</h2>
-            <p class="text-sm text-[#4D4D4D]/80">Message our team for scheduling help, account changes, or product guidance.</p>
+            <h2 class="text-2xl font-semibold text-[#1b392c]" data-i18n="dashboard.support.conciergeTitle">Concierge support</h2>
+            <p class="text-sm text-[#4D4D4D]/80" data-i18n="dashboard.support.conciergeSubtitle">Message our team for scheduling help, account changes, or product guidance.</p>
           </div>
           <ul class="space-y-2 text-sm text-[#4D4D4D]/80">
-            <li><strong>Email:</strong> <a href="mailto:{{ support_email }}" class="text-[#1f5f44] hover:underline">{{ support_email }}</a></li>
+            <li><strong data-i18n="dashboard.support.email">Email:</strong> <a href="mailto:{{ support_email }}" class="text-[#1f5f44] hover:underline">{{ support_email }}</a></li>
             {% if business_phone %}
-              <li><strong>Phone:</strong> <a href="tel:{{ business_phone }}" class="text-[#1f5f44] hover:underline">{{ business_phone }}</a></li>
+              <li><strong data-i18n="dashboard.support.phone">Phone:</strong> <a href="tel:{{ business_phone }}" class="text-[#1f5f44] hover:underline">{{ business_phone }}</a></li>
             {% endif %}
-            <li><strong>Hours:</strong> Monday–Friday, 9am–6pm</li>
+            <li>
+              <strong data-i18n="dashboard.support.hours">Hours:</strong>
+              <span data-i18n="dashboard.support.hoursValue">Monday–Friday, 9am–6pm</span>
+            </li>
           </ul>
           <div class="flex flex-wrap gap-3 pt-2">
-            <a href="/accounts/#services" class="px-5 py-2.5 rounded-full bg-[#1f5f44] text-white hover:bg-[#194f39]">Book another visit</a>
-            <a href="{% url 'client-intake-forms' %}" class="px-5 py-2.5 rounded-full border border-[#1f5f44]/40 text-[#1f5f44] hover:bg-white">Update forms</a>
+            <a href="/accounts/#services" class="px-5 py-2.5 rounded-full bg-[#1f5f44] text-white hover:bg-[#194f39]" data-i18n="dashboard.support.bookAgain">Book another visit</a>
+            <a href="{% url 'client-intake-forms' %}" class="px-5 py-2.5 rounded-full border border-[#1f5f44]/40 text-[#1f5f44] hover:bg-white" data-i18n="dashboard.support.updateForms">Update forms</a>
           </div>
         </article>
         <article class="tab-card p-6 flex flex-col gap-4">
           <div>
-            <h2 class="text-2xl font-semibold text-[#1b392c]">Resources & downloads</h2>
-            <p class="text-sm text-[#4D4D4D]/80">Keep Malva close with our app and quick-reference guides.</p>
+            <h2 class="text-2xl font-semibold text-[#1b392c]" data-i18n="dashboard.support.resourcesTitle">Resources & downloads</h2>
+            <p class="text-sm text-[#4D4D4D]/80" data-i18n="dashboard.support.resourcesSubtitle">Keep Malva close with our app and quick-reference guides.</p>
           </div>
           <ul class="space-y-2 text-sm text-[#4D4D4D]/80">
-            <li>Step-by-step account walkthroughs</li>
-            <li>Aftercare recommendations from your master</li>
-            <li>Printable receipts and booking confirmations</li>
+            <li data-i18n="dashboard.support.resources.walkthroughs">Step-by-step account walkthroughs</li>
+            <li data-i18n="dashboard.support.resources.aftercare">Aftercare recommendations from your master</li>
+            <li data-i18n="dashboard.support.resources.receipts">Printable receipts and booking confirmations</li>
           </ul>
           <div class="flex flex-wrap gap-3">
-            <a href="#download" class="px-5 py-2.5 rounded-full bg-[#AF9525] text-white hover:bg-[#9b8521]">Download the app</a>
-            <a href="#help" class="px-5 py-2.5 rounded-full border border-[#AF9525]/30 text-[#AF9525] hover:bg-white">Visit help center</a>
+            <a href="#download" class="px-5 py-2.5 rounded-full bg-[#AF9525] text-white hover:bg-[#9b8521]" data-i18n="services.userMenu.download">Download the app</a>
+            <a href="#help" class="px-5 py-2.5 rounded-full border border-[#AF9525]/30 text-[#AF9525] hover:bg-white" data-i18n="dashboard.support.helpCenter">Visit help center</a>
+          </div>
+        </article>
+        <article class="tab-card p-6 flex flex-col gap-5 xl:col-span-2">
+          <div>
+            <h2 class="text-2xl font-semibold text-[#1b392c]" data-i18n="dashboard.support.policiesTitle">Policies & privacy</h2>
+            <p class="text-sm text-[#4D4D4D]/80" data-i18n="dashboard.support.policiesSubtitle">Full transparency on how we handle consent, marketing emails, and stored data.</p>
+          </div>
+          <div class="space-y-4">
+            {% for doc in support_documents %}
+              <div class="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm shadow-[#1f5f44]/5">
+                <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <h3 class="text-lg font-semibold text-[#1b392c]">{{ doc.card_heading }}</h3>
+                    {% if doc.card_excerpt %}
+                      <p class="text-sm text-[#4D4D4D]/80">{{ doc.card_excerpt }}</p>
+                    {% endif %}
+                  </div>
+                  {% with updated_doc=doc.updated_at|date:"M j, Y" %}
+                    <span class="text-xs uppercase tracking-wide text-[#1b392c]/55"
+                          data-i18n="dashboard.support.docs.updated"
+                          data-i18n-vars='{"date":"{{ updated_doc|escapejs }}"}'>
+                      Updated {{ doc.updated_at|date:"M j, Y" }}
+                    </span>
+                  {% endwith %}
+                </div>
+                <div class="flex flex-wrap gap-3 pt-3">
+                  <a href="{{ doc.get_absolute_url }}" class="px-4 py-2 rounded-full bg-[#1f5f44] text-white hover:bg-[#194f39]">{{ doc.card_cta_label }}</a>
+                  <a href="{{ doc.get_absolute_url }}" class="px-4 py-2 rounded-full border border-[#1f5f44]/20 text-[#1f5f44] hover:bg-white" aria-label="Open {{ doc.card_heading }}" data-i18n="dashboard.support.docs.viewDetails">View details</a>
+                </div>
+              </div>
+            {% empty %}
+              <p class="text-sm text-[#4D4D4D]/80">
+                <span data-i18n="dashboard.support.docs.emptyIntro">We're preparing updated documentation.</span>
+                <span data-i18n="dashboard.support.docs.emptyPrompt">Email</span>
+                <a href="mailto:{{ support_email }}" class="text-[#1f5f44] hover:underline">{{ support_email }}</a>
+                <span data-i18n="dashboard.support.docs.emptyOutro">if you need anything right away.</span>
+              </p>
+            {% endfor %}
           </div>
         </article>
       </div>
@@ -829,6 +917,7 @@
       <div>
         <label class="text-sm" data-i18n="dashboard.reschedule.masterLabel">Master</label>
         <select id="resMaster" class="w-full border border-[#DEDEDE] rounded-md px-3 py-2"></select>
+        <p class="text-xs text-[#4D4D4D]/80 mt-1" id="resMasterHint" hidden></p>
       </div>
 
       <!-- Новый горизонтальный выбор даты/времени -->
@@ -838,14 +927,15 @@
         <div class="lg:hidden mt-2" id="rsMobileContainer">
           <div class="rs-mobile-days" id="rsMobileDays" aria-live="polite"></div>
           <div class="rs-mobile-times" id="rsMobileTimes" aria-live="polite"></div>
-          <div class="rs-mobile-empty hidden" id="rsMobileEmpty">No available times on this day.</div>
+          <div class="rs-mobile-empty hidden" id="rsMobileEmpty" data-i18n="dashboard.reschedule.mobileEmpty">No available times on this day.</div>
         </div>
 
         <div class="ol2 mt-1 hidden lg:flex" id="rsOl">
           <div class="ol2__toolbar">
-            <div class="flex gap-2">
+            <div class="flex gap-2 flex-wrap">
               <button id="rsPrev" type="button" class="px-2 py-1 border rounded-md" data-i18n="dashboard.reschedule.prev">← Prev</button>
               <button id="rsToday" type="button" class="px-2 py-1 border rounded-md" data-i18n="dashboard.reschedule.today">Today</button>
+              <button id="rsCurrent" type="button" class="px-2 py-1 border rounded-md hidden" data-i18n="dashboard.reschedule.current">Current slot</button>
               <button id="rsNext" type="button" class="px-2 py-1 border rounded-md" data-i18n="dashboard.reschedule.next">Next →</button>
             </div>
             <div id="rsRange" class="font-bold text-[#204029]">—</div>
@@ -856,7 +946,7 @@
         </div>
 
         <p class="text-xs text-[#4D4D4D]/80 mt-2 hidden lg:block" data-i18n="dashboard.reschedule.hint">Scroll horizontally. Red slots are busy.</p>
-        <p class="text-xs text-[#4D4D4D]/80 mt-2 lg:hidden" id="rsMobileHint">Tap a date to see available times.</p>
+        <p class="text-xs text-[#4D4D4D]/80 mt-2 lg:hidden" id="rsMobileHint" data-i18n="dashboard.reschedule.mobileHint">Tap a date to see available times.</p>
         <p class="text-sm text-red-600 mt-1 hidden" id="resErr"></p>
         <p class="text-sm text-emerald-700 mt-1 hidden" id="resOk"></p>
       </div>
@@ -875,5 +965,3 @@
 <script defer src="{% static 'js/dashboard.js' %}"></script>
 </body>
 </html>
-
-

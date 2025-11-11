@@ -8,10 +8,12 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt, csrf_protect
+from django.views.generic import TemplateView
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 from django.utils.html import format_html
 from django.urls import reverse
+import logging
 from datetime import datetime
 from decimal import Decimal
 from django.core.exceptions import ImproperlyConfigured, ValidationError, PermissionDenied
@@ -20,9 +22,23 @@ import json
 import stripe
 
 from core.models import (
-    Appointment, ServiceCategory, Service, PromoCode,
-    AppointmentStatusHistory, AppointmentItemStatusHistory, MasterProfile, UserProfile, CancellationReason,
-    AppointmentItem, BookingCart, BookingCartItem, Payment, ClientIntakeForm, ServiceMaster, ProductSale,
+    Appointment,
+    ServiceCategory,
+    Service,
+    PromoCode,
+    AppointmentStatusHistory,
+    AppointmentItemStatusHistory,
+    MasterProfile,
+    UserProfile,
+    CancellationReason,
+    AppointmentItem,
+    BookingCart,
+    BookingCartItem,
+    Payment,
+    ClientIntakeForm,
+    ServiceMaster,
+    ProductSale,
+    SupportDocument,
 )
 from core.services.booking import (
     get_available_slots,
@@ -42,6 +58,8 @@ from core.services.pricing import (
     PricingComputationError,
 )
 from core.services.refunds import RefundService, RefundError
+
+logger = logging.getLogger(__name__)
 from core.utils.fees import card_processing_fee
 from core.tasks import send_item_cancellation_email, send_item_confirmation_email
 from core.forms import PaymentRefundForm
@@ -54,9 +72,9 @@ def _build_catalog_context(request):
     today = timezone.now().date()
     discount_window = Q(discounts__start_date__lte=today, discounts__end_date__gte=today)
 
+    base_services_qs = Service.objects.filter(is_active=True)
     services_qs = (
-        Service.objects.filter(is_active=True)
-        .select_related("category")
+        base_services_qs.select_related("category")
         .prefetch_related(
             Prefetch(
                 "pre_appointment_forms",
@@ -68,6 +86,7 @@ def _build_catalog_context(request):
     if q:
         services_qs = services_qs.filter(Q(name__icontains=q) | Q(description__icontains=q))
 
+    base_discounted_services_qs = base_services_qs.filter(discount_window).distinct()
     discounted_services_qs = services_qs.filter(discount_window).distinct()
 
     selected_category = None
@@ -85,27 +104,51 @@ def _build_catalog_context(request):
     )
     categories = []
     discounted_services = None
+    selected_only_discounted = bool(selected_category and selected_category.only_discounted_services)
+
     for category in categories_qs:
-        if category.only_discounted_services:
-            if selected_category and not getattr(selected_category, "only_discounted_services", False):
-                category.catalog_services = []
-                categories.append(category)
+        if selected_category:
+            if selected_only_discounted and not category.only_discounted_services:
                 continue
+            if not selected_only_discounted and category.pk != selected_category.pk:
+                continue
+
+        if category.only_discounted_services:
             if discounted_services is None:
                 discounted_services = list(discounted_services_qs)
-            category.catalog_services = discounted_services
+            services_for_category = discounted_services
         else:
-            if selected_category and getattr(selected_category, "only_discounted_services", False):
-                category.catalog_services = []
-            else:
-                category.catalog_services = list(category.service_set.all())
-        categories.append(category)
+            services_for_category = list(category.service_set.all())
+
+        if services_for_category:
+            category.catalog_services = services_for_category
+            categories.append(category)
+
+    categories_with_services_ids = set(
+        base_services_qs.filter(category__isnull=False).values_list("category_id", flat=True)
+    )
+    has_global_discounted_services = base_discounted_services_qs.exists()
+    filter_categories = []
+    for category in ServiceCategory.objects.for_catalog():
+        if category.only_discounted_services:
+            if has_global_discounted_services:
+                filter_categories.append(category)
+            continue
+        if category.pk in categories_with_services_ids:
+            filter_categories.append(category)
+
+    active_category = ""
+    if selected_category:
+        if selected_category.only_discounted_services and has_global_discounted_services:
+            active_category = str(selected_category.pk)
+        elif not selected_category.only_discounted_services and selected_category.pk in categories_with_services_ids:
+            active_category = str(selected_category.pk)
 
     return {
         "categories": categories,
-        "filter_categories": ServiceCategory.objects.for_catalog(),
+        "filter_categories": filter_categories,
         "q": q,
-        "active_category": str(cat),
+        "active_category": active_category,
         "search_results": services_qs if q else None,
         "has_any_services": services_qs.exists(),
         "uncategorized": services_qs.filter(category__isnull=True),
@@ -147,6 +190,38 @@ def public_mainmenu(request):
     ctx["default_prepayment_percent"] = options[0] if options else 100
 
     return render(request, "client/mainmenu.html", ctx)
+
+
+class SupportDocumentDetailView(TemplateView):
+    """
+    Renders admin-authored support/legal documents (privacy notice, marketing policy, etc.).
+    """
+
+    template_name = "legal/support_document.html"
+
+    def get_queryset(self):
+        return SupportDocument.objects.active()
+
+    def get_document(self):
+        slug = self.kwargs.get("slug")
+        document_type = self.kwargs.get("document_type")
+        queryset = self.get_queryset()
+        if slug:
+            return get_object_or_404(queryset, slug=slug)
+        if document_type:
+            return get_object_or_404(queryset, document_type=document_type)
+        raise Http404("Support document is not specified")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        document = self.get_document()
+        context["document"] = document
+        context.setdefault(
+            "support_email",
+            getattr(settings, "BUSINESS_SUPPORT_EMAIL", getattr(settings, "DEFAULT_FROM_EMAIL", "")),
+        )
+        context.setdefault("page_title", document.title)
+        return context
 
 # ===== API (оставляем только для авторизованных) =====
 
@@ -1207,8 +1282,9 @@ def payment_refund_view(request, pk):
         if form.is_valid():
             requested_minor = form.cleaned_data["amount_minor"]
             try:
-                print(
-                    "[Refund Debug] Initiating refund",
+                # CHANGED: log refund workflow steps instead of printing to stdout.
+                logger.debug(
+                    "Initiating refund %s",
                     {
                         "payment_id": str(payment.pk),
                         "appointment_id": str(appointment.pk),
@@ -1221,8 +1297,8 @@ def payment_refund_view(request, pk):
                     appointment,
                     requested_minor,
                 )
-                print(
-                    "[Refund Debug] Allocations resolved",
+                logger.debug(
+                    "Refund allocations resolved %s",
                     [
                         {
                             "payment_id": str(allocation.payment.pk),
@@ -1234,7 +1310,7 @@ def payment_refund_view(request, pk):
                 )
                 stripe_ids = RefundService.perform_refund(allocations, actor=request.user)
             except RefundError as exc:
-                print("[Refund Debug] RefundError encountered:", exc)
+                logger.debug("RefundError encountered %s", exc, exc_info=exc)
                 form.add_error(None, str(exc))
             else:
                 amount = form.cleaned_data["amount_to_refund"]
@@ -1263,8 +1339,8 @@ def payment_refund_view(request, pk):
                         stripe_html,
                     ),
                 )
-                print(
-                    "[Refund Debug] Refund complete",
+                logger.debug(
+                    "Refund complete %s",
                     {
                         "payment_id": str(payment.pk),
                         "appointment_id": str(appointment.pk),
