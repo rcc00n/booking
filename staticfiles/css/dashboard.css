@@ -875,18 +875,31 @@ textarea { resize: vertical; min-height: 120px; }
 
 
 @media (min-width: 640px) {
-  .sm-flex-row { flex-direction: row; }
-  .sm-items-center { align-items: center; }
-  .sm-justify-between { justify-content: space-between; }
-  .sm-justify-end { justify-content: flex-end; }
-  .grid-sm-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .sm-col-span-2 { grid-column: span 2 / span 2; }
-  .text-4xl-sm { font-size: 2.25rem; line-height: 2.5rem; }
+  .sm-flex-row,
+  .sm\:flex-row { flex-direction: row; }
+  .sm-items-center,
+  .sm\:items-center { align-items: center; }
+  .sm-justify-between,
+  .sm\:justify-between { justify-content: space-between; }
+  .sm-justify-end,
+  .sm\:justify-end { justify-content: flex-end; }
+  .grid-sm-2,
+  .sm\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sm-col-span-2,
+  .sm\:col-span-2 { grid-column: span 2 / span 2; }
+  .text-4xl-sm,
+  .sm\:text-4xl { font-size: 2.25rem; line-height: 2.5rem; }
+  .sm\:text-sm { font-size: 0.875rem; line-height: 1.25rem; }
 }
 
 @media (min-width: 768px) {
-  .grid-md-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .md-col-span-2 { grid-column: span 2 / span 2; }
+  .grid-md-2,
+  .md\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .md-col-span-2,
+  .md\:col-span-2 { grid-column: span 2 / span 2; }
+  .md\:flex-row { flex-direction: row; }
+  .md\:items-start { align-items: flex-start; }
+  .md\:justify-between { justify-content: space-between; }
 }
 
 @media (min-width: 1024px) {
@@ -896,18 +909,27 @@ textarea { resize: vertical; min-height: 120px; }
   .dashboard-mobile-bar { display: none; }
   .dashboard-content { padding: 0; }
 
-  .lg-flex { display: flex !important; }
-  .lg-block { display: block !important; }
-  .lg-flex-row { flex-direction: row !important; }
-  .lg-items-center { align-items: center !important; }
-  .lg-justify-between { justify-content: space-between !important; }
-  .hide-desktop { display: none !important; }
+  .lg-flex,
+  .lg\:flex { display: flex !important; }
+  .lg-block,
+  .lg\:block { display: block !important; }
+  .lg-flex-row,
+  .lg\:flex-row { flex-direction: row !important; }
+  .lg-items-center,
+  .lg\:items-center { align-items: center !important; }
+  .lg-justify-between,
+  .lg\:justify-between { justify-content: space-between !important; }
+  .hide-desktop,
+  .lg\:hidden { display: none !important; }
 }
 
 @media (min-width: 1280px) {
-  .grid-xl-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .grid-xl-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .xl-col-span-2 { grid-column: span 2 / span 2; }
+  .grid-xl-3,
+  .xl\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grid-xl-2,
+  .xl\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .xl-col-span-2,
+  .xl\:col-span-2 { grid-column: span 2 / span 2; }
 }
 
 @media (max-width: 1023px) {
