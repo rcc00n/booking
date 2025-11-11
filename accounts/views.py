@@ -43,6 +43,7 @@ from core.models import (
     EmailVerification,
     ClientIntakeAssignment,
     ClientIntakeFormSubmission,
+    Payment,
 )
 from core.services.intake_assignments import ensure_universal_assignments_for_profile
 from core.services.pricing import get_available_prepayment_percents
@@ -120,6 +121,54 @@ def _is_rate_limited(action: str, email: str, ip: str) -> bool:
     if ip and ip_limit:
         limited = limited or _limit_hit(action, f"ip:{ip}", *ip_limit)
     return limited
+
+
+def _resolve_payment_receipt_url(payment) -> str | None:
+    """Return the most user-friendly receipt URL for a payment."""
+    receipt_file = getattr(payment, "receipt_pdf", None)
+    if receipt_file:
+        try:
+            url = receipt_file.url
+        except Exception as err:  # pragma: no cover - storage edge cases
+            logger.warning("Failed to resolve receipt pdf for payment %s: %s", payment.pk, err)
+        else:
+            if url:
+                return url
+    url = getattr(payment, "receipt_url", "") or ""
+    return url or None
+
+
+def _attach_receipt_links(appointments: list[Appointment]) -> None:
+    """Attach client_receipt_url/client_receipt_payment_id attrs to appointments."""
+    if not appointments:
+        return
+    appointment_ids = [appt.pk for appt in appointments if appt.pk]
+    if not appointment_ids:
+        for appt in appointments:
+            appt.client_receipt_url = None
+            appt.client_receipt_payment_id = None
+        return
+
+    payments_by_appt: dict = {}
+    payment_qs = (
+        Payment.objects.filter(appointment_id__in=appointment_ids)
+        .order_by("-created_at")
+        .only("id", "appointment_id", "created_at", "receipt_url", "receipt_pdf")
+    )
+    for payment in payment_qs:
+        payments_by_appt.setdefault(payment.appointment_id, []).append(payment)
+
+    for appointment in appointments:
+        receipt_url = None
+        receipt_payment = None
+        for payment in payments_by_appt.get(appointment.id, ()):
+            url_candidate = _resolve_payment_receipt_url(payment)
+            if url_candidate:
+                receipt_url = url_candidate
+                receipt_payment = payment
+                break
+        appointment.client_receipt_url = receipt_url
+        appointment.client_receipt_payment_id = str(receipt_payment.pk) if (receipt_payment and receipt_url) else None
 
 # =========================
 # Аутентификация и доступ
@@ -492,7 +541,9 @@ class ClientDashboardView(LoginRequiredMixin, TemplateView):
         ctx["appointments"] = qs
 
         # прошлые и будущие
-        ctx["recent_appointments"] = qs.filter(start_time__lt=now)[:5]
+        recent_appointments = list(qs.filter(start_time__lt=now)[:5])
+        _attach_receipt_links(recent_appointments)
+        ctx["recent_appointments"] = recent_appointments
 
         # 🔹 все будущие (по возрастанию), исключая отменённые
         upcoming_qs = (

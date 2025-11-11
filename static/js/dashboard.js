@@ -58,6 +58,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   };
 
+  const bind = (node, event, handler, options) => {
+    if (node && typeof node.addEventListener === 'function') {
+      node.addEventListener(event, handler, options);
+      return true;
+    }
+    return false;
+  };
+
   function parseUtc(iso) {
     const d = new Date(iso);
     return isNaN(d.getTime()) ? null : d;
@@ -516,37 +524,228 @@ document.addEventListener('DOMContentLoaded', () => {
   const fmtHM = d => d.toLocaleTimeString(getLocale(), {hour:'numeric', minute:'2-digit'});
   const fmtTime = iso => { try { return new Date(iso).toLocaleTimeString(getLocale(), {hour:'2-digit', minute:'2-digit'});} catch(e){ return iso; } };
   const ymd = d => { const m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${d.getFullYear()}-${m}-${day}`; };
+  const fmtDateTime = (iso, options) => {
+    if (!iso) return '';
+    try {
+      const opts = options || { dateStyle: 'medium', timeStyle: 'short' };
+      return new Date(iso).toLocaleString(getLocale(), opts);
+    } catch (err) {
+      return iso;
+    }
+  };
+
+  function cssEscape(value) {
+    const str = value === undefined || value === null ? '' : String(value);
+    if (!str) return '';
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+      return window.CSS.escape(str);
+    }
+    return str.replace(/[\0-\x1F\x7F"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/g, '\\$&');
+  }
+
+  function findAppointmentNodes(apptId) {
+    const escaped = cssEscape(apptId);
+    if (!escaped) return [];
+    return Array.from(document.querySelectorAll(`[data-appt-id="${escaped}"]`));
+  }
+
+  function findItemNodes(itemId) {
+    const escaped = cssEscape(itemId);
+    if (!escaped) return [];
+    return Array.from(document.querySelectorAll(`[data-item-id="${escaped}"]`));
+  }
+
+  function setLoadingState(node, loading) {
+    if (!node || !node.dataset) return;
+    if (loading) {
+      node.dataset.loading = 'true';
+      node.setAttribute('aria-busy', 'true');
+      node.classList.add('is-loading');
+    } else {
+      delete node.dataset.loading;
+      node.removeAttribute('aria-busy');
+      node.classList.remove('is-loading');
+    }
+  }
+
+  function updateItemStatusDisplay(node, status) {
+    if (!node || !status) return;
+    const badge = node.querySelector('[data-role="item-status"]');
+    if (!badge) return;
+    const code = (status.code || '').toUpperCase();
+    const label = status.label || code || badge.textContent || '';
+    if (code) badge.setAttribute('data-status-code', code);
+    badge.textContent = label;
+  }
+
+  function freezeItemActions(node, noteText) {
+    if (!node) return;
+    node.querySelectorAll('.appt-cancel, .appt-reschedule').forEach((link) => {
+      link.setAttribute('aria-disabled', 'true');
+      link.classList.add('is-disabled');
+      link.removeAttribute('href');
+      link.tabIndex = -1;
+    });
+    if (noteText) {
+      let note = node.querySelector('[data-role="item-note"]');
+      if (!note) {
+        note = document.createElement('span');
+        note.className = 'text-xs text-[#4D4D4D]/70 block';
+        note.style.display = 'block';
+        note.setAttribute('data-role', 'item-note');
+        node.appendChild(note);
+      }
+      note.style.display = 'block';
+      note.textContent = noteText;
+    }
+  }
+
+  function setAppointmentStatus(apptId, status) {
+    if (!apptId || !status) return false;
+    const nodes = findAppointmentNodes(apptId);
+    if (!nodes.length) return false;
+    const code = (status.code || '').toUpperCase();
+    const label = status.label || code || '';
+    nodes.forEach((node) => {
+      node.querySelectorAll('[data-role="appointment-status"]').forEach((badge) => {
+        if (code) badge.setAttribute('data-status-code', code);
+        badge.textContent = label;
+      });
+    });
+    return true;
+  }
+
+  function setAppointmentStart(apptId, iso) {
+    if (!apptId || !iso) return false;
+    const nodes = findAppointmentNodes(apptId);
+    if (!nodes.length) return false;
+    const text = fmtDateTime(iso);
+    nodes.forEach((node) => {
+      node.setAttribute('data-appt-start-iso', iso);
+      node.querySelectorAll('.appt-dt').forEach((el) => {
+        el.textContent = text;
+      });
+    });
+    return true;
+  }
+
+  function setItemStart(itemId, iso) {
+    if (!itemId || !iso) return false;
+    const nodes = findItemNodes(itemId);
+    if (!nodes.length) return false;
+    const text = fmtDateTime(iso);
+    nodes.forEach((node) => {
+      if (node.classList && node.classList.contains('appointment-item')) {
+        node.setAttribute('data-appt-start-iso', iso);
+        node.querySelectorAll('.appt-dt').forEach((el) => {
+          el.textContent = text;
+        });
+      }
+      node.querySelectorAll('[data-role="item-start"]').forEach((el) => {
+        el.textContent = text;
+      });
+    });
+    return true;
+  }
+
+  function applyCancellationResult(payload) {
+    if (!payload) return false;
+    let mutated = false;
+    const status = payload.item_status || { code: 'CANCELLED', label: 'Cancelled' };
+    const noteText = status.label || 'Cancelled';
+    const targets = [];
+    if (payload.item_id) targets.push(payload.item_id);
+    if (Array.isArray(payload.item_ids)) targets.push(...payload.item_ids);
+    targets.forEach((itemId) => {
+      const nodes = findItemNodes(itemId);
+      if (nodes.length) mutated = true;
+      nodes.forEach((node) => {
+        updateItemStatusDisplay(node, status);
+        freezeItemActions(node, noteText);
+      });
+    });
+    if (payload.appointment_id && payload.appointment_aggregated_status) {
+      if (setAppointmentStatus(payload.appointment_id, payload.appointment_aggregated_status)) {
+        mutated = true;
+      }
+    }
+    return mutated;
+  }
+
+  function applyRescheduleResult(payload) {
+    if (!payload) return false;
+    let mutated = false;
+    const apptId = (payload.appointment && payload.appointment.id) || payload.appointment_id;
+    const apptStart = payload.appointment && payload.appointment.start_time;
+    if (apptId && apptStart) {
+      if (setAppointmentStart(apptId, apptStart)) mutated = true;
+    }
+    const itemId = (payload.item && payload.item.id) || payload.item_id;
+    const itemStart = payload.item && payload.item.start_time;
+    if (itemId && itemStart) {
+      if (setItemStart(itemId, itemStart)) mutated = true;
+    }
+    const aggregated = payload.appointment_aggregated_status
+      || (payload.appointment && payload.appointment.aggregated_status);
+    if (apptId && aggregated) {
+      if (setAppointmentStatus(apptId, aggregated)) mutated = true;
+    }
+    return mutated;
+  }
 
   /* ===== отмена с подтверждением + «перечёркивание» без перезагрузки ===== */
-  async function cancelAppointment(apptId, itemId){
-    if(!confirm(translate('dashboard.reschedule.confirmCancel', null, 'Cancel this appointment?'))) return;
-    const payload = itemId ? { item_id: itemId } : {};
-    const r = await fetch(`/accounts/api/appointment/${apptId}/cancel/`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','X-CSRFToken': csrftoken},
-      credentials:'same-origin',
-      body: JSON.stringify(payload)
-    });
-    const data = await r.json().catch(()=> ({}));
-    if(!r.ok){
-      const fallback = data.error || data.detail || await r.text();
-      alert(translate('dashboard.reschedule.cancelError', { detail: fallback }, `Cancel error: ${fallback}`));
-      return;
-    }
-    location.reload();
-  }
-  document.addEventListener('click', async (e)=>{
-    const a = e.target.closest('.appt-cancel');
-    if(!a) return;
-    if (a.hasAttribute('aria-disabled') || a.classList.contains('is-disabled')) {
-      e.preventDefault();
-      return;
-    }
-    e.preventDefault();
-    const apptId = a.dataset.apptId;
-    const itemId = a.dataset.itemId || '';
+  async function cancelAppointment(apptId, itemId, trigger){
     if(!apptId) return;
-    cancelAppointment(apptId, itemId);
+    const confirmation = window.confirm(translate('dashboard.reschedule.confirmCancel', null, 'Cancel this appointment?'));
+    if(!confirmation) return;
+    const payload = itemId ? { item_id: itemId } : {};
+    setLoadingState(trigger, true);
+    try{
+      const response = await fetch(`/accounts/api/appointment/${apptId}/cancel/`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRFToken': csrftoken},
+        credentials:'same-origin',
+        body: JSON.stringify(payload)
+      });
+      let data = {};
+      try{
+        data = await response.json();
+      }catch(_){
+        data = {};
+      }
+      if(!response.ok){
+        const detail = data.error || data.detail || data.message || 'Unable to cancel appointment.';
+        throw new Error(detail);
+      }
+      const mutated = applyCancellationResult(data);
+      if(!mutated){
+        window.setTimeout(()=> location.reload(), 150);
+      }else{
+        enforce24hLock();
+      }
+    }catch(err){
+      const detail = err && err.message ? err.message : '';
+      alert(translate('dashboard.reschedule.cancelError', { detail }, `Cancel error: ${detail || 'Unable to cancel'}`));
+    }finally{
+      setLoadingState(trigger, false);
+    }
+  }
+  document.addEventListener('click', (event)=>{
+    const link = event.target.closest('.appt-cancel');
+    if(!link) return;
+    if (
+      link.hasAttribute('aria-disabled')
+      || link.classList.contains('is-disabled')
+      || link.dataset.loading === 'true'
+    ){
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    const apptId = link.dataset.apptId;
+    const itemId = link.dataset.itemId || '';
+    if(!apptId) return;
+    cancelAppointment(apptId, itemId, link);
   });
 
   /* ===== RESCHEDULE: новый горизонтальный пикер ===== */
@@ -585,6 +784,10 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   function openRes(apptId, serviceId, itemId){
+    if (!resModal || !resMaster || !rsGrid) {
+      alert(translate('dashboard.reschedule.unavailable', null, 'Reschedule is temporarily unavailable.'));
+      return;
+    }
     const startOfDay = new Date();
     startOfDay.setHours(0,0,0,0);
     resState.apptId = apptId;
@@ -601,12 +804,18 @@ document.addEventListener('DOMContentLoaded', () => {
     resState.timeRows = [];
     resState.locale = getLocale();
     resMaster.innerHTML = '';
-    resSubmit.disabled = true;
-    resErr.classList.add('hidden'); resOk.classList.add('hidden');
-    resModal.classList.remove('hidden'); resModal.classList.add('flex');
+    if (resSubmit) resSubmit.disabled = true;
+    if (resErr) { resErr.classList.add('hidden'); clearTextKey(resErr); }
+    if (resOk) { resOk.classList.add('hidden'); clearTextKey(resOk); }
+    resModal.classList.remove('hidden');
+    resModal.classList.add('flex');
     loadMastersAndRender();
   }
-  function closeRes(){ resModal.classList.add('hidden'); resModal.classList.remove('flex'); }
+  function closeRes(){
+    if (!resModal) return;
+    resModal.classList.add('hidden');
+    resModal.classList.remove('flex');
+  }
 
   async function fetchAvail(dayISO, masterId){
     const params = new URLSearchParams({ service: resState.serviceId, date: dayISO });
@@ -965,51 +1174,84 @@ document.addEventListener('DOMContentLoaded', () => {
     await renderWindow();
   }
 
-  resMaster.addEventListener('change', async ()=>{
+  bind(resMaster, 'change', async ()=>{
     resState.masterId = resMaster.value;
-    resState.slot = null; resSubmit.disabled=true; resState.cache.clear();
+    resState.slot = null;
+    if (resSubmit) resSubmit.disabled = true;
+    resState.cache.clear();
     resState.selectedDayIndex = 0;
-    resErr.classList.add('hidden'); clearTextKey(resErr);
-    resOk.classList.add('hidden'); clearTextKey(resOk);
+    if (resErr) { resErr.classList.add('hidden'); clearTextKey(resErr); }
+    if (resOk) { resOk.classList.add('hidden'); clearTextKey(resOk); }
     await renderWindow();
   });
-  rsPrev.addEventListener('click', ()=>shiftWindow(-WINDOW_DAYS));
-  rsNext.addEventListener('click', ()=>shiftWindow(WINDOW_DAYS));
-  rsToday.addEventListener('click', async ()=>{ const d=new Date(); d.setHours(0,0,0,0); resState.baseStart=d; await renderWindow(); });
+  bind(rsPrev, 'click', ()=>shiftWindow(-WINDOW_DAYS));
+  bind(rsNext, 'click', ()=>shiftWindow(WINDOW_DAYS));
+  bind(rsToday, 'click', async ()=>{
+    const d=new Date(); d.setHours(0,0,0,0); resState.baseStart=d; await renderWindow();
+  });
 
   // UX: Shift+Wheel — горизонтальный скролл
-  rsWrap.addEventListener('wheel', (e)=>{ if(e.shiftKey && Math.abs(e.deltaY)>Math.abs(e.deltaX)){ e.preventDefault(); rsWrap.scrollLeft += e.deltaY; } }, {passive:false});
+  bind(rsWrap, 'wheel', (e)=>{
+    if(e.shiftKey && Math.abs(e.deltaY)>Math.abs(e.deltaX)){
+      e.preventDefault();
+      rsWrap.scrollLeft += e.deltaY;
+    }
+  }, {passive:false});
 
   async function submitRes(){
-    if(!resState.apptId || !resState.slot) return;
-    resSubmit.disabled = true; resErr.classList.add('hidden'); resOk.classList.add('hidden');
-    clearTextKey(resErr); clearTextKey(resOk);
-    const r = await fetch(`/accounts/api/appointment/${resState.apptId}/reschedule/`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','X-CSRFToken': csrftoken},
-      credentials:'same-origin',
-      body: JSON.stringify({ start_time: resState.slot, master: resState.masterId, item_id: resState.itemId })
-    });
-    const data = await r.json().catch(()=> ({}));
-    if(r.ok){
-      const startISO = data.appointment?.start_time || '';
-      const locale = getLocale();
-      const localized = startISO ? new Date(startISO).toLocaleString(locale) : '';
-      setTextKey(resOk, 'dashboard.reschedule.success', { datetime: localized }, `Rescheduled to ${localized}`);
-      resOk.classList.remove('hidden');
-      // мгновенно обновим дату в карточке (если она на странице)
-      document.querySelectorAll(`[data-appt-id="${resState.apptId}"] .appt-dt`).forEach(dt=>{
-        try{ dt.textContent = new Date(data.appointment.start_time).toLocaleString(locale); }catch(_){}
+    if(!resState.apptId || !resState.slot || !resSubmit) return;
+    resSubmit.disabled = true;
+    if (resErr) { resErr.classList.add('hidden'); clearTextKey(resErr); }
+    if (resOk) { resOk.classList.add('hidden'); clearTextKey(resOk); }
+    try{
+      const response = await fetch(`/accounts/api/appointment/${resState.apptId}/reschedule/`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRFToken': csrftoken},
+        credentials:'same-origin',
+        body: JSON.stringify({ start_time: resState.slot, master: resState.masterId, item_id: resState.itemId })
       });
-      setTimeout(()=> location.reload(), 700);
-    }else{
-      const fallback = data.error || data.detail;
-      resErr.classList.remove('hidden');
-      if(fallback){
-        clearTextKey(resErr);
-        resErr.textContent = fallback;
+      const data = await response.json().catch(()=> ({}));
+      if(response.ok){
+        const startISO = data.appointment?.start_time || '';
+        const locale = getLocale();
+        const localized = startISO ? new Date(startISO).toLocaleString(locale) : '';
+        if (resOk) {
+          setTextKey(resOk, 'dashboard.reschedule.success', { datetime: localized }, `Rescheduled to ${localized}`);
+          resOk.classList.remove('hidden');
+        }
+        const mutated = applyRescheduleResult(data);
+        resState.slot = null;
+        if(!mutated){
+          window.setTimeout(()=> location.reload(), 500);
+        }else{
+          enforce24hLock();
+        }
+        resSubmit.disabled = true;
       }else{
-        setTextKey(resErr, 'dashboard.reschedule.failed');
+        const fallback = data.error || data.detail;
+        if(resErr){
+          resErr.classList.remove('hidden');
+          if(fallback){
+            clearTextKey(resErr);
+            resErr.textContent = fallback;
+          }else{
+            setTextKey(resErr, 'dashboard.reschedule.failed');
+          }
+        }else if(fallback){
+          alert(fallback);
+        }
+        resSubmit.disabled = false;
+      }
+    }catch(err){
+      if(resErr){
+        resErr.classList.remove('hidden');
+        const message = err && err.message ? err.message : '';
+        if(message){
+          clearTextKey(resErr);
+          resErr.textContent = message;
+        }else{
+          setTextKey(resErr, 'dashboard.reschedule.failed');
+        }
       }
       resSubmit.disabled = false;
     }
@@ -1025,10 +1267,12 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     openRes(a.dataset.apptId, a.dataset.serviceId, a.dataset.itemId || '');
   });
-  resClose.addEventListener('click', closeRes);
-  resCancel.addEventListener('click', closeRes);
-  resModal.addEventListener('click', (e)=>{ if(e.target===resModal) closeRes(); });
-  resSubmit.addEventListener('click', submitRes);
+  bind(resClose, 'click', closeRes);
+  bind(resCancel, 'click', closeRes);
+  if (resModal) {
+    resModal.addEventListener('click', (e)=>{ if(e.target===resModal) closeRes(); });
+  }
+  bind(resSubmit, 'click', submitRes);
 
   applyServiceNameTranslations();
   enforce24hLock();

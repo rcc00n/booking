@@ -286,7 +286,7 @@
                   <th class="py-2 pr-4" data-i18n="dashboard.table.master">Master</th>
                   <th class="py-2 pr-4" data-i18n="dashboard.table.status">Status</th>
                   <th class="py-2 pr-4" data-i18n="dashboard.table.payment">Payment</th>
-                  <th class="py-2 pr-3 rounded-r-lg" data-i18n="dashboard.table.amount">Amount</th>
+                  <th class="py-2 pr-3 rounded-r-lg" data-i18n="dashboard.table.receipt">Receipt</th>
                 </tr>
               </thead>
               <tbody class="[&>tr]:border-b [&>tr]:border-[#DEDEDE]">
@@ -319,8 +319,18 @@
                       <span class="table-value">{{ a.payment_status.name|default:"—" }}</span>
                     </td>
                     <td class="py-2 pr-3">
-                      <span class="table-label" data-i18n="dashboard.table.amount">Amount</span>
-                      <span class="table-value">{{ a.price|default:"—" }}</span>
+                      <span class="table-label" data-i18n="dashboard.table.receipt">Receipt</span>
+                      {% if a.client_receipt_url %}
+                        <a href="{{ a.client_receipt_url }}"
+                           class="table-value text-[#1f5f44] font-semibold hover:underline"
+                           target="_blank"
+                           rel="noopener noreferrer"
+                           data-i18n="dashboard.table.receiptCta">
+                          View receipt
+                        </a>
+                      {% else %}
+                        <span class="table-value text-[#4D4D4D]/60" data-i18n="dashboard.table.noReceipt">Not available yet</span>
+                      {% endif %}
                     </td>
                   </tr>
                 {% endfor %}
@@ -522,7 +532,7 @@
                               <p class="text-xs text-[#4D4D4D]/80">
                                 {{ item.master_name }}
                                 {% if item.start_display %}
-                                  &middot; {{ item.start_display }}
+                                  &middot; <span data-role="item-start">{{ item.start_display }}</span>
                                 {% endif %}
                               </p>
                             </div>
@@ -875,5 +885,3 @@
 <script defer src="{% static 'js/dashboard.js' %}"></script>
 </body>
 </html>
-
-

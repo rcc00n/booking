@@ -262,7 +262,9 @@
           master: 'Master',
           status: 'Status',
           payment: 'Payment status',
-          amount: 'Amount'
+          receipt: 'Receipt',
+          receiptCta: 'View receipt',
+          noReceipt: 'Not available yet'
         },
         myTitle: 'My appointments',
         myEmpty: 'No appointments.',
@@ -550,7 +552,9 @@
           master: 'Мастер',
           status: 'Статус',
           payment: 'Статус оплаты',
-          amount: 'Сумма'
+          receipt: 'Receipt',
+          receiptCta: 'View receipt',
+          noReceipt: 'Not available yet'
         },
         myTitle: 'Мои записи',
         myEmpty: 'Записей нет.',
@@ -829,7 +833,9 @@
           master: 'मास्टर',
           status: 'स्थिति',
           payment: 'भुगतान स्थिति',
-          amount: 'राशि'
+          receipt: 'Receipt',
+          receiptCta: 'View receipt',
+          noReceipt: 'Not available yet'
         },
         myTitle: 'मेरी अपॉइंटमेंट्स',
         myEmpty: 'अपॉइंटमेंट नहीं हैं।',
@@ -1108,7 +1114,9 @@
           master: 'Майстер',
           status: 'Статус',
           payment: 'Статус оплати',
-          amount: 'Сума'
+          receipt: 'Receipt',
+          receiptCta: 'View receipt',
+          noReceipt: 'Not available yet'
         },
         myTitle: 'Мої записи',
         myEmpty: 'Записів немає.',
@@ -1375,7 +1383,9 @@
           master: 'Praticien',
           status: 'Statut',
           payment: 'Statut de paiement',
-          amount: 'Montant'
+          receipt: 'Receipt',
+          receiptCta: 'View receipt',
+          noReceipt: 'Not available yet'
         },
         myTitle: 'Mes rendez-vous',
         myEmpty: 'Aucun rendez-vous.',
@@ -1654,7 +1664,9 @@
           master: 'الخبير',
           status: 'الحالة',
           payment: 'حالة الدفع',
-          amount: 'المبلغ'
+          receipt: 'Receipt',
+          receiptCta: 'View receipt',
+          noReceipt: 'Not available yet'
         },
         myTitle: 'مواعيدي',
         myEmpty: 'لا توجد مواعيد.',
