@@ -10,18 +10,44 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   };
   const translate = (key, vars, fallback) => {
-    if (!key) return fallback || '';
-    if (I18N) {
+    if (!key) {
+      return fallback !== undefined ? fallback : '';
+    }
+    let result;
+    if (I18N && typeof I18N.t === 'function') {
       try {
-        return I18N.t(key, vars);
+        result = I18N.t(key, vars);
       } catch (err) {
-        return fallback !== undefined ? fallback : key;
+        result = undefined;
       }
     }
-    return fallback !== undefined ? fallback : key;
+    const resultIsString = typeof result === 'string';
+    const normalized = resultIsString ? result.trim() : result;
+    const shouldFallback = (
+      result === undefined
+      || result === null
+      || (resultIsString && normalized === '')
+      || (resultIsString && normalized === key)
+    );
+    if (shouldFallback) {
+      if (fallback !== undefined) {
+        return fallback;
+      }
+      if (resultIsString && normalized) {
+        return result;
+      }
+      return key;
+    }
+    return result;
   };
   const setTextKey = (el, key, vars, fallback) => {
     if (!el) return;
+    const resolved = key
+      ? translate(key, vars, fallback !== undefined ? fallback : el.textContent)
+      : fallback;
+    if (resolved !== undefined && resolved !== null) {
+      el.textContent = resolved;
+    }
     if (I18N && key) {
       el.setAttribute('data-i18n', key);
       if (vars) {
@@ -30,8 +56,9 @@ document.addEventListener('DOMContentLoaded', () => {
         el.removeAttribute('data-i18n-vars');
       }
       queueRefresh();
-    } else if (fallback !== undefined) {
-      el.textContent = fallback;
+    } else if (!key) {
+      el.removeAttribute('data-i18n');
+      el.removeAttribute('data-i18n-vars');
     }
   };
   const clearTextKey = (el) => {
