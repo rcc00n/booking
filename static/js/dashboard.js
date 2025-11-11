@@ -552,7 +552,13 @@ document.addEventListener('DOMContentLoaded', () => {
   function findItemNodes(itemId) {
     const escaped = cssEscape(itemId);
     if (!escaped) return [];
-    return Array.from(document.querySelectorAll(`[data-item-id="${escaped}"]`));
+    return Array.from(document.querySelectorAll(`[data-item-id="${escaped}"]`))
+      .filter((node) => {
+        if (!(node instanceof Element)) return false;
+        if (node.matches('.appt-cancel, .appt-reschedule')) return false;
+        if (node.classList.contains('appointment-item')) return true;
+        return Boolean(node.querySelector('[data-role="item-status"]'));
+      });
   }
 
   function setLoadingState(node, loading) {
@@ -731,7 +737,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   document.addEventListener('click', (event)=>{
-    const link = event.target.closest('.appt-cancel');
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const link = target.closest('.appt-cancel');
     if(!link) return;
     if (
       link.hasAttribute('aria-disabled')
@@ -1257,20 +1265,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  document.addEventListener('click', (e)=>{
-    const a = e.target.closest('.appt-reschedule');
-    if(!a) return;
-    if (a.hasAttribute('aria-disabled') || a.classList.contains('is-disabled')) {
-      e.preventDefault();
+  document.addEventListener('click', (event)=>{
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const trigger = target.closest('.appt-reschedule');
+    if(!trigger) return;
+    if (trigger.hasAttribute('aria-disabled') || trigger.classList.contains('is-disabled')) {
+      event.preventDefault();
       return;
     }
-    e.preventDefault();
-    openRes(a.dataset.apptId, a.dataset.serviceId, a.dataset.itemId || '');
+    event.preventDefault();
+    openRes(trigger.dataset.apptId, trigger.dataset.serviceId, trigger.dataset.itemId || '');
   });
   bind(resClose, 'click', closeRes);
   bind(resCancel, 'click', closeRes);
   if (resModal) {
-    resModal.addEventListener('click', (e)=>{ if(e.target===resModal) closeRes(); });
+    resModal.addEventListener('click', (event)=>{
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target === resModal) closeRes();
+    });
   }
   bind(resSubmit, 'click', submitRes);
 
