@@ -1161,3 +1161,60 @@ textarea { resize: vertical; min-height: 120px; }
     transform: rotate(180deg);
   }
 }
+
+/* === Reschedule modal: mobile height guardrails & scroll === */
+#resModal .modal-panel{
+  display: flex;
+  flex-direction: column;
+  max-height: min(92vh, 720px);   /* never exceed the viewport */
+  width: 100%;
+  overflow: hidden;               /* body inside will scroll */
+  border-radius: 1rem;
+}
+
+#resModal .modal-header{
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+  padding-top: .25rem;
+  padding-bottom: .25rem;
+}
+
+/* Middle content becomes the only scrollable area */
+#resModal .modal-body{
+  flex: 1 1 auto;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: .25rem;          /* avoid scrollbar overlap with text */
+}
+
+/* Footer sticks to the bottom of the modal panel */
+#resModal .modal-footer{
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: #fff;
+  padding-bottom: max(.75rem, env(safe-area-inset-bottom));
+  box-shadow: 0 -6px 16px rgba(0,0,0,.06);
+  border-top: 1px solid #E5E7EB;
+}
+
+/* Mobile-only: cap the vertical space of the time picker */
+@media (max-width: 1023px){
+  #rsMobileContainer{
+    display: flex;
+    flex-direction: column;
+    max-height: 56vh;             /* enough space for header + footer */
+    gap: .5rem;
+  }
+  #rsMobileDays{ flex: 0 0 auto; }
+  #rsMobileTimes{
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: .25rem;
+  }
+  #rsMobileEmpty{ flex: 0 0 auto; }
+}
