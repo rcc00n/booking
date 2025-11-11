@@ -698,8 +698,16 @@
 
       function showMasterHint(key, vars, fallback){
         if (!elMasterHint) return;
-        setTextKey(elMasterHint, key, vars, fallback);
-        elMasterHint.hidden = false;
+        const fallbackText = typeof fallback === 'string' ? fallback : '';
+        let resolved = fallbackText;
+        if (key){
+          const translated = translate(key, vars);
+          if (translated && translated !== key){
+            resolved = translated;
+          }
+        }
+        elMasterHint.textContent = resolved;
+        elMasterHint.hidden = !resolved;
       }
 
       syncPrepaymentInputs(currentPrepaymentPercent);
