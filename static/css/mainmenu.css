@@ -704,3 +704,25 @@
     justify-content:center;
   }
 }
+
+/* ===== 1) User menu: hide username in the trigger (keep dropdown header intact) ===== */
+.user-menu__trigger .user-menu__label strong{ display:none; }  /* trigger only */
+
+/* ===== 2) Mobile search card overflow fix ===== */
+@media (max-width: 900px){
+  /* allow grid items to shrink and never spill */
+  .filters__grid{ grid-template-columns: minmax(0,1fr); }
+  .filters__grid > *{ min-width:0; }
+
+  /* make the pill controls strictly fit the card */
+  .pill-input{ min-width:0; }
+  .pill-input__control{ max-width:100%; }
+  .pill-input input,
+  .pill-input select{ width:100%; min-width:0; }
+
+  /* slight padding tweak + clipping guard on the card */
+  .search-panel{
+    padding:1.25rem;
+    overflow:hidden; /* prevents sub-pixel bleed on iOS */
+  }
+}
