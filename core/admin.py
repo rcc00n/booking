@@ -5198,7 +5198,7 @@ class ClientIntakeFormAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ("name",)}
     fieldsets = (
         (None, {"fields": ("name", "slug", "description", "is_active", "is_universal")}),
-        (_("Builder"), {"fields": ("schema", "schema_version")} ),
+        (_("Builder"), {"fields": ("schema",)}),
         (_("Form class"), {"fields": ("form_class",), "classes": ("collapse",)}),
         (_("Timestamps"), {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
     )
