@@ -570,6 +570,11 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
   color:var(--dgray);
   line-height:1.6;
 }
+.field-check__body{
+  display:flex;
+  flex-direction:column;
+  gap:.35rem;
+}
 .field.field--check .field__error{
   margin-top:.5rem;
 }
@@ -628,7 +633,7 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
 .consent-card .field.field--check{
   gap:12px;
 }
-.consent-card .field.field--check label a{
+.consent-card__link a{
   color:var(--green);
   text-decoration:underline;
   text-decoration-color:rgba(32,64,41,.4);
@@ -636,9 +641,22 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
   text-underline-offset:3px;
   transition:color .2s ease, text-decoration-color .2s ease;
 }
-.consent-card .field.field--check label a:hover{
+.consent-card__link a:hover{
   color:var(--primary-dark);
   text-decoration-color:rgba(175,149,37,.65);
+}
+.reg-terms-note{
+  grid-column:1 / -1;
+  font-size:.85rem;
+  color:rgba(32,64,41,.75);
+  margin-top:.25rem;
+}
+.reg-terms-note a{
+  color:var(--green);
+  font-weight:600;
+  text-decoration:underline;
+  text-decoration-thickness:2px;
+  text-underline-offset:3px;
 }
 @media (max-width:540px){
   .reg-progress{
@@ -910,10 +928,14 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
             <div class="consent-card" data-consent-card="email">
               <div class="field field--check" data-field="email_marketing_consent">
                 <input id="consentEmail" type="checkbox" name="email_marketing_consent">
-                <label for="consentEmail">
-                  I'd like to receive email updates and limited-time offers.
-                  <a href="{% url 'legal-email-updates' %}" target="_blank" rel="noopener">See how we use marketing emails.</a>
-                </label>
+                <div class="field-check__body">
+                  <label for="consentEmail">
+                    I'd like to receive email updates and limited-time offers.
+                  </label>
+                  <div class="consent-card__link">
+                    <a href="{% url 'legal-email-updates' %}" target="_blank" rel="noopener">See how we use marketing emails.</a>
+                  </div>
+                </div>
                 <span class="field__error" data-field-error="email_marketing_consent"></span>
               </div>
               <span class="consent-card__meta">
@@ -929,16 +951,24 @@ h1.title{margin:0 0 2.4rem;font-size:2.6rem;font-weight:700;text-align:center;le
                   required
                   data-required-msg="You must consent to personal data processing to continue."
                 >
-                <label for="consentPrivacy">
-                  I consent to the processing of my personal data for account creation and booking management.
-                  <a href="{% url 'legal-data-processing' %}" target="_blank" rel="noopener">Review the full privacy notice.</a>
-                </label>
+                <div class="field-check__body">
+                  <label for="consentPrivacy">
+                    I consent to the processing of my personal data for account creation and booking management.
+                  </label>
+                  <div class="consent-card__link">
+                    <a href="{% url 'legal-data-processing' %}" target="_blank" rel="noopener">Review the full privacy notice.</a>
+                  </div>
+                </div>
                 <span class="field__error" data-field-error="data_processing_consent"></span>
               </div>
               <span class="consent-card__meta">
                 <strong>Why we need this.</strong> We securely store your details to manage appointments, receipts, and support.
               </span>
             </div>
+            <p class="reg-terms-note">
+              By continuing you agree to our
+              <a href="{% url 'legal-terms' %}" target="_blank" rel="noopener">Terms &amp; Conditions</a>.
+            </p>
           </div>
           <div class="reg-summary" aria-hidden="true">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.5 4h-17A1.5 1.5 0 002 5.5v13A1.5 1.5 0 003.5 20h17a1.5 1.5 0 001.5-1.5v-13A1.5 1.5 0 0020.5 4zm-.4 1.5L12 11.24 3.9 5.5h16.2zM20.5 18.5h-17V7.05l8.1 5.72a1 1 0 001.2 0l8.1-5.72v11.45z"/></svg>

@@ -3019,6 +3019,7 @@ class SupportDocument(models.Model):
     class DocumentType(models.TextChoices):
         PRIVACY_NOTICE = ("privacy_notice", "Privacy notice")
         EMAIL_UPDATES = ("email_updates", "Email updates policy")
+        TERMS_AND_CONDITIONS = ("terms_conditions", "Terms & Conditions")
         OTHER = ("other", "General support document")
 
     document_type = models.CharField(

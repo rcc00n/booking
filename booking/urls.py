@@ -64,6 +64,12 @@ path("", include("core.urls")),
         name="legal-data-processing",
     ),
     path(
+        "legal/terms/",
+        SupportDocumentDetailView.as_view(),
+        {"document_type": SupportDocument.DocumentType.TERMS_AND_CONDITIONS},
+        name="legal-terms",
+    ),
+    path(
         "support/<slug:slug>/",
         SupportDocumentDetailView.as_view(),
         name="support-document-detail",
