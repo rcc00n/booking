@@ -781,6 +781,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const rsPrev = document.getElementById('rsPrev');
   const rsNext = document.getElementById('rsNext');
   const rsToday= document.getElementById('rsToday');
+  const rsCurrent = document.getElementById('rsCurrent');
   const rsMobileContainer = document.getElementById('rsMobileContainer');
   const rsMobileDays = document.getElementById('rsMobileDays');
   const rsMobileTimes = document.getElementById('rsMobileTimes');
@@ -788,11 +789,34 @@ document.addEventListener('DOMContentLoaded', () => {
   const rsMobileHint = document.getElementById('rsMobileHint');
 
   const WINDOW_DAYS = 14, START=6, END=23, STEP=30;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const INITIAL_ANCHOR_THRESHOLD_DAYS = 28;
+  const AUTO_WINDOW_HOPS = 6;
   const normalizeId = (value) => (value === undefined || value === null ? "" : String(value));
+  const startOfDay = (value) => {
+    if (!value) return null;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+  const getTodayStart = () => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return now;
+  };
+  const clampInitialBaseStart = (anchor) => {
+    const today = getTodayStart();
+    if (!anchor) return today;
+    const diffDays = Math.floor((anchor.getTime() - today.getTime()) / DAY_MS);
+    if (diffDays >= 0 && diffDays <= INITIAL_ANCHOR_THRESHOLD_DAYS) {
+      return anchor;
+    }
+    return today;
+  };
 
   const createDefaultResState = () => {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
+    const start = getTodayStart();
     return {
       apptId: null,
       serviceId: null,
@@ -803,6 +827,8 @@ document.addEventListener('DOMContentLoaded', () => {
       slot: null,
       masters: [],
       baseStart: start,
+      apptStart: null,
+      autoSeekBudget: AUTO_WINDOW_HOPS,
       cache: new Map(),
       selectedDayIndex: 0,
       days: [],
@@ -841,6 +867,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const masterLabel = match?.name || translate('services.modal.masterFallbackName', null, 'selected master');
     showResMasterHint('services.modal.masterHintActive', { master: masterLabel }, `Showing availability for ${masterLabel}.`);
   };
+  const syncCurrentButton = () => {
+    if (!rsCurrent) return;
+    const hasAnchor = Boolean(resState.apptStart);
+    rsCurrent.classList.toggle('hidden', !hasAnchor);
+    rsCurrent.disabled = !hasAnchor;
+  };
   const resolveGuardMessage = (record) => {
     if (!record) return '';
     const fallback = record.fallback || '';
@@ -856,17 +888,17 @@ document.addEventListener('DOMContentLoaded', () => {
       alert(translate('dashboard.reschedule.errorLoad', null, 'Unable to fetch availability for this service.'));
       return;
     }
-    const base = meta.startIso ? parseUtc(meta.startIso) : new Date();
-    if (base && !Number.isNaN(base.getTime())) {
-      base.setHours(0,0,0,0);
-    }
+    const base = meta.startIso ? parseUtc(meta.startIso) : null;
+    const anchor = startOfDay(base);
     resState = createDefaultResState();
     resState.apptId = apptId;
     resState.serviceId = serviceId;
     resState.itemId = itemId;
     resState.serviceName = meta.serviceName || '';
     resState.preferredMasterId = normalizeId(meta.masterId || meta.preferredMasterId || '');
-    resState.baseStart = (base && !Number.isNaN(base.getTime())) ? base : resState.baseStart;
+    resState.apptStart = anchor;
+    resState.baseStart = clampInitialBaseStart(anchor);
+    resState.autoSeekBudget = AUTO_WINDOW_HOPS;
     resMaster.innerHTML = '';
     hideResMasterHint();
     if (resSubmit) resSubmit.disabled = true;
@@ -874,6 +906,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (resOk) { resOk.classList.add('hidden'); clearTextKey(resOk); }
     resModal.classList.remove('hidden');
     resModal.classList.add('flex');
+    syncCurrentButton();
     loadMastersAndRender();
   }
   function closeRes(){
@@ -995,10 +1028,10 @@ document.addEventListener('DOMContentLoaded', () => {
           vars: { service: resState.serviceName || '' },
           fallback: 'Select a master to view availability.'
         };
-        renderWindow();
+        renderWindow({ autoSeek: false });
         return;
       }
-      await renderWindow();
+      await renderWindow({ autoSeek: true });
     }catch(e){
       const fallback = e && e.message;
       const defaultMsg = translate('dashboard.reschedule.errorLoad');
@@ -1012,7 +1045,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function renderWindow(){
+  const windowHasAvailability = (records = []) => records.some((entry) => entry && entry.set && entry.set.size);
+
+  async function buildWindowSnapshot(baseDate) {
+    await ensureRangeLoaded(baseDate, WINDOW_DAYS);
+    const days = Array.from({ length: WINDOW_DAYS }, (_, i) => {
+      const d = new Date(baseDate);
+      d.setDate(d.getDate() + i);
+      return d;
+    });
+    const dayStrs = days.map(ymd);
+    const dayData = dayStrs.map((ds) => resState.cache.get(ds));
+    const timeRows = buildTimeRows(dayData.map((x) => x?.set));
+    return { days, dayData, timeRows };
+  }
+
+  async function renderWindow(options = {}){
+    const { autoSeek = false } = options;
     const locale = getLocale();
     resState.locale = locale;
 
@@ -1030,12 +1079,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     resState.guardMessage = null;
-    await ensureRangeLoaded(resState.baseStart, WINDOW_DAYS);
+    resState.baseStart = startOfDay(resState.baseStart) || getTodayStart();
 
-    const days = Array.from({length:WINDOW_DAYS}, (_,i)=>{ const d=new Date(resState.baseStart); d.setDate(d.getDate()+i); return d;});
-    const dayStrs = days.map(ymd);
-    const dayData = dayStrs.map(ds => resState.cache.get(ds));
-    const timeRows = buildTimeRows(dayData.map(x=>x?.set));
+    let hopsRemaining = autoSeek ? Math.max(0, resState.autoSeekBudget || AUTO_WINDOW_HOPS) : 0;
+    let snapshot = await buildWindowSnapshot(resState.baseStart);
+
+    while (autoSeek && hopsRemaining > 0 && !windowHasAvailability(snapshot.dayData)) {
+      hopsRemaining -= 1;
+      const next = new Date(resState.baseStart);
+      next.setDate(next.getDate() + WINDOW_DAYS);
+      resState.baseStart = startOfDay(next) || next;
+      resState.selectedDayIndex = 0;
+      resState.slot = null;
+      snapshot = await buildWindowSnapshot(resState.baseStart);
+    }
+
+    resState.autoSeekBudget = hopsRemaining;
+    const { days, dayData, timeRows } = snapshot;
 
     if (rsRange) {
       if (days.length) {
@@ -1047,7 +1107,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    resState.locale = locale;
     resState.days = days;
     resState.dayData = dayData;
     resState.timeRows = timeRows;
@@ -1311,7 +1370,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!resModal || resModal.classList.contains('hidden')) return;
     if (resWindowResizeTimer) window.clearTimeout(resWindowResizeTimer);
     resWindowResizeTimer = window.setTimeout(()=>{
-      renderWindow().catch(()=>{});
+      renderWindow({ autoSeek: false }).catch(()=>{});
     }, 180);
   });
 
@@ -1320,7 +1379,7 @@ document.addEventListener('DOMContentLoaded', () => {
     resState.selectedDayIndex = 0;
     resState.slot = null;
     resSubmit.disabled = true;
-    await renderWindow();
+    await renderWindow({ autoSeek: false });
   }
 
   bind(resMaster, 'change', async ()=>{
@@ -1339,17 +1398,33 @@ document.addEventListener('DOMContentLoaded', () => {
         fallback: 'Select a master to view availability.'
       };
       syncResMasterHint();
-      renderWindow();
+      renderWindow({ autoSeek: false });
       return;
     }
     resState.preferredMasterId = resState.masterId;
     syncResMasterHint();
-    await renderWindow();
+    resState.autoSeekBudget = AUTO_WINDOW_HOPS;
+    await renderWindow({ autoSeek: true });
   });
   bind(rsPrev, 'click', ()=>shiftWindow(-WINDOW_DAYS));
   bind(rsNext, 'click', ()=>shiftWindow(WINDOW_DAYS));
   bind(rsToday, 'click', async ()=>{
-    const d=new Date(); d.setHours(0,0,0,0); resState.baseStart=d; await renderWindow();
+    const d = getTodayStart();
+    resState.baseStart = d;
+    resState.slot = null;
+    resState.selectedDayIndex = 0;
+    resState.autoSeekBudget = AUTO_WINDOW_HOPS;
+    await renderWindow({ autoSeek: true });
+  });
+  bind(rsCurrent, 'click', async ()=>{
+    if (!resState.apptStart) return;
+    const anchor = startOfDay(resState.apptStart);
+    if (!anchor) return;
+    resState.baseStart = anchor;
+    resState.slot = null;
+    resState.selectedDayIndex = 0;
+    resState.autoSeekBudget = 0;
+    await renderWindow({ autoSeek: false });
   });
 
   // UX: Shift+Wheel — горизонтальный скролл
@@ -1458,7 +1533,7 @@ document.addEventListener('DOMContentLoaded', () => {
       applyServiceNameTranslations();
       enforce24hLock();
       if (resModal && resModal.classList.contains('flex')) {
-        renderWindow().catch(()=>{});
+        renderWindow({ autoSeek: false }).catch(()=>{});
       }
       if (statsChart) {
         statsChart.data.datasets[0].label = translate('dashboard.chartLabel', null, 'Appointments');
