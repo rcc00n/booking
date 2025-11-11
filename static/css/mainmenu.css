@@ -653,38 +653,54 @@
       .services-grid{grid-template-columns:1fr;}
     }
 
-
-    /* --- Mobile drawer hardening --- */
+/* Mobile drawer: stack items vertically, one per row */
 @media (max-width: 900px){
-  /* When the drawer is open, neutralize backdrop-filter on the header
-     to avoid Safari's fixed-position clipping bug. */
-  body.nav-open .site-header{
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
+  /* 1) Stack the control row itself */
+  .header-controls{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:1rem;                 /* consistent spacing between rows */
   }
 
-  /* Stronger sizing + safe-area support for the drawer itself */
-  .header-actions{
-    /* already fixed; ensure viewport anchoring is explicit */
-    inset: 0 auto 0  auto;   /* top/bottom 0; stick to the right by default */
-    right: 0;
-    left: auto;
+  /* 2) Make auth area vertical too */
+  .header-actions .header-auth{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:.75rem;
+  }
+  .header-actions .header-auth__cta{ width:100%; }  /* full-width buttons */
 
-    /* predictable width on all phones, but never full-screen */
-    width: clamp(300px, 88vw, 380px);
+  /* 3) Language block already adapts; ensure full width */
+  .header-actions .lang-picker{ align-items:stretch; }
+  .header-actions .lang-picker__select{ width:100%; }
 
-    /* full height with modern units, with fallback below */
-    height: 100dvh;
-
-    /* keep the existing padding but ensure safe-areas are respected */
-    padding-top: calc(1.75rem + env(safe-area-inset-top));
-    padding-bottom: calc(2rem + env(safe-area-inset-bottom));
-
-    /* performance + crisp transform animation */
-    will-change: transform;
+  /* 4) User menu fits the column layout and opens inline */
+  .header-actions .user-menu{ width:100%; }
+  .header-actions .user-menu__trigger{
+    width:100%;
+    justify-content:flex-start;   /* label-aligned, not centered */
+  }
+  /* On mobile, show the dropdown inline (not absolute) so it flows vertically */
+  .header-actions .user-menu__dropdown{
+    position:static;
+    width:100%;
+    margin-top:.35rem;
+    box-shadow:var(--shadow-card);
+    /* avoid reserving space when closed */
+    display:none;
+    opacity:1;           /* layout-driven show/hide, no fade needed */
+    transform:none;
+    pointer-events:auto;
+  }
+  .header-actions .user-menu.is-open .user-menu__dropdown{
+    display:block;
   }
 
-  @supports not (height: 100dvh){
-    .header-actions{ height: 100vh; }
+  /* 5) Ensure all buttons expand to a single full-width row */
+  .header-actions .btn{
+    width:100%;
+    justify-content:center;
   }
 }
