@@ -221,6 +221,7 @@ function showTooltip(box) {
     const editUrl = box.dataset.editUrl || "";
     const statusUrl = box.dataset.statusUrl || "";
     const rescheduleUrl = box.dataset.rescheduleUrl || "";
+    const notes = box.dataset.notes || "";
 
     const firstLetter = client.trim().charAt(0).toUpperCase();
     const baseRawValue = parseCurrencyValue(box.dataset.baseRaw);
@@ -312,6 +313,7 @@ function showTooltip(box) {
                     </div>
                     ${priceBlockHtml}
                 </div>
+                ${notes ? `<div class="appt-tt-footer">Notes: ${notes}</div>` : ""}
                 ${actionsHtml}
             </div>
         </div>

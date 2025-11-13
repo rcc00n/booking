@@ -7138,12 +7138,12 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
         client = appointment_obj.client
         client_label = client.get_full_name() or client.user.username
         notes_value = getattr(appointment_obj, "notes", "") or ""
-        has_direct_note = bool(str(notes_value).strip())
+        notes_text = str(notes_value)
+        has_direct_note = bool(notes_text.strip())
 
         # Some views may attach per-item notes (custom annotations).
         item_note_value = getattr(item, "note", "") or getattr(item, "notes", "")
         has_item_note = bool(str(item_note_value).strip())
-        has_note = has_direct_note or has_item_note
 
         return {
             "s_local": s_local,
@@ -7169,8 +7169,10 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "grand_total_decimal": grand_total,
             "paid_total_decimal": paid_total_cached,
             "paid_total_raw": f"{paid_total_cached:.2f}",
-            "has_note": has_note,
+            "notes": notes_text,
+            "has_note": has_direct_note,
             "appointment_has_note": has_direct_note,
+            "item_has_note": has_item_note,
         }
 
     def _cell_html_item(item, meta, show_cancelled=False):
@@ -7223,6 +7225,8 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             "paid_total_raw": meta.get("paid_total_raw", "0.00"),
             "has_note": meta.get("has_note", False),
             "appointment_has_note": meta.get("appointment_has_note", False),
+            "item_has_note": meta.get("item_has_note", False),
+            "notes": meta.get("notes", ""),
             "status_code": meta.get("status_code"),
             "status_label": meta.get("status_label"),
             "status_class": meta.get("status_class"),
@@ -7703,11 +7707,16 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
             if not appt:
                 continue
 
-            has_note = bool(getattr(appt, "notes", "").strip()) or bool(cell.get("has_note"))
-            if not has_note:
+            notes_text = str(getattr(appt, "notes", "") or "")
+            has_direct_note = bool(notes_text.strip())
+            has_item_note = bool(cell.get("item_has_note"))
+
+            cell["notes"] = notes_text if has_direct_note else ""
+            cell["has_note"] = has_direct_note
+
+            if not (has_direct_note or has_item_note):
                 continue
 
-            cell["has_note"] = True
             if "badge--note" not in cell.get("html", ""):
                 cell["html"] = cell.get("html", "") + note_badge_html
 
