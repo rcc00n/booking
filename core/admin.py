@@ -2015,6 +2015,14 @@ def _patched_admin_get_urls():
 admin.site.get_urls = _patched_admin_get_urls
 
 
+@admin.register(TimeOffReason)
+class TimeOffReasonAdmin(admin.ModelAdmin):
+    list_display = ("name", "code")
+    search_fields = ("name", "code")
+    ordering = ("name",)
+    prepopulated_fields = {"code": ("name",)}
+
+
 @admin.register(MasterAvailability)
 class MasterAvailabilityAdmin(ExportCsvMixin, admin.ModelAdmin):
     form = MasterAvailabilityForm
@@ -7467,7 +7475,7 @@ def createTable(selected_date, time_pointer, end_time, slot_times, items, master
                 "kind": "unavailable",
                 "rowspan": rowsp,
                 "colspan": 2,
-                "reason": period.get_reason_display(),
+                "reason": str(period.reason),
                 "from": block_start.strftime("%I:%M%p").lstrip("0"),
                 "to": block_end.strftime("%I:%M%p").lstrip("0"),
                 "until": period.end_time.strftime("%d %b %Y"),

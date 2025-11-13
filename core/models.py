@@ -2764,28 +2764,32 @@ class ReminderSchedule(models.Model):
         n = self.offset_amount
         return f"{n} {unit}{'' if n == 1 else 's'}"
 
+class TimeOffReason(models.Model):
+    code = models.SlugField(max_length=50, unique=True)
+    name = models.CharField(max_length=100, unique=True)
+
+    class Meta:
+        verbose_name = "Time Off Reason"
+        verbose_name_plural = "Time Off Reasons"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 # --- 8. MASTERS ---
 
 
 class MasterAvailability(models.Model):
-    VACATION = 'vacation'
-    LUNCH = 'lunch'
-    BREAK = 'break'
-
-    REASON_CHOICES = [
-        (VACATION, 'Vacation'),
-        (LUNCH, 'Lunch'),
-        (BREAK, 'Break'),
-    ]
 
     master = models.ForeignKey(MasterProfile, on_delete=models.CASCADE)
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()
-    reason = models.CharField(
-        max_length=20,
-        choices=REASON_CHOICES,
-        default=VACATION,
-        help_text="Reason for time off"
+    reason = models.ForeignKey(
+        TimeOffReason,
+        on_delete=models.PROTECT,
+        related_name="master_availabilities",
+        help_text="Reason for time off",
     )
 
     class Meta:
@@ -2793,7 +2797,7 @@ class MasterAvailability(models.Model):
         verbose_name_plural = "Time Offs / Vacations"
 
     def __str__(self):
-        return f"{self.master} → {self.get_reason_display()} from {self.start_time} to {self.end_time}"
+        return f"{self.master} -> {self.reason} from {self.start_time} to {self.end_time}"
 
     def clean(self):
         super().clean()

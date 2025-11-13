@@ -1542,6 +1542,13 @@ class QuarterHourTimeInput(forms.TimeInput):
         super().__init__(*args, **kwargs)
 
 class MasterAvailabilityForm(forms.ModelForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "reason" in self.fields and not self.initial.get("reason"):
+            default_reason = TimeOffReason.objects.order_by("name").first()
+            if default_reason:
+                self.initial["reason"] = default_reason.pk
+
     class Meta:
         model = MasterAvailability
         fields = "__all__"
