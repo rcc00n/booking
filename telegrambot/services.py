@@ -1533,7 +1533,7 @@ def _start_of_day(day: date) -> datetime:
 
 def _period_window(token: str | None) -> tuple[datetime, datetime, str]:
     now = timezone.localtime()
-    normalized = (token or "today").strip().lower()
+    normalized = (token or "today").strip().lower().replace("_", " ")
 
     if normalized in {"today", ""}:
         start = _start_of_day(now.date())
@@ -1546,11 +1546,25 @@ def _period_window(token: str | None) -> tuple[datetime, datetime, str]:
         day = now.date() + timedelta(days=1)
         start = _start_of_day(day)
         return start, start + timedelta(days=1), day.strftime("%d %b %Y")
+    if normalized in {"this week"}:
+        normalized = "week"
+    if normalized in {"this month"}:
+        normalized = "month"
     if normalized == "week":
         day = now.date() - timedelta(days=now.weekday())
         start = _start_of_day(day)
         end = start + timedelta(days=7)
         return start, end, f"Week of {day:%d %b}"
+    if normalized == "next week":
+        current_week = now.date() - timedelta(days=now.weekday())
+        start = _start_of_day(current_week + timedelta(days=7))
+        end = start + timedelta(days=7)
+        return start, end, f"Week of {start.date():%d %b}"
+    if normalized == "last week":
+        current_week = now.date() - timedelta(days=now.weekday())
+        start = _start_of_day(current_week - timedelta(days=7))
+        end = start + timedelta(days=7)
+        return start, end, f"Week of {start.date():%d %b}"
     if normalized == "month":
         month_start = now.date().replace(day=1)
         start = _start_of_day(month_start)
@@ -1558,6 +1572,22 @@ def _period_window(token: str | None) -> tuple[datetime, datetime, str]:
         next_month = next_month_seed.replace(day=1)
         end = _start_of_day(next_month)
         return start, end, month_start.strftime("%B %Y")
+    if normalized == "next month":
+        month_start = now.date().replace(day=1)
+        next_month_seed = month_start + timedelta(days=32)
+        next_month = next_month_seed.replace(day=1)
+        following_seed = next_month + timedelta(days=32)
+        following_month = following_seed.replace(day=1)
+        start = _start_of_day(next_month)
+        end = _start_of_day(following_month)
+        return start, end, next_month.strftime("%B %Y")
+    if normalized == "last month":
+        month_start = now.date().replace(day=1)
+        previous_day = month_start - timedelta(days=1)
+        prev_month_start = previous_day.replace(day=1)
+        start = _start_of_day(prev_month_start)
+        end = _start_of_day(month_start)
+        return start, end, prev_month_start.strftime("%B %Y")
 
     # allow single-day queries and simple ranges (YYYY-MM-DD or start:end)
     try:
@@ -1575,7 +1605,7 @@ def _period_window(token: str | None) -> tuple[datetime, datetime, str]:
         start = _start_of_day(day)
         return start, start + timedelta(days=1), day.strftime("%d %b %Y")
     except ValueError as exc:  # noqa: PERF203 - parsing failures are user facing
-        raise TelegramCommandError("Use YYYY-MM-DD, today, week or month.") from exc
+        raise TelegramCommandError("Use YYYY-MM-DD, today, week, month or a supported range.") from exc
 
 
 def _schedule_window(token: str | None) -> tuple[datetime, datetime | None, str]:

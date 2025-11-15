@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import html
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -58,7 +60,56 @@ ALLOWED_INTENTS = {
     "outstanding",
     "appointment_details",
     "payment_status",
+    "booking_guidance",
 }
+
+STRUCTURED_RESPONSE_INTENTS = {
+    "today_summary",
+    "management_summary",
+    "schedule",
+    "outstanding",
+    "appointment_details",
+    "payment_status",
+    "booking_guidance",
+    "general",
+}
+
+
+def _format_static_block(title: str, lines: Iterable[str]) -> str:
+    safe_title = html.escape(title)
+    bullets = [f"• {html.escape(line)}" for line in lines if line]
+    body = "\n".join(bullets) if bullets else "—"
+    return f"<b>{safe_title}</b>\n{body}"
+
+
+CAPABILITIES_MESSAGE = _format_static_block(
+    "Assistant capabilities",
+    (
+        "Share today's KPIs and booking snapshot by asking for the daily summary.",
+        "Generate management level revenue summaries for any day, week, or month.",
+        "List the upcoming schedule (today, tomorrow, this week, next week) optionally with notes.",
+        "Highlight unpaid or overdue appointments and their balances.",
+        "Show appointment details or payment status whenever you provide an appointment ID.",
+    ),
+)
+
+BOOKING_GUIDANCE_MESSAGE = _format_static_block(
+    "Booking guidance",
+    (
+        "I cannot create or reschedule appointments directly from this assistant yet.",
+        "Use /book in this chat or the admin dashboard to add or edit bookings.",
+        "Send me an appointment ID if you need the latest details or payment status afterward.",
+    ),
+)
+
+
+APPOINTMENT_ID_PATTERN = re.compile(r"(?:#|id|appointment|appt|booking)\s*(\d{3,})", re.IGNORECASE)
+LIMIT_HINT_PATTERNS = [
+    re.compile(r"(?:next|show|top|first)\s+(\d{1,2})", re.IGNORECASE),
+    re.compile(r"\b(\d{1,2})\s+(?:appointments?|bookings?|slots?)\b", re.IGNORECASE),
+]
+BOOKING_VERB_PATTERN = re.compile(r"\b(book|rebook|reschedule)\b", re.IGNORECASE)
+SCHEDULE_VERB_PATTERN = re.compile(r"\bschedule\s+(?:a|an|the|new|another|appointments?)\b", re.IGNORECASE)
 
 
 class StaffAssistantError(RuntimeError):
@@ -124,8 +175,9 @@ class StaffAssistant:
         "You evaluate staff questions about Malva's operations and pick the best data tool. "
         "Respond ONLY with strict JSON using this schema: "
         '{"intent": "<one of: today_summary, management_summary, schedule, outstanding, '
-        'appointment_details, payment_status, general>", "arguments": { ... }, '
+        'appointment_details, payment_status, booking_guidance, general>", "arguments": { ... }, '
         '"rationale": "<short reason>"} '
+        "Use intent 'booking_guidance' when the user asks to create/reschedule appointments. "
         "If the user references a previous answer, infer the missing values from the conversation summary. "
         "Return intent 'general' when no predefined tool fits."
     )
@@ -161,7 +213,10 @@ class StaffAssistant:
         history = _history_slice(self.session.context_log or [], self.config.max_history)
         plan = self._route_intent(client, normalized, history)
         dataset = self._collect_dataset(plan)
-        reply = self._build_answer(client, normalized, history, dataset, plan)
+        if self._should_bypass_model(plan, dataset):
+            reply = self._render_dataset_entries(dataset)
+        else:
+            reply = self._build_answer(client, normalized, history, dataset, plan)
 
         self.session.append_context("user", normalized)
         self.session.append_context("assistant", reply)
@@ -176,6 +231,10 @@ class StaffAssistant:
         prompt: str,
         history: list[dict[str, str]],
     ) -> AssistantPlan:
+        heuristic = self._heuristic_plan(prompt)
+        if heuristic:
+            return heuristic
+
         payload_lines: list[str] = []
         if history:
             payload_lines.append("Recent conversation:")
@@ -283,6 +342,10 @@ class StaffAssistant:
                     )
                 else:
                     dataset.append(DatasetEntry(label="System notice", body="Missing appointment ID for payment status."))
+            elif plan.intent == "booking_guidance":
+                dataset.append(DatasetEntry(label="Booking guidance", body=BOOKING_GUIDANCE_MESSAGE))
+            elif plan.intent == "general":
+                dataset.append(DatasetEntry(label="Assistant capabilities", body=CAPABILITIES_MESSAGE))
         except TelegramCommandError as exc:
             logger.info("Assistant data fetch failed: intent=%s error=%s", plan.intent, exc)
             dataset.append(DatasetEntry(label="System error", body=str(exc)))
@@ -343,6 +406,23 @@ class StaffAssistant:
         return text
 
     @staticmethod
+    def _should_bypass_model(plan: AssistantPlan, dataset: list[DatasetEntry]) -> bool:
+        return bool(dataset and plan.intent in STRUCTURED_RESPONSE_INTENTS)
+
+    @staticmethod
+    def _render_dataset_entries(dataset: list[DatasetEntry]) -> str:
+        blocks: list[str] = []
+        for item in dataset:
+            body = (item.body or "").strip()
+            if body.startswith("<b>"):
+                blocks.append(body)
+                continue
+            label = html.escape(item.label or "Insight")
+            payload = html.escape(body) if body else "—"
+            blocks.append(f"<b>{label}</b>\n{payload}")
+        return "\n\n".join(blocks).strip()
+
+    @staticmethod
     def _sanitize_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:
         try:
             parsed = int(value)
@@ -357,31 +437,170 @@ class StaffAssistant:
         text = str(value).strip()
         return text or None
 
+    def _extract_limit(self, text: str) -> int | None:
+        for pattern in LIMIT_HINT_PATTERNS:
+            match = pattern.search(text)
+            if not match:
+                continue
+            return self._sanitize_int(match.group(1), default=5, min_value=1, max_value=20)
+        return None
+
+    @staticmethod
+    def _mentions_schedule_request(text: str) -> bool:
+        if not text:
+            return False
+        if re.search(r"\bschedule\b", text):
+            return True
+        if any(keyword in text for keyword in ("calendar", "agenda", "bookings", "booking list", "schedule overview")):
+            return True
+        if "appointments" in text and any(token in text for token in ("today", "tomorrow", "week", "month", "next", "this", "have", "upcoming")):
+            return True
+        return False
+
+    @staticmethod
+    def _infer_schedule_target(text: str) -> str:
+        normalized = text.replace("-", " ")
+        if "next week" in normalized:
+            return "next week"
+        if "last week" in normalized or "previous week" in normalized:
+            return "last week"
+        if "next month" in normalized:
+            return "next month"
+        if "last month" in normalized or "previous month" in normalized:
+            return "last month"
+        if "this week" in normalized:
+            return "week"
+        if "this month" in normalized:
+            return "month"
+        if "tomorrow" in normalized:
+            return "tomorrow"
+        if "yesterday" in normalized:
+            return "yesterday"
+        if "week" in normalized:
+            return "week"
+        if "month" in normalized:
+            return "month"
+        if "upcoming" in normalized or "later" in normalized or "next" in normalized:
+            return "next"
+        return "today"
+
+    @staticmethod
+    def _infer_period_token(text: str) -> str:
+        normalized = text.replace("-", " ")
+        if "next week" in normalized:
+            return "next week"
+        if "last week" in normalized or "previous week" in normalized:
+            return "last week"
+        if "next month" in normalized:
+            return "next month"
+        if "last month" in normalized or "previous month" in normalized:
+            return "last month"
+        if "week" in normalized:
+            return "week"
+        if "month" in normalized:
+            return "month"
+        if "yesterday" in normalized:
+            return "yesterday"
+        if "tomorrow" in normalized:
+            return "tomorrow"
+        return "today"
+
+    @staticmethod
+    def _is_booking_request(text: str) -> bool:
+        if not text:
+            return False
+        if BOOKING_VERB_PATTERN.search(text):
+            return True
+        if SCHEDULE_VERB_PATTERN.search(text):
+            return True
+        for phrase in ("create an appointment", "add an appointment", "set up an appointment", "new booking"):
+            if phrase in text:
+                return True
+        return False
+
+    @staticmethod
+    def _extract_appointment_id(prompt: str) -> str | None:
+        if not prompt:
+            return None
+        match = APPOINTMENT_ID_PATTERN.search(prompt)
+        if match:
+            return match.group(1)
+        fallback = re.search(r"\b(\d{4,})\b", prompt)
+        if fallback:
+            return fallback.group(1)
+        return None
+
     def _heuristic_plan(self, prompt: str) -> AssistantPlan | None:
-        text = prompt.lower()
+        text = (prompt or "").strip().lower()
         if not text:
             return None
 
-        def _match(pattern: str) -> bool:
-            return pattern in text
+        appointment_id: str | None = None
 
-        if "appointment" in text:
-            tokens = [token for token in text.replace("#", " ").split() if token.isdigit()]
-            if tokens:
-                return AssistantPlan(intent="appointment_details", arguments={"appointment_id": tokens[0]})
-        if "payment" in text:
-            tokens = [token for token in text.replace("#", " ").split() if token.isdigit()]
-            if tokens:
-                return AssistantPlan(intent="payment_status", arguments={"appointment_id": tokens[0]})
-        if _match("outstanding") or _match("overdue") or _match("unpaid"):
-            return AssistantPlan(intent="outstanding", arguments={})
-        if _match("schedule") or _match("calendar") or _match("bookings"):
-            target = "today"
-            if "tomorrow" in text:
-                target = "tomorrow"
-            elif "week" in text:
-                target = "week"
-            return AssistantPlan(intent="schedule", arguments={"target": target})
-        if _match("kpi") or _match("today") or _match("summary"):
+        def ensure_appointment_id() -> str | None:
+            nonlocal appointment_id
+            if appointment_id is None:
+                appointment_id = self._extract_appointment_id(prompt)
+            return appointment_id
+
+        payment_tokens = ("payment", "paid", "deposit", "invoice")
+        mentions_payment = any(token in text for token in payment_tokens)
+        if mentions_payment and ("status" in text or "confirm" in text or ensure_appointment_id()):
+            args: dict[str, Any] = {}
+            appt_id = ensure_appointment_id()
+            if appt_id:
+                args["appointment_id"] = appt_id
+            return AssistantPlan(intent="payment_status", arguments=args)
+
+        detail_tokens = (
+            "detail",
+            "info",
+            "client",
+            "email",
+            "phone",
+            "contact",
+            "start",
+            "time",
+            "when",
+            "notes",
+            "status",
+        )
+        if any(token in text for token in ("appointment", "booking")) and any(marker in text for marker in detail_tokens):
+            args: dict[str, Any] = {}
+            appt_id = ensure_appointment_id()
+            if appt_id:
+                args["appointment_id"] = appt_id
+            return AssistantPlan(intent="appointment_details", arguments=args)
+
+        appt_id = ensure_appointment_id()
+        if appt_id and any(token in text for token in ("appointment", "booking")) and not mentions_payment:
+            return AssistantPlan(intent="appointment_details", arguments={"appointment_id": appt_id})
+
+        if self._is_booking_request(text):
+            return AssistantPlan(intent="booking_guidance", arguments={})
+
+        if any(token in text for token in ("outstanding", "overdue", "unpaid", "pending", "owe", "balance", "due")):
+            args: dict[str, Any] = {}
+            limit = self._extract_limit(text)
+            if limit is not None:
+                args["limit"] = limit
+            return AssistantPlan(intent="outstanding", arguments=args)
+
+        if self._mentions_schedule_request(text):
+            args: dict[str, Any] = {"target": self._infer_schedule_target(text)}
+            limit = self._extract_limit(text)
+            if limit is not None:
+                args["limit"] = limit
+            if "note" in text:
+                args["include_notes"] = True
+            return AssistantPlan(intent="schedule", arguments=args)
+
+        if "management" in text or "revenue" in text or "finance" in text or "report" in text:
+            period = self._infer_period_token(text)
+            detailed = any(token in text for token in ("detail", "breakdown", "per service", "per-service"))
+            return AssistantPlan(intent="management_summary", arguments={"period": period, "detailed": detailed})
+
+        if any(token in text for token in ("kpi", "today", "daily", "overview", "summary")) and "management" not in text:
             return AssistantPlan(intent="today_summary", arguments={})
+
         return None
