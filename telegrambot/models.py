@@ -253,3 +253,33 @@ class TelegramBookingSession(models.Model):
         history = list(self.context_log or [])
         history.append({"role": role, "text": text, "ts": timezone.now().isoformat()})
         self.context_log = history[-limit:]
+
+
+class TelegramStaffAssistantSession(models.Model):
+    """Conversation history for staff AI assistant chats."""
+
+    subscription = models.OneToOneField(
+        TelegramChatSubscription,
+        on_delete=models.CASCADE,
+        related_name="assistant_session",
+    )
+    context_log = models.JSONField(default=list, blank=True)
+    last_error = models.TextField(blank=True)
+    last_interaction_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Telegram AI assistant session"
+        verbose_name_plural = "Telegram AI assistant sessions"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"Assistant session for chat {self.subscription.chat_id}"
+
+    def append_context(self, role: str, content: str, *, limit: int = 12) -> None:
+        history = list(self.context_log or [])
+        history.append({"role": role, "text": content, "ts": timezone.now().isoformat()})
+        self.context_log = history[-limit:]
+
+    def reset(self) -> None:
+        self.context_log = []
+        self.last_error = ""

@@ -35,6 +35,7 @@ from .services import (
     start_client_booking,
     update_payment_status_via_bot,
 )
+from .assistant import StaffAssistant, StaffAssistantError
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,9 @@ def register_handlers(bot: TeleBot) -> None:
                 "/appointment <id> — appointment snapshot.",
                 "/paystatus <id> [status|list] — review or update payment status.",
                 "/note <id> [text] — view notes or append a new entry.",
+                "",
+                "<b>AI assistant</b>",
+                "/assistant <question> — natural language access to KPIs, schedules, and payment insights.",
             ]
             bot.send_message(message.chat.id, "\n".join(help_lines))
         logger.info("Telegram chat %s connected (admin=%s)", subscription.chat_id, subscription.is_admin_channel)
@@ -435,3 +439,28 @@ def register_handlers(bot: TeleBot) -> None:
             bot.reply_to(message, str(exc))
             return
         bot.reply_to(message, response)
+
+    @bot.message_handler(commands=["assistant", "ai"])
+    def handle_ai_assistant(message: Message) -> None:
+        _log_command(message, "/assistant")
+        subscription = _require_admin(message)
+        if not subscription:
+            return
+        prompt = _extract_argument(message.text)
+        if not prompt:
+            bot.reply_to(
+                message,
+                "Usage: /assistant <question>. Example: /assistant Summarize tomorrow's schedule workload.",
+            )
+            return
+        assistant = StaffAssistant(subscription)
+        try:
+            reply = assistant.answer(prompt)
+        except StaffAssistantError as exc:
+            bot.reply_to(message, str(exc))
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("AI assistant failed")
+            bot.reply_to(message, "AI assistant failed to process the request. Try again in a moment.")
+            return
+        bot.send_message(message.chat.id, reply)
