@@ -39,6 +39,12 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["malvabeauty.duckdns.org", "127.0.0.1", "localhost"]
 
+_default_public_host = ALLOWED_HOSTS[0].lstrip(".") if ALLOWED_HOSTS else "localhost"
+PUBLIC_ROOT_URL = env(
+    "PUBLIC_ROOT_URL",
+    default=f"https://{_default_public_host}",
+)
+
 
 def _build_csrf_trusted_origins(hosts: list[str]) -> list[str]:
     """
@@ -88,6 +94,7 @@ INSTALLED_APPS = [
     'accounts',
     'core',
     'telegrambot',
+    'rest_framework',
     'dal',
     'dal_select2',
     'storages',

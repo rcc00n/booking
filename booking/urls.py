@@ -26,6 +26,7 @@ from core.payments.stripe_api import stripe_webhook
 from core.admin import stats_view
 from accounts.views import health_view, health_edit
 from core.models import SupportDocument
+from booking.api import AvailabilityView, AppointmentCreateView, AppointmentItemStatusView
 urlpatterns = [
     path("admin/api/appointment-items/<uuid:item_id>/status/", admin_item_status_update, name="admin-item-status-update"),
     path("admin/api/appointment-items/<uuid:item_id>/reschedule/", admin_item_reschedule, name="admin-item-reschedule"),
@@ -38,6 +39,13 @@ path("", include("core.urls")),
     path("autocomplete/master/", MasterUserProfileAutocomplete.as_view(), name="master-userprofile-autocomplete"),  # // CHANGED
     path("admin/stats/", admin.site.admin_view(stats_view), name="admin-stats"),
     path("api/service/<uuid:pk>/price/", service_price, name="service-price"),
+    path("api/availability/", AvailabilityView.as_view(), name="api-availability"),
+    path("api/appointments/", AppointmentCreateView.as_view(), name="api-appointments"),
+    path(
+        "api/items/<uuid:item_id>/status/",
+        AppointmentItemStatusView.as_view(),
+        name="api-item-status",
+    ),
     path(
         "accounts/api/services/<slug:service_id>/promocodes/",
         service_promocodes_api,

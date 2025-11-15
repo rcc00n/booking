@@ -6,17 +6,20 @@ import logging
 import secrets
 
 from telebot import TeleBot
-from telebot.types import Message
+from telebot.types import CallbackQuery, Message
 
 from .models import TelegramBotSettings, TelegramChatSubscription
 from .services import (
+    MAIN_MENU_BOOK,
+    MAIN_MENU_BOOKINGS,
+    MAIN_MENU_HELP,
     TelegramCommandError,
+    append_booking_context,
     append_note_to_appointment,
     describe_payment_status,
-    execute_ops_command,
-    is_ops_command,
+    handle_booking_callback,
+    handle_admin_status_callback,
     link_subscription_to_profile,
-    list_ops_commands,
     list_payment_status_choices,
     record_subscription,
     render_appointment_details,
@@ -25,6 +28,10 @@ from .services import (
     render_outstanding_overview,
     render_schedule_overview,
     render_today_summary,
+    send_client_help,
+    send_client_menu,
+    send_upcoming_bookings,
+    start_client_booking,
     update_payment_status_via_bot,
 )
 
@@ -68,29 +75,55 @@ def register_handlers(bot: TeleBot) -> None:
         )
         return None
 
+    @bot.callback_query_handler(func=lambda c: bool(c.data and c.data.startswith("b|")))
+    def handle_booking_callbacks(callback: CallbackQuery) -> None:
+        handle_booking_callback(bot, callback)
+
+    @bot.callback_query_handler(func=lambda c: bool(c.data and c.data.startswith("ops|")))
+    def handle_admin_callbacks(callback: CallbackQuery) -> None:
+        handle_admin_status_callback(bot, callback)
+
     @bot.message_handler(commands=["start", "help"])
     def handle_help(message: Message) -> None:
         _log_command(message, "/help")
         subscription = record_subscription(message)
-        help_text = (
-            "Hello! I keep admins informed about bookings and payments.\n\n"
-            "Key commands:\n"
-            "/subscribe [token] - register this chat and enable admin alerts.\n"
-            "/today - quick view of today's KPIs.\n"
-            "/summary [today|yesterday|week|YYYY-MM-DD[:YYYY-MM-DD]] [detailed] - operations report.\n"
-            "/schedule [window] [limit] [client:term] [staff:term] [status:code] [payment:name] [notes] - inspect the calendar.\n"
-            "/outstanding [limit] - show unpaid appointments.\n"
-            "/appointment [id] - appointment snapshot.\n"
-            "/link [email] - link this chat to your staff profile (needed for edits).\n"
-            "/paystatus [id] [status|list] - review or update payment status.\n"
-            "/note [id] [text] - view notes or append a new entry.\n"
-            "/unsubscribe - stop notifications."
-        )
-        ops_entries = [f"{spec.name} — {spec.description}" for spec in list_ops_commands()]
-        if ops_entries:
-            help_text += "\n\nChatOps commands (send as plain text):\n" + "\n".join(ops_entries)
-        bot.reply_to(message, help_text)
+        send_client_menu(bot, message.chat.id)
+        send_client_help(bot, subscription)
+        if subscription.is_admin_channel:
+            help_text = (
+                "Hello! I keep admins informed about bookings and payments.\n\n"
+                "Key commands:\n"
+                "/subscribe [token] - register this chat and enable admin alerts.\n"
+                "/today - quick view of today's KPIs.\n"
+                "/summary [today|yesterday|week|YYYY-MM-DD[:YYYY-MM-DD]] [detailed] - operations report.\n"
+                "/schedule [window] [limit] [client:term] [staff:term] [status:code] [payment:name] [notes] - inspect the calendar.\n"
+                "/outstanding [limit] - show unpaid appointments.\n"
+                "/appointment [id] - appointment snapshot.\n"
+                "/link [email] - link this chat to your staff profile (needed for edits).\n"
+                "/paystatus [id] [status|list] - review or update payment status.\n"
+                "/note [id] [text] - view notes or append a new entry.\n"
+                "/unsubscribe - stop notifications."
+            )
+            bot.send_message(message.chat.id, help_text)
         logger.info("Telegram chat %s connected (admin=%s)", subscription.chat_id, subscription.is_admin_channel)
+
+    @bot.message_handler(func=lambda msg: (msg.text or "").strip() == MAIN_MENU_BOOK)
+    def handle_menu_book(message: Message) -> None:
+        subscription = record_subscription(message)
+        append_booking_context(subscription, "user", message.text or "")
+        start_client_booking(bot, subscription, telegram_user=message.from_user)
+
+    @bot.message_handler(func=lambda msg: (msg.text or "").strip() == MAIN_MENU_BOOKINGS)
+    def handle_menu_bookings(message: Message) -> None:
+        subscription = record_subscription(message)
+        append_booking_context(subscription, "user", message.text or "")
+        send_upcoming_bookings(bot, subscription)
+
+    @bot.message_handler(func=lambda msg: (msg.text or "").strip() == MAIN_MENU_HELP)
+    def handle_menu_help(message: Message) -> None:
+        subscription = record_subscription(message)
+        append_booking_context(subscription, "user", message.text or "")
+        send_client_help(bot, subscription)
 
     @bot.message_handler(commands=["subscribe"])
     def handle_subscribe(message: Message) -> None:
@@ -368,17 +401,6 @@ def register_handlers(bot: TeleBot) -> None:
         note_text = parts[1]
         try:
             response = append_note_to_appointment(appt_id, note_text, actor=subscription.linked_profile)
-        except TelegramCommandError as exc:
-            bot.reply_to(message, str(exc))
-            return
-        bot.reply_to(message, response)
-
-    @bot.message_handler(func=lambda msg: is_ops_command(getattr(msg, "text", None)))
-    def handle_ops_text(message: Message) -> None:
-        _log_command(message, "ops-command")
-        subscription = record_subscription(message)
-        try:
-            response = execute_ops_command(message.text or "", subscription)
         except TelegramCommandError as exc:
             bot.reply_to(message, str(exc))
             return

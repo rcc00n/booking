@@ -150,6 +150,14 @@ class TelegramChatSubscription(models.Model):
         related_name="telegram_chats",
         help_text="Staff profile used to attribute Telegram commands.",
     )
+    client_profile = models.ForeignKey(
+        "core.UserProfile",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="telegram_client_chats",
+        help_text="Client profile linked to this chat for booking flows.",
+    )
 
     class Meta:
         ordering = ["-is_admin_channel", "-last_interaction_at"]
@@ -195,3 +203,51 @@ class TelegramBroadcast(models.Model):
         self.sent_at = timezone.now() if not error else None
         fields = ["is_sent", "last_error", "sent_at"]
         self.save(update_fields=fields)
+
+
+class TelegramBookingSession(models.Model):
+    """Stores per-chat state for the conversational booking flow."""
+
+    STATE_IDLE = "idle"
+    STATE_SERVICE = "service"
+    STATE_MASTER = "master"
+    STATE_DATE = "date"
+    STATE_TIME = "time"
+    STATE_CONFIRM = "confirm"
+    STATE_CHOICES = [
+        (STATE_IDLE, "Idle"),
+        (STATE_SERVICE, "Choosing service"),
+        (STATE_MASTER, "Choosing master"),
+        (STATE_DATE, "Choosing date"),
+        (STATE_TIME, "Choosing time"),
+        (STATE_CONFIRM, "Confirm"),
+    ]
+
+    subscription = models.OneToOneField(
+        TelegramChatSubscription,
+        on_delete=models.CASCADE,
+        related_name="booking_session",
+    )
+    state = models.CharField(max_length=20, choices=STATE_CHOICES, default=STATE_IDLE)
+    payload = models.JSONField(default=dict, blank=True)
+    context_log = models.JSONField(default=list, blank=True)
+    active_message_id = models.BigIntegerField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Telegram booking session"
+        verbose_name_plural = "Telegram booking sessions"
+
+    def reset(self, *, keep_defaults: bool = True) -> None:
+        defaults = self.payload.get("last_selection", {}) if keep_defaults else {}
+        self.payload = {"last_selection": defaults}
+        self.state = self.STATE_IDLE
+        self.active_message_id = None
+        self.last_error = ""
+
+    def append_context(self, role: str, text: str, *, limit: int = 10) -> None:
+        history = list(self.context_log or [])
+        history.append({"role": role, "text": text, "ts": timezone.now().isoformat()})
+        self.context_log = history[-limit:]
