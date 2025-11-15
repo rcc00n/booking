@@ -13,7 +13,10 @@ from .services import (
     TelegramCommandError,
     append_note_to_appointment,
     describe_payment_status,
+    execute_ops_command,
+    is_ops_command,
     link_subscription_to_profile,
+    list_ops_commands,
     list_payment_status_choices,
     record_subscription,
     render_appointment_details,
@@ -83,6 +86,9 @@ def register_handlers(bot: TeleBot) -> None:
             "/note [id] [text] - view notes or append a new entry.\n"
             "/unsubscribe - stop notifications."
         )
+        ops_entries = [f"{spec.name} — {spec.description}" for spec in list_ops_commands()]
+        if ops_entries:
+            help_text += "\n\nChatOps commands (send as plain text):\n" + "\n".join(ops_entries)
         bot.reply_to(message, help_text)
         logger.info("Telegram chat %s connected (admin=%s)", subscription.chat_id, subscription.is_admin_channel)
 
@@ -362,6 +368,17 @@ def register_handlers(bot: TeleBot) -> None:
         note_text = parts[1]
         try:
             response = append_note_to_appointment(appt_id, note_text, actor=subscription.linked_profile)
+        except TelegramCommandError as exc:
+            bot.reply_to(message, str(exc))
+            return
+        bot.reply_to(message, response)
+
+    @bot.message_handler(func=lambda msg: is_ops_command(getattr(msg, "text", None)))
+    def handle_ops_text(message: Message) -> None:
+        _log_command(message, "ops-command")
+        subscription = record_subscription(message)
+        try:
+            response = execute_ops_command(message.text or "", subscription)
         except TelegramCommandError as exc:
             bot.reply_to(message, str(exc))
             return
