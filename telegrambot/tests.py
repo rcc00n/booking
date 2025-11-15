@@ -7,6 +7,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 from unittest import mock
 
@@ -22,6 +23,7 @@ from .services import (
     render_schedule_overview,
     update_payment_status_via_bot,
 )
+from .admin import RECOVERY_PASSWORD
 
 User = get_user_model()
 
@@ -65,6 +67,31 @@ class TelegramBotPermissionsTests(TestCase):
         self.assertTrue(user_has_bot_access(self.owner))
         self.assertTrue(user_has_bot_access(self.staff))
         self.assertFalse(user_has_bot_access(self.other))
+
+
+class TelegramBotAdminRecoveryTests(TestCase):
+    def setUp(self) -> None:
+        TelegramBotSettings.objects.all().delete()
+        self.settings = TelegramBotSettings.load()
+        self.owner = User.objects.create_user("owner", "owner@example.com", "pwd", is_staff=True)
+        self.claimant = User.objects.create_user("claimant", "claimant@example.com", "pwd", is_staff=True)
+        assign_lock_to_user(self.owner)
+
+    def test_recovery_password_transfers_lock(self) -> None:
+        self.client.force_login(self.claimant)
+        url = reverse("admin:telegrambot_telegrambotsettings_recover")
+        response = self.client.post(url, {"recovery_password": RECOVERY_PASSWORD}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.locked_by, self.claimant)
+
+    def test_invalid_password_keeps_existing_owner(self) -> None:
+        self.client.force_login(self.claimant)
+        url = reverse("admin:telegrambot_telegrambotsettings_recover")
+        response = self.client.post(url, {"recovery_password": "wrong"})
+        self.assertEqual(response.status_code, 200)
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.locked_by, self.owner)
 
 
 class TelegramBotCommandServiceTests(TestCase):

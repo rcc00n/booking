@@ -98,6 +98,18 @@ class TelegramBotSettingsAdmin(RestrictedBotAdminMixin, admin.ModelAdmin):
             obj.locked_at = timezone.now()
         super().save_model(request, obj, form, change)
 
+    def changelist_view(self, request, extra_context=None):
+        """Expose current lock state and recovery link on the changelist screen."""
+
+        settings_obj = TelegramBotSettings.load()
+        context = {
+            "settings_obj": settings_obj,
+            "recover_url": reverse("admin:telegrambot_telegrambotsettings_recover"),
+        }
+        if extra_context:
+            context.update(extra_context)
+        return super().changelist_view(request, extra_context=context)
+
     def get_urls(self):
         urls = super().get_urls()
         custom = [

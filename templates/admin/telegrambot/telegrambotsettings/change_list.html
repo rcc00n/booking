@@ -1,0 +1,50 @@
+{% extends "admin/change_list.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="card mb-4">
+  <div class="card-header">
+    <h2>Telegram bot access control</h2>
+  </div>
+  <div class="card-body">
+    <p>
+      The first staff member who updates the bot settings becomes the owner.
+      After that only the owner, superusers, or people listed in <em>Allowed admins</em> can manage the bot section.
+    </p>
+    {% if settings_obj.locked_by %}
+      <p>
+        <strong>Current owner:</strong>
+        {{ settings_obj.locked_by.get_full_name|default:settings_obj.locked_by.username }}
+        {% if settings_obj.locked_at %}
+          (since {{ settings_obj.locked_at|date:"SHORT_DATETIME_FORMAT" }})
+        {% endif %}
+      </p>
+      {% with delegates=settings_obj.allowed_admins.all %}
+        <p>
+          <strong>Delegated admins:</strong>
+          {% if delegates %}
+            {% for admin in delegates %}
+              {{ admin.get_full_name|default:admin.username }}{% if not forloop.last %}, {% endif %}
+            {% endfor %}
+          {% else %}
+            <span>None yet.</span>
+          {% endif %}
+        </p>
+      {% endwith %}
+    {% else %}
+      <p class="text-success">
+        No one has claimed the Telegram bot yet. Saving the configuration will lock it to you automatically.
+      </p>
+    {% endif %}
+    <div class="btn-toolbar gap-2 mt-3">
+      <a class="btn btn-primary" href="{% url 'admin:telegrambot_telegrambotsettings_change' settings_obj.pk %}">
+        Open settings
+      </a>
+      <a class="btn btn-outline-danger" href="{{ recover_url }}">
+        Recover ownership
+      </a>
+    </div>
+  </div>
+</div>
+{{ block.super }}
+{% endblock %}
