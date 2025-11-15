@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Iterable, Sequence
 
 from django.contrib.auth import get_user_model
-from django.db.models import Prefetch, Q, Sum
+from django.db.models import Count, Prefetch, Q, Sum
 from django.utils import timezone
 from django.utils.html import escape
 
@@ -16,7 +16,7 @@ from telebot import TeleBot
 from telebot.apihelper import ApiTelegramException
 from telebot.types import Message
 
-from core.models import Appointment, AppointmentItem, Payment, PaymentStatus, UserProfile
+from core.models import Appointment, AppointmentItem, AppointmentQuerySet, Payment, PaymentStatus, UserProfile
 from .models import TelegramBotSettings, TelegramBroadcast, TelegramChatSubscription
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,43 @@ def _unique(values: Iterable[int]) -> list[int]:
 
 def _collect_chat_ids(queryset) -> list[int]:
     return [int(chat_id) for chat_id in queryset if chat_id is not None]
+
+
+def _clamp_limit(value: int | None, *, default: int = 5, maximum: int = 20) -> int:
+    base = default if value is None else value
+    if base < 1:
+        return 1
+    if base > maximum:
+        return maximum
+    return base
+
+
+def _normalize_status_token(token: str | None) -> str:
+    return (token or "").strip().replace("-", "_").replace(" ", "_").upper()
+
+
+def _resolve_status_code(token: str | None) -> str | None:
+    normalized = _normalize_status_token(token)
+    if not normalized:
+        return None
+    for code, label in AppointmentQuerySet.STATUS_LABELS.items():
+        if normalized == code:
+            return code
+        label_key = label.replace(" ", "_").upper()
+        if normalized == label_key:
+            return code
+    return None
+
+
+def _notes_preview(notes: str | None, limit: int = 120) -> str | None:
+    if not notes:
+        return None
+    compact = " ".join(notes.strip().split())
+    if not compact:
+        return None
+    if len(compact) <= limit:
+        return compact
+    return compact[: max(limit - 3, 1)].rstrip() + "..."
 
 
 def admin_chat_ids(settings_obj: TelegramBotSettings | None = None) -> list[int]:
@@ -261,9 +298,18 @@ def render_today_summary() -> str:
     revenue = payments.aggregate(total=Sum("amount"))
     revenue_total = revenue.get("total") or Decimal("0.00")
 
+    outstanding_qs = appts.filter(
+        Q(payment_status__isnull=True)
+        | Q(payment_status__name__icontains="not paid")
+        | Q(payment_status__name__icontains="pending")
+    )
+    outstanding_count = outstanding_qs.count()
+    outstanding_value = outstanding_qs.aggregate(total=Sum("final_price")).get("total") or Decimal("0.00")
+
     lines = [
         f"Appointments today: {appt_count}",
         f"Payments today: {_format_money(revenue_total)}",
+        f"Outstanding today: {outstanding_count} worth {_format_money(outstanding_value)}",
     ]
 
     if next_appt:
@@ -418,7 +464,7 @@ def _services_summary(appt: Appointment) -> str:
     return ", ".join(services) if services else "Services pending"
 
 
-def render_management_summary(period: str | None = None) -> str:
+def render_management_summary(period: str | None = None, *, detailed: bool = False) -> str:
     start, end, label = _period_window(period)
     appointments = Appointment.objects.filter(start_time__gte=start, start_time__lt=end)
     appt_count = appointments.count()
@@ -430,9 +476,13 @@ def render_management_summary(period: str | None = None) -> str:
     payment_count = payments.count()
     avg_ticket = revenue_total / Decimal(payment_count or 1)
 
-    outstanding = appointments.filter(
-        Q(payment_status__name__icontains="not paid") | Q(payment_status__name__icontains="pending")
-    ).count()
+    outstanding_qs = appointments.filter(
+        Q(payment_status__isnull=True)
+        | Q(payment_status__name__icontains="not paid")
+        | Q(payment_status__name__icontains="pending")
+    )
+    outstanding = outstanding_qs.count()
+    outstanding_value = outstanding_qs.aggregate(total=Sum("final_price")).get("total") or Decimal("0.00")
 
     upcoming = (
         appointments.filter(start_time__gte=timezone.now())
@@ -452,14 +502,49 @@ def render_management_summary(period: str | None = None) -> str:
         f"Unique clients: {unique_clients}",
         f"Succeeded payments: {payment_count}",
         f"Revenue: {_format_money(revenue_total)} (avg {_format_money(avg_ticket)})",
-        f"Outstanding (unpaid/pending): {outstanding}",
+        f"Outstanding (unpaid/pending): {outstanding} worth {_format_money(outstanding_value)}",
         upcoming_text,
     ]
+
+    if detailed:
+        status_breakdown = (
+            appointments.with_aggregated_status()
+            .values("_aggregated_status_label")
+            .annotate(total=Count("id"))
+            .order_by("-total", "_aggregated_status_label")
+        )
+        if status_breakdown:
+            breakdown_text = " • ".join(
+                f"{escape(entry['_aggregated_status_label'])}: {entry['total']}"
+                for entry in status_breakdown
+            )
+            lines.append(f"Status mix: {breakdown_text}")
+
+        top_service = (
+            AppointmentItem.objects.filter(appointment__start_time__gte=start, appointment__start_time__lt=end)
+            .values("service__name")
+            .annotate(total=Count("id"))
+            .order_by("-total", "service__name")
+            .first()
+        )
+        if top_service:
+            service_name = escape(top_service.get("service__name") or "Service")
+            lines.append(f"Top service: {service_name} ({top_service['total']})")
+
     return _format_message("Operations report", lines)
 
 
-def render_schedule_overview(target: str | None = None, *, limit: int = 5) -> str:
-    limit = max(1, min(limit or 5, 20))
+def render_schedule_overview(
+    target: str | None = None,
+    *,
+    limit: int = 5,
+    staff_query: str | None = None,
+    client_query: str | None = None,
+    status_filter: str | None = None,
+    payment_filter: str | None = None,
+    include_notes: bool = False,
+) -> str:
+    limit = _clamp_limit(limit)
     start, end, label = _schedule_window(target)
 
     qs = (
@@ -477,23 +562,77 @@ def render_schedule_overview(target: str | None = None, *, limit: int = 5) -> st
     if end is not None:
         qs = qs.filter(start_time__lt=end)
 
+    needs_distinct = False
+
+    if client_query:
+        client_term = client_query.strip()
+        if client_term:
+            client_filter = (
+                Q(client__user__first_name__icontains=client_term)
+                | Q(client__user__last_name__icontains=client_term)
+                | Q(client__user__username__icontains=client_term)
+                | Q(client__user__email__icontains=client_term)
+                | Q(client__phone__icontains=client_term)
+            )
+            qs = qs.filter(client_filter)
+
+    if staff_query:
+        staff_term = staff_query.strip()
+        if staff_term:
+            staff_filter = (
+                Q(items__master__user__first_name__icontains=staff_term)
+                | Q(items__master__user__last_name__icontains=staff_term)
+                | Q(items__master__user__username__icontains=staff_term)
+                | Q(items__master__display_name__icontains=staff_term)
+            )
+            qs = qs.filter(staff_filter)
+            needs_distinct = True
+
+    if payment_filter:
+        payment_term = payment_filter.strip()
+        if payment_term:
+            qs = qs.filter(payment_status__name__icontains=payment_term)
+
+    if status_filter:
+        status_code = _resolve_status_code(status_filter)
+        if status_code:
+            qs = qs.filter(_aggregated_status_code=status_code)
+        else:
+            qs = qs.filter(_aggregated_status_label__icontains=status_filter.strip())
+
+    if needs_distinct:
+        qs = qs.distinct()
+
     appointments = list(qs[:limit])
     if not appointments:
         return _format_message(f"Schedule — {label}", ["No appointments scheduled."])
 
     blocks: list[str] = []
+    now = timezone.localtime()
     for idx, appt in enumerate(appointments, start=1):
         start_text = timezone.localtime(appt.start_time).strftime("%H:%M") if appt.start_time else "TBD"
         status_label = getattr(appt, "aggregated_status", None) or getattr(appt, "_aggregated_status_label", "Booked")
         payment_label = getattr(getattr(appt, "payment_status", None), "name", "Unspecified")
         services = _services_summary(appt)
         client_name = escape(_client_label(appt))
+        badges: list[str] = []
+        if appt.start_time and appt.start_time < now:
+            badges.append("past")
+        payment_lower = payment_label.lower()
+        if "not paid" in payment_lower or "pending" in payment_lower:
+            badges.append("unpaid")
+        badge_text = f" {escape('(' + ', '.join(badges) + ')')}" if badges else ""
+
         block = (
-            f"{idx}. {escape(start_text)} — {client_name} [{escape(status_label)}]\n"
+            f"{idx}. {escape(start_text)} — {client_name} [{escape(status_label)}]{badge_text}\n"
             f"   Services: {services}\n"
             f"   Payment: {escape(payment_label)} • Total {_format_money(appt.final_price)}\n"
             f"   ID: <code>{escape(str(appt.pk))}</code>"
         )
+        if include_notes:
+            preview = _notes_preview(appt.notes)
+            if preview:
+                block += f"\n   Notes: {escape(preview)}"
         blocks.append(block)
 
     return _format_message(f"Schedule — {label}", blocks)

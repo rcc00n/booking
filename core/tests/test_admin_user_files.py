@@ -4,10 +4,13 @@ import tempfile
 from django.contrib.auth import get_user_model
 from django.core.files.storage import FileSystemStorage
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.http import QueryDict
+from django.test import RequestFactory, TestCase
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
+from django.utils.datastructures import MultiValueDict
 
+from core.forms import CustomUserChangeForm
 from core.models import Appointment, ClientFile, PaymentStatus, UserProfile
 
 
@@ -54,6 +57,10 @@ class AdminClientFilesViewTests(TestCase):
         cls.client_profile = getattr(cls.client_user, "userprofile", None)
         if cls.client_profile is None:
             cls.client_profile = UserProfile.objects.create(user=cls.client_user)
+        cls.client_profile.phone = "+14035550123"
+        cls.client_profile.postal_code = "T2X1A1"
+        cls.client_profile.address = "123 Example Street"
+        cls.client_profile.save(update_fields=["phone", "postal_code", "address"])
 
         cls.payment_status = PaymentStatus.objects.create(name="Files Pending")
 
@@ -79,6 +86,61 @@ class AdminClientFilesViewTests(TestCase):
             kind=ClientFile.KIND_OTHER,
             description="Signed consent form",
             uploaded_by=ClientFile.USER,
+        )
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def _user_change_form_data(self, overrides=None):
+        profile = self.client_profile
+        data = QueryDict("", mutable=True)
+        data["email"] = self.client_user.email
+        data["first_name"] = self.client_user.first_name
+        data["last_name"] = self.client_user.last_name
+        if self.client_user.is_active:
+            data["is_active"] = "on"
+        if self.client_user.is_staff:
+            data["is_staff"] = "on"
+        if self.client_user.is_superuser:
+            data["is_superuser"] = "on"
+        data.setlist("groups", [])
+        data.setlist("user_permissions", [])
+        data["password"] = self.client_user.password
+        data["postal_code"] = profile.postal_code or ""
+        data["address"] = profile.address or ""
+        data["how_heard"] = profile.how_heard or ""
+        if profile.email_marketing_consent:
+            data["email_marketing_consent"] = "on"
+        data["notes"] = profile.notes or ""
+        data["personal_discount_percent"] = str(profile.personal_discount_percent or 0)
+        data["phone"] = profile.phone or "+14035550000"
+        data["birth_date_year"] = ""
+        data["birth_date_month"] = ""
+        data["birth_date_day"] = ""
+        data["files_kind"] = ClientFile.KIND_BEFORE
+        data["files_description"] = "Session capture"
+        data["files_appointment"] = str(self.appointment.pk)
+        if overrides:
+            for key, value in overrides.items():
+                if isinstance(value, list):
+                    data.setlist(key, value)
+                else:
+                    data[key] = value
+        data._mutable = False
+        return data
+
+    @staticmethod
+    def _file_payload(filename):
+        return MultiValueDict(
+            {
+                "files": [
+                    SimpleUploadedFile(
+                        filename,
+                        b"\x47\x49\x46",
+                        content_type="image/jpeg",
+                    )
+                ]
+            }
         )
 
     def test_user_change_view_lists_all_client_files(self):
@@ -121,3 +183,57 @@ class AdminClientFilesViewTests(TestCase):
         follow_up.render()
         self.assertContains(follow_up, "Client Files (1)")
         self.assertNotContains(follow_up, "before-session.jpg")
+
+    def test_user_change_form_uploads_file_with_metadata(self):
+        data = self._user_change_form_data(
+            {
+                "files_kind": ClientFile.KIND_BEFORE,
+                "files_description": "Fresh capture",
+                "files_appointment": str(self.appointment.pk),
+            }
+        )
+        files = self._file_payload("before-admin.jpg")
+        request = self.factory.post("/")
+        request.user = self.admin_user
+
+        form = CustomUserChangeForm(
+            data=data,
+            files=files,
+            instance=self.client_user,
+            request=request,
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+
+        uploaded = (
+            ClientFile.objects.filter(
+                user=self.client_profile,
+                appointment=self.appointment,
+                description="Fresh capture",
+            )
+            .order_by("-uploaded_at")
+            .first()
+        )
+        self.assertIsNotNone(uploaded)
+        self.assertEqual(uploaded.kind, ClientFile.KIND_BEFORE)
+        self.assertEqual(uploaded.uploaded_by_user, self.admin_user)
+
+    def test_user_change_form_requires_appointment_for_before_after(self):
+        data = self._user_change_form_data(
+            {
+                "files_kind": ClientFile.KIND_AFTER,
+                "files_appointment": "",
+            }
+        )
+        files = self._file_payload("after-admin.jpg")
+        request = self.factory.post("/")
+        request.user = self.admin_user
+
+        form = CustomUserChangeForm(
+            data=data,
+            files=files,
+            instance=self.client_user,
+            request=request,
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("files_appointment", form.errors)

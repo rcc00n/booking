@@ -1394,7 +1394,10 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             'postal_code', 'how_heard', 'email_marketing_consent'
         )}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
-        ('Files', {'fields': ('files',)}),
+        ('Files', {
+            'fields': ('files', 'files_kind', 'files_appointment', 'files_description'),
+            'description': "Upload documents or Before/After photos and link them to specific appointments.",
+        }),
         ('Notes', {'fields': ('notes',)}),
         ('Health', {
             'classes': ('collapse', 'wide'),
@@ -1407,6 +1410,24 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             ),
         }),
     )
+
+    def get_form(self, request, obj=None, **kwargs):
+        form_class = super().get_form(request, obj, **kwargs)
+        if not isinstance(form_class, type):
+            return form_class
+        if not issubclass(form_class, CustomUserChangeForm):
+            return form_class
+        if getattr(form_class, "_request_injected", False):
+            return form_class
+
+        class RequestAwareUserForm(form_class):
+            _request_injected = True
+
+            def __init__(self, *args, **inner_kwargs):
+                inner_kwargs.setdefault("request", request)
+                super().__init__(*args, **inner_kwargs)
+
+        return RequestAwareUserForm
 
     def password_change_link(self, obj):
         if not obj or not getattr(obj, "pk", None):
