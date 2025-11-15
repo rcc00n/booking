@@ -8,8 +8,9 @@ import secrets
 from telebot import TeleBot
 from telebot.types import CallbackQuery, Message
 
-from .models import TelegramBotSettings, TelegramChatSubscription
+from .models import TelegramBotSettings, TelegramBookingSession, TelegramChatSubscription
 from .services import (
+    ClientBookingFlow,
     MAIN_MENU_BOOK,
     MAIN_MENU_BOOKINGS,
     MAIN_MENU_HELP,
@@ -40,6 +41,17 @@ logger = logging.getLogger(__name__)
 
 def _subscription_for(message: Message) -> TelegramChatSubscription | None:
     return TelegramChatSubscription.objects.filter(chat_id=message.chat.id).first()
+
+
+def _awaiting_client_search(message: Message) -> bool:
+    subscription = _subscription_for(message)
+    if not subscription:
+        return False
+    session = getattr(subscription, "booking_session", None)
+    if not session:
+        return False
+    payload = session.payload or {}
+    return session.state == TelegramBookingSession.STATE_CLIENT and bool(payload.get("awaiting_client_query"))
 
 
 def register_handlers(bot: TeleBot) -> None:
@@ -90,21 +102,26 @@ def register_handlers(bot: TeleBot) -> None:
         send_client_menu(bot, message.chat.id)
         send_client_help(bot, subscription)
         if subscription.is_admin_channel:
-            help_text = (
-                "Hello! I keep admins informed about bookings and payments.\n\n"
-                "Key commands:\n"
-                "/subscribe [token] - register this chat and enable admin alerts.\n"
-                "/today - quick view of today's KPIs.\n"
-                "/summary [today|yesterday|week|YYYY-MM-DD[:YYYY-MM-DD]] [detailed] - operations report.\n"
-                "/schedule [window] [limit] [client:term] [staff:term] [status:code] [payment:name] [notes] - inspect the calendar.\n"
-                "/outstanding [limit] - show unpaid appointments.\n"
-                "/appointment [id] - appointment snapshot.\n"
-                "/link [email] - link this chat to your staff profile (needed for edits).\n"
-                "/paystatus [id] [status|list] - review or update payment status.\n"
-                "/note [id] [text] - view notes or append a new entry.\n"
-                "/unsubscribe - stop notifications."
-            )
-            bot.send_message(message.chat.id, help_text)
+            help_lines = [
+                "<b>Admin quick guide</b>",
+                "",
+                "<b>Setup</b>",
+                "/subscribe <token> — register this chat and enable alerts.",
+                "/link <staff email> — connect this chat to your staff profile (needed for edits).",
+                "/unsubscribe — stop notifications.",
+                "",
+                "<b>Insights</b>",
+                "/today — snapshot of today's KPIs.",
+                "/summary [today|yesterday|week|YYYY-MM-DD[:YYYY-MM-DD]] [detailed] — operations report.",
+                "/schedule [window] [limit] [client:term] [staff:term] [status:code] [payment:name] [notes] — inspect the calendar.",
+                "/outstanding [limit] — show unpaid appointments.",
+                "",
+                "<b>Appointments</b>",
+                "/appointment <id> — appointment snapshot.",
+                "/paystatus <id> [status|list] — review or update payment status.",
+                "/note <id> [text] — view notes or append a new entry.",
+            ]
+            bot.send_message(message.chat.id, "\n".join(help_lines))
         logger.info("Telegram chat %s connected (admin=%s)", subscription.chat_id, subscription.is_admin_channel)
 
     @bot.message_handler(func=lambda msg: (msg.text or "").strip() == MAIN_MENU_BOOK)
@@ -124,6 +141,19 @@ def register_handlers(bot: TeleBot) -> None:
         subscription = record_subscription(message)
         append_booking_context(subscription, "user", message.text or "")
         send_client_help(bot, subscription)
+
+    @bot.message_handler(func=_awaiting_client_search)
+    def handle_client_search_query(message: Message) -> None:
+        subscription = record_subscription(message)
+        query = (message.text or "").strip()
+        if query:
+            append_booking_context(subscription, "user", query)
+        flow = ClientBookingFlow(bot, subscription)
+        normalized = query.lower()
+        if not query or normalized in {"cancel", "stop", "exit"}:
+            flow.clear_client_search()
+            return
+        flow.apply_client_search_query(query)
 
     @bot.message_handler(commands=["subscribe"])
     def handle_subscribe(message: Message) -> None:

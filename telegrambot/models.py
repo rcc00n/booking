@@ -209,6 +209,7 @@ class TelegramBookingSession(models.Model):
     """Stores per-chat state for the conversational booking flow."""
 
     STATE_IDLE = "idle"
+    STATE_CLIENT = "client"
     STATE_SERVICE = "service"
     STATE_MASTER = "master"
     STATE_DATE = "date"
@@ -216,6 +217,7 @@ class TelegramBookingSession(models.Model):
     STATE_CONFIRM = "confirm"
     STATE_CHOICES = [
         (STATE_IDLE, "Idle"),
+        (STATE_CLIENT, "Choosing client"),
         (STATE_SERVICE, "Choosing service"),
         (STATE_MASTER, "Choosing master"),
         (STATE_DATE, "Choosing date"),

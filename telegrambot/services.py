@@ -219,6 +219,26 @@ def _master_display(master: MasterProfile | None, *, fallback: str | None = None
     return fallback or f"Master {getattr(master, 'pk', '?')}"
 
 
+def _client_profile_display(profile: UserProfile | None, *, fallback: str = "Client") -> str:
+    if profile is None:
+        return fallback
+    user = getattr(profile, "user", None)
+    if user:
+        full_name = getattr(user, "get_full_name", lambda: "")()
+        username = getattr(user, "username", "")
+        if full_name:
+            return full_name
+        if username:
+            return username
+        email = getattr(user, "email", "")
+        if email:
+            return email
+    phone = getattr(profile, "phone", "") or ""
+    if phone:
+        return phone
+    return fallback or f"Client {getattr(profile, 'pk', '?')}"
+
+
 _SENTINEL = object()
 
 
@@ -257,6 +277,7 @@ def _parse_date_token(token: str) -> date:
 
 
 class ClientBookingFlow:
+    CLIENT_PAGE_SIZE = 6
     SERVICE_PAGE_SIZE = 6
     MASTER_PAGE_SIZE = 6
     TIME_PAGE_SIZE = 12
@@ -280,10 +301,40 @@ class ClientBookingFlow:
         payload.pop("slot_iso", None)
         payload.pop("slot_label", None)
         payload.pop("reschedule_item_id", None)
+        payload.pop("client_query", None)
+        payload.pop("awaiting_client_query", None)
+        payload.pop("resume_state", None)
 
-        last_selection = payload.get("last_selection", {})
+        last_selection = payload.get("last_selection") or {}
+        payload["last_selection"] = last_selection
+
+        if not reuse_defaults:
+            payload.pop("client_id", None)
+            payload.pop("client_label", None)
+
+        if self._client_choice_enabled():
+            client_id = last_selection.get("client_id") if reuse_defaults else None
+            if client_id:
+                client = UserProfile.objects.select_related("user").filter(pk=client_id).first()
+                if client:
+                    payload["client_id"] = str(client.pk)
+                    payload["client_label"] = _client_profile_display(client)
+                else:
+                    last_selection.pop("client_id", None)
+        else:
+            profile = _ensure_client_profile(self.subscription)
+            payload["client_id"] = str(profile.pk)
+            payload["client_label"] = _client_profile_display(profile)
+
         service_id = last_selection.get("service_id") if reuse_defaults else None
         master_id = last_selection.get("master_id") if reuse_defaults else None
+
+        if self._client_choice_enabled() and not payload.get("client_id"):
+            payload.setdefault("resume_state", TelegramBookingSession.STATE_SERVICE)
+            self._commit(payload=payload)
+            self.show_client_picker(info="Pick a client to continue.")
+            return
+
         if service_id and master_id:
             service = Service.objects.filter(pk=service_id, is_active=True).first()
             master = MasterProfile.objects.filter(pk=master_id).first()
@@ -299,6 +350,125 @@ class ClientBookingFlow:
         self._commit(payload=payload, state=TelegramBookingSession.STATE_SERVICE)
         self.show_service_picker()
 
+    def show_client_picker(self, *, page: int = 0, info: str | None = None) -> None:
+        if not self._client_choice_enabled():
+            self.show_service_picker(info="Client selection is not available for this chat.")
+            return
+
+        payload = self.payload
+        if "resume_state" not in payload:
+            payload["resume_state"] = self.session.state or TelegramBookingSession.STATE_SERVICE
+            self._commit(payload=payload)
+
+        query = (payload.get("client_query") or "").strip()
+        page = max(0, page)
+        qs = self._client_queryset(query)
+        start = page * self.CLIENT_PAGE_SIZE
+        end = start + self.CLIENT_PAGE_SIZE + 1
+        clients = list(qs[start:end])
+        has_next = len(clients) > self.CLIENT_PAGE_SIZE
+        clients = clients[: self.CLIENT_PAGE_SIZE]
+
+        rows: list[list[InlineKeyboardButton]] = []
+        for profile in clients:
+            label = _client_profile_display(profile)
+            phone = getattr(profile, "phone", "") or ""
+            caption = f"{label} • {phone}" if phone else label
+            if len(caption) > 48:
+                caption = caption[:47] + "…"
+            rows.append([InlineKeyboardButton(caption, callback_data=self._cb("clientpick", str(profile.pk)))])
+
+        nav_row: list[InlineKeyboardButton] = []
+        if page > 0:
+            nav_row.append(InlineKeyboardButton("◀ Prev", callback_data=self._cb("clientpg", str(page - 1))))
+        if has_next:
+            nav_row.append(InlineKeyboardButton("Next ▶", callback_data=self._cb("clientpg", str(page + 1))))
+        if nav_row:
+            rows.append(nav_row)
+
+        action_row = [InlineKeyboardButton("🔍 Search", callback_data=self._cb("clientsearch"))]
+        if query:
+            action_row.append(InlineKeyboardButton("🧹 Clear", callback_data=self._cb("clientclr")))
+        rows.append(action_row)
+        rows.append(
+            [
+                InlineKeyboardButton("↩ Back to booking", callback_data=self._cb("clientresume")),
+                InlineKeyboardButton("✖ Cancel", callback_data=self._cb("cancel")),
+            ]
+        )
+
+        lines = ["<b>Who is this booking for?</b>"]
+        if query:
+            lines.append(f"Filter: {escape(query)}")
+        lines.append("Tap an existing client or send a name/phone/email to search.")
+        if not clients:
+            lines.append("No clients match the current filter yet.")
+        if info:
+            lines.append(info)
+
+        self._commit(state=TelegramBookingSession.STATE_CLIENT)
+        self._send_or_edit("\n".join(lines), _inline_markup(rows))
+
+    def select_client(self, client_id: str) -> None:
+        if not self._client_choice_enabled():
+            return
+        profile = UserProfile.objects.select_related("user").filter(pk=client_id).first()
+        if not profile:
+            self.show_client_picker(info="Client not found. Try another search.")
+            return
+
+        payload = self.payload
+        payload["client_id"] = str(profile.pk)
+        payload["client_label"] = _client_profile_display(profile)
+        payload.pop("client_query", None)
+        payload.pop("awaiting_client_query", None)
+        payload.pop("reschedule_item_id", None)
+        last = payload.get("last_selection", {})
+        last["client_id"] = str(profile.pk)
+        payload["last_selection"] = last
+        self._commit(payload=payload)
+        self._resume_after_client_picker(info=f"Booking for {payload['client_label']}.")
+
+    def change_client(self) -> None:
+        if not self._client_choice_enabled():
+            return
+        payload = self.payload
+        payload["resume_state"] = self.session.state or TelegramBookingSession.STATE_SERVICE
+        self._commit(payload=payload)
+        self.show_client_picker(info="Pick a different client.")
+
+    def resume_client_picker(self) -> None:
+        self._resume_after_client_picker(info="Kept your current client.")
+
+    def prompt_client_search(self) -> None:
+        if not self._client_choice_enabled():
+            return
+        payload = self.payload
+        payload["awaiting_client_query"] = True
+        self._commit(payload=payload)
+        self.bot.send_message(
+            self.subscription.chat_id,
+            "Send a client name, phone or email. Reply with 'cancel' to exit search.",
+        )
+
+    def apply_client_search_query(self, query: str) -> None:
+        if not self._client_choice_enabled():
+            return
+        payload = self.payload
+        payload["client_query"] = query.strip()
+        payload["awaiting_client_query"] = False
+        self._commit(payload=payload)
+        self.show_client_picker(info="Search updated." if query else "Showing all clients.")
+
+    def clear_client_search(self) -> None:
+        if not self._client_choice_enabled():
+            return
+        payload = self.payload
+        payload.pop("client_query", None)
+        payload["awaiting_client_query"] = False
+        self._commit(payload=payload)
+        self.show_client_picker(info="Search cleared.")
+
     def show_service_picker(self, *, page: int = 0, info: str | None = None) -> None:
         services = list(Service.objects.filter(is_active=True).order_by("name"))
         if not services:
@@ -308,7 +478,12 @@ class ClientBookingFlow:
         total_pages = max(1, ceil(len(services) / self.SERVICE_PAGE_SIZE))
         page = max(0, min(page, total_pages - 1))
         start = page * self.SERVICE_PAGE_SIZE
-        rows = []
+        rows: list[list[InlineKeyboardButton]] = []
+        client_label = self._selected_client_label()
+        if self._client_choice_enabled():
+            rows.append(
+                [InlineKeyboardButton(f"👤 {self._client_button_caption()}", callback_data=self._cb("clientchange"))]
+            )
         for service in services[start : start + self.SERVICE_PAGE_SIZE]:
             rows.append([InlineKeyboardButton(service.name, callback_data=self._cb("svc", str(service.pk)))])
 
@@ -324,7 +499,10 @@ class ClientBookingFlow:
         rows.append([InlineKeyboardButton("✖ Cancel", callback_data=self._cb("cancel"))])
         markup = _inline_markup(rows)
 
-        lines = ["<b>Choose a service</b>", "Pick what you'd like to book today."]
+        lines = ["<b>Choose a service</b>"]
+        if self._client_choice_enabled() and client_label:
+            lines.append(f"Booking for: {escape(client_label)}")
+        lines.append("Pick what you'd like to book today.")
         if info:
             lines.append(info)
         self._commit(state=TelegramBookingSession.STATE_SERVICE)
@@ -354,6 +532,9 @@ class ClientBookingFlow:
         page = max(0, min(page, total_pages - 1))
         start = page * self.MASTER_PAGE_SIZE
         rows = []
+        client_label = self._selected_client_label()
+        if self._client_choice_enabled():
+            rows.append([InlineKeyboardButton(f"👤 {self._client_button_caption()}", callback_data=self._cb("clientchange"))])
         for master in masters[start : start + self.MASTER_PAGE_SIZE]:
             label = _master_display(master, fallback=f"Master {master.pk}")
             rows.append([InlineKeyboardButton(label, callback_data=self._cb("mst", str(master.pk)))])
@@ -376,6 +557,8 @@ class ClientBookingFlow:
         markup = _inline_markup(rows)
 
         lines = [f"<b>Who would you like for {escape(service.name)}?</b>"]
+        if self._client_choice_enabled() and client_label:
+            lines.append(f"Booking for: {escape(client_label)}")
         if info:
             lines.append(info)
         self._commit(state=TelegramBookingSession.STATE_MASTER)
@@ -403,13 +586,16 @@ class ClientBookingFlow:
         weekend_delta = (5 - today.weekday()) % 7
         weekend_day = today + timedelta(days=weekend_delta)
 
-        rows = [
+        rows: list[list[InlineKeyboardButton]] = []
+        if self._client_choice_enabled():
+            rows.append([InlineKeyboardButton(f"👤 {self._client_button_caption()}", callback_data=self._cb("clientchange"))])
+        rows.append(
             [
                 InlineKeyboardButton("Today", callback_data=self._cb("day", _date_token(today))),
                 InlineKeyboardButton("Tomorrow", callback_data=self._cb("day", _date_token(today + timedelta(days=1)))),
                 InlineKeyboardButton("This weekend", callback_data=self._cb("day", _date_token(weekend_day))),
             ]
-        ]
+        )
 
         for chunk in _chunk(days, 3):
             row = [InlineKeyboardButton(_format_date_label(day), callback_data=self._cb("day", _date_token(day))) for day in chunk]
@@ -424,10 +610,13 @@ class ClientBookingFlow:
         rows.append([InlineKeyboardButton("🧑‍💼 Talk to manager", callback_data=self._cb("manager"))])
 
         markup = _inline_markup(rows)
+        client_label = self._selected_client_label()
         lines = [
             f"<b>Select date for {escape(service.name)}</b>",
             f"With {escape(_master_display(master, fallback='our team'))}",
         ]
+        if self._client_choice_enabled() and client_label:
+            lines.append(f"Booking for: {escape(client_label)}")
         if info:
             lines.append(info)
         self._commit(state=TelegramBookingSession.STATE_DATE)
@@ -467,6 +656,8 @@ class ClientBookingFlow:
         slice_slots = slots[start : start + self.TIME_PAGE_SIZE]
 
         rows = []
+        if self._client_choice_enabled():
+            rows.append([InlineKeyboardButton(f"👤 {self._client_button_caption()}", callback_data=self._cb("clientchange"))])
         for chunk in _chunk(slice_slots, 4):
             row = [InlineKeyboardButton(_format_time_label(slot), callback_data=self._cb("time", slot.isoformat())) for slot in chunk]
             rows.append(row)
@@ -489,10 +680,13 @@ class ClientBookingFlow:
         service = self._selected_service()
         master = self._selected_master()
         date_label = _format_date_label(self._selected_date())
+        client_label = self._selected_client_label()
         lines = [
             f"<b>Pick a time on {date_label}</b>",
             f"{escape(service.name)} with {escape(_master_display(master, fallback='our team'))}",
         ]
+        if self._client_choice_enabled() and client_label:
+            lines.append(f"Booking for: {escape(client_label)}")
         if info:
             lines.append(info)
         self._commit(state=TelegramBookingSession.STATE_TIME)
@@ -514,6 +708,7 @@ class ClientBookingFlow:
         service = self._selected_service()
         master = self._selected_master()
         booking_date = self._selected_date()
+        client_label = self._selected_client_label()
         slot_label = self.payload.get("slot_label", "")
         price = service.get_discounted_price() if hasattr(service, "get_discounted_price") else service.base_price
         lines = [
@@ -523,17 +718,23 @@ class ClientBookingFlow:
             f"When: {_format_date_label(booking_date)} at {slot_label}",
             f"Price: CAD {price:.2f}",
         ]
+        if self._client_choice_enabled() and client_label:
+            lines.append(f"Client: {escape(client_label)}")
         if info:
             lines.append(info)
 
         rows = [
             [InlineKeyboardButton("✅ Confirm", callback_data=self._cb("confirm"))],
+        ]
+        if self._client_choice_enabled():
+            rows.append([InlineKeyboardButton("👤 Change client", callback_data=self._cb("clientchange"))])
+        rows.extend(
             [
                 InlineKeyboardButton("◀ Back", callback_data=self._cb("back", "time")),
                 InlineKeyboardButton("✖ Cancel", callback_data=self._cb("cancel")),
             ],
             [InlineKeyboardButton("🧑‍💼 Talk to manager", callback_data=self._cb("manager"))],
-        ]
+        )
         self._commit(state=TelegramBookingSession.STATE_CONFIRM)
         self._send_or_edit("\n".join(lines), _inline_markup(rows))
 
@@ -549,7 +750,7 @@ class ClientBookingFlow:
             self.show_time_picker(info="Time selection expired. Please pick again.")
             return
 
-        profile = _ensure_client_profile(self.subscription)
+        profile = self._selected_client_profile()
         service = self._selected_service()
         master = self._selected_master()
         cart_item = _BotCartItem(service=service, master=master, start_time=slot_dt)
@@ -570,7 +771,7 @@ class ClientBookingFlow:
         payload = self.payload
         reschedule_item_id = payload.get("reschedule_item_id")
         last = payload.get("last_selection", {})
-        last.update({"service_id": str(service.pk), "master_id": str(master.pk)})
+        last.update({"service_id": str(service.pk), "master_id": str(master.pk), "client_id": str(profile.pk)})
         new_payload = {"last_selection": last}
 
         if reschedule_item_id:
@@ -592,6 +793,7 @@ class ClientBookingFlow:
             details.append("When: We'll confirm the start time shortly.")
         details.append(f"Service: {escape(service.name)}")
         details.append(f"Master: {escape(_master_display(master))}")
+        details.append(f"Client: {escape(_client_profile_display(profile))}")
         if assign_count:
             try:
                 forms_link = _public_url(reverse("client-intake-forms"))
@@ -628,6 +830,11 @@ class ClientBookingFlow:
         payload["service_id"] = str(item.service_id)
         payload["master_id"] = str(item.master_id)
         payload["reschedule_item_id"] = str(item.pk)
+        appointment = getattr(item, "appointment", None)
+        client_profile = getattr(appointment, "client", None)
+        if client_profile:
+            payload["client_id"] = str(client_profile.pk)
+            payload["client_label"] = _client_profile_display(client_profile)
         payload.pop("date", None)
         payload.pop("slot_iso", None)
         payload.pop("slot_label", None)
@@ -656,6 +863,9 @@ class ClientBookingFlow:
 
     def _selection_snapshot(self) -> list[str]:
         lines: list[str] = []
+        client_label = self._selected_client_label()
+        if client_label:
+            lines.append(f"Client: {client_label}")
         service_id = self.payload.get("service_id")
         master_id = self.payload.get("master_id")
         date_label = self.payload.get("date")
@@ -673,6 +883,81 @@ class ClientBookingFlow:
         if slot_label:
             lines.append(f"Time: {slot_label}")
         return lines
+
+    def _resume_after_client_picker(self, *, info: str | None = None) -> None:
+        payload = self.payload
+        resume = payload.pop("resume_state", None)
+        payload.pop("awaiting_client_query", None)
+        self._commit(payload=payload)
+
+        if resume == TelegramBookingSession.STATE_CONFIRM and payload.get("slot_iso"):
+            self.show_confirmation(info=info)
+            return
+        if resume == TelegramBookingSession.STATE_TIME and payload.get("date"):
+            self.show_time_picker(info=info)
+            return
+        if resume == TelegramBookingSession.STATE_DATE and payload.get("master_id"):
+            self.show_date_picker(info=info)
+            return
+        if resume == TelegramBookingSession.STATE_MASTER and payload.get("service_id"):
+            self.show_master_picker(info=info)
+            return
+        self.show_service_picker(info=info)
+
+    def _client_choice_enabled(self) -> bool:
+        return bool(self.subscription.is_admin_channel or self.subscription.linked_profile_id)
+
+    def _selected_client_profile(self) -> UserProfile:
+        client_id = self.payload.get("client_id")
+        if client_id:
+            profile = UserProfile.objects.select_related("user").filter(pk=client_id).first()
+            if profile:
+                return profile
+            payload = self.payload
+            payload.pop("client_id", None)
+            payload.pop("client_label", None)
+            self._commit(payload=payload)
+            raise TelegramCommandError("Client selection expired. Please choose again.")
+        if self._client_choice_enabled():
+            raise TelegramCommandError("Choose a client first.")
+        profile = _ensure_client_profile(self.subscription)
+        payload = self.payload
+        payload["client_id"] = str(profile.pk)
+        payload["client_label"] = _client_profile_display(profile)
+        self._commit(payload=payload)
+        return profile
+
+    def _selected_client_label(self) -> str:
+        label = (self.payload.get("client_label") or "").strip()
+        if label:
+            return label
+        if self.subscription.client_profile_id:
+            return _client_profile_display(self.subscription.client_profile)
+        return ""
+
+    def _client_button_caption(self) -> str:
+        label = self._selected_client_label() or "Change client"
+        label = label.strip() or "Change client"
+        return label if len(label) <= 28 else label[:27] + "…"
+
+    def _client_queryset(self, query: str | None):
+        qs = UserProfile.objects.select_related("user").order_by(
+            "-user__date_joined",
+            "user__first_name",
+            "user__last_name",
+            "pk",
+        )
+        if query:
+            token = query.strip()
+            name_filter = (
+                Q(user__first_name__icontains=token)
+                | Q(user__last_name__icontains=token)
+                | Q(user__username__icontains=token)
+                | Q(user__email__icontains=token)
+                | Q(phone__icontains=token)
+            )
+            qs = qs.filter(name_filter)
+        return qs
 
     def _selected_service(self) -> Service:
         service_id = self.payload.get("service_id")
@@ -802,6 +1087,18 @@ def handle_booking_callback(bot: TeleBot, callback: CallbackQuery) -> bool:
             _begin_reschedule(flow, value)
         elif action == "cancelitem":
             _cancel_item(flow, value)
+        elif action == "clientpg":
+            flow.show_client_picker(page=int(value or 0))
+        elif action == "clientpick":
+            flow.select_client(value)
+        elif action == "clientchange":
+            flow.change_client()
+        elif action == "clientresume":
+            flow.resume_client_picker()
+        elif action == "clientsearch":
+            flow.prompt_client_search()
+        elif action == "clientclr":
+            flow.clear_client_search()
         else:
             flow.show_service_picker()
     except TelegramCommandError as exc:
@@ -911,17 +1208,18 @@ def send_upcoming_bookings(bot: TeleBot, subscription: TelegramChatSubscription,
 
 
 def send_client_help(bot: TeleBot, subscription: TelegramChatSubscription) -> None:
-    text = (
-        "Need a hand?\n"
-        "• 📅 Book — start a 4-tap wizard: Service → Master → Date → Time.\n"
-        "• 🧾 My bookings — review, reschedule or cancel upcoming visits.\n"
-        "• 🧑‍💼 Talk to manager anytime for custom requests."
-    )
+    text_lines = [
+        "<b>Need a hand?</b>",
+        "• 📅 Book — quick wizard: Service → Master → Date → Time.",
+        "  Staff chats can tap 👤 to pick the client before confirming.",
+        "• 🧾 My bookings — review, reschedule or cancel upcoming visits.",
+        "• 🧑‍💼 Talk to manager — reach a human for bespoke requests.",
+    ]
+    bot.send_message(subscription.chat_id, "\n".join(text_lines), reply_markup=_main_menu_markup())
     markup = _inline_markup(
         [[InlineKeyboardButton("🧑‍💼 Talk to manager", callback_data=f"{BOOKING_CALLBACK_PREFIX}manager")]]
     )
-    bot.send_message(subscription.chat_id, text, reply_markup=_main_menu_markup())
-    bot.send_message(subscription.chat_id, "Need direct assistance?", reply_markup=markup)
+    bot.send_message(subscription.chat_id, "Need white-glove support?", reply_markup=markup)
 
 
 def _clamp_limit(value: int | None, *, default: int = 5, maximum: int = 20) -> int:
