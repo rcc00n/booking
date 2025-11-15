@@ -42,6 +42,21 @@ class TelegramBotSettings(models.Model):
         default=True,
         help_text="Allow /today command for admin chats.",
     )
+    locked_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="telegrambot_ownerships",
+        help_text="Once assigned, only this user or the allowed list can manage the bot.",
+    )
+    allowed_admins = models.ManyToManyField(
+        User,
+        blank=True,
+        related_name="telegrambot_delegations",
+        help_text="Staff members allowed to configure the Telegram bot after it is locked.",
+    )
+    locked_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -105,6 +120,10 @@ class TelegramBotSettings(models.Model):
             seen.add(chat_id)
             result.append(chat_id)
         return result
+
+    @property
+    def is_locked(self) -> bool:
+        return bool(self.locked_by_id)
 
 
 class TelegramChatSubscription(models.Model):

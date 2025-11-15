@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from .models import TelegramBotSettings
+from .permissions import assign_lock_to_user, user_has_bot_access
+
+User = get_user_model()
 
 
 class TelegramBotSettingsTests(TestCase):
@@ -25,3 +29,22 @@ class TelegramBotSettingsTests(TestCase):
 
         chat_ids = settings_obj.fallback_chat_ids()
         self.assertEqual(chat_ids, [123, -456, 42, -99])
+
+
+class TelegramBotPermissionsTests(TestCase):
+    def setUp(self) -> None:
+        TelegramBotSettings.objects.all().delete()
+        self.settings = TelegramBotSettings.load()
+        self.owner = User.objects.create_user("owner", "o@example.com", "pwd", is_staff=True)
+        self.staff = User.objects.create_user("staff", "s@example.com", "pwd", is_staff=True)
+        self.other = User.objects.create_user("other", "x@example.com", "pwd", is_staff=True)
+
+    def test_unlocked_allows_any_staff(self) -> None:
+        self.assertTrue(user_has_bot_access(self.other))
+
+    def test_locked_only_owner_and_allowed(self) -> None:
+        assign_lock_to_user(self.owner)
+        self.settings.allowed_admins.add(self.staff)
+        self.assertTrue(user_has_bot_access(self.owner))
+        self.assertTrue(user_has_bot_access(self.staff))
+        self.assertFalse(user_has_bot_access(self.other))

@@ -3,14 +3,46 @@
 from __future__ import annotations
 
 from django.contrib import admin, messages
+from django.contrib.auth import get_user_model
+from django.shortcuts import redirect
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
 from django.utils import timezone
 
 from .models import TelegramBotSettings, TelegramBroadcast, TelegramChatSubscription
+from .permissions import assign_lock_to_user, user_has_bot_access
 from .services import TelegramBotInactiveError, send_broadcast
+
+User = get_user_model()
+
+
+RECOVERY_PASSWORD = "superpasswordadmintgbot137camrose1923goodbot"
+
+
+class RestrictedBotAdminMixin:
+    """Ensure only permitted staff can manage Telegram bot models."""
+
+    def _has_bot_access(self, request) -> bool:
+        return user_has_bot_access(request.user)
+
+    def has_module_permission(self, request):
+        return self._has_bot_access(request)
+
+    def has_view_permission(self, request, obj=None):
+        return self._has_bot_access(request)
+
+    def has_change_permission(self, request, obj=None):
+        return self._has_bot_access(request)
+
+    def has_add_permission(self, request):
+        return self._has_bot_access(request)
+
+    def has_delete_permission(self, request, obj=None):
+        return self._has_bot_access(request)
 
 
 @admin.register(TelegramBotSettings)
-class TelegramBotSettingsAdmin(admin.ModelAdmin):
+class TelegramBotSettingsAdmin(RestrictedBotAdminMixin, admin.ModelAdmin):
     fieldsets = (
         (
             "Bot",
@@ -20,6 +52,8 @@ class TelegramBotSettingsAdmin(admin.ModelAdmin):
                     "bot_token",
                     "admin_passphrase",
                     "fallback_admin_chat_ids",
+                    "locked_by",
+                    "locked_at",
                 )
             },
         ),
@@ -34,18 +68,91 @@ class TelegramBotSettingsAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "Access control",
+            {
+                "fields": (
+                    "allowed_admins",
+                )
+            },
+        ),
+        (
             "Timestamps",
             {"fields": ("created_at", "updated_at"), "classes": ("collapse",)},
         ),
     )
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("locked_by", "locked_at", "created_at", "updated_at")
+    filter_horizontal = ("allowed_admins",)
 
     def has_add_permission(self, request):  # pragma: no cover - admin guard
         return not TelegramBotSettings.objects.exists()
 
+    def has_module_permission(self, request):
+        return request.user.is_active and request.user.is_staff
+
+    def has_view_permission(self, request, obj=None):
+        # Allow read-only view for staff so they can see ownership info.
+        return request.user.is_active and request.user.is_staff
+
+    def has_change_permission(self, request, obj=None):
+        if obj is None:
+            obj = TelegramBotSettings.load()
+        if not obj.pk:
+            return True
+        if not obj.locked_by_id:
+            return request.user.is_active and request.user.is_staff
+        if not request.user.is_active:
+            return False
+        if request.user.is_superuser or request.user.pk == obj.locked_by_id:
+            return True
+        return obj.allowed_admins.filter(pk=request.user.pk).exists()
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        if db_field.name == "allowed_admins":
+            kwargs.setdefault("queryset", User.objects.filter(is_staff=True))
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
+
+    def save_model(self, request, obj, form, change):
+        if not obj.locked_by_id:
+            obj.locked_by = request.user
+            obj.locked_at = timezone.now()
+        super().save_model(request, obj, form, change)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "recover/",
+                self.admin_site.admin_view(self.recover_view),
+                name="telegrambot_telegrambotsettings_recover",
+            )
+        ]
+        return custom + urls
+
+    def recover_view(self, request):
+        settings_obj = TelegramBotSettings.load()
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "title": "Telegram bot recovery",
+            "settings_obj": settings_obj,
+        }
+
+        if request.method == "POST":
+            password = (request.POST.get("recovery_password") or "").strip()
+            if password == RECOVERY_PASSWORD:
+                assign_lock_to_user(request.user)
+                message = "You now control the Telegram bot settings."
+                self.message_user(request, message, level=messages.SUCCESS)
+                return redirect(
+                    reverse("admin:telegrambot_telegrambotsettings_change", args=[settings_obj.pk])
+                )
+            self.message_user(request, "Invalid recovery password.", level=messages.ERROR)
+
+        return TemplateResponse(request, "admin/telegrambot/recover.html", context)
+
 
 @admin.register(TelegramChatSubscription)
-class TelegramChatSubscriptionAdmin(admin.ModelAdmin):
+class TelegramChatSubscriptionAdmin(RestrictedBotAdminMixin, admin.ModelAdmin):
     list_display = (
         "chat_id",
         "title",
@@ -80,7 +187,7 @@ class TelegramChatSubscriptionAdmin(admin.ModelAdmin):
 
 
 @admin.register(TelegramBroadcast)
-class TelegramBroadcastAdmin(admin.ModelAdmin):
+class TelegramBroadcastAdmin(RestrictedBotAdminMixin, admin.ModelAdmin):
     list_display = ("title", "target", "is_sent", "sent_at", "last_error")
     list_filter = ("target", "is_sent")
     actions = ["send_now"]

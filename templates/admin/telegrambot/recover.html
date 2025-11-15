@@ -1,0 +1,25 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <h1>Telegram Bot Recovery</h1>
+  </div>
+  <div class="card-body">
+    <p>
+      Use this form to take over Telegram bot administration when the original owner is unavailable.
+      Enter the recovery password to assign ownership to your account.
+    </p>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <div class="form-group">
+        <label for="id_recovery_password">Recovery password</label>
+        <input type="password" name="recovery_password" class="form-control" id="id_recovery_password" required />
+      </div>
+      <button type="submit" class="btn btn-danger">Take ownership</button>
+      <a href="{% url 'admin:telegrambot_telegrambotsettings_changelist' %}" class="btn btn-secondary">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

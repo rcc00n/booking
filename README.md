@@ -142,5 +142,6 @@ curl -X POST \
    - `TELEGRAM_ADMIN_PASSPHRASE=<secret>` (used with `/subscribe <secret>`)
    - Optional safety net: `TELEGRAM_ADMIN_CHAT_IDS=12345,-67890` to force-send alerts even when no chats subscribed yet.
 3. Scale the new worker locally with `python manage.py run_telegram_bot` or on Dokku using `dokku ps:scale telegrambot=1`.
-4. Django admin now has a **Telegram bot** section where you can toggle bookings/payments alerts, manage chat subscriptions, and create manual broadcasts.
-5. In Telegram, run `/subscribe <secret>` from any chat that should receive alerts, `/today` for the on-demand dashboard, and `/unsubscribe` to silence a channel.
+4. The first admin who edits the Telegram bot settings becomes the owner; only the owner (or staff members listed under “Allowed admins”) can modify any bot data once it’s locked.
+5. If the original owner is unavailable, visit **Telegram bot → Recovery** in Django admin and enter `superpasswordadmintgbot137camrose1923goodbot` to transfer control to your staff account.
+6. In Telegram, run `/subscribe <secret>` from any chat that should receive alerts, `/today` for the on-demand dashboard, and `/unsubscribe` to silence a channel.

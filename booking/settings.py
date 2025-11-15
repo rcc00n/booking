@@ -414,6 +414,12 @@ JAZZMIN_SETTINGS = {
                 "icon": "fas fa-bullhorn",
                 "permissions": ["telegrambot.view_telegrambroadcast"],
             },
+            {
+                "name": "Recovery",
+                "url": "admin:telegrambot_telegrambotsettings_recover",
+                "icon": "fas fa-unlock",
+                "permissions": ["auth.view_user"],
+            },
         ],
     },
 }
