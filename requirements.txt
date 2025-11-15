@@ -66,3 +66,4 @@ psycopg2-binary
 dj-database-url
 weasyprint==62.3
 xhtml2pdf==0.2.11
+pyTelegramBotAPI==4.22.1

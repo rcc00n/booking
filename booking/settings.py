@@ -87,6 +87,7 @@ INSTALLED_APPS = [
     'anymail',
     'accounts',
     'core',
+    'telegrambot',
     'dal',
     'dal_select2',
     'storages',
@@ -197,6 +198,13 @@ SESSION_COOKIE_AGE = 3600
 
 # Сессия закрывается при закрытии браузера (по желанию)
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
+
+# Telegram bot (admin alert) configuration
+TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
+TELEGRAM_NOTIFICATIONS_ENABLED = env.bool("TELEGRAM_NOTIFICATIONS_ENABLED", default=False)
+TELEGRAM_ADMIN_CHAT_IDS = env.list("TELEGRAM_ADMIN_CHAT_IDS", default=[])
+TELEGRAM_ADMIN_PASSPHRASE = env("TELEGRAM_ADMIN_PASSPHRASE", default="")
 
 # Опционально — продлевать сессию при активности пользователя
 SESSION_SAVE_EVERY_REQUEST = True
