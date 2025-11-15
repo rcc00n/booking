@@ -145,3 +145,15 @@ curl -X POST \
 4. The first admin who edits the Telegram bot settings becomes the owner; only the owner (or staff members listed under “Allowed admins”) can modify any bot data once it’s locked.
 5. If the original owner is unavailable, visit **Telegram bot → Recovery** in Django admin and enter `superpasswordadmintgbot137camrose1923goodbot` to transfer control to your staff account.
 6. In Telegram, run `/subscribe <secret>` from any chat that should receive alerts, `/today` for the on-demand dashboard, and `/unsubscribe` to silence a channel.
+
+### Telegram AI assistant
+
+1. Open **Admin → Telegram bot settings** and scroll to **AI assistant**.
+2. Paste your `sk-...` OpenAI API key, optionally override the model IDs, then enable the toggle. The server stores the key in the database so you no longer need to redeploy for changes.
+3. Save the form; the worker reloads the configuration the next time `/assistant` runs.
+4. In Telegram, make sure the chat is marked as admin (`/subscribe <token>`) and linked to a staff profile using `/link <email>`.
+5. Ask natural-language questions with `/assistant <prompt>` (alias `/ai`). Examples:  
+   - `/assistant Summarize today's KPIs and unpaid balances.`  
+   - `/assistant What does tomorrow's schedule look like for Anna?`  
+   - `/assistant Show payment status for appointment 54821.`  
+6. The model only runs for admin chats and never sees client conversations. `/assistant` answers always stay in English and cite which dataset they used (“Today's KPIs”, “Schedule overview”, etc.).

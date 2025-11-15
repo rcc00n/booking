@@ -42,6 +42,29 @@ class TelegramBotSettings(models.Model):
         default=True,
         help_text="Allow /today command for admin chats.",
     )
+    ai_is_enabled = models.BooleanField(
+        default=False,
+        help_text="Toggle the internal AI assistant for staff Telegram chats.",
+    )
+    ai_openai_api_key = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="OpenAI API key used for the assistant. Stored encrypted at rest.",
+    )
+    ai_model = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Model for final answers (e.g. gpt-4o-mini).",
+    )
+    ai_router_model = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Optional smaller model for intent routing. Leave blank to reuse AI model.",
+    )
+    ai_max_history = models.PositiveSmallIntegerField(
+        default=8,
+        help_text="How many recent exchanges to share with the model (1-20).",
+    )
     locked_by = models.ForeignKey(
         User,
         null=True,
@@ -86,6 +109,21 @@ class TelegramBotSettings(models.Model):
         env_passphrase = getattr(settings, "TELEGRAM_ADMIN_PASSPHRASE", "")
         if env_passphrase:
             defaults.setdefault("admin_passphrase", env_passphrase)
+        env_ai_key = getattr(settings, "OPENAI_API_KEY", "")
+        if env_ai_key:
+            defaults.setdefault("ai_openai_api_key", env_ai_key)
+        env_ai_enabled = getattr(settings, "TELEGRAM_AI_ENABLED", False)
+        if env_ai_enabled:
+            defaults.setdefault("ai_is_enabled", True)
+        env_ai_model = getattr(settings, "TELEGRAM_AI_MODEL", "")
+        if env_ai_model:
+            defaults.setdefault("ai_model", env_ai_model)
+        env_ai_router = getattr(settings, "TELEGRAM_AI_ROUTER_MODEL", "")
+        if env_ai_router:
+            defaults.setdefault("ai_router_model", env_ai_router)
+        env_ai_history = getattr(settings, "TELEGRAM_AI_MAX_HISTORY", 0)
+        if env_ai_history:
+            defaults.setdefault("ai_max_history", env_ai_history)
 
         obj, _ = cls.objects.get_or_create(pk=cls.SINGLETON_PK, defaults=defaults)
         return obj
@@ -93,6 +131,23 @@ class TelegramBotSettings(models.Model):
     @property
     def token(self) -> str:
         return (self.bot_token or "").strip() or getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+
+    def ai_config(self) -> dict[str, str | int | bool]:
+        """Return effective AI assistant configuration with environment fallbacks."""
+
+        api_key = (self.ai_openai_api_key or "").strip() or getattr(settings, "OPENAI_API_KEY", "")
+        model = (self.ai_model or "").strip() or getattr(settings, "TELEGRAM_AI_MODEL", "gpt-4o-mini")
+        router_model = (self.ai_router_model or "").strip() or getattr(settings, "TELEGRAM_AI_ROUTER_MODEL", model) or model
+        history_limit = self.ai_max_history or getattr(settings, "TELEGRAM_AI_MAX_HISTORY", 8) or 8
+        history_limit = max(1, min(20, history_limit))
+        enabled = bool(self.ai_is_enabled and api_key)
+        return {
+            "enabled": enabled,
+            "api_key": api_key,
+            "model": model,
+            "router_model": router_model,
+            "max_history": history_limit,
+        }
 
     def fallback_chat_ids(self) -> list[int]:
         """Parsed fallback chat ID list from DB field and env list."""

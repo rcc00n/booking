@@ -7,8 +7,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from django.conf import settings
-
 try:
     from openai import (
         APIError,
@@ -36,7 +34,7 @@ except ImportError:  # pragma: no cover - handled at runtime
     class RateLimitError(Exception):  # type: ignore[no-redef]
         pass
 
-from .models import TelegramChatSubscription, TelegramStaffAssistantSession
+from .models import TelegramBotSettings, TelegramChatSubscription, TelegramStaffAssistantSession
 from .services import (
     TelegramCommandError,
     describe_payment_status,
@@ -80,26 +78,42 @@ class DatasetEntry:
     body: str
 
 
-def _ai_enabled() -> bool:
-    return bool(getattr(settings, "TELEGRAM_AI_ENABLED", False) and getattr(settings, "OPENAI_API_KEY", ""))
+@dataclass
+class AIConfig:
+    enabled: bool
+    api_key: str
+    model: str
+    router_model: str
+    max_history: int
 
 
-def _history_slice(history: Iterable[dict[str, str]]) -> list[dict[str, str]]:
-    limit = getattr(settings, "TELEGRAM_AI_MAX_HISTORY", 8) or 8
+def _history_slice(history: Iterable[dict[str, str]], limit: int) -> list[dict[str, str]]:
+    limit = max(1, min(20, limit))
     return list(history)[-limit:]
 
 
-def _get_client() -> OpenAI | None:
+def _load_ai_config() -> AIConfig:
+    settings_obj = TelegramBotSettings.load()
+    raw = settings_obj.ai_config()
+    return AIConfig(
+        enabled=bool(raw["enabled"]),
+        api_key=str(raw["api_key"] or ""),
+        model=str(raw["model"] or "gpt-4o-mini"),
+        router_model=str(raw["router_model"] or raw["model"] or "gpt-4o-mini"),
+        max_history=int(raw["max_history"] or 8),
+    )
+
+
+def _get_client(config: AIConfig) -> OpenAI | None:
     global _openai_client, _openai_token_cache
-    if not _ai_enabled():
+    if not config.enabled:
         return None
-    token = getattr(settings, "OPENAI_API_KEY", "")
-    if not token or OpenAI is None:
+    if not config.api_key or OpenAI is None:
         return None
 
-    if _openai_client is None or _openai_token_cache != token:
-        _openai_client = OpenAI(api_key=token)
-        _openai_token_cache = token
+    if _openai_client is None or _openai_token_cache != config.api_key:
+        _openai_client = OpenAI(api_key=config.api_key)
+        _openai_token_cache = config.api_key
     return _openai_client
 
 
@@ -126,8 +140,9 @@ class StaffAssistant:
 
     def __init__(self, subscription: TelegramChatSubscription):
         self.subscription = subscription
-        self.model = getattr(settings, "TELEGRAM_AI_MODEL", "gpt-4o-mini")
-        self.router_model = getattr(settings, "TELEGRAM_AI_ROUTER_MODEL", self.model)
+        self.config = _load_ai_config()
+        self.model = self.config.model
+        self.router_model = self.config.router_model
         self.session, _ = TelegramStaffAssistantSession.objects.get_or_create(subscription=subscription)
 
     def answer(self, prompt: str) -> str:
@@ -137,13 +152,13 @@ class StaffAssistant:
         if not normalized:
             raise StaffAssistantError("Ask a question after /assistant so I know what to do.")
 
-        client = _get_client()
+        client = _get_client(self.config)
         if client is None:
             raise StaffAssistantError(
-                "AI assistant is not configured yet. Add OPENAI_API_KEY and TELEGRAM_AI_ENABLED to enable it."
+                "AI assistant is not configured yet. Provide an OpenAI API key and enable it in Telegram bot settings."
             )
 
-        history = _history_slice(self.session.context_log or [])
+        history = _history_slice(self.session.context_log or [], self.config.max_history)
         plan = self._route_intent(client, normalized, history)
         dataset = self._collect_dataset(plan)
         reply = self._build_answer(client, normalized, history, dataset, plan)
