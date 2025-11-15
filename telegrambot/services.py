@@ -210,7 +210,8 @@ def _chunk(items: Sequence, size: int) -> list[list]:
 
 def _inline_markup(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
     markup = InlineKeyboardMarkup()
-    markup.inline_keyboard = rows
+    for row in rows:
+        markup.row(*row)
     return markup
 
 
