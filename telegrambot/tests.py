@@ -56,9 +56,11 @@ class TelegramBotPermissionsTests(TestCase):
         self.staff = User.objects.create_user("staff", "s@example.com", "pwd", is_staff=True)
         self.other = User.objects.create_user("other", "x@example.com", "pwd", is_staff=True)
         self.non_staff = User.objects.create_user("visitor", "v@example.com", "pwd", is_staff=False)
+        self.superuser = User.objects.create_superuser("boss", "b@example.com", "pwd")
 
     def test_unlocked_allows_any_staff(self) -> None:
         self.assertTrue(user_has_bot_access(self.other))
+        self.assertTrue(user_has_bot_access(self.superuser))
         self.assertFalse(user_has_bot_access(self.non_staff))
 
     def test_locked_only_owner_and_allowed(self) -> None:
@@ -67,6 +69,7 @@ class TelegramBotPermissionsTests(TestCase):
         self.assertTrue(user_has_bot_access(self.owner))
         self.assertTrue(user_has_bot_access(self.staff))
         self.assertFalse(user_has_bot_access(self.other))
+        self.assertFalse(user_has_bot_access(self.superuser))
 
 
 class TelegramBotAdminRecoveryTests(TestCase):

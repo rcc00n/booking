@@ -20,9 +20,6 @@ def user_has_bot_access(user: User) -> bool:
     if not settings_obj.locked_by_id:
         return True
 
-    if getattr(user, "is_superuser", False):
-        return True
-
     if user.pk == settings_obj.locked_by_id:
         return True
 
