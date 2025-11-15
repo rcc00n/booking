@@ -142,6 +142,14 @@ class TelegramChatSubscription(models.Model):
     last_interaction_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True)
+    linked_profile = models.ForeignKey(
+        "core.UserProfile",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="telegram_chats",
+        help_text="Staff profile used to attribute Telegram commands.",
+    )
 
     class Meta:
         ordering = ["-is_admin_channel", "-last_interaction_at"]

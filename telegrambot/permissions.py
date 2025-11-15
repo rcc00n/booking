@@ -13,12 +13,12 @@ User = get_user_model()
 def user_has_bot_access(user: User) -> bool:
     """Return True if the user may manage Telegram bot settings."""
 
+    if not getattr(user, "is_active", False) or not getattr(user, "is_staff", False):
+        return False
+
     settings_obj = TelegramBotSettings.load()
     if not settings_obj.locked_by_id:
         return True
-
-    if not getattr(user, "is_active", False):
-        return False
 
     if getattr(user, "is_superuser", False):
         return True

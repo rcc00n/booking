@@ -1,12 +1,24 @@
-"""Minimal regressions for the Telegram bot models."""
+"""Regressions for the Telegram bot models and bot service helpers."""
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
-from .models import TelegramBotSettings
+from core.models import Appointment, PaymentStatus, UserProfile
+from .models import TelegramBotSettings, TelegramChatSubscription
 from .permissions import assign_lock_to_user, user_has_bot_access
+from .services import (
+    append_note_to_appointment,
+    link_subscription_to_profile,
+    render_appointment_details,
+    render_management_summary,
+    render_schedule_overview,
+    update_payment_status_via_bot,
+)
 
 User = get_user_model()
 
@@ -38,9 +50,11 @@ class TelegramBotPermissionsTests(TestCase):
         self.owner = User.objects.create_user("owner", "o@example.com", "pwd", is_staff=True)
         self.staff = User.objects.create_user("staff", "s@example.com", "pwd", is_staff=True)
         self.other = User.objects.create_user("other", "x@example.com", "pwd", is_staff=True)
+        self.non_staff = User.objects.create_user("visitor", "v@example.com", "pwd", is_staff=False)
 
     def test_unlocked_allows_any_staff(self) -> None:
         self.assertTrue(user_has_bot_access(self.other))
+        self.assertFalse(user_has_bot_access(self.non_staff))
 
     def test_locked_only_owner_and_allowed(self) -> None:
         assign_lock_to_user(self.owner)
@@ -48,3 +62,69 @@ class TelegramBotPermissionsTests(TestCase):
         self.assertTrue(user_has_bot_access(self.owner))
         self.assertTrue(user_has_bot_access(self.staff))
         self.assertFalse(user_has_bot_access(self.other))
+
+
+class TelegramBotCommandServiceTests(TestCase):
+    def setUp(self) -> None:
+        self.staff_user = User.objects.create_user(
+            "staff",
+            "staff@example.com",
+            "pwd",
+            first_name="Staff",
+            last_name="Member",
+            is_staff=True,
+        )
+        self.staff_profile = UserProfile.objects.create(user=self.staff_user)
+
+        self.client_user = User.objects.create_user(
+            "client",
+            "client@example.com",
+            "pwd",
+            first_name="Client",
+            last_name="Example",
+        )
+        self.client_profile = UserProfile.objects.create(user=self.client_user)
+
+        self.pending_status, _ = PaymentStatus.objects.get_or_create(name="Pending")
+        self.paid_status, _ = PaymentStatus.objects.get_or_create(name="Paid")
+
+        self.appointment = Appointment.objects.create(
+            client=self.client_profile,
+            start_time=timezone.now(),
+            payment_status=self.pending_status,
+            final_price=Decimal("120.00"),
+        )
+
+        self.subscription = TelegramChatSubscription.objects.create(chat_id=9999, is_admin_channel=True)
+
+    def test_link_subscription_to_profile(self) -> None:
+        response = link_subscription_to_profile(self.subscription, self.staff_user.email)
+        self.assertIn("Linked", response)
+        self.subscription.refresh_from_db()
+        self.assertEqual(self.subscription.linked_profile, self.staff_profile)
+
+    def test_render_schedule_overview_uses_client_name(self) -> None:
+        text = render_schedule_overview("today", limit=5)
+        self.assertIn("Schedule", text)
+        self.assertIn(self.client_user.get_full_name(), text)
+
+    def test_render_management_summary_returns_metrics(self) -> None:
+        summary = render_management_summary("today")
+        self.assertIn("Operations report", summary)
+        self.assertIn("Appointments", summary)
+
+    def test_render_appointment_details_includes_id(self) -> None:
+        details = render_appointment_details(str(self.appointment.pk))
+        self.assertIn(str(self.appointment.pk), details)
+
+    def test_update_payment_status_flow(self) -> None:
+        response = update_payment_status_via_bot(str(self.appointment.pk), "Paid", actor=self.staff_profile)
+        self.assertIn("Marked", response)
+        self.appointment.refresh_from_db()
+        self.assertEqual(self.appointment.payment_status, self.paid_status)
+
+    def test_append_note_appends_text(self) -> None:
+        reply = append_note_to_appointment(str(self.appointment.pk), "Client confirmed", actor=self.staff_profile)
+        self.assertIn("Note stored", reply)
+        self.appointment.refresh_from_db()
+        self.assertIn("Client confirmed", self.appointment.notes)

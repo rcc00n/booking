@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Iterable, Sequence
 
-from django.db.models import Sum
+from django.contrib.auth import get_user_model
+from django.db.models import Prefetch, Q, Sum
 from django.utils import timezone
 from django.utils.html import escape
 
@@ -15,10 +16,12 @@ from telebot import TeleBot
 from telebot.apihelper import ApiTelegramException
 from telebot.types import Message
 
-from core.models import Appointment, Payment
+from core.models import Appointment, AppointmentItem, Payment, PaymentStatus, UserProfile
 from .models import TelegramBotSettings, TelegramBroadcast, TelegramChatSubscription
 
 logger = logging.getLogger(__name__)
+
+User = get_user_model()
 
 _bot_instance: TeleBot | None = None
 _bot_token_cache: str | None = None
@@ -26,6 +29,10 @@ _bot_token_cache: str | None = None
 
 class TelegramBotInactiveError(RuntimeError):
     """Raised when attempting to send messages but the bot is disabled."""
+
+
+class TelegramCommandError(ValueError):
+    """Raised when user-provided Telegram command payload is invalid."""
 
 
 def get_bot(force_reload: bool = False) -> TeleBot | None:
@@ -293,3 +300,319 @@ def send_broadcast(broadcast: TelegramBroadcast) -> tuple[bool, str | None]:
 
     broadcast.mark_sent()
     return True, None
+
+
+def _start_of_day(day: date) -> datetime:
+    tz = timezone.get_current_timezone()
+    return timezone.make_aware(datetime.combine(day, time.min), tz)
+
+
+def _period_window(token: str | None) -> tuple[datetime, datetime, str]:
+    now = timezone.localtime()
+    normalized = (token or "today").strip().lower()
+
+    if normalized in {"today", ""}:
+        start = _start_of_day(now.date())
+        return start, start + timedelta(days=1), now.strftime("%d %b %Y")
+    if normalized == "yesterday":
+        day = now.date() - timedelta(days=1)
+        start = _start_of_day(day)
+        return start, start + timedelta(days=1), day.strftime("%d %b %Y")
+    if normalized == "tomorrow":
+        day = now.date() + timedelta(days=1)
+        start = _start_of_day(day)
+        return start, start + timedelta(days=1), day.strftime("%d %b %Y")
+    if normalized == "week":
+        day = now.date() - timedelta(days=now.weekday())
+        start = _start_of_day(day)
+        end = start + timedelta(days=7)
+        return start, end, f"Week of {day:%d %b}"
+    if normalized == "month":
+        month_start = now.date().replace(day=1)
+        start = _start_of_day(month_start)
+        next_month_seed = month_start + timedelta(days=32)
+        next_month = next_month_seed.replace(day=1)
+        end = _start_of_day(next_month)
+        return start, end, month_start.strftime("%B %Y")
+
+    # allow single-day queries and simple ranges (YYYY-MM-DD or start:end)
+    try:
+        if ":" in normalized:
+            start_txt, end_txt = normalized.split(":", 1)
+            start_day = datetime.strptime(start_txt, "%Y-%m-%d").date()
+            end_day = datetime.strptime(end_txt, "%Y-%m-%d").date()
+            if end_day < start_day:
+                raise TelegramCommandError("End date must be after start date.")
+            start = _start_of_day(start_day)
+            end = _start_of_day(end_day) + timedelta(days=1)
+            label = f"{start_day:%d %b} – {end_day:%d %b}"
+            return start, end, label
+        day = datetime.strptime(normalized, "%Y-%m-%d").date()
+        start = _start_of_day(day)
+        return start, start + timedelta(days=1), day.strftime("%d %b %Y")
+    except ValueError as exc:  # noqa: PERF203 - parsing failures are user facing
+        raise TelegramCommandError("Use YYYY-MM-DD, today, week or month.") from exc
+
+
+def _schedule_window(token: str | None) -> tuple[datetime, datetime | None, str]:
+    normalized = (token or "today").strip().lower()
+    now = timezone.localtime()
+    if normalized in {"next", "upcoming"}:
+        return now, now + timedelta(days=7), "Upcoming"
+    start, end, label = _period_window(normalized)
+    return start, end, label
+
+
+def _prefetched_items(appt: Appointment) -> list[AppointmentItem]:
+    cache = getattr(appt, "_prefetched_objects_cache", {})
+    if "items" in cache:
+        return list(cache["items"])
+    return list(appt.items.all())
+
+
+def _client_label(appt: Appointment) -> str:
+    profile = getattr(appt, "client", None)
+    user = getattr(profile, "user", None)
+    if user:
+        full_name = getattr(user, "get_full_name", lambda: "")()
+        username = getattr(user, "username", "")
+        if full_name:
+            return full_name
+        if username:
+            return username
+    phone = getattr(profile, "phone", "")
+    if phone:
+        return phone
+    return f"Client {getattr(profile, 'pk', '') or '?'}"
+
+
+def _actor_label(actor: UserProfile | None) -> str:
+    if not actor:
+        return "System"
+    user = getattr(actor, "user", None)
+    if user:
+        full_name = getattr(user, "get_full_name", lambda: "")()
+        username = getattr(user, "username", "")
+        if full_name:
+            return full_name
+        if username:
+            return username
+    return f"User {actor.pk}"
+
+
+def _services_summary(appt: Appointment) -> str:
+    services: list[str] = []
+    for item in _prefetched_items(appt):
+        service = getattr(item, "service", None)
+        service_name = getattr(service, "name", "Service")
+        master = getattr(item, "master", None)
+        master_user = getattr(master, "user", None)
+        master_name = ""
+        if master_user:
+            master_name = getattr(master_user, "get_full_name", lambda: "")() or getattr(master_user, "username", "")
+        master_name = master_name or getattr(master, "display_name", "")
+        fragment = escape(service_name)
+        if master_name:
+            fragment += f" ({escape(master_name)})"
+        services.append(fragment)
+    return ", ".join(services) if services else "Services pending"
+
+
+def render_management_summary(period: str | None = None) -> str:
+    start, end, label = _period_window(period)
+    appointments = Appointment.objects.filter(start_time__gte=start, start_time__lt=end)
+    appt_count = appointments.count()
+    unique_clients = appointments.values("client_id").distinct().count()
+
+    payments = Payment.objects.filter(status__iexact="succeeded", created_at__gte=start, created_at__lt=end)
+    revenue = payments.aggregate(total=Sum("amount"))
+    revenue_total = revenue.get("total") or Decimal("0.00")
+    payment_count = payments.count()
+    avg_ticket = revenue_total / Decimal(payment_count or 1)
+
+    outstanding = appointments.filter(
+        Q(payment_status__name__icontains="not paid") | Q(payment_status__name__icontains="pending")
+    ).count()
+
+    upcoming = (
+        appointments.filter(start_time__gte=timezone.now())
+        .order_by("start_time")
+        .first()
+    )
+
+    if upcoming:
+        start_text = timezone.localtime(upcoming.start_time).strftime("%d %b %H:%M") if upcoming.start_time else "TBD"
+        upcoming_text = f"Next: {escape(_client_label(upcoming))} at {start_text}"
+    else:
+        upcoming_text = "Next: No appointments in this window"
+
+    lines = [
+        f"Window: {escape(label)}",
+        f"Appointments: {appt_count}",
+        f"Unique clients: {unique_clients}",
+        f"Succeeded payments: {payment_count}",
+        f"Revenue: {_format_money(revenue_total)} (avg {_format_money(avg_ticket)})",
+        f"Outstanding (unpaid/pending): {outstanding}",
+        upcoming_text,
+    ]
+    return _format_message("Operations report", lines)
+
+
+def render_schedule_overview(target: str | None = None, *, limit: int = 5) -> str:
+    limit = max(1, min(limit or 5, 20))
+    start, end, label = _schedule_window(target)
+
+    qs = (
+        Appointment.objects.with_aggregated_status()
+        .select_related("client__user", "payment_status")
+        .prefetch_related(
+            Prefetch(
+                "items",
+                queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
+            )
+        )
+        .filter(start_time__gte=start)
+        .order_by("start_time")
+    )
+    if end is not None:
+        qs = qs.filter(start_time__lt=end)
+
+    appointments = list(qs[:limit])
+    if not appointments:
+        return _format_message(f"Schedule — {label}", ["No appointments scheduled."])
+
+    blocks: list[str] = []
+    for idx, appt in enumerate(appointments, start=1):
+        start_text = timezone.localtime(appt.start_time).strftime("%H:%M") if appt.start_time else "TBD"
+        status_label = getattr(appt, "aggregated_status", None) or getattr(appt, "_aggregated_status_label", "Booked")
+        payment_label = getattr(getattr(appt, "payment_status", None), "name", "Unspecified")
+        services = _services_summary(appt)
+        client_name = escape(_client_label(appt))
+        block = (
+            f"{idx}. {escape(start_text)} — {client_name} [{escape(status_label)}]\n"
+            f"   Services: {services}\n"
+            f"   Payment: {escape(payment_label)} • Total {_format_money(appt.final_price)}\n"
+            f"   ID: <code>{escape(str(appt.pk))}</code>"
+        )
+        blocks.append(block)
+
+    return _format_message(f"Schedule — {label}", blocks)
+
+
+def render_appointment_details(appointment_id: str) -> str:
+    appointment = (
+        Appointment.objects.with_aggregated_status()
+        .select_related("client__user", "payment_status")
+        .prefetch_related(
+            Prefetch(
+                "items",
+                queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
+            )
+        )
+        .filter(pk=appointment_id)
+        .first()
+    )
+    if not appointment:
+        raise TelegramCommandError("Appointment not found.")
+
+    start_text = timezone.localtime(appointment.start_time).strftime("%d %b %Y, %H:%M") if appointment.start_time else "Not scheduled"
+    status_label = getattr(appointment, "aggregated_status", None) or getattr(appointment, "_aggregated_status_label", "Booked")
+    payment_label = getattr(getattr(appointment, "payment_status", None), "name", "Unspecified")
+    services = _services_summary(appointment)
+
+    notes = (appointment.notes or "").strip()
+    safe_notes = escape(notes) if notes else "—"
+
+    lines = [
+        f"Client: {escape(_client_label(appointment))}",
+        f"Start: {escape(start_text)}",
+        f"Services: {services}",
+        f"Status: {escape(status_label)}",
+        f"Payment status: {escape(payment_label)}",
+        f"Total: {_format_money(appointment.final_price)}",
+        f"Appointment ID: <code>{escape(str(appointment.pk))}</code>",
+        f"Notes: {safe_notes}",
+    ]
+    return _format_message("Appointment details", lines)
+
+
+def update_payment_status_via_bot(appointment_id: str, status_name: str, *, actor: UserProfile | None = None) -> str:
+    if not status_name:
+        raise TelegramCommandError("Provide a payment status name.")
+
+    appointment = (
+        Appointment.objects.select_related("client__user", "payment_status")
+        .filter(pk=appointment_id)
+        .first()
+    )
+    if not appointment:
+        raise TelegramCommandError("Appointment not found.")
+
+    status = (
+        PaymentStatus.objects.filter(name__iexact=status_name.strip())
+        .order_by("name")
+        .first()
+    )
+    if not status:
+        available = list(PaymentStatus.objects.order_by("name").values_list("name", flat=True)[:10])
+        if available:
+            raise TelegramCommandError(
+                "Unknown payment status. Available: " + ", ".join(available)
+            )
+        raise TelegramCommandError("No payment statuses configured yet.")
+
+    if appointment.payment_status_id == status.id:
+        return f"Payment status already set to {status.name}."
+
+    appointment.payment_status = status
+    appointment.save(update_fields=["payment_status"])
+
+    actor_label = _actor_label(actor)
+    return (
+        f"Marked {escape(_client_label(appointment))}'s appointment as {escape(status.name)} via {escape(actor_label)}."
+    )
+
+
+def append_note_to_appointment(appointment_id: str, note: str, *, actor: UserProfile | None = None) -> str:
+    text = (note or "").strip()
+    if not text:
+        raise TelegramCommandError("Provide note text after the command.")
+
+    appointment = Appointment.objects.filter(pk=appointment_id).first()
+    if not appointment:
+        raise TelegramCommandError("Appointment not found.")
+
+    timestamp = timezone.localtime().strftime("%d %b %Y %H:%M")
+    actor_label = _actor_label(actor)
+    entry = f"[{timestamp}] {actor_label}: {text}"
+    existing = (appointment.notes or "").strip()
+    appointment.notes = f"{existing}\n{entry}".strip() if existing else entry
+    appointment.save(update_fields=["notes"])
+    return "Note stored successfully."
+
+
+def link_subscription_to_profile(subscription: TelegramChatSubscription, identifier: str) -> str:
+    token = (identifier or "").strip()
+    if not token:
+        raise TelegramCommandError("Provide a staff email or username.")
+
+    user = (
+        User.objects.filter(
+            Q(email__iexact=token) | Q(username__iexact=token),
+            is_active=True,
+            is_staff=True,
+        )
+        .select_related("userprofile")
+        .first()
+    )
+    if not user:
+        raise TelegramCommandError("Staff account not found or not active.")
+
+    profile = getattr(user, "userprofile", None)
+    if profile is None:
+        profile = UserProfile.objects.create(user=user)
+
+    subscription.linked_profile = profile
+    subscription.save(update_fields=["linked_profile"])
+    display = user.get_full_name() or user.username or user.email
+    return f"Linked this chat to {display}."

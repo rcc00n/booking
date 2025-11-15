@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
@@ -86,26 +87,6 @@ class TelegramBotSettingsAdmin(RestrictedBotAdminMixin, admin.ModelAdmin):
     def has_add_permission(self, request):  # pragma: no cover - admin guard
         return not TelegramBotSettings.objects.exists()
 
-    def has_module_permission(self, request):
-        return request.user.is_active and request.user.is_staff
-
-    def has_view_permission(self, request, obj=None):
-        # Allow read-only view for staff so they can see ownership info.
-        return request.user.is_active and request.user.is_staff
-
-    def has_change_permission(self, request, obj=None):
-        if obj is None:
-            obj = TelegramBotSettings.load()
-        if not obj.pk:
-            return True
-        if not obj.locked_by_id:
-            return request.user.is_active and request.user.is_staff
-        if not request.user.is_active:
-            return False
-        if request.user.is_superuser or request.user.pk == obj.locked_by_id:
-            return True
-        return obj.allowed_admins.filter(pk=request.user.pk).exists()
-
     def formfield_for_manytomany(self, db_field, request, **kwargs):
         if db_field.name == "allowed_admins":
             kwargs.setdefault("queryset", User.objects.filter(is_staff=True))
@@ -129,6 +110,9 @@ class TelegramBotSettingsAdmin(RestrictedBotAdminMixin, admin.ModelAdmin):
         return custom + urls
 
     def recover_view(self, request):
+        if not request.user.is_active or not request.user.is_staff:
+            raise PermissionDenied
+
         settings_obj = TelegramBotSettings.load()
         context = {
             **self.admin_site.each_context(request),
@@ -160,6 +144,7 @@ class TelegramChatSubscriptionAdmin(RestrictedBotAdminMixin, admin.ModelAdmin):
         "is_admin_channel",
         "is_active",
         "last_interaction_at",
+        "linked_profile",
     )
     list_filter = ("is_admin_channel", "is_active")
     search_fields = ("chat_id", "title", "username")
