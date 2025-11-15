@@ -737,13 +737,13 @@ class ClientBookingFlow:
         ]
         if self._client_choice_enabled():
             rows.append([InlineKeyboardButton("👤 Change client", callback_data=self._cb("clientchange"))])
-        rows.extend(
+        rows.append(
             [
                 InlineKeyboardButton("◀ Back", callback_data=self._cb("back", "time")),
                 InlineKeyboardButton("✖ Cancel", callback_data=self._cb("cancel")),
-            ],
-            [InlineKeyboardButton("🧑‍💼 Talk to manager", callback_data=self._cb("manager"))],
+            ]
         )
+        rows.append([InlineKeyboardButton("🧑‍💼 Talk to manager", callback_data=self._cb("manager"))])
         self._commit(state=TelegramBookingSession.STATE_CONFIRM)
         self._send_or_edit("\n".join(lines), _inline_markup(rows))
 
