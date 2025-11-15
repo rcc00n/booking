@@ -375,8 +375,47 @@ JAZZMIN_SETTINGS = {
 
         "core.Service": "fas fa-spa",
         "core.ServiceMaster": "fas fa-user-cog",
+
+        # Telegram bot
+        "telegrambot.TelegramBotSettings": "fab fa-telegram-plane",
+        "telegrambot.TelegramChatSubscription": "fas fa-comment-dots",
+        "telegrambot.TelegramBroadcast": "fas fa-bullhorn",
     },
     "search_model_fields": {},
+    "order_with_respect_to": [
+        "auth",
+        "accounts",
+        "core",
+        "telegrambot",
+    ],
+    "topmenu_links": [
+        {"name": "Dashboard", "url": "admin:index"},
+        {"app": "core"},
+        {"app": "accounts"},
+        {"app": "telegrambot"},
+    ],
+    "custom_links": {
+        "telegrambot": [
+            {
+                "name": "Bot Settings",
+                "url": "admin:telegrambot_telegrambotsettings_changelist",
+                "icon": "fab fa-telegram-plane",
+                "permissions": ["telegrambot.view_telegrambotsettings"],
+            },
+            {
+                "name": "Subscriptions",
+                "url": "admin:telegrambot_telegramchatsubscription_changelist",
+                "icon": "fas fa-comment-dots",
+                "permissions": ["telegrambot.view_telegramchatsubscription"],
+            },
+            {
+                "name": "Broadcasts",
+                "url": "admin:telegrambot_telegrambroadcast_changelist",
+                "icon": "fas fa-bullhorn",
+                "permissions": ["telegrambot.view_telegrambroadcast"],
+            },
+        ],
+    },
 }
 EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
 ANYMAIL = {
