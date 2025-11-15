@@ -621,10 +621,10 @@ def render_schedule_overview(
         payment_lower = payment_label.lower()
         if "not paid" in payment_lower or "pending" in payment_lower:
             badges.append("unpaid")
-        badge_text = f" {escape('(' + ', '.join(badges) + ')')}" if badges else ""
+        badge_fragment = escape(f" ({', '.join(badges)})") if badges else ""
 
         block = (
-            f"{idx}. {escape(start_text)} — {client_name} [{escape(status_label)}]{badge_text}\n"
+            f"{idx}. {escape(start_text)} — {client_name} [{escape(status_label)}]{badge_fragment}\n"
             f"   Services: {services}\n"
             f"   Payment: {escape(payment_label)} • Total {_format_money(appt.final_price)}\n"
             f"   ID: <code>{escape(str(appt.pk))}</code>"
@@ -662,8 +662,15 @@ def render_appointment_details(appointment_id: str) -> str:
     notes = (appointment.notes or "").strip()
     safe_notes = escape(notes) if notes else "—"
 
+    client_profile = getattr(appointment, "client", None)
+    client_phone = getattr(client_profile, "phone", "") or "—"
+    client_user = getattr(client_profile, "user", None)
+    client_email = getattr(client_user, "email", "") or "—"
+
     lines = [
         f"Client: {escape(_client_label(appointment))}",
+        f"Phone: {escape(client_phone)}",
+        f"Email: {escape(client_email)}",
         f"Start: {escape(start_text)}",
         f"Services: {services}",
         f"Status: {escape(status_label)}",
@@ -673,6 +680,114 @@ def render_appointment_details(appointment_id: str) -> str:
         f"Notes: {safe_notes}",
     ]
     return _format_message("Appointment details", lines)
+
+
+def render_outstanding_overview(limit: int = 5) -> str:
+    limit = _clamp_limit(limit)
+    qs = (
+        Appointment.objects.with_aggregated_status()
+        .select_related("client__user", "payment_status")
+        .filter(
+            Q(payment_status__isnull=True)
+            | Q(payment_status__name__icontains="not paid")
+            | Q(payment_status__name__icontains="pending")
+        )
+        .order_by("start_time")
+    )
+    total_count = qs.count()
+    if not total_count:
+        return _format_message("Outstanding payments", ["Everything is up to date."])
+
+    appointments = list(qs[:limit])
+    now = timezone.localtime()
+    blocks: list[str] = []
+    for idx, appt in enumerate(appointments, start=1):
+        local_start = timezone.localtime(appt.start_time) if appt.start_time else None
+        start_text = local_start.strftime("%d %b %H:%M") if local_start else "Not scheduled"
+        payment_label = getattr(getattr(appt, "payment_status", None), "name", "Not set")
+        status_label = getattr(appt, "_aggregated_status_label", getattr(appt, "aggregated_status", "Booked"))
+        badges: list[str] = []
+        if local_start and local_start.date() < now.date():
+            overdue_days = (now.date() - local_start.date()).days
+            if overdue_days > 0:
+                badges.append(f"{overdue_days}d late")
+        payment_lower = payment_label.lower()
+        if "pending" in payment_lower or "not paid" in payment_lower:
+            badges.append("awaiting payment")
+        badge_text = f" ({', '.join(badges)})" if badges else ""
+        block = (
+            f"{idx}. {escape(_client_label(appt))} — {_format_money(appt.final_price)}\n"
+            f"   Start: {escape(start_text)} • Status: {escape(status_label)}\n"
+            f"   Payment: {escape(payment_label)}{escape(badge_text)}\n"
+            f"   ID: <code>{escape(str(appt.pk))}</code>"
+        )
+        note_preview = _notes_preview(appt.notes)
+        if note_preview:
+            block += f"\n   Note: {escape(note_preview)}"
+        blocks.append(block)
+
+    totals = qs.aggregate(total_value=Sum("final_price"))
+    total_value = totals.get("total_value") or Decimal("0.00")
+    blocks.append(
+        escape(
+            f"Showing {len(appointments)} of {total_count} outstanding • Value {_format_money(total_value)}"
+        )
+    )
+    return _format_message("Outstanding payments", blocks)
+
+
+def list_payment_status_choices(limit: int = 20) -> str:
+    names = list(PaymentStatus.objects.order_by("name").values_list("name", flat=True)[:limit])
+    if not names:
+        return "No payment statuses configured yet."
+    lines = [f"{idx}. {escape(name)}" for idx, name in enumerate(names, start=1)]
+    return _format_message("Available payment statuses", lines)
+
+
+def describe_payment_status(appointment_id: str) -> str:
+    appointment = (
+        Appointment.objects.select_related("client__user", "payment_status")
+        .filter(pk=appointment_id)
+        .first()
+    )
+    if not appointment:
+        raise TelegramCommandError("Appointment not found.")
+    payment_label = getattr(getattr(appointment, "payment_status", None), "name", "Not set")
+    start_text = (
+        timezone.localtime(appointment.start_time).strftime("%d %b %Y, %H:%M")
+        if appointment.start_time
+        else "Not scheduled"
+    )
+    lines = [
+        f"Client: {escape(_client_label(appointment))}",
+        f"Start: {escape(start_text)}",
+        f"Payment status: {escape(payment_label)}",
+        f"Total: {_format_money(appointment.final_price)}",
+        f"Appointment ID: <code>{escape(str(appointment.pk))}</code>",
+    ]
+    return _format_message("Payment status", lines)
+
+
+def render_appointment_notes(appointment_id: str) -> str:
+    appointment = (
+        Appointment.objects.select_related("client__user")
+        .filter(pk=appointment_id)
+        .first()
+    )
+    if not appointment:
+        raise TelegramCommandError("Appointment not found.")
+    lines = [
+        f"Client: {escape(_client_label(appointment))}",
+        f"Appointment ID: <code>{escape(str(appointment.pk))}</code>",
+    ]
+    notes = (appointment.notes or "").strip()
+    if notes:
+        note_lines = [escape(line) for line in notes.splitlines()]
+        lines.append("Notes:")
+        lines.extend(note_lines)
+    else:
+        lines.append("Notes: No notes recorded yet.")
+    return _format_message("Appointment notes", lines)
 
 
 def update_payment_status_via_bot(appointment_id: str, status_name: str, *, actor: UserProfile | None = None) -> str:

@@ -12,10 +12,14 @@ from .models import TelegramBotSettings, TelegramChatSubscription
 from .services import (
     TelegramCommandError,
     append_note_to_appointment,
+    describe_payment_status,
     link_subscription_to_profile,
+    list_payment_status_choices,
     record_subscription,
     render_appointment_details,
+    render_appointment_notes,
     render_management_summary,
+    render_outstanding_overview,
     render_schedule_overview,
     render_today_summary,
     update_payment_status_via_bot,
@@ -34,6 +38,12 @@ def register_handlers(bot: TeleBot) -> None:
     def _extract_argument(text: str | None) -> str:
         parts = (text or "").split(maxsplit=1)
         return parts[1].strip() if len(parts) > 1 else ""
+
+    def _safe_int(value: str | None) -> int | None:
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
 
     def _log_command(message: Message, command: str) -> None:
         username = getattr(getattr(message, "from_user", None), "username", "") or "unknown"
@@ -60,15 +70,18 @@ def register_handlers(bot: TeleBot) -> None:
         _log_command(message, "/help")
         subscription = record_subscription(message)
         help_text = (
-            "Hello! I will push booking and payment alerts for admins.\n\n"
-            "Use /subscribe <token> if you were given an admin token to receive alerts.\n"
-            "Use /today for the basic daily summary.\n"
-            "Use /summary <today|yesterday|week|YYYY-MM-DD> to request reports.\n"
-            "Use /schedule <today|tomorrow|next> [limit] to inspect the calendar.\n"
-            "Use /appointment <id> for full details.\n"
-            "Use /link <email> once to map this chat to a staff profile.\n"
-            "After linking you can run /paystatus and /note to update records.\n"
-            "Use /unsubscribe to pause all notifications."
+            "Hello! I keep admins informed about bookings and payments.\n\n"
+            "Key commands:\n"
+            "/subscribe [token] - register this chat and enable admin alerts.\n"
+            "/today - quick view of today's KPIs.\n"
+            "/summary [today|yesterday|week|YYYY-MM-DD[:YYYY-MM-DD]] [detailed] - operations report.\n"
+            "/schedule [window] [limit] [client:term] [staff:term] [status:code] [payment:name] [notes] - inspect the calendar.\n"
+            "/outstanding [limit] - show unpaid appointments.\n"
+            "/appointment [id] - appointment snapshot.\n"
+            "/link [email] - link this chat to your staff profile (needed for edits).\n"
+            "/paystatus [id] [status|list] - review or update payment status.\n"
+            "/note [id] [text] - view notes or append a new entry.\n"
+            "/unsubscribe - stop notifications."
         )
         bot.reply_to(message, help_text)
         logger.info("Telegram chat %s connected (admin=%s)", subscription.chat_id, subscription.is_admin_channel)
@@ -139,9 +152,23 @@ def register_handlers(bot: TeleBot) -> None:
         subscription = _require_admin(message)
         if not subscription:
             return
-        period = _extract_argument(message.text) or "today"
+        raw_args = _extract_argument(message.text)
+        tokens = raw_args.split()
+        period = None
+        detailed = False
+        for token in tokens:
+            normalized = token.lower()
+            if normalized in {"detailed", "--detailed", "full"}:
+                detailed = True
+                continue
+            if normalized in {"brief", "summary"}:
+                detailed = False
+                continue
+            if period is None:
+                period = token
+        period = period or "today"
         try:
-            summary = render_management_summary(period)
+            summary = render_management_summary(period, detailed=detailed)
         except TelegramCommandError as exc:
             bot.reply_to(message, f"Unable to build report: {exc}")
             return
@@ -154,20 +181,70 @@ def register_handlers(bot: TeleBot) -> None:
         if not subscription:
             return
 
-        tokens = (message.text or "").split()
-        target = tokens[1] if len(tokens) > 1 else "today"
-        limit_token = tokens[2] if len(tokens) > 2 else "5"
-        try:
-            limit = int(limit_token)
-        except ValueError:
-            bot.reply_to(message, "Limit must be a number between 1 and 20.")
-            return
-        if limit < 1 or limit > 20:
+        raw_args = _extract_argument(message.text)
+        tokens = raw_args.split()
+        target = None
+        limit_value: int | None = None
+        staff_query: str | None = None
+        client_query: str | None = None
+        status_filter: str | None = None
+        payment_filter: str | None = None
+        include_notes = False
+        loose_terms: list[str] = []
+
+        for token in tokens:
+            normalized = token.lower()
+            if normalized in {"notes", "--notes"}:
+                include_notes = True
+                continue
+            if normalized.startswith("client:"):
+                client_query = token.split(":", 1)[1]
+                continue
+            if normalized.startswith("staff:"):
+                staff_query = token.split(":", 1)[1]
+                continue
+            if normalized.startswith("status:"):
+                status_filter = token.split(":", 1)[1]
+                continue
+            if normalized.startswith("payment:"):
+                payment_filter = token.split(":", 1)[1]
+                continue
+            if normalized.startswith("limit:"):
+                limit_candidate = _safe_int(token.split(":", 1)[1])
+                if limit_candidate is None:
+                    bot.reply_to(message, "Limit must be a number between 1 and 20.")
+                    return
+                limit_value = limit_candidate
+                continue
+            if target is None:
+                target = token
+                continue
+            if limit_value is None:
+                parsed_limit = _safe_int(token)
+                if parsed_limit is not None:
+                    limit_value = parsed_limit
+                    continue
+            loose_terms.append(token)
+
+        if loose_terms and not client_query:
+            client_query = " ".join(loose_terms)
+
+        if limit_value is not None and (limit_value < 1 or limit_value > 20):
             bot.reply_to(message, "Limit must stay between 1 and 20.")
             return
 
+        target = target or "today"
+
         try:
-            overview = render_schedule_overview(target, limit=limit)
+            overview = render_schedule_overview(
+                target,
+                limit=limit_value or 5,
+                staff_query=staff_query,
+                client_query=client_query,
+                status_filter=status_filter,
+                payment_filter=payment_filter,
+                include_notes=include_notes,
+            )
         except TelegramCommandError as exc:
             bot.reply_to(message, f"Unable to load schedule: {exc}")
             return
@@ -190,23 +267,67 @@ def register_handlers(bot: TeleBot) -> None:
             return
         bot.send_message(message.chat.id, details)
 
+    @bot.message_handler(commands=["outstanding", "pending"])
+    def handle_outstanding(message: Message) -> None:
+        _log_command(message, "/outstanding")
+        subscription = _require_admin(message)
+        if not subscription:
+            return
+
+        raw_arg = _extract_argument(message.text).strip()
+        limit_value: int | None = None
+        if raw_arg:
+            if raw_arg.lower().startswith("limit:"):
+                raw_arg = raw_arg.split(":", 1)[1]
+            parsed = _safe_int(raw_arg)
+            if parsed is None:
+                bot.reply_to(message, "Usage: /outstanding [limit].")
+                return
+            limit_value = parsed
+            if limit_value < 1 or limit_value > 20:
+                bot.reply_to(message, "Limit must stay between 1 and 20.")
+                return
+
+        overview = render_outstanding_overview(limit=limit_value or 5)
+        bot.send_message(message.chat.id, overview)
+
     @bot.message_handler(commands=["paystatus"])
     def handle_payment_status(message: Message) -> None:
         _log_command(message, "/paystatus")
         subscription = _require_admin(message)
         if not subscription:
             return
+        args = _extract_argument(message.text)
+        tokens = args.split()
+        if not tokens:
+            bot.reply_to(message, "Usage: /paystatus <appointment id> <status name> or /paystatus list.")
+            return
+
+        first = tokens[0].lower()
+        if first in {"list", "help"}:
+            bot.reply_to(message, list_payment_status_choices())
+            return
+
+        appointment_id = tokens[0]
+        if len(tokens) == 1:
+            try:
+                summary = describe_payment_status(appointment_id)
+            except TelegramCommandError as exc:
+                bot.reply_to(message, str(exc))
+                return
+            bot.reply_to(message, summary)
+            return
+
         if not _require_actor(subscription, message):
             return
 
-        args = _extract_argument(message.text)
-        parts = args.split(maxsplit=1)
-        if len(parts) < 2:
-            bot.reply_to(message, "Usage: /paystatus <appointment id> <status name>.")
-            return
-        appt_id, status_name = parts[0], parts[1]
+        status_name = " ".join(tokens[1:])
         try:
-            response = update_payment_status_via_bot(appt_id, status_name, actor=subscription.linked_profile)
+            response = update_payment_status_via_bot(
+                appointment_id,
+                status_name,
+                actor=subscription.linked_profile,
+            )
         except TelegramCommandError as exc:
             bot.reply_to(message, str(exc))
             return
@@ -218,15 +339,27 @@ def register_handlers(bot: TeleBot) -> None:
         subscription = _require_admin(message)
         if not subscription:
             return
-        if not _require_actor(subscription, message):
-            return
 
         args = _extract_argument(message.text)
         parts = args.split(maxsplit=1)
-        if len(parts) < 2:
-            bot.reply_to(message, "Usage: /note <appointment id> <text>.")
+        if not parts or not parts[0]:
+            bot.reply_to(message, "Usage: /note <appointment id> <text> or /note <appointment id> to read notes.")
             return
-        appt_id, note_text = parts[0], parts[1]
+
+        appt_id = parts[0]
+        if len(parts) == 1:
+            try:
+                payload = render_appointment_notes(appt_id)
+            except TelegramCommandError as exc:
+                bot.reply_to(message, str(exc))
+                return
+            bot.reply_to(message, payload)
+            return
+
+        if not _require_actor(subscription, message):
+            return
+
+        note_text = parts[1]
         try:
             response = append_note_to_appointment(appt_id, note_text, actor=subscription.linked_profile)
         except TelegramCommandError as exc:

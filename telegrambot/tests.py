@@ -17,9 +17,13 @@ from .management.commands.run_telegram_bot import Command as RunBotCommand
 from .permissions import assign_lock_to_user, user_has_bot_access
 from .services import (
     append_note_to_appointment,
+    describe_payment_status,
     link_subscription_to_profile,
+    list_payment_status_choices,
     render_appointment_details,
+    render_appointment_notes,
     render_management_summary,
+    render_outstanding_overview,
     render_schedule_overview,
     update_payment_status_via_bot,
 )
@@ -141,20 +145,49 @@ class TelegramBotCommandServiceTests(TestCase):
         self.assertIn("Schedule", text)
         self.assertIn(self.client_user.get_full_name(), text)
 
+    def test_render_schedule_overview_with_filters_and_notes(self) -> None:
+        self.appointment.notes = "Client confirmed"
+        self.appointment.save(update_fields=["notes"])
+        text = render_schedule_overview(
+            "today",
+            limit=5,
+            client_query=self.client_user.first_name,
+            include_notes=True,
+        )
+        self.assertIn("Client confirmed", text)
+
     def test_render_management_summary_returns_metrics(self) -> None:
         summary = render_management_summary("today")
         self.assertIn("Operations report", summary)
         self.assertIn("Appointments", summary)
 
+    def test_render_outstanding_overview_lists_unpaid(self) -> None:
+        text = render_outstanding_overview(limit=5)
+        self.assertIn("Outstanding payments", text)
+        self.assertIn(self.client_user.get_full_name(), text)
+
     def test_render_appointment_details_includes_id(self) -> None:
         details = render_appointment_details(str(self.appointment.pk))
         self.assertIn(str(self.appointment.pk), details)
+
+    def test_render_appointment_notes_handles_empty_state(self) -> None:
+        notes = render_appointment_notes(str(self.appointment.pk))
+        self.assertIn("No notes", notes)
 
     def test_update_payment_status_flow(self) -> None:
         response = update_payment_status_via_bot(str(self.appointment.pk), "Paid", actor=self.staff_profile)
         self.assertIn("Marked", response)
         self.appointment.refresh_from_db()
         self.assertEqual(self.appointment.payment_status, self.paid_status)
+
+    def test_describe_payment_status_reports_current_state(self) -> None:
+        text = describe_payment_status(str(self.appointment.pk))
+        self.assertIn("Payment status", text)
+        self.assertIn("Pending", text)
+
+    def test_list_payment_status_choices_includes_known_statuses(self) -> None:
+        listing = list_payment_status_choices()
+        self.assertIn("Pending", listing)
 
     def test_append_note_appends_text(self) -> None:
         reply = append_note_to_appointment(str(self.appointment.pk), "Client confirmed", actor=self.staff_profile)
