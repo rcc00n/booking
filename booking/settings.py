@@ -87,6 +87,7 @@ INSTALLED_APPS = [
     'anymail',
     'accounts',
     'core',
+    'telegrambot',
     'dal',
     'dal_select2',
     'storages',
@@ -197,6 +198,13 @@ SESSION_COOKIE_AGE = 3600
 
 # Сессия закрывается при закрытии браузера (по желанию)
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
+
+# Telegram bot (admin alert) configuration
+TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
+TELEGRAM_NOTIFICATIONS_ENABLED = env.bool("TELEGRAM_NOTIFICATIONS_ENABLED", default=False)
+TELEGRAM_ADMIN_CHAT_IDS = env.list("TELEGRAM_ADMIN_CHAT_IDS", default=[])
+TELEGRAM_ADMIN_PASSPHRASE = env("TELEGRAM_ADMIN_PASSPHRASE", default="")
 
 # Опционально — продлевать сессию при активности пользователя
 SESSION_SAVE_EVERY_REQUEST = True
@@ -367,8 +375,53 @@ JAZZMIN_SETTINGS = {
 
         "core.Service": "fas fa-spa",
         "core.ServiceMaster": "fas fa-user-cog",
+
+        # Telegram bot
+        "telegrambot.TelegramBotSettings": "fab fa-telegram-plane",
+        "telegrambot.TelegramChatSubscription": "fas fa-comment-dots",
+        "telegrambot.TelegramBroadcast": "fas fa-bullhorn",
     },
     "search_model_fields": {},
+    "order_with_respect_to": [
+        "auth",
+        "accounts",
+        "core",
+        "telegrambot",
+    ],
+    "topmenu_links": [
+        {"name": "Dashboard", "url": "admin:index"},
+        {"app": "core"},
+        {"app": "accounts"},
+        {"app": "telegrambot"},
+    ],
+    "custom_links": {
+        "telegrambot": [
+            {
+                "name": "Bot Settings",
+                "url": "admin:telegrambot_telegrambotsettings_changelist",
+                "icon": "fab fa-telegram-plane",
+                "permissions": ["telegrambot.view_telegrambotsettings"],
+            },
+            {
+                "name": "Subscriptions",
+                "url": "admin:telegrambot_telegramchatsubscription_changelist",
+                "icon": "fas fa-comment-dots",
+                "permissions": ["telegrambot.view_telegramchatsubscription"],
+            },
+            {
+                "name": "Broadcasts",
+                "url": "admin:telegrambot_telegrambroadcast_changelist",
+                "icon": "fas fa-bullhorn",
+                "permissions": ["telegrambot.view_telegrambroadcast"],
+            },
+            {
+                "name": "Recovery",
+                "url": "admin:telegrambot_telegrambotsettings_recover",
+                "icon": "fas fa-unlock",
+                "permissions": ["auth.view_user"],
+            },
+        ],
+    },
 }
 EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
 ANYMAIL = {

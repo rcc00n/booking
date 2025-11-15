@@ -132,3 +132,16 @@ curl -X POST \
 - Choose **Cash** or **E-transfer** to jump to the “Add payment” admin form with appointment, amount, and method pre-filled.
 - Choose **Credit card** or **Debit card** after taking payment on the physical terminal; this applies the 3% + $0.50 Stripe fee (stored on the appointment) so totals and receipts stay accurate while the Stripe webhook finalizes the charge.
 - Appointments created through the public cart automatically flag the card fee so online self-bookings match Stripe totals, while admin-created appointments stay fee-free until credit/debit is selected.
+
+### Telegram bot alerts
+
+1. Install dependencies and run migrations (`python manage.py migrate`) to create the Telegram tables.
+2. Configure the bot via environment variables:
+   - `TELEGRAM_BOT_TOKEN=123456:ABC` (token from BotFather)
+   - `TELEGRAM_NOTIFICATIONS_ENABLED=True`
+   - `TELEGRAM_ADMIN_PASSPHRASE=<secret>` (used with `/subscribe <secret>`)
+   - Optional safety net: `TELEGRAM_ADMIN_CHAT_IDS=12345,-67890` to force-send alerts even when no chats subscribed yet.
+3. Scale the new worker locally with `python manage.py run_telegram_bot` or on Dokku using `dokku ps:scale telegrambot=1`.
+4. The first admin who edits the Telegram bot settings becomes the owner; only the owner (or staff members listed under “Allowed admins”) can modify any bot data once it’s locked.
+5. If the original owner is unavailable, visit **Telegram bot → Recovery** in Django admin and enter `superpasswordadmintgbot137camrose1923goodbot` to transfer control to your staff account.
+6. In Telegram, run `/subscribe <secret>` from any chat that should receive alerts, `/today` for the on-demand dashboard, and `/unsubscribe` to silence a channel.
