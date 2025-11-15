@@ -194,6 +194,31 @@ def _public_url(path: str) -> str:
     return urljoin(normalized_base, path.lstrip("/"))
 
 
+def _master_display(master: MasterProfile | None, *, fallback: str | None = None) -> str:
+    if master is None:
+        return fallback or "Team"
+    profile = getattr(master, "user", None)
+    if profile:
+        auth_user = getattr(profile, "user", None)
+        if auth_user:
+            full_name = auth_user.get_full_name()
+            if full_name:
+                return full_name
+            if auth_user.username:
+                return auth_user.username
+        if hasattr(profile, "get_full_name"):
+            name = profile.get_full_name()
+            if name:
+                return name
+    display = getattr(master, "display_name", None)
+    if display:
+        return display
+    profession = getattr(master, "profession", None)
+    if profession:
+        return profession
+    return fallback or f"Master {getattr(master, 'pk', '?')}"
+
+
 _SENTINEL = object()
 
 
@@ -330,7 +355,7 @@ class ClientBookingFlow:
         start = page * self.MASTER_PAGE_SIZE
         rows = []
         for master in masters[start : start + self.MASTER_PAGE_SIZE]:
-            label = master.display_name or getattr(master.user, "get_full_name", lambda: "")() or f"Master {master.pk}"
+            label = _master_display(master, fallback=f"Master {master.pk}")
             rows.append([InlineKeyboardButton(label, callback_data=self._cb("mst", str(master.pk)))])
 
         if total_pages > 1:
@@ -401,7 +426,7 @@ class ClientBookingFlow:
         markup = _inline_markup(rows)
         lines = [
             f"<b>Select date for {escape(service.name)}</b>",
-            f"With {escape(master.display_name or getattr(master.user, 'get_full_name', lambda: '')() or 'our team')}",
+            f"With {escape(_master_display(master, fallback='our team'))}",
         ]
         if info:
             lines.append(info)
@@ -466,7 +491,7 @@ class ClientBookingFlow:
         date_label = _format_date_label(self._selected_date())
         lines = [
             f"<b>Pick a time on {date_label}</b>",
-            f"{escape(service.name)} with {escape(master.display_name or getattr(master.user, 'get_full_name', lambda: '')() or 'our team')}",
+            f"{escape(service.name)} with {escape(_master_display(master, fallback='our team'))}",
         ]
         if info:
             lines.append(info)
@@ -494,7 +519,7 @@ class ClientBookingFlow:
         lines = [
             "<b>Review your booking</b>",
             f"Service: {escape(service.name)}",
-            f"Master: {escape(master.display_name or getattr(master.user, 'get_full_name', lambda: '')() or 'Team')}",
+            f"Master: {escape(_master_display(master))}",
             f"When: {_format_date_label(booking_date)} at {slot_label}",
             f"Price: CAD {price:.2f}",
         ]
@@ -566,9 +591,7 @@ class ClientBookingFlow:
         else:
             details.append("When: We'll confirm the start time shortly.")
         details.append(f"Service: {escape(service.name)}")
-        details.append(
-            f"Master: {escape(master.display_name or getattr(master.user, 'get_full_name', lambda: '')() or 'Team')}"
-        )
+        details.append(f"Master: {escape(_master_display(master))}")
         if assign_count:
             try:
                 forms_link = _public_url(reverse("client-intake-forms"))
@@ -644,7 +667,7 @@ class ClientBookingFlow:
         if master_id:
             master = MasterProfile.objects.filter(pk=master_id).first()
             if master:
-                lines.append(f"Master: {master.display_name or getattr(master.user, 'get_full_name', lambda: '')()}")
+                lines.append(f"Master: {_master_display(master)}")
         if date_label:
             lines.append(f"Date: {date_label}")
         if slot_label:
@@ -867,9 +890,7 @@ def send_upcoming_bookings(bot: TeleBot, subscription: TelegramChatSubscription,
 
     for item in items:
         start = timezone.localtime(item.start_time)
-        master_name = getattr(item.master, "display_name", "") or getattr(
-            getattr(item.master, "user", None), "get_full_name", lambda: ""
-        )()
+        master_name = _master_display(getattr(item, "master", None))
         lines = [
             f"<b>{escape(getattr(item.service, 'name', 'Service'))}</b>",
             f"When: {start:%a %d %b, %H:%M}",
@@ -1010,9 +1031,7 @@ def _send_status_cards(appointment: Appointment, chat_ids: Sequence[int], items:
     for chat_id in chat_ids:
         for item in items:
             service_name = getattr(item.service, "name", "Service")
-            master = getattr(item.master, "display_name", "") or getattr(
-                getattr(item.master, "user", None), "get_full_name", lambda: ""
-            )()
+            master = _master_display(getattr(item, "master", None), fallback="Staff")
             start_label = timezone.localtime(item.start_time).strftime("%d %b %H:%M") if item.start_time else "TBD"
             text = (
                 f"<b>{escape(service_name)}</b> — {escape(master or 'Staff')}\n"
@@ -1061,10 +1080,8 @@ def notify_new_appointment(appointment_id: str) -> None:
         service_lines = []
         for item in items:
             service_name = getattr(item.service, "name", "Service")
-            master_name = getattr(getattr(item.master, "user", None), "get_full_name", lambda: "")()
-            if not master_name:
-                master_name = getattr(item.master, "display_name", "Staff")
-            service_lines.append(f"• {escape(service_name)} — {escape(master_name or 'Staff')}" )
+            master_name = _master_display(getattr(item, "master", None), fallback="Staff")
+            service_lines.append(f"• {escape(service_name)} — {escape(master_name)}" )
         services_text = "\n".join(service_lines)
     else:
         services_text = "• Services will be assigned by staff"
@@ -1315,11 +1332,7 @@ def _services_summary(appt: Appointment) -> str:
         service = getattr(item, "service", None)
         service_name = getattr(service, "name", "Service")
         master = getattr(item, "master", None)
-        master_user = getattr(master, "user", None)
-        master_name = ""
-        if master_user:
-            master_name = getattr(master_user, "get_full_name", lambda: "")() or getattr(master_user, "username", "")
-        master_name = master_name or getattr(master, "display_name", "")
+        master_name = _master_display(master, fallback="")
         fragment = escape(service_name)
         if master_name:
             fragment += f" ({escape(master_name)})"
@@ -1443,10 +1456,11 @@ def render_schedule_overview(
         staff_term = staff_query.strip()
         if staff_term:
             staff_filter = (
-                Q(items__master__user__first_name__icontains=staff_term)
-                | Q(items__master__user__last_name__icontains=staff_term)
-                | Q(items__master__user__username__icontains=staff_term)
-                | Q(items__master__display_name__icontains=staff_term)
+                Q(items__master__user__user__first_name__icontains=staff_term)
+                | Q(items__master__user__user__last_name__icontains=staff_term)
+                | Q(items__master__user__user__username__icontains=staff_term)
+                | Q(items__master__user__user__email__icontains=staff_term)
+                | Q(items__master__profession__icontains=staff_term)
             )
             qs = qs.filter(staff_filter)
             needs_distinct = True
