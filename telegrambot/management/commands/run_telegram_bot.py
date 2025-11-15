@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
 
 from telegrambot.handlers import register_handlers
 from telegrambot.services import TelegramBotInactiveError, get_bot
@@ -10,6 +12,20 @@ from telegrambot.services import TelegramBotInactiveError, get_bot
 
 class Command(BaseCommand):
     help = "Run the Telegram bot using long polling."
+
+    def _ensure_schema_ready(self) -> None:
+        """Fail fast when telegrambot migrations are missing."""
+
+        executor = MigrationExecutor(connection)
+        leaf_nodes = executor.loader.graph.leaf_nodes()
+        plan = executor.migration_plan(leaf_nodes)
+        pending = [migration for migration, _ in plan if migration.app_label == "telegrambot"]
+        if pending:
+            names = ", ".join(f"{migration.app_label}.{migration.name}" for migration in pending)
+            raise CommandError(
+                "Pending telegrambot migrations detected (%s). Run `python manage.py migrate telegrambot` "
+                "before starting the bot." % names
+            )
 
     def add_arguments(self, parser) -> None:
         parser.add_argument(
@@ -19,6 +35,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        self._ensure_schema_ready()
         bot = get_bot(force_reload=options.get("reload_token", False))
         if bot is None:
             raise CommandError("Telegram bot is disabled or token missing. Enable it from admin settings.")

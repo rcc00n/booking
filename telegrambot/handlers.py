@@ -35,6 +35,10 @@ def register_handlers(bot: TeleBot) -> None:
         parts = (text or "").split(maxsplit=1)
         return parts[1].strip() if len(parts) > 1 else ""
 
+    def _log_command(message: Message, command: str) -> None:
+        username = getattr(getattr(message, "from_user", None), "username", "") or "unknown"
+        logger.info("Telegram command %s from chat %s (%s)", command, message.chat.id, username)
+
     def _require_admin(message: Message) -> TelegramChatSubscription | None:
         subscription = record_subscription(message)
         if not subscription.is_admin_channel:
@@ -53,6 +57,7 @@ def register_handlers(bot: TeleBot) -> None:
 
     @bot.message_handler(commands=["start", "help"])
     def handle_help(message: Message) -> None:
+        _log_command(message, "/help")
         subscription = record_subscription(message)
         help_text = (
             "Hello! I will push booking and payment alerts for admins.\n\n"
@@ -70,6 +75,7 @@ def register_handlers(bot: TeleBot) -> None:
 
     @bot.message_handler(commands=["subscribe"])
     def handle_subscribe(message: Message) -> None:
+        _log_command(message, "/subscribe")
         text = message.text or ""
         parts = text.split(maxsplit=1)
         provided_token = parts[1].strip() if len(parts) > 1 else ""
@@ -91,6 +97,7 @@ def register_handlers(bot: TeleBot) -> None:
 
     @bot.message_handler(commands=["unsubscribe"])
     def handle_unsubscribe(message: Message) -> None:
+        _log_command(message, "/unsubscribe")
         updated = TelegramChatSubscription.objects.filter(chat_id=message.chat.id).update(
             is_active=False,
             is_admin_channel=False,
@@ -102,6 +109,7 @@ def register_handlers(bot: TeleBot) -> None:
 
     @bot.message_handler(commands=["today"])
     def handle_today(message: Message) -> None:
+        _log_command(message, "/today")
         subscription = _subscription_for(message)
         if not subscription or not subscription.is_admin_channel:
             bot.reply_to(message, "Only admin chats can call /today.")
@@ -112,6 +120,7 @@ def register_handlers(bot: TeleBot) -> None:
 
     @bot.message_handler(commands=["link"])
     def handle_link(message: Message) -> None:
+        _log_command(message, "/link")
         subscription = record_subscription(message)
         identifier = _extract_argument(message.text)
         if not identifier:
@@ -126,6 +135,7 @@ def register_handlers(bot: TeleBot) -> None:
 
     @bot.message_handler(commands=["summary", "report"])
     def handle_summary(message: Message) -> None:
+        _log_command(message, "/summary")
         subscription = _require_admin(message)
         if not subscription:
             return
@@ -139,6 +149,7 @@ def register_handlers(bot: TeleBot) -> None:
 
     @bot.message_handler(commands=["schedule"])
     def handle_schedule(message: Message) -> None:
+        _log_command(message, "/schedule")
         subscription = _require_admin(message)
         if not subscription:
             return
@@ -164,6 +175,7 @@ def register_handlers(bot: TeleBot) -> None:
 
     @bot.message_handler(commands=["appointment"])
     def handle_appointment_details(message: Message) -> None:
+        _log_command(message, "/appointment")
         subscription = _require_admin(message)
         if not subscription:
             return
@@ -180,6 +192,7 @@ def register_handlers(bot: TeleBot) -> None:
 
     @bot.message_handler(commands=["paystatus"])
     def handle_payment_status(message: Message) -> None:
+        _log_command(message, "/paystatus")
         subscription = _require_admin(message)
         if not subscription:
             return
@@ -201,6 +214,7 @@ def register_handlers(bot: TeleBot) -> None:
 
     @bot.message_handler(commands=["note", "addnote"])
     def handle_add_note(message: Message) -> None:
+        _log_command(message, "/note")
         subscription = _require_admin(message)
         if not subscription:
             return

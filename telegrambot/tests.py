@@ -5,11 +5,14 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from unittest import mock
 
 from core.models import Appointment, PaymentStatus, UserProfile
 from .models import TelegramBotSettings, TelegramChatSubscription
+from .management.commands.run_telegram_bot import Command as RunBotCommand
 from .permissions import assign_lock_to_user, user_has_bot_access
 from .services import (
     append_note_to_appointment,
@@ -128,3 +131,19 @@ class TelegramBotCommandServiceTests(TestCase):
         self.assertIn("Note stored", reply)
         self.appointment.refresh_from_db()
         self.assertIn("Client confirmed", self.appointment.notes)
+
+
+class TelegramBotCommandLineTests(TestCase):
+    def test_schema_check_passes_when_migrated(self) -> None:
+        cmd = RunBotCommand()
+        cmd._ensure_schema_ready()
+
+    def test_schema_check_detects_pending(self) -> None:
+        cmd = RunBotCommand()
+        fake_migration = mock.Mock(app_label="telegrambot", name="0004_future")
+        with mock.patch("telegrambot.management.commands.run_telegram_bot.MigrationExecutor") as executor_cls:
+            executor = executor_cls.return_value
+            executor.loader.graph.leaf_nodes.return_value = ["leaf"]
+            executor.migration_plan.return_value = [(fake_migration, False)]
+            with self.assertRaises(CommandError):
+                cmd._ensure_schema_ready()
