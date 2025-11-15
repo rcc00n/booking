@@ -45,6 +45,8 @@ from .services import (
     assistant_reschedule_booking,
     assistant_update_item_status,
     describe_payment_status,
+    render_popular_services,
+    render_service_catalog,
     render_appointment_details,
     render_management_summary,
     render_outstanding_overview,
@@ -73,6 +75,8 @@ ALLOWED_INTENTS = {
     "cancel_booking",
     "item_status_update",
     "append_note",
+    "service_catalog",
+    "popular_services",
 }
 
 STRUCTURED_RESPONSE_INTENTS = {
@@ -84,6 +88,8 @@ STRUCTURED_RESPONSE_INTENTS = {
     "payment_status",
     "booking_guidance",
     "general",
+    "service_catalog",
+    "popular_services",
 }
 
 ACTION_INTENTS = {
@@ -108,6 +114,7 @@ CAPABILITIES_MESSAGE = _format_static_block(
     (
         "Book, reschedule, or cancel appointments for any client when you share the service and timing.",
         "Update appointment item statuses (confirmed, completed, no-show) or payment statuses on request.",
+        "List available services or spotlight the top-selling offerings in seconds.",
         "Share today's KPIs and booking snapshot by asking for the daily summary.",
         "Generate management-level revenue summaries for any day, week, or month.",
         "List upcoming schedule windows, outstanding balances, or detailed appointment cards.",
@@ -198,12 +205,14 @@ class StaffAssistant:
         "You evaluate staff questions about Malva's operations and pick the best data tool or action. "
         "Respond ONLY with strict JSON using this schema: "
         '{"intent": "<one of: today_summary, management_summary, schedule, outstanding, '
-        'appointment_details, payment_status, payment_status_update, booking_guidance, general, '
-        'create_booking, reschedule_booking, cancel_booking, item_status_update, append_note>", '
+        'service_catalog, popular_services, appointment_details, payment_status, payment_status_update, '
+        'booking_guidance, general, create_booking, reschedule_booking, cancel_booking, '
+        'item_status_update, append_note>", '
         '"arguments": { ... }, "rationale": "<short reason>"} '
         "For create_booking include keys client, service, start_time, master(optional), notes(optional). "
         "For reschedule/cancel/item_status include appointment_id when possible; otherwise provide client, service, "
-        "and master hints."
+        "and master hints. For service_catalog provide query (optional) and limit(optional). "
+        "Use popular_services when the user asks for top/best offerings (include limit optional). "
         " Use payment_status_update when the user wants to mark a booking paid/unpaid and include the desired status. "
         "Reserve booking_guidance for how-to questions rather than actionable requests. "
         "If the user references a previous answer, infer the missing values from the conversation summary. "
@@ -353,6 +362,17 @@ class StaffAssistant:
                 limit = self._sanitize_int(plan.arguments.get("limit"), default=5, min_value=1, max_value=20)
                 dataset.append(
                     DatasetEntry(label="Outstanding balances", body=render_outstanding_overview(limit=limit)),
+                )
+            elif plan.intent == "service_catalog":
+                query = self._clean_str(plan.arguments.get("query") or plan.arguments.get("filter"))
+                limit = self._sanitize_int(plan.arguments.get("limit"), default=8, min_value=3, max_value=20)
+                dataset.append(
+                    DatasetEntry(label="Service catalog", body=render_service_catalog(query, limit=limit)),
+                )
+            elif plan.intent == "popular_services":
+                limit = self._sanitize_int(plan.arguments.get("limit"), default=5, min_value=3, max_value=10)
+                dataset.append(
+                    DatasetEntry(label="Popular services", body=render_popular_services(limit=limit)),
                 )
             elif plan.intent == "appointment_details":
                 appointment_id = self._clean_str(plan.arguments.get("appointment_id"))
@@ -650,6 +670,42 @@ class StaffAssistant:
         return "today"
 
     @staticmethod
+    def _is_service_catalog_request(text: str) -> bool:
+        if not text or "service" not in text:
+            return False
+        question_words = ("what", "which", "list", "show", "available", "offer", "have", "provide", "catalog")
+        inquisitive = any(word in text for word in question_words)
+        if not inquisitive:
+            return False
+        if BOOKING_VERB_PATTERN.search(text) or RESCHEDULE_VERB_PATTERN.search(text) or CANCEL_VERB_PATTERN.search(text):
+            return False
+        return True
+
+    @staticmethod
+    def _mentions_popular_services(text: str) -> bool:
+        if not text or "service" not in text:
+            return False
+        keywords = ("popular", "top", "best", "bestseller", "best-selling", "most booked", "favourite", "favorite")
+        return any(keyword in text for keyword in keywords)
+
+    @staticmethod
+    def _extract_service_query_hint(text: str) -> str | None:
+        if not text:
+            return None
+        lowered = text
+        markers = ("like", "such as", "named", "called", "similar to", "for", "around", "about")
+        fragment = None
+        for marker in markers:
+            if marker in lowered:
+                fragment = lowered.split(marker, 1)[1]
+                break
+        if fragment is None:
+            return None
+        fragment = re.split(r"\b(?:do|are|can|we|have|offer|available|list|show|please|what)\b", fragment, 1)[0]
+        candidate = fragment.strip(" ?.,'\"")
+        return candidate if len(candidate) >= 3 else None
+
+    @staticmethod
     def _extract_payment_status_hint(text: str) -> str | None:
         normalized = text.lower()
         if "not paid" in normalized or "unpaid" in normalized:
@@ -734,6 +790,23 @@ class StaffAssistant:
             if appt_id:
                 args["appointment_id"] = appt_id
             return AssistantPlan(intent="payment_status", arguments=args)
+
+        if self._mentions_popular_services(text):
+            args: dict[str, Any] = {}
+            limit = self._extract_limit(text)
+            if limit is not None:
+                args["limit"] = limit
+            return AssistantPlan(intent="popular_services", arguments=args)
+
+        if self._is_service_catalog_request(text):
+            args = {}
+            query_hint = self._extract_service_query_hint(text)
+            if query_hint:
+                args["query"] = query_hint
+            limit = self._extract_limit(text)
+            if limit is not None:
+                args["limit"] = limit
+            return AssistantPlan(intent="service_catalog", arguments=args)
 
         detail_tokens = (
             "detail",

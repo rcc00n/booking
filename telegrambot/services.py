@@ -1356,6 +1356,17 @@ def _format_money(amount: Decimal | None, currency: str = "CAD") -> str:
     return f"{currency.upper()} {amount:.2f}"
 
 
+def _format_duration(minutes: int | None) -> str:
+    if not minutes:
+        return ""
+    hours, mins = divmod(minutes, 60)
+    if hours and mins:
+        return f"{hours}h {mins}m"
+    if hours:
+        return f"{hours}h"
+    return f"{mins}m"
+
+
 def _format_message(title: str, lines: Iterable[str]) -> str:
     body = "\n".join(line for line in lines if line)
     return f"<b>{escape(title)}</b>\n{body}".strip()
@@ -1948,6 +1959,75 @@ def render_outstanding_overview(limit: int = 5) -> str:
         )
     )
     return _format_message("Outstanding payments", blocks)
+
+
+def render_service_catalog(query: str | None = None, *, limit: int = 8) -> str:
+    limit = _clamp_limit(limit, default=8, maximum=20)
+    qs = Service.objects.filter(is_active=True).select_related("category").order_by("name")
+    search = (query or "").strip()
+    if search:
+        terms = [term for term in re.split(r"\s+", search) if term]
+        for term in terms:
+            qs = qs.filter(
+                Q(name__icontains=term)
+                | Q(description__icontains=term)
+                | Q(category__name__icontains=term)
+            )
+
+    services = list(qs[:limit])
+    if not services:
+        if search:
+            return _format_message("Service catalog", [f"No services match '{escape(search)}'."])
+        return _format_message("Service catalog", ["No active services configured yet."])
+
+    lines: list[str] = []
+    for idx, service in enumerate(services, start=1):
+        duration = (service.duration_min or 0) + (service.extra_time_min or 0)
+        duration_label = _format_duration(duration)
+        category_name = getattr(getattr(service, "category", None), "name", "")
+        price = service.get_discounted_price() if hasattr(service, "get_discounted_price") else service.base_price
+        details = f"{idx}. {escape(service.name)} — {_format_money(price)}"
+        badges: list[str] = []
+        if duration_label:
+            badges.append(duration_label)
+        if category_name:
+            badges.append(category_name)
+        if badges:
+            details += f" • {' / '.join(escape(badge) for badge in badges)}"
+        lines.append(details)
+        preview = _notes_preview(service.description, limit=120)
+        if preview:
+            lines.append(f"   {escape(preview)}")
+    if search:
+        lines.append(f"Filter: {escape(search)}")
+    lines.append(f"Showing {len(services)} service{'s' if len(services) != 1 else ''}.")
+    return _format_message("Service catalog", lines)
+
+
+def render_popular_services(*, limit: int = 5, window_days: int = 90) -> str:
+    limit = _clamp_limit(limit, default=5, maximum=10)
+    window_start = timezone.now() - timedelta(days=max(7, window_days))
+    stats = (
+        AppointmentItem.objects.filter(appointment__start_time__gte=window_start)
+        .values("service__name")
+        .annotate(total=Count("id"), revenue=Sum("final_price"))
+        .order_by("-total", "service__name")
+    )
+    rows = list(stats[:limit])
+    if not rows:
+        return _format_message("Popular services", ["No recent bookings yet. Ask again after a few appointments."])
+
+    lines: list[str] = []
+    for idx, entry in enumerate(rows, start=1):
+        service_name = entry.get("service__name") or "Service"
+        total = int(entry.get("total") or 0)
+        revenue = entry.get("revenue") or Decimal("0.00")
+        label = f"{idx}. {escape(service_name)} — {total} booking{'s' if total != 1 else ''}"
+        if revenue and revenue > 0:
+            label += f" • {_format_money(revenue)}"
+        lines.append(label)
+    lines.append(f"Window: last {max(7, window_days)} days")
+    return _format_message("Popular services", lines)
 
 
 def list_payment_status_choices(limit: int = 20) -> str:
