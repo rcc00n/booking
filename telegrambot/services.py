@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -10,8 +11,10 @@ from math import ceil
 from typing import Iterable, Sequence
 from urllib.parse import urljoin
 
+from dateutil import parser as date_parser
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Count, Prefetch, Q, Sum
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
@@ -32,13 +35,19 @@ from core.models import (
     Appointment,
     AppointmentItem,
     AppointmentQuerySet,
+    AppointmentStatusHistory,
     MasterProfile,
     Payment,
     PaymentStatus,
     Service,
     UserProfile,
 )
-from core.services.booking import create_appointment_from_cart_items, get_available_slots, get_service_masters
+from core.services.booking import (
+    create_appointment_from_cart_items,
+    get_available_slots,
+    get_or_create_status,
+    get_service_masters,
+)
 from core.services.intake_assignments import ensure_assignments, ensure_universal_assignments_for_profile
 from core.services.item_status import record_item_status
 from .models import (
@@ -2075,3 +2084,528 @@ def link_subscription_to_profile(subscription: TelegramChatSubscription, identif
     subscription.save(update_fields=["linked_profile"])
     display = user.get_full_name() or user.username or user.email
     return f"Linked this chat to {display}."
+
+
+# ---------------------------------------------------------------------------
+# Assistant/admin automation helpers
+# ---------------------------------------------------------------------------
+
+_SLOT_MATCH_TOLERANCE_MIN = 5
+
+
+def _ensure_actor_profile(actor: UserProfile | None) -> UserProfile:
+    if actor is None:
+        raise TelegramCommandError("Link this chat to a staff profile with /link before editing appointments.")
+    return actor
+
+
+def _normalize_identifier(token: str | None) -> str:
+    return (token or "").strip()
+
+
+def _resolve_client_profile(identifier: str | None) -> UserProfile:
+    token = _normalize_identifier(identifier)
+    if not token:
+        raise TelegramCommandError("Specify which client this action targets (name, email, phone, or ID).")
+
+    qs = UserProfile.objects.select_related("user")
+    plain = token.lstrip("#")
+    if plain.isdigit():
+        profile = qs.filter(pk=int(plain)).first()
+        if profile:
+            return profile
+
+    username = token[1:] if token.startswith("@") else token
+    profile = qs.filter(user__username__iexact=username).first()
+    if profile:
+        return profile
+
+    if "@" in token:
+        profile = qs.filter(user__email__iexact=token).first()
+        if profile:
+            return profile
+
+    digits = re.sub(r"\D", "", token)
+    if len(digits) >= 6:
+        profile = qs.filter(phone__icontains=digits).first()
+        if profile:
+            return profile
+
+    parts = [part for part in re.split(r"\s+", token) if part]
+    if len(parts) >= 2:
+        first, last = parts[0], parts[-1]
+        profile = (
+            qs.filter(user__first_name__istartswith=first, user__last_name__istartswith=last)
+            .order_by("user__first_name", "user__last_name")
+            .first()
+        )
+        if profile:
+            return profile
+
+    profile = (
+        qs.filter(
+            Q(user__first_name__icontains=token)
+            | Q(user__last_name__icontains=token)
+            | Q(user__email__icontains=token)
+        )
+        .order_by("user__first_name", "user__last_name")
+        .first()
+    )
+    if profile:
+        return profile
+
+    raise TelegramCommandError(f"Client '{token}' was not found.")
+
+
+def _resolve_service_record(identifier: str | None) -> Service:
+    token = _normalize_identifier(identifier)
+    if not token:
+        raise TelegramCommandError("Specify which service you are referring to.")
+
+    qs = Service.objects.filter(is_active=True)
+    plain = token.lstrip("#")
+    if plain.isdigit():
+        service = qs.filter(pk=int(plain)).first()
+        if service:
+            return service
+
+    service = qs.filter(name__iexact=token).first()
+    if service:
+        return service
+
+    service = qs.filter(name__icontains=token).order_by("name").first()
+    if service:
+        return service
+
+    raise TelegramCommandError(f"Service '{token}' was not found.")
+
+
+def _resolve_master_profile(identifier: str | None, *, service: Service | None = None) -> MasterProfile:
+    base_qs = get_service_masters(service) if service else MasterProfile.objects.all()
+    qs = base_qs.select_related("user__user")
+    token = _normalize_identifier(identifier)
+
+    if token:
+        plain = token.lstrip("#")
+        if plain.isdigit():
+            master = qs.filter(pk=int(plain)).first()
+            if master:
+                return master
+
+        username = token[1:] if token.startswith("@") else token
+        master = qs.filter(user__user__username__iexact=username).first()
+        if master:
+            return master
+
+        master = qs.filter(user__user__email__iexact=token).first()
+        if master:
+            return master
+
+        master = (
+            qs.filter(
+                Q(user__user__first_name__icontains=token)
+                | Q(user__user__last_name__icontains=token)
+                | Q(user__profession__icontains=token)
+            )
+            .order_by("user__user__first_name", "user__user__last_name")
+            .first()
+        )
+        if master:
+            return master
+
+        target = f" for {service.name}" if service else ""
+        raise TelegramCommandError(f"Specialist '{token}' was not found{target}.")
+
+    master = qs.order_by("user__user__first_name", "user__user__last_name").first()
+    if master:
+        return master
+
+    if service:
+        raise TelegramCommandError("No specialists are assigned to this service yet.")
+    raise TelegramCommandError("No specialists are configured yet.")
+
+
+def _parse_admin_datetime(expression: str) -> datetime:
+    candidate = _normalize_identifier(expression)
+    if not candidate:
+        raise TelegramCommandError("Provide the desired date and time.")
+    default = timezone.localtime().replace(second=0, microsecond=0)
+    try:
+        parsed = date_parser.parse(candidate, fuzzy=True, default=default)
+    except (ValueError, TypeError, OverflowError) as exc:  # noqa: PERF203 - defensive parsing
+        raise TelegramCommandError("Unable to parse the requested time. Use formats like '2025-03-04 14:30'.") from exc
+    if not timezone.is_aware(parsed):
+        parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+    return timezone.localtime(parsed)
+
+
+def _slot_anchor(dt: datetime) -> datetime:
+    base = datetime.combine(dt.date(), time.min)
+    return timezone.make_aware(base, timezone.get_current_timezone())
+
+
+def _match_slot(desired: datetime, slots: Sequence[datetime]) -> datetime | None:
+    for slot in slots:
+        delta = abs((slot - desired).total_seconds())
+        if delta <= _SLOT_MATCH_TOLERANCE_MIN * 60:
+            return slot
+    return None
+
+
+def _lookup_available_slot(
+    service: Service,
+    desired: datetime,
+    *,
+    master: MasterProfile | None = None,
+) -> tuple[MasterProfile | None, datetime | None, list[tuple[MasterProfile, datetime]]]:
+    masters = ([master] if master else list(get_service_masters(service)))
+    if not masters:
+        raise TelegramCommandError("No specialists are assigned to this service yet.")
+
+    slots_map = get_available_slots(service, _slot_anchor(desired), master=master)
+    suggestions: list[tuple[MasterProfile, datetime]] = []
+    for candidate in masters:
+        slot_list = slots_map.get(candidate.id, [])
+        match = _match_slot(desired, slot_list)
+        if match:
+            return candidate, match, []
+        for slot in slot_list:
+            if slot >= desired:
+                suggestions.append((candidate, slot))
+
+    suggestions.sort(key=lambda entry: entry[1])
+    return None, None, suggestions[:3]
+
+
+def _slot_suggestion_message(
+    service: Service,
+    desired: datetime,
+    suggestions: Sequence[tuple[MasterProfile, datetime]],
+) -> str:
+    target = timezone.localtime(desired).strftime("%a %d %b at %H:%M")
+    if not suggestions:
+        return f"No open slots around {target} for {service.name}. Try another day or master."
+    lines = ["Next openings:"]
+    for master, slot in suggestions:
+        local_slot = timezone.localtime(slot)
+        slot_label = f"{local_slot:%a %d %b} at {local_slot:%H:%M} with {_master_display(master)}"
+        lines.append(f"• {slot_label}")
+    return f"No open slots around {target} for {service.name}.\n" + "\n".join(lines)
+
+
+def _load_appointment_for_action(
+    appointment_id: str | None,
+    *,
+    client_token: str | None = None,
+    service_token: str | None = None,
+) -> Appointment:
+    base_qs = (
+        Appointment.objects.select_related("client__user", "payment_status")
+        .prefetch_related(
+            Prefetch(
+                "items",
+                queryset=AppointmentItem.objects.select_related("service", "master__user").order_by("start_time"),
+            )
+        )
+    )
+
+    token = _normalize_identifier(appointment_id)
+    if token:
+        appointment = base_qs.filter(pk=token).first()
+        if not appointment:
+            raise TelegramCommandError("Appointment not found.")
+        return appointment
+
+    if not client_token and not service_token:
+        raise TelegramCommandError("Provide an appointment ID or identify the client/service you want to manage.")
+
+    qs = base_qs
+    client_profile: UserProfile | None = None
+    if client_token:
+        client_profile = _resolve_client_profile(client_token)
+        qs = qs.filter(client=client_profile)
+
+    if service_token:
+        service = _resolve_service_record(service_token)
+        qs = qs.filter(items__service=service).distinct()
+
+    window_start = timezone.now() - timedelta(hours=1)
+    upcoming = qs.filter(Q(start_time__isnull=True) | Q(start_time__gte=window_start)).order_by("start_time").first()
+    if upcoming:
+        return upcoming
+
+    appointment = qs.order_by("-start_time").first()
+    if appointment:
+        return appointment
+
+    label = client_profile.user.get_full_name() if client_profile else "criteria"
+    raise TelegramCommandError(f"No matching appointments found for {label}. Provide the booking ID for clarity.")
+
+
+def _format_item_snapshot(item: AppointmentItem) -> str:
+    service_name = getattr(item.service, "name", "Service")
+    master_name = _master_display(getattr(item, "master", None), fallback="Team")
+    start_text = (
+        timezone.localtime(item.start_time).strftime("%d %b %H:%M")
+        if item.start_time
+        else "Time TBD"
+    )
+    return f"{service_name} with {master_name} — {start_text}"
+
+
+def assistant_create_booking(
+    *,
+    client_token: str,
+    service_token: str,
+    start_expression: str,
+    actor: UserProfile | None,
+    master_token: str | None = None,
+    notes: str | None = None,
+) -> str:
+    actor_profile = _ensure_actor_profile(actor)
+    client = _resolve_client_profile(client_token)
+    service = _resolve_service_record(service_token)
+    desired = _parse_admin_datetime(start_expression)
+    if desired < timezone.now() - timedelta(minutes=5):
+        raise TelegramCommandError("Start time must be in the future.")
+
+    master_hint = _resolve_master_profile(master_token, service=service) if master_token else None
+    master, slot, suggestions = _lookup_available_slot(service, desired, master=master_hint)
+    if not master or not slot:
+        raise TelegramCommandError(_slot_suggestion_message(service, desired, suggestions))
+
+    cart_item = _BotCartItem(service=service, master=master, start_time=slot)
+    try:
+        appointment = create_appointment_from_cart_items(profile=client, items=[cart_item])
+    except Exception as exc:  # noqa: BLE001 - bubble readable error
+        logger.warning("Assistant booking failed: %s", exc, exc_info=exc)
+        raise TelegramCommandError("Failed to create the appointment. Please try a different slot.") from exc
+
+    forms_assigned = 0
+    service_forms = list(service.active_forms()) if hasattr(service, "active_forms") else []
+    if service_forms:
+        forms_assigned += ensure_assignments(profile=client, forms=service_forms)
+    forms_assigned += ensure_universal_assignments_for_profile(client)
+
+    note_added = False
+    if notes:
+        append_note_to_appointment(str(appointment.pk), notes, actor=actor_profile)
+        note_added = True
+
+    start_label = timezone.localtime(slot).strftime("%a %d %b, %H:%M")
+    lines = [
+        f"Client: {escape(_client_profile_display(client))}",
+        f"Service: {escape(service.name)}",
+        f"Master: {escape(_master_display(master))}",
+        f"Start: {escape(start_label)}",
+        f"Appointment ID: <code>{escape(str(appointment.pk))}</code>",
+        f"Actor: {escape(_actor_label(actor_profile))}",
+    ]
+    if forms_assigned:
+        plural = "s" if forms_assigned != 1 else ""
+        lines.append(f"Intake form{plural} assigned: {forms_assigned}")
+    if note_added:
+        lines.append("Note added to the appointment log.")
+
+    return _format_message("Appointment booked", lines)
+
+
+def assistant_reschedule_booking(
+    *,
+    new_start_expression: str,
+    actor: UserProfile | None,
+    appointment_id: str | None = None,
+    item_id: str | None = None,
+    master_token: str | None = None,
+    client_token: str | None = None,
+    service_token: str | None = None,
+) -> str:
+    actor_profile = _ensure_actor_profile(actor)
+    appointment = _load_appointment_for_action(appointment_id, client_token=client_token, service_token=service_token)
+    items = _prefetched_items(appointment)
+    if not items:
+        raise TelegramCommandError("Appointment has no items to reschedule.")
+
+    target: AppointmentItem | None = None
+    if item_id:
+        for item in items:
+            if str(item.pk) == str(item_id):
+                target = item
+                break
+        if target is None:
+            raise TelegramCommandError("Appointment item not found.")
+    else:
+        target = items[0]
+
+    service = target.service
+    if service is None:
+        raise TelegramCommandError("Selected appointment item has no service attached.")
+
+    desired = _parse_admin_datetime(new_start_expression)
+    if desired < timezone.now() - timedelta(minutes=5):
+        raise TelegramCommandError("New start time must be in the future.")
+
+    master_hint = _resolve_master_profile(master_token, service=service) if master_token else target.master
+    master, slot, suggestions = _lookup_available_slot(service, desired, master=master_hint)
+    if not master or not slot:
+        raise TelegramCommandError(_slot_suggestion_message(service, desired, suggestions))
+
+    previous_master_id = target.master_id
+    new_end = target.compute_end_time()
+
+    with transaction.atomic():
+        target.master = master
+        target.start_time = slot
+        if new_end:
+            target.end_time = new_end
+        fields = ["start_time", "end_time"]
+        if master.id != previous_master_id:
+            fields.append("master")
+        target.full_clean()
+        target.save(update_fields=fields)
+        appointment.sync_start_time_from_items(save=True)
+        appointment.recompute_totals(save=True)
+        AppointmentStatusHistory.objects.create(
+            appointment=appointment,
+            status=get_or_create_status("Rescheduled"),
+            set_by=actor_profile,
+        )
+
+    start_label = timezone.localtime(slot).strftime("%a %d %b, %H:%M")
+    lines = [
+        f"Client: {escape(_client_label(appointment))}",
+        f"Service: {escape(getattr(service, 'name', 'Service'))}",
+        f"Master: {escape(_master_display(master))}",
+        f"New start: {escape(start_label)}",
+        f"Appointment ID: <code>{escape(str(appointment.pk))}</code>",
+        f"Actor: {escape(_actor_label(actor_profile))}",
+    ]
+    return _format_message("Appointment rescheduled", lines)
+
+
+def assistant_cancel_booking(
+    *,
+    actor: UserProfile | None,
+    appointment_id: str | None = None,
+    item_id: str | None = None,
+    reason: str | None = None,
+    client_token: str | None = None,
+    service_token: str | None = None,
+) -> str:
+    actor_profile = _ensure_actor_profile(actor)
+    appointment = _load_appointment_for_action(appointment_id, client_token=client_token, service_token=service_token)
+    items = _prefetched_items(appointment)
+    if not items:
+        raise TelegramCommandError("Appointment has no items to cancel.")
+
+    def _active_item(entry: AppointmentItem) -> bool:
+        current = getattr(entry, "status", None)
+        code = getattr(current, "code", "")
+        return code.upper() != "CANCELLED"
+
+    targets: list[AppointmentItem]
+    if item_id:
+        targets = [item for item in items if str(item.pk) == str(item_id)]
+        if not targets:
+            raise TelegramCommandError("Appointment item not found.")
+    else:
+        targets = [item for item in items if _active_item(item)]
+        if not targets:
+            raise TelegramCommandError("All items are already cancelled.")
+
+    note = (reason or "telegram-assistant").strip()
+    actor_user_id = getattr(getattr(actor_profile, "user", None), "id", None)
+    cancelled: list[str] = []
+    for item in targets:
+        record_item_status(item, "CANCELLED", set_by_user_id=actor_user_id, note=note)
+        cancelled.append(_format_item_snapshot(item))
+
+    if not cancelled:
+        raise TelegramCommandError("No items were updated. They may already be cancelled.")
+
+    if not item_id:
+        AppointmentStatusHistory.objects.create(
+            appointment=appointment,
+            status=get_or_create_status("Cancelled"),
+            set_by=actor_profile,
+        )
+
+    lines = [
+        f"Client: {escape(_client_label(appointment))}",
+        "Cancelled items:",
+    ]
+    lines.extend(f"• {escape(entry)}" for entry in cancelled)
+    lines.append(f"Actor: {escape(_actor_label(actor_profile))}")
+    if reason:
+        lines.append(f"Reason: {escape(reason)}")
+    lines.append(f"Appointment ID: <code>{escape(str(appointment.pk))}</code>")
+
+    return _format_message("Appointment cancelled", lines)
+
+
+def _normalize_item_status_code(token: str | None) -> str:
+    raw = _normalize_identifier(token)
+    if not raw:
+        raise TelegramCommandError("Provide the status you want to apply (e.g. confirmed, completed).")
+    normalized = raw.replace("-", "_").replace(" ", "_").upper()
+    synonyms = {
+        "DONE": "COMPLETED",
+        "FINISHED": "COMPLETED",
+        "NO SHOW": "NO_SHOW",
+        "NOSHOW": "NO_SHOW",
+        "CANCELED": "CANCELLED",
+    }
+    return synonyms.get(normalized, normalized)
+
+
+def assistant_update_item_status(
+    *,
+    status_code: str,
+    actor: UserProfile | None,
+    appointment_id: str | None = None,
+    item_id: str | None = None,
+    note: str | None = None,
+    client_token: str | None = None,
+    service_token: str | None = None,
+) -> str:
+    actor_profile = _ensure_actor_profile(actor)
+    appointment = _load_appointment_for_action(appointment_id, client_token=client_token, service_token=service_token)
+    items = _prefetched_items(appointment)
+    if not items:
+        raise TelegramCommandError("Appointment has no items to update.")
+
+    targets: list[AppointmentItem]
+    if item_id:
+        targets = [item for item in items if str(item.pk) == str(item_id)]
+        if not targets:
+            raise TelegramCommandError("Appointment item not found.")
+    else:
+        targets = items
+
+    code = _normalize_item_status_code(status_code)
+    note_text = (note or "telegram-assistant").strip()
+    actor_user_id = getattr(getattr(actor_profile, "user", None), "id", None)
+
+    updated: list[str] = []
+    last_label = code.title()
+    for item in targets:
+        result = record_item_status(item, code, set_by_user_id=actor_user_id, note=note_text)
+        label = getattr(result.status, "name", None)
+        if label:
+            last_label = label
+        updated.append(_format_item_snapshot(item))
+
+    if not updated:
+        raise TelegramCommandError("No items were updated. Double-check the appointment reference.")
+
+    lines = [
+        f"Client: {escape(_client_label(appointment))}",
+        f"Applied status: {escape(last_label)}",
+    ]
+    lines.extend(f"• {escape(entry)}" for entry in updated)
+    lines.append(f"Actor: {escape(_actor_label(actor_profile))}")
+    if note:
+        lines.append(f"Note: {escape(note)}")
+    lines.append(f"Appointment ID: <code>{escape(str(appointment.pk))}</code>")
+
+    return _format_message("Status updated", lines)

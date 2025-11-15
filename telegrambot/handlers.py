@@ -123,7 +123,7 @@ def register_handlers(bot: TeleBot) -> None:
                 "/note <id> [text] — view notes or append a new entry.",
                 "",
                 "<b>AI assistant</b>",
-                "/assistant <question> — natural language access to KPIs, schedules, and payment insights.",
+                "/assistant <question> — natural language access to KPIs, schedules, payments, and booking actions.",
             ]
             bot.send_message(message.chat.id, "\n".join(help_lines))
         logger.info("Telegram chat %s connected (admin=%s)", subscription.chat_id, subscription.is_admin_channel)

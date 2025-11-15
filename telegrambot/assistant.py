@@ -39,12 +39,18 @@ except ImportError:  # pragma: no cover - handled at runtime
 from .models import TelegramBotSettings, TelegramChatSubscription, TelegramStaffAssistantSession
 from .services import (
     TelegramCommandError,
+    append_note_to_appointment,
+    assistant_cancel_booking,
+    assistant_create_booking,
+    assistant_reschedule_booking,
+    assistant_update_item_status,
     describe_payment_status,
     render_appointment_details,
     render_management_summary,
     render_outstanding_overview,
     render_schedule_overview,
     render_today_summary,
+    update_payment_status_via_bot,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,7 +66,13 @@ ALLOWED_INTENTS = {
     "outstanding",
     "appointment_details",
     "payment_status",
+    "payment_status_update",
     "booking_guidance",
+    "create_booking",
+    "reschedule_booking",
+    "cancel_booking",
+    "item_status_update",
+    "append_note",
 }
 
 STRUCTURED_RESPONSE_INTENTS = {
@@ -74,6 +86,15 @@ STRUCTURED_RESPONSE_INTENTS = {
     "general",
 }
 
+ACTION_INTENTS = {
+    "create_booking",
+    "reschedule_booking",
+    "cancel_booking",
+    "item_status_update",
+    "payment_status_update",
+    "append_note",
+}
+
 
 def _format_static_block(title: str, lines: Iterable[str]) -> str:
     safe_title = html.escape(title)
@@ -85,20 +106,20 @@ def _format_static_block(title: str, lines: Iterable[str]) -> str:
 CAPABILITIES_MESSAGE = _format_static_block(
     "Assistant capabilities",
     (
+        "Book, reschedule, or cancel appointments for any client when you share the service and timing.",
+        "Update appointment item statuses (confirmed, completed, no-show) or payment statuses on request.",
         "Share today's KPIs and booking snapshot by asking for the daily summary.",
-        "Generate management level revenue summaries for any day, week, or month.",
-        "List the upcoming schedule (today, tomorrow, this week, next week) optionally with notes.",
-        "Highlight unpaid or overdue appointments and their balances.",
-        "Show appointment details or payment status whenever you provide an appointment ID.",
+        "Generate management-level revenue summaries for any day, week, or month.",
+        "List upcoming schedule windows, outstanding balances, or detailed appointment cards.",
     ),
 )
 
 BOOKING_GUIDANCE_MESSAGE = _format_static_block(
     "Booking guidance",
     (
-        "I cannot create or reschedule appointments directly from this assistant yet.",
-        "Use /book in this chat or the admin dashboard to add or edit bookings.",
-        "Send me an appointment ID if you need the latest details or payment status afterward.",
+        "Share the client, service, and desired start time to create a new booking immediately.",
+        "Say 'reschedule' or 'cancel' with an appointment ID (or client + service) to adjust existing visits.",
+        "When multiple similar bookings exist, include the appointment ID or master to avoid ambiguity.",
     ),
 )
 
@@ -110,6 +131,8 @@ LIMIT_HINT_PATTERNS = [
 ]
 BOOKING_VERB_PATTERN = re.compile(r"\b(book|rebook|reschedule)\b", re.IGNORECASE)
 SCHEDULE_VERB_PATTERN = re.compile(r"\bschedule\s+(?:a|an|the|new|another|appointments?)\b", re.IGNORECASE)
+CANCEL_VERB_PATTERN = re.compile(r"\b(cancel|drop|void|remove)\b", re.IGNORECASE)
+RESCHEDULE_VERB_PATTERN = re.compile(r"\b(resched\w*|move|shift|push\s*(?:back|out))\b", re.IGNORECASE)
 
 
 class StaffAssistantError(RuntimeError):
@@ -172,12 +195,17 @@ class StaffAssistant:
     """High-level orchestration for routing and answering staff prompts."""
 
     ROUTER_PROMPT = (
-        "You evaluate staff questions about Malva's operations and pick the best data tool. "
+        "You evaluate staff questions about Malva's operations and pick the best data tool or action. "
         "Respond ONLY with strict JSON using this schema: "
         '{"intent": "<one of: today_summary, management_summary, schedule, outstanding, '
-        'appointment_details, payment_status, booking_guidance, general>", "arguments": { ... }, '
-        '"rationale": "<short reason>"} '
-        "Use intent 'booking_guidance' when the user asks to create/reschedule appointments. "
+        'appointment_details, payment_status, payment_status_update, booking_guidance, general, '
+        'create_booking, reschedule_booking, cancel_booking, item_status_update, append_note>", '
+        '"arguments": { ... }, "rationale": "<short reason>"} '
+        "For create_booking include keys client, service, start_time, master(optional), notes(optional). "
+        "For reschedule/cancel/item_status include appointment_id when possible; otherwise provide client, service, "
+        "and master hints."
+        " Use payment_status_update when the user wants to mark a booking paid/unpaid and include the desired status. "
+        "Reserve booking_guidance for how-to questions rather than actionable requests. "
         "If the user references a previous answer, infer the missing values from the conversation summary. "
         "Return intent 'general' when no predefined tool fits."
     )
@@ -212,11 +240,14 @@ class StaffAssistant:
 
         history = _history_slice(self.session.context_log or [], self.config.max_history)
         plan = self._route_intent(client, normalized, history)
-        dataset = self._collect_dataset(plan)
-        if self._should_bypass_model(plan, dataset):
-            reply = self._render_dataset_entries(dataset)
+        if plan.intent in ACTION_INTENTS:
+            reply = self._execute_action(plan)
         else:
-            reply = self._build_answer(client, normalized, history, dataset, plan)
+            dataset = self._collect_dataset(plan)
+            if self._should_bypass_model(plan, dataset):
+                reply = self._render_dataset_entries(dataset)
+            else:
+                reply = self._build_answer(client, normalized, history, dataset, plan)
 
         self.session.append_context("user", normalized)
         self.session.append_context("assistant", reply)
@@ -405,6 +436,119 @@ class StaffAssistant:
             raise StaffAssistantError("AI assistant returned an empty response. Please rephrase and send again.")
         return text
 
+    def _require_actor(self):
+        profile = getattr(self.subscription, "linked_profile", None)
+        if profile is None:
+            raise StaffAssistantError(
+                "Link this chat to a staff profile with /link <work email> before editing appointments or payments."
+            )
+        return profile
+
+    @staticmethod
+    def _pick_argument(arguments: dict[str, Any], *keys: str) -> str | None:
+        for key in keys:
+            value = arguments.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return None
+
+    def _execute_action(self, plan: AssistantPlan) -> str:
+        actor = self._require_actor()
+        args = plan.arguments or {}
+        try:
+            if plan.intent == "create_booking":
+                client_token = self._pick_argument(args, "client", "client_id", "client_identifier")
+                service_token = self._pick_argument(args, "service", "service_id", "service_name")
+                start_expr = self._pick_argument(args, "start_time", "start", "datetime")
+                master_token = self._pick_argument(args, "master", "master_id")
+                notes = self._pick_argument(args, "notes", "note")
+                if not client_token or not service_token or not start_expr:
+                    raise StaffAssistantError("Provide the client, service, and desired start time to create a booking.")
+                return assistant_create_booking(
+                    client_token=client_token,
+                    service_token=service_token,
+                    start_expression=start_expr,
+                    master_token=master_token,
+                    notes=notes,
+                    actor=actor,
+                )
+
+            if plan.intent == "reschedule_booking":
+                appointment_id = self._pick_argument(args, "appointment_id", "appointment", "id")
+                item_id = self._pick_argument(args, "item_id", "item")
+                client_token = self._pick_argument(args, "client", "client_id")
+                service_token = self._pick_argument(args, "service", "service_id")
+                master_token = self._pick_argument(args, "master", "master_id")
+                new_start = self._pick_argument(args, "new_time", "new_start", "start_time", "datetime")
+                if not new_start:
+                    raise StaffAssistantError("Provide the new date/time for the reschedule request.")
+                return assistant_reschedule_booking(
+                    new_start_expression=new_start,
+                    actor=actor,
+                    appointment_id=appointment_id,
+                    item_id=item_id,
+                    master_token=master_token,
+                    client_token=client_token,
+                    service_token=service_token,
+                )
+
+            if plan.intent == "cancel_booking":
+                appointment_id = self._pick_argument(args, "appointment_id", "appointment", "id")
+                item_id = self._pick_argument(args, "item_id", "item")
+                client_token = self._pick_argument(args, "client", "client_id")
+                service_token = self._pick_argument(args, "service", "service_id")
+                reason = self._pick_argument(args, "reason", "note")
+                return assistant_cancel_booking(
+                    actor=actor,
+                    appointment_id=appointment_id,
+                    item_id=item_id,
+                    reason=reason,
+                    client_token=client_token,
+                    service_token=service_token,
+                )
+
+            if plan.intent == "item_status_update":
+                appointment_id = self._pick_argument(args, "appointment_id", "appointment", "id")
+                item_id = self._pick_argument(args, "item_id", "item")
+                client_token = self._pick_argument(args, "client", "client_id")
+                service_token = self._pick_argument(args, "service", "service_id")
+                status_code = self._pick_argument(args, "status", "status_code")
+                note_text = self._pick_argument(args, "note", "reason")
+                if not status_code:
+                    raise StaffAssistantError("Tell me which status to apply (confirmed, completed, no-show, etc.).")
+                return assistant_update_item_status(
+                    status_code=status_code,
+                    actor=actor,
+                    appointment_id=appointment_id,
+                    item_id=item_id,
+                    note=note_text,
+                    client_token=client_token,
+                    service_token=service_token,
+                )
+
+            if plan.intent == "payment_status_update":
+                appointment_id = self._pick_argument(args, "appointment_id", "appointment", "id")
+                status_name = self._pick_argument(args, "status", "status_name")
+                if not appointment_id:
+                    raise StaffAssistantError("Provide the appointment ID whose payment status you want to change.")
+                if not status_name:
+                    raise StaffAssistantError("Tell me which payment status to apply (e.g. Paid, Pending).")
+                return update_payment_status_via_bot(appointment_id, status_name, actor=actor)
+
+            if plan.intent == "append_note":
+                appointment_id = self._pick_argument(args, "appointment_id", "appointment", "id")
+                note_text = self._pick_argument(args, "note", "notes")
+                if not appointment_id or not note_text:
+                    raise StaffAssistantError("Provide both the appointment ID and the note text you want to add.")
+                return append_note_to_appointment(appointment_id, note_text, actor=actor)
+        except TelegramCommandError as exc:
+            raise StaffAssistantError(str(exc)) from exc
+
+        raise StaffAssistantError(f"Unsupported action intent: {plan.intent}")
+
     @staticmethod
     def _should_bypass_model(plan: AssistantPlan, dataset: list[DatasetEntry]) -> bool:
         return bool(dataset and plan.intent in STRUCTURED_RESPONSE_INTENTS)
@@ -506,6 +650,32 @@ class StaffAssistant:
         return "today"
 
     @staticmethod
+    def _extract_payment_status_hint(text: str) -> str | None:
+        normalized = text.lower()
+        if "not paid" in normalized or "unpaid" in normalized:
+            return "Not Paid"
+        if "paid" in normalized and "not paid" not in normalized:
+            return "Paid"
+        if "pending" in normalized:
+            return "Pending"
+        if "deposit" in normalized and ("received" in normalized or "taken" in normalized):
+            return "Deposit Received"
+        return None
+
+    @staticmethod
+    def _infer_item_status_code(text: str) -> str | None:
+        normalized = text.replace("-", " ")
+        if "no show" in normalized:
+            return "NO_SHOW"
+        if "complete" in normalized or "finished" in normalized or "done" in normalized:
+            return "COMPLETED"
+        if "confirm" in normalized:
+            return "CONFIRMED"
+        if "cancel" in normalized:
+            return "CANCELLED"
+        return None
+
+    @staticmethod
     def _is_booking_request(text: str) -> bool:
         if not text:
             return False
@@ -545,8 +715,21 @@ class StaffAssistant:
 
         payment_tokens = ("payment", "paid", "deposit", "invoice")
         mentions_payment = any(token in text for token in payment_tokens)
-        if mentions_payment and ("status" in text or "confirm" in text or ensure_appointment_id()):
+        wants_payment_update = mentions_payment and any(
+            keyword in text for keyword in ("mark", "set", "update", "change")
+        )
+        if wants_payment_update:
             args: dict[str, Any] = {}
+            appt_id = ensure_appointment_id()
+            if appt_id:
+                args["appointment_id"] = appt_id
+            status_hint = self._extract_payment_status_hint(text)
+            if status_hint:
+                args["status"] = status_hint
+            return AssistantPlan(intent="payment_status_update", arguments=args)
+
+        if mentions_payment and ("status" in text or "confirm" in text or ensure_appointment_id()):
+            args = {}
             appt_id = ensure_appointment_id()
             if appt_id:
                 args["appointment_id"] = appt_id
@@ -566,17 +749,40 @@ class StaffAssistant:
             "status",
         )
         if any(token in text for token in ("appointment", "booking")) and any(marker in text for marker in detail_tokens):
-            args: dict[str, Any] = {}
+            args = {}
             appt_id = ensure_appointment_id()
             if appt_id:
                 args["appointment_id"] = appt_id
             return AssistantPlan(intent="appointment_details", arguments=args)
 
         appt_id = ensure_appointment_id()
+
+        if CANCEL_VERB_PATTERN.search(text) and any(marker in text for marker in ("appointment", "booking")):
+            args = {}
+            if appt_id:
+                args["appointment_id"] = appt_id
+            return AssistantPlan(intent="cancel_booking", arguments=args)
+
+        if RESCHEDULE_VERB_PATTERN.search(text) and any(token in text for token in ("appointment", "booking")):
+            args = {}
+            if appt_id:
+                args["appointment_id"] = appt_id
+            return AssistantPlan(intent="reschedule_booking", arguments=args)
+
+        status_code = self._infer_item_status_code(text)
+        if status_code and any(token in text for token in ("appointment", "booking", "visit")):
+            args = {"status": status_code}
+            if appt_id:
+                args["appointment_id"] = appt_id
+            return AssistantPlan(intent="item_status_update", arguments=args)
+
         if appt_id and any(token in text for token in ("appointment", "booking")) and not mentions_payment:
             return AssistantPlan(intent="appointment_details", arguments={"appointment_id": appt_id})
 
         if self._is_booking_request(text):
+            return AssistantPlan(intent="create_booking", arguments={})
+
+        if "how" in text and ("book" in text or "schedule" in text):
             return AssistantPlan(intent="booking_guidance", arguments={})
 
         if any(token in text for token in ("outstanding", "overdue", "unpaid", "pending", "owe", "balance", "due")):
