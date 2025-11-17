@@ -960,6 +960,7 @@
                                 {{ photo_upload_form.files.label_tag }} {{ photo_upload_form.files }}
                                 {% if photo_upload_form.files.errors %}<div class="ab-err">{{ photo_upload_form.files.errors }}</div>{% endif %}
                                 {% if photo_upload_form.files.help_text %}<p class="ab-muted">{{ photo_upload_form.files.help_text }}</p>{% endif %}
+                                <p class="ab-muted ab-photo-upload__status" data-photo-upload-status hidden aria-live="polite"></p>
                             </div>
                             <div class="ab-field">
                                 {{ photo_upload_form.description.label_tag }} {{ photo_upload_form.description }}
@@ -973,6 +974,7 @@
                                     formmethod="post"
                                     formenctype="multipart/form-data"
                                     formnovalidate
+                                    data-photo-upload-submit
                                 >
                                     Upload photos
                                 </button>

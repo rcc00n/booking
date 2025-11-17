@@ -390,7 +390,7 @@ class AppointmentPhotoUploadForm(forms.Form):
                 "accept": "image/*",
             }
         ),
-        help_text="Upload one or more images to attach to this appointment.",
+        help_text="Upload one or more images to attach to this appointment. Selecting files will start the upload immediately.",
     )
     description = forms.CharField(
         label="Description",

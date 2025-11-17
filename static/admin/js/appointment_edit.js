@@ -2150,6 +2150,53 @@
             });
         });
     }
+
+    function initAutoPhotoUpload() {
+        const mainForm = document.querySelector(".ab-wrap form");
+        if (!mainForm) return;
+        const uploadButton = mainForm.querySelector("[data-photo-upload-submit]");
+        if (!uploadButton || !uploadButton.getAttribute("formaction")) return;
+        const fileInput = mainForm.querySelector("input[type='file'][name$='-files']");
+        if (!fileInput) return;
+        const statusEl = mainForm.querySelector("[data-photo-upload-status]");
+
+        let autoSubmitting = false;
+
+        const setStatus = (text) => {
+            if (!statusEl) return;
+            statusEl.textContent = text || "";
+            if (text) {
+                statusEl.hidden = false;
+                statusEl.dataset.state = "uploading";
+            } else {
+                statusEl.hidden = true;
+                statusEl.removeAttribute("data-state");
+            }
+        };
+
+        const triggerSubmit = () => {
+            if (typeof mainForm.requestSubmit === "function") {
+                mainForm.requestSubmit(uploadButton);
+            } else if (typeof uploadButton.click === "function") {
+                uploadButton.click();
+            } else {
+                mainForm.submit();
+            }
+        };
+
+        fileInput.addEventListener("change", () => {
+            if (autoSubmitting) return;
+            if (!fileInput.files || fileInput.files.length === 0) return;
+            autoSubmitting = true;
+            setStatus("Uploading photos...");
+            triggerSubmit();
+        });
+
+        window.addEventListener("pageshow", () => {
+            autoSubmitting = false;
+            setStatus("");
+        });
+    }
     document.addEventListener("DOMContentLoaded", () => {
         refreshSaleClientDefaultFromAppointment();
         if (appointmentClientSelect) {
@@ -2161,6 +2208,7 @@
         recomputeAllTotals();
         initTabs();
         stripDateTimeLabels(document);
+        initAutoPhotoUpload();
         const btnAdd = $("#btn-add-item");
         if (btnAdd) btnAdd.addEventListener("click", addItem);
         const btnAddSale = document.getElementById("btn-add-product-sale");
