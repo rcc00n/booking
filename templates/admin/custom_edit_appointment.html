@@ -180,7 +180,7 @@
 {% block content %}
 
     <div class="ab-wrap">
-        <form method="post" novalidate>
+        <form method="post" novalidate enctype="multipart/form-data">
             {% csrf_token %}
             <input type="hidden" name="return_to_date" value="{{ return_to_date|default:'' }}">
 

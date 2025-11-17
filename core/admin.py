@@ -2268,6 +2268,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     # NOTE: если хочешь отдельный шаблон для календаря — задай его здесь
     change_list_template = "admin/appointments_calendar.html"  # твой базовый шаблон списка
     change_form_template = "admin/custom_edit_appointment.html"
+    PHOTO_UPLOAD_FORM_PREFIX = "photo_upload"
 
 
     @staticmethod
@@ -2858,7 +2859,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 .order_by("-sent_at", "-id")
             )
 
-        photo_upload_form = AppointmentPhotoUploadForm()
+        photo_upload_form = AppointmentPhotoUploadForm(prefix=self.PHOTO_UPLOAD_FORM_PREFIX)
         photo_kind_labels = dict(ClientFile.KIND_CHOICES)
         photo_groups: list[dict[str, Any]] = []
         photo_total_count = 0
@@ -2998,21 +2999,23 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         obj.full_clean()  # вызывает Appointment.clean()
         super().save_model(request, obj, form, change)
         new_status = form.cleaned_data.get("current_status")
-        if not new_status:
-            return
-
-        last = (AppointmentStatusHistory.objects
+        if new_status:
+            last = (
+                AppointmentStatusHistory.objects
                 .filter(appointment=obj)
                 .order_by("-set_at")             # или -created_at
                 .values_list("status_id", flat=True)
-                .first())
-        if last != new_status.id:
-            AppointmentStatusHistory.objects.create(
-                appointment=obj,
-                status=new_status,
-                set_by=self._actor(request.user),
-                set_at=timezone.now(),
+                .first()
             )
+            if last != new_status.id:
+                AppointmentStatusHistory.objects.create(
+                    appointment=obj,
+                    status=new_status,
+                    set_by=self._actor(request.user),
+                    set_at=timezone.now(),
+                )
+
+        self._maybe_process_embedded_photo_uploads(request, obj)
 
     def _actor(self, user):
         # Подгони под свой профиль:
@@ -3234,6 +3237,79 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     def _redirect_to_change_view(self, request, appointment, *, anchor: str | None = None) -> HttpResponseRedirect:
         return redirect(self._change_view_url(appointment, request, anchor=anchor))
 
+    def _photo_upload_field_name(self, field_name: str) -> str:
+        prefix = getattr(self, "PHOTO_UPLOAD_FORM_PREFIX", "") or ""
+        return f"{prefix}-{field_name}" if prefix else field_name
+
+    def _emit_photo_upload_errors(self, request, form: AppointmentPhotoUploadForm) -> None:
+        for field, errors in form.errors.items():
+            label = form.fields.get(field).label if field in form.fields else field
+            for message_text in errors:
+                if field == "__all__":
+                    messages.error(request, message_text)
+                else:
+                    messages.error(request, f"{label}: {message_text}")
+
+    def _persist_photo_uploads(self, request, appointment, form: AppointmentPhotoUploadForm) -> bool:
+        if not appointment or not getattr(appointment, "pk", None):
+            return False
+        if not form.is_valid():
+            self._emit_photo_upload_errors(request, form)
+            return False
+
+        uploaded_files = form.cleaned_data["files"]
+        if not uploaded_files:
+            messages.warning(request, "No files were uploaded.")
+            return False
+
+        kind = form.cleaned_data["kind"]
+        description = (form.cleaned_data.get("description") or "").strip()
+        uploader_flag = ClientFile.ADMIN if getattr(request.user, "is_staff", False) else ClientFile.USER
+        uploader_user = request.user if getattr(request.user, "is_authenticated", False) else None
+        created = 0
+        try:
+            with transaction.atomic():
+                for uploaded in uploaded_files:
+                    instance = ClientFile(
+                        user=getattr(appointment, "client", None),
+                        appointment=appointment,
+                        file=uploaded,
+                        kind=kind,
+                        description=description,
+                        uploaded_by=uploader_flag,
+                        uploaded_by_user=uploader_user,
+                    )
+                    instance.save()
+                    created += 1
+        except ValidationError as exc:
+            message = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+            messages.error(request, message)
+            return False
+        except Exception as exc:  # pylint: disable=broad-except
+            messages.error(request, f"Could not upload photos: {exc}")
+            return False
+
+        if created == 1:
+            messages.success(request, "Photo uploaded.")
+        elif created > 1:
+            messages.success(request, f"{created} photos uploaded.")
+        else:
+            messages.warning(request, "No files were uploaded.")
+        return True
+
+    def _maybe_process_embedded_photo_uploads(self, request, appointment) -> None:
+        if not appointment or not getattr(appointment, "pk", None):
+            return
+        files_field = self._photo_upload_field_name("files")
+        if not request.FILES.getlist(files_field):
+            return
+        form = AppointmentPhotoUploadForm(
+            request.POST,
+            request.FILES,
+            prefix=self.PHOTO_UPLOAD_FORM_PREFIX,
+        )
+        self._persist_photo_uploads(request, appointment, form)
+
     def before_after_upload_view(self, request, appointment_id):
         if request.method != "POST":
             return HttpResponseBadRequest("POST required")
@@ -3242,50 +3318,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         if not self.has_change_permission(request, appointment):
             raise PermissionDenied
 
-        form = AppointmentPhotoUploadForm(request.POST, request.FILES)
-        if form.is_valid():
-            uploaded_files = form.cleaned_data["files"]
-            kind = form.cleaned_data["kind"]
-            description = (form.cleaned_data.get("description") or "").strip()
-            uploader_flag = ClientFile.ADMIN if request.user.is_staff else ClientFile.USER
-            uploader_user = request.user if request.user.is_authenticated else None
-            created = 0
-            try:
-                with transaction.atomic():
-                    for uploaded in uploaded_files:
-                        instance = ClientFile(
-                            user=appointment.client,
-                            appointment=appointment,
-                            file=uploaded,
-                            kind=kind,
-                            description=description,
-                            uploaded_by=uploader_flag,
-                            uploaded_by_user=uploader_user,
-                        )
-                        instance.save()
-                        created += 1
-            except ValidationError as exc:
-                messages.error(
-                    request,
-                    "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc),
-                )
-            except Exception as exc:  # pylint: disable=broad-except
-                messages.error(request, f"Could not upload photos: {exc}")
-            else:
-                if created == 1:
-                    messages.success(request, "Photo uploaded.")
-                elif created > 1:
-                    messages.success(request, f"{created} photos uploaded.")
-                else:
-                    messages.warning(request, "No files were uploaded.")
-        else:
-            for field, errors in form.errors.items():
-                label = form.fields.get(field).label if field in form.fields else field
-                for message_text in errors:
-                    if field == "__all__":
-                        messages.error(request, message_text)
-                    else:
-                        messages.error(request, f"{label}: {message_text}")
+        form = AppointmentPhotoUploadForm(
+            request.POST,
+            request.FILES,
+            prefix=self.PHOTO_UPLOAD_FORM_PREFIX,
+        )
+        self._persist_photo_uploads(request, appointment, form)
 
         return self._redirect_to_change_view(request, appointment, anchor="before-after")
 

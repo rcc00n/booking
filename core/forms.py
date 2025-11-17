@@ -404,7 +404,8 @@ class AppointmentPhotoUploadForm(forms.Form):
     )
 
     def clean_files(self):
-        uploaded_files = self.files.getlist("files")
+        files_key = self.add_prefix("files")
+        uploaded_files = self.files.getlist(files_key)
         if not uploaded_files:
             raise forms.ValidationError("Select at least one file to upload.")
         for file_obj in uploaded_files:
