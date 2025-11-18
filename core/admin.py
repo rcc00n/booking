@@ -1455,7 +1455,9 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             profile = getattr(obj, "userprofile", None)
             if profile:
                 files_qs = (
-                    ClientFile.objects.filter(user=profile)
+                    ClientFile.objects.filter(
+                        Q(user=profile) | Q(appointment__client=profile)
+                    )
                     .select_related("appointment", "uploaded_by_user")
                     .order_by("-uploaded_at", "-id")
                 )
@@ -1504,7 +1506,8 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             messages.error(request, "Client profile is missing.")
             return redirect("admin:auth_user_change", user_id)
 
-        file_obj = get_object_or_404(ClientFile, pk=file_id, user=profile)
+        file_qs = ClientFile.objects.filter(Q(user=profile) | Q(appointment__client=profile))
+        file_obj = get_object_or_404(file_qs, pk=file_id)
         try:
             file_obj.delete()
         except Exception as exc:  # pylint: disable=broad-except

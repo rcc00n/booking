@@ -62,6 +62,17 @@ class AdminClientFilesViewTests(TestCase):
         cls.client_profile.address = "123 Example Street"
         cls.client_profile.save(update_fields=["phone", "postal_code", "address"])
 
+        cls.orphan_user = user_model.objects.create_user(
+            username="files-orphan",
+            email="orphan-files@example.com",
+            password="orphanpass123",
+            first_name="Casey",
+            last_name="Orphan",
+        )
+        cls.orphan_profile = getattr(cls.orphan_user, "userprofile", None)
+        if cls.orphan_profile is None:
+            cls.orphan_profile = UserProfile.objects.create(user=cls.orphan_user)
+
         cls.payment_status = PaymentStatus.objects.create(name="Files Pending")
 
         cls.appointment = Appointment.objects.create(
@@ -143,6 +154,24 @@ class AdminClientFilesViewTests(TestCase):
             }
         )
 
+    def _create_orphaned_appointment_file(self, filename="lost-before.jpg"):
+        """
+        Build a ClientFile tied to the appointment but pointing to another profile.
+        This mimics legacy rows where the FK drifted away from the client profile.
+        """
+        stale_file = ClientFile.objects.create(
+            user=self.client_profile,
+            appointment=self.appointment,
+            file=SimpleUploadedFile(filename, b"\x47\x49\x46", content_type="image/jpeg"),
+            kind=ClientFile.KIND_BEFORE,
+            description="Legacy photo link",
+            uploaded_by=ClientFile.ADMIN,
+            uploaded_by_user=self.admin_user,
+        )
+        ClientFile.objects.filter(pk=stale_file.pk).update(user=self.orphan_profile)
+        stale_file.refresh_from_db()
+        return stale_file
+
     def test_user_change_view_lists_all_client_files(self):
         self.client.force_login(self.admin_user)
         url = reverse("admin:auth_user_change", args=[self.client_user.pk])
@@ -183,6 +212,25 @@ class AdminClientFilesViewTests(TestCase):
         follow_up.render()
         self.assertContains(follow_up, "Client Files (1)")
         self.assertNotContains(follow_up, "before-session.jpg")
+
+    def test_user_change_view_includes_appointment_files_even_if_user_pointer_is_stale(self):
+        legacy_file = self._create_orphaned_appointment_file(filename="legacy-before.jpg")
+
+        self.client.force_login(self.admin_user)
+        url = reverse("admin:auth_user_change", args=[self.client_user.pk])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        response.render()
+
+        self.assertContains(response, "Client Files (3)")
+        self.assertContains(response, "legacy-before.jpg")
+        appointment_url = reverse("admin:core_appointment_change", args=[self.appointment.pk])
+        self.assertContains(response, appointment_url)
+        self.assertTrue(
+            ClientFile.objects.filter(pk=legacy_file.pk, appointment=self.appointment).exists(),
+            "Legacy file should still belong to the appointment",
+        )
 
     def test_user_change_form_uploads_file_with_metadata(self):
         data = self._user_change_form_data(
@@ -237,3 +285,13 @@ class AdminClientFilesViewTests(TestCase):
         )
         self.assertFalse(form.is_valid())
         self.assertIn("files_appointment", form.errors)
+
+    def test_admin_can_delete_client_file_even_if_user_pointer_is_stale(self):
+        legacy_file = self._create_orphaned_appointment_file(filename="legacy-delete.jpg")
+        self.client.force_login(self.admin_user)
+        delete_url = reverse("admin:auth_user_delete_file", args=[self.client_user.pk, legacy_file.pk])
+
+        response = self.client.post(delete_url, data={})
+
+        self.assertRedirects(response, reverse("admin:auth_user_change", args=[self.client_user.pk]))
+        self.assertFalse(ClientFile.objects.filter(pk=legacy_file.pk).exists())
