@@ -34,6 +34,87 @@
 
     const $ = (sel, root = document) => root.querySelector(sel);
     const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+    window.APPOINTMENT_TOASTS = window.APPOINTMENT_TOASTS || [];
+
+    const TOAST_LEVEL_CLASS = {
+        error: "ab-toast--error",
+        warning: "ab-toast--warning",
+        success: "ab-toast--success",
+        info: "",
+    };
+
+    function initToastSystem() {
+        if (initToastSystem._initialized) {
+            return;
+        }
+        const stack = document.querySelector("[data-toast-stack]");
+        if (!stack) {
+            return;
+        }
+        initToastSystem._initialized = true;
+
+        const normalizeLevel = (value) => {
+            const raw = (value || "").toString().trim();
+            if (!raw) return "info";
+            return raw.split(/\s+/)[0].toLowerCase();
+        };
+
+        const showToast = (message, level = "info", options = {}) => {
+            if (!message) return null;
+            const toast = document.createElement("div");
+            toast.className = "ab-toast";
+            const normalized = normalizeLevel(level);
+            const levelClass = TOAST_LEVEL_CLASS[normalized];
+            if (levelClass) {
+                toast.classList.add(levelClass);
+            }
+
+            const textEl = document.createElement("div");
+            textEl.className = "ab-toast__text";
+            textEl.textContent = message;
+            toast.appendChild(textEl);
+
+            const closeBtn = document.createElement("button");
+            closeBtn.type = "button";
+            closeBtn.className = "ab-toast__close";
+            closeBtn.setAttribute("aria-label", "Dismiss notification");
+            closeBtn.textContent = "×";
+            toast.appendChild(closeBtn);
+
+            let autoHideId = null;
+            const dismiss = () => {
+                if (!toast.parentNode) return;
+                toast.parentNode.removeChild(toast);
+            };
+
+            closeBtn.addEventListener("click", () => {
+                if (autoHideId) {
+                    window.clearTimeout(autoHideId);
+                }
+                dismiss();
+            });
+
+            stack.appendChild(toast);
+
+            const requestedDuration = Number(options.duration);
+            const duration = Number.isFinite(requestedDuration) ? requestedDuration : 6500;
+            if (duration > 0) {
+                autoHideId = window.setTimeout(dismiss, duration);
+            }
+
+            return toast;
+        };
+
+        window.showToast = showToast;
+
+        if (Array.isArray(window.APPOINTMENT_TOASTS)) {
+            window.APPOINTMENT_TOASTS.forEach((item) => {
+                if (!item || !item.text) return;
+                showToast(item.text, item.level || "info", item.options || {});
+            });
+            window.APPOINTMENT_TOASTS = [];
+        }
+    }
 
     const itemsContainer = $("#items-container");
     const salesContainer = document.getElementById("product-sales-container");
@@ -2198,6 +2279,7 @@
         });
     }
     document.addEventListener("DOMContentLoaded", () => {
+        initToastSystem();
         refreshSaleClientDefaultFromAppointment();
         if (appointmentClientSelect) {
             appointmentClientSelect.addEventListener("change", refreshSaleClientDefaultFromAppointment);

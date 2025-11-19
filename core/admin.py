@@ -67,6 +67,7 @@ from core.tasks import (
     send_item_cancellation_email,
 )
 from core.services.item_status import record_item_status
+from core.services.intake_assignments import ensure_universal_assignments_for_profile
 
 PAID_BADGE_ICON_URL = static("admin/icons/paid.png")
 PARTIAL_BADGE_ICON_URL = static("admin/icons/partially-paid.png")
@@ -1440,10 +1441,161 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 
     password_change_link.short_description = _("Password")
 
+    @staticmethod
+    def _format_user_display(user):
+        if not user:
+            return "—"
+        full_name = getattr(user, "get_full_name", lambda: "")() or ""
+        if full_name.strip():
+            return full_name
+        username = getattr(user, "get_username", lambda: "")() or ""
+        if username.strip():
+            return username
+        email = getattr(user, "email", "") or ""
+        if email:
+            return email
+        return str(user)
+
+    @staticmethod
+    def _safe_reverse(url_name, *args):
+        try:
+            return reverse(url_name, args=args)
+        except NoReverseMatch:
+            return ""
+
+    def _build_client_intake_context(self, profile):
+        ensure_universal_assignments_for_profile(profile)
+
+        submissions_prefetch = Prefetch(
+            "submissions",
+            queryset=(
+                ClientIntakeFormSubmission.objects.filter(client=profile)
+                .select_related("submitted_by", "appointment")
+                .order_by("-submitted_at")[:1]
+            ),
+            to_attr="prefetched_submissions",
+        )
+
+        assignment_qs = (
+            ClientIntakeAssignment.objects.for_client(profile)
+            .select_related("form", "assigned_by", "completed_by")
+            .prefetch_related(submissions_prefetch)
+            .annotate(submission_count=Count("submissions", distinct=True))
+        )
+
+        pending_assignments = []
+        completed_assignments = []
+        now = timezone.now()
+        future_anchor = now + timedelta(days=3650)
+
+        for assignment in assignment_qs:
+            submissions = list(getattr(assignment, "prefetched_submissions", []))
+            for submission in submissions:
+                submission.admin_url = self._safe_reverse(
+                    "admin:core_clientintakeformsubmission_change",
+                    submission.pk,
+                )
+                if submission.appointment_id:
+                    submission.appointment_admin_url = self._safe_reverse(
+                        "admin:core_appointment_change",
+                        submission.appointment_id,
+                    )
+                else:
+                    submission.appointment_admin_url = ""
+                if submission.assignment_id:
+                    submission.assignment_admin_url = self._safe_reverse(
+                        "admin:core_clientintakeassignment_change",
+                        submission.assignment_id,
+                    )
+                else:
+                    submission.assignment_admin_url = ""
+                submission.submitted_by_display = self._format_user_display(submission.submitted_by)
+
+            assignment.form_admin_url = (
+                self._safe_reverse("admin:core_clientintakeform_change", assignment.form_id)
+                if assignment.form_id
+                else ""
+            )
+            assignment.assignment_admin_url = self._safe_reverse(
+                "admin:core_clientintakeassignment_change",
+                assignment.pk,
+            )
+            assignment.assigned_by_display = self._format_user_display(assignment.assigned_by)
+            assignment.completed_by_display = self._format_user_display(assignment.completed_by)
+            assignment.latest_submission = submissions[0] if submissions else None
+            assignment.total_submissions = getattr(assignment, "submission_count", len(submissions))
+
+            if assignment.is_completed:
+                completed_assignments.append(assignment)
+            else:
+                pending_assignments.append(assignment)
+
+        pending_assignments.sort(
+            key=lambda item: (
+                item.due_at or future_anchor,
+                item.assigned_at or future_anchor,
+            )
+        )
+        completed_assignments.sort(
+            key=lambda item: (
+                item.completed_at or item.assigned_at or now,
+            ),
+            reverse=True,
+        )
+
+        submissions_base_qs = ClientIntakeFormSubmission.objects.filter(client=profile)
+        submissions_total = submissions_base_qs.count()
+        recent_submissions = list(
+            submissions_base_qs.select_related("form", "submitted_by", "appointment", "assignment")
+            .order_by("-submitted_at")[:10]
+        )
+        for submission in recent_submissions:
+            submission.admin_url = self._safe_reverse(
+                "admin:core_clientintakeformsubmission_change",
+                submission.pk,
+            )
+            submission.submitted_by_display = self._format_user_display(submission.submitted_by)
+            submission.assignment_admin_url = (
+                self._safe_reverse("admin:core_clientintakeassignment_change", submission.assignment_id)
+                if submission.assignment_id
+                else ""
+            )
+            submission.appointment_admin_url = (
+                self._safe_reverse("admin:core_appointment_change", submission.appointment_id)
+                if submission.appointment_id
+                else ""
+            )
+            submission.form_admin_url = (
+                self._safe_reverse("admin:core_clientintakeform_change", submission.form_id)
+                if submission.form_id
+                else ""
+            )
+
+        return {
+            "client_intake_panel_visible": True,
+            "client_intake_pending": pending_assignments,
+            "client_intake_completed": completed_assignments,
+            "client_intake_recent_submissions": recent_submissions,
+            "client_intake_counts": {
+                "pending": len(pending_assignments),
+                "completed": len(completed_assignments),
+                "recent": len(recent_submissions),
+                "recent_total": submissions_total,
+            },
+        }
+
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
         context = dict(context or {})
         context.setdefault("client_files", None)
         context.setdefault("client_files_total", 0)
+        context.setdefault("client_intake_pending", [])
+        context.setdefault("client_intake_completed", [])
+        context.setdefault("client_intake_recent_submissions", [])
+        context.setdefault(
+            "client_intake_counts",
+            {"pending": 0, "completed": 0, "recent": 0, "recent_total": 0},
+        )
+        context.setdefault("client_intake_panel_visible", False)
 
         if add and (request.GET.get(IS_POPUP_VAR) or request.POST.get(IS_POPUP_VAR)):
             if request.GET.get("_from_custom_appt") or request.POST.get("_from_custom_appt"):
@@ -1478,6 +1630,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
                     files.append(file_obj)
                 context["client_files"] = files
                 context["client_files_total"] = len(files)
+                context.update(self._build_client_intake_context(profile))
         return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
 
     def get_urls(self):

@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from dal import autocomplete
 from django import forms
+from django.contrib import messages
 from django.contrib.admin import TabularInline
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import (
@@ -216,6 +217,54 @@ class AppointmentProductSaleForm(ProductSaleAdminForm):
         notes = self.fields.get("notes")
         if notes:
             notes.widget.attrs.setdefault("rows", 2)
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("DELETE"):
+            return cleaned
+
+        product = cleaned.get("product") or getattr(self.instance, "product", None)
+        quantity = cleaned.get("quantity")
+
+        if not product or quantity in (None, ""):
+            return cleaned
+
+        try:
+            requested_qty = int(quantity)
+        except (TypeError, ValueError):
+            return cleaned
+
+        existing_qty = 0
+        if getattr(self.instance, "pk", None) and getattr(self.instance, "product_id", None) == getattr(product, "pk", None):
+            try:
+                existing_qty = int(getattr(self.instance, "quantity", 0) or 0)
+            except (TypeError, ValueError):
+                existing_qty = 0
+
+        try:
+            in_stock = int(getattr(product, "quantity_in_stock", 0) or 0)
+        except (TypeError, ValueError):
+            in_stock = 0
+
+        allowed_qty = max(in_stock + existing_qty, 0)
+
+        if requested_qty > allowed_qty:
+            if allowed_qty <= 0:
+                availability_note = f"{product} is out of stock."
+            else:
+                unit_label = "unit" if allowed_qty == 1 else "units"
+                availability_note = f"Only {allowed_qty} {unit_label} available."
+
+            message = (
+                f"Cannot attach {product} to this appointment. {availability_note} "
+                "Reduce the quantity or restock before saving."
+            )
+            self.add_error("quantity", message)
+            self.add_error(None, message)
+            if getattr(self, "request", None):
+                messages.error(self.request, message)
+
+        return cleaned
 
 
 def _normalize_phone(value: str) -> str:

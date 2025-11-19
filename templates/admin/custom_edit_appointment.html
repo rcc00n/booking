@@ -173,16 +173,41 @@
         .ab-btn-link:hover{text-decoration:underline}
         .ab-photo-upload .ab-field{margin-bottom:16px}
         .ab-photo-upload input[type="file"]{display:block}
+        ul.messagelist{display:none}
+        .ab-toast-stack{position:fixed;top:18px;right:18px;display:flex;flex-direction:column;gap:12px;z-index:1500;max-width:320px}
+        .ab-toast{background:#0f172a;color:#fff;padding:14px 16px;border-radius:14px;box-shadow:0 18px 40px rgba(15,23,42,.35);display:flex;gap:12px;align-items:flex-start;font-size:14px;line-height:1.45}
+        .ab-toast--error{background:#991b1b}
+        .ab-toast--warning{background:#92400e}
+        .ab-toast--success{background:#166534}
+        .ab-toast__text{flex:1}
+        .ab-toast__close{margin-left:auto;background:none;border:none;color:inherit;font-size:18px;line-height:1;cursor:pointer;opacity:.8;padding:0}
+        .ab-toast__close:hover{opacity:1}
 
     </style>
 {% endblock %}
 
 {% block content %}
 
+    <script>
+        window.APPOINTMENT_TOASTS = window.APPOINTMENT_TOASTS || [];
+    </script>
+    {% if messages %}
+        <script>
+            window.APPOINTMENT_TOASTS = window.APPOINTMENT_TOASTS || [];
+            {% for message in messages %}
+                window.APPOINTMENT_TOASTS.push({
+                    level: "{{ message.tags|default:'info' }}",
+                    text: "{{ message|escapejs }}"
+                });
+            {% endfor %}
+        </script>
+    {% endif %}
+
     <div class="ab-wrap">
         <form method="post" novalidate enctype="multipart/form-data">
             {% csrf_token %}
             <input type="hidden" name="return_to_date" value="{{ return_to_date|default:'' }}">
+            <div class="ab-toast-stack" data-toast-stack aria-live="polite" aria-atomic="true"></div>
 
             <nav class="tabs" id="tabs">
                 <button type="button" class="tab active" data-tab="details">Appointment details</button>
