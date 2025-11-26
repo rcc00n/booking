@@ -1640,7 +1640,7 @@ function updateCartUI(data){
         remove.className='cart-remove';
         remove.dataset.removeId=item.id;
         const img = document.createElement('img');
-        img.src = '../static/admin/icons/delete.svg';      // path to the remove icon asset
+        img.src = '/static/admin/icons/delete.svg';        // absolute path to the remove icon asset
         img.alt = '';                                      // keep aria-label on button instead of the image
         img.width = 24;                                    // icon size
         img.height = 24;
