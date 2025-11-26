@@ -553,135 +553,226 @@ html, body {
     position: absolute;
     z-index: 9999;
     display: block;
-    transition: opacity 0.25s ease, transform 0.25s ease;
-}
-.appt-tt-footer{
-    margin-top:8px; font-size:12px; color:#6b7280;
-}
-/* ---------- Видимость ---------- */
-#apptTooltip.visible{
-  opacity:1; transform:translateY(0); visibility:visible; pointer-events:auto;
-}
-#apptTooltip.hidden{
-  opacity:0; transform:translateY(1.1vh); visibility:hidden; pointer-events:none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-/* ---------- Карточка ---------- */
-#apptTooltip .tooltip-card{
-  box-sizing:border-box;
-  font-family:Arial, sans-serif;
-  width:40.3vh;
-  min-height:22.5vh;
-  background:#fff;
-  border-radius:12px;
-  display:flex;
-  flex-direction:column;
-  overflow:hidden;
-  box-shadow:0 4px 16px rgba(0,0,0,0.2);
+#apptTooltip.visible {
+    opacity: 1;
+    transform: translateY(0);
+    visibility: visible;
+    pointer-events: auto;
 }
 
-#apptTooltip .tooltip-header{
-  background:#0064ef;
-  color:#fff;
-  font-weight:600;
-  font-size:1.7vh;
-  padding:1.3vh 2.2vh;
-  display:flex;
-  justify-content:space-between;
+#apptTooltip.hidden {
+    opacity: 0;
+    transform: translateY(8px);
+    visibility: hidden;
+    pointer-events: none;
 }
 
-/* тело — гибкая колонка без абсолютов */
-#apptTooltip .tooltip-body{
-  position:relative;
-  display:flex;
-  flex-direction:column;
-  padding:1.8vh 2.2vh;
-  gap:1.4vh;
+#apptTooltip .tooltip-card {
+    box-sizing: border-box;
+    width: 360px;
+    background: #ffffff;
+    color: #0f172a;
+    border-radius: 14px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+    overflow: hidden;
+    font-family: "Inter", "SF Pro Text", system-ui, -apple-system, sans-serif;
 }
 
-/* ---------- Клиент ---------- */
-#apptTooltip .tooltip-client{ display:flex; align-items:center; }
-#apptTooltip .tooltip-avatar{
-  width:6vh; height:6vh; border-radius:50%;
-  background:#e6e6fa; color:#5f5fc4;
-  display:flex; align-items:center; justify-content:center;
-  font-weight:600; font-size:2.2vh; margin-right:1.3vh;
-}
-#apptTooltip .tooltip-client-info{ display:flex; flex-direction:column; }
-#apptTooltip .tooltip-client-name{ font-weight:700; font-size:1.82vh; }
-#apptTooltip .tooltip-client-phone{ font-size:1.6vh; color:#777; }
-
-/* ---------- Детали услуги ---------- */
-#apptTooltip .tooltip-footer-row{
-  display:flex !important;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap:1.4vh;
-  flex-wrap:wrap;
-  margin-top:1.2vh;
-}
-#apptTooltip .tooltip-details{
-  display:flex;
-  flex-direction:column;
-  gap:0.8vh;
-  flex:1 1 auto;
-  min-width:0;
-}
-#apptTooltip .tooltip-service-name{
-  font-size:1.85vh; font-weight:600; color:#1c1c1c; margin:0.4vh 0 0;
-  word-break: break-word;
-}
-#apptTooltip .tooltip-meta{
-  font-size:1.5vh;
-  color:#777;
-  margin-top:0.4vh;
-  position:static;
+#apptTooltip .tooltip-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    background: linear-gradient(90deg, #0068ff 0%, #0094ff 100%);
+    color: #ffffff;
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: 0.2px;
 }
 
-/* ---------- Цены ---------- */
-#apptTooltip .tooltip-price-block{
-  position:static !important;
-  text-align:center;
-  display:flex; flex-direction:column; gap:0.45vh; align-items:center;
-  flex:0 0 auto;
-  max-width:45%;
-  min-width:14vh;
+#apptTooltip .tooltip-header {
+    padding: 12px 16px;
+    background: #0f172a;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 14px;
 }
-#apptTooltip .tooltip-price-line{
-  display:flex; align-items:center; gap:0.6vh; justify-content:center;
-  color:#222; flex-wrap:wrap;
+
+#apptTooltip .tooltip-time {
+    font-size: 15px;
 }
-#apptTooltip .tooltip-price-label{ font-weight:600; color:#555; }
-#apptTooltip .tooltip-price-value{ display:flex; align-items:center; gap:0.45vh; }
-#apptTooltip .tooltip-price-old{ text-decoration:line-through; opacity:.6; }
-#apptTooltip .tooltip-price-current{ font-weight:700; }
-#apptTooltip .tooltip-price-arrow{ display:none !important; }
-#apptTooltip .tooltip-actions{
-  margin-top:1.8vh;
-  display:flex;
-  gap:0.8vh;
-  flex-wrap:wrap;
+
+#apptTooltip .tooltip-status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 13px;
 }
-#apptTooltip .tooltip-action-btn{
-  background:#111827;
-  color:#fff;
-  border:none;
-  border-radius:0.9vh;
-  padding:0.6vh 1.2vh;
-  font-size:1.4vh;
-  cursor:pointer;
-  transition:background-color 0.2s ease;
+
+#apptTooltip .tooltip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 18px 18px;
 }
-#apptTooltip .tooltip-action-btn.secondary{
-  background:#e5e7eb;
-  color:#111827;
+
+#apptTooltip .tooltip-client-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
-#apptTooltip .tooltip-action-btn.danger{
-  background:#b91c1c;
-  color:#fff;
+
+#apptTooltip .tooltip-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, #e0e7ff, #f1f5f9);
+    color: #1d4ed8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 18px;
 }
-#apptTooltip .tooltip-action-btn:hover{
-  filter:brightness(0.9);
+
+#apptTooltip .tooltip-client-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+#apptTooltip .tooltip-client-name {
+    font-size: 16px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+#apptTooltip .tooltip-client-phone {
+    font-size: 14px;
+    color: #64748b;
+}
+
+#apptTooltip .tooltip-service {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#apptTooltip .tooltip-service-title {
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.4;
+}
+
+#apptTooltip .tooltip-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #6b7280;
+}
+
+#apptTooltip .tooltip-price-block {
+    border-top: 1px solid #e5e7eb;
+    padding-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#apptTooltip .tooltip-price-line {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+#apptTooltip .tooltip-price-label {
+    font-weight: 700;
+    color: #111827;
+    font-size: 14px;
+}
+
+#apptTooltip .tooltip-price-value {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+#apptTooltip .tooltip-price-old {
+    text-decoration: line-through;
+    color: #94a3b8;
+    font-size: 13px;
+}
+
+#apptTooltip .tooltip-price-current {
+    font-weight: 800;
+    font-size: 15px;
+}
+
+#apptTooltip .tooltip-price-arrow {
+    display: none;
+}
+
+#apptTooltip .tooltip-notes {
+    display: flex;
+    gap: 6px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    font-size: 13px;
+    color: #475569;
+}
+
+#apptTooltip .tooltip-notes-label {
+    font-weight: 700;
+    color: #0f172a;
+}
+
+#apptTooltip .tooltip-actions {
+    margin-top: 2px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+#apptTooltip .tooltip-action-btn {
+    background: #0f172a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+#apptTooltip .tooltip-action-btn:hover {
+    background: #111827;
+    transform: translateY(-1px);
+}
+
+#apptTooltip .tooltip-action-btn.secondary {
+    background: #e5e7eb;
+    color: #111827;
+}
+
+#apptTooltip .tooltip-action-btn.danger {
+    background: #b91c1c;
+    color: #fff;
 }
 .corner-badges{
     position:absolute; top:6px; right:8px;

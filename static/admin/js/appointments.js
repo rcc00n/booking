@@ -291,35 +291,42 @@ function showTooltip(box) {
     const priceBlockHtml = priceLinesHtml ? `<div class="tooltip-price-block">${priceLinesHtml}</div>` : "";
 
     const actionsHtml = "";
+    const metaParts = [];
+    if (master) {
+        metaParts.push(master);
+    }
+    if (duration) {
+        metaParts.push(duration);
+    }
+    const metaText = metaParts.join(" | ");
 
     tooltip.innerHTML = `
         <div class="tooltip-card">
-            <div class="tooltip-header">
-                <span>${time}</span>
-                <span>${status}</span>
+            <div class="tooltip-top">
+                <div class="tooltip-time">${time}</div>
+                ${status ? `<div class="tooltip-status-pill">${status}</div>` : ""}
             </div>
             <div class="tooltip-body">
-                <div class="tooltip-client">
+                <div class="tooltip-client-row">
                     <div class="tooltip-avatar">${firstLetter}</div>
                     <div class="tooltip-client-info">
                         <div class="tooltip-client-name">${client}</div>
-                        <div class="tooltip-client-phone">${phone}</div>
+                        ${phone ? `<div class="tooltip-client-phone">${phone}</div>` : ""}
                     </div>
                 </div>
-                <div class="tooltip-footer-row">
-                    <div class="tooltip-details">
-                        ${service ? `<div class="tooltip-service-name">${service}</div>` : ""}
-                        <div class="tooltip-meta">${master} | ${duration}</div>
-                    </div>
-                    ${priceBlockHtml}
-                </div>
-                ${notes ? `<div class="appt-tt-footer">Notes: ${notes}</div>` : ""}
+                ${(service || metaText) ? `
+                <div class="tooltip-service">
+                    ${service ? `<div class="tooltip-service-title">${service}</div>` : ""}
+                    ${metaText ? `<div class="tooltip-meta">${metaText}</div>` : ""}
+                </div>` : ""}
+                ${priceBlockHtml}
+                ${notes ? `<div class="tooltip-notes"><span class="tooltip-notes-label">Notes</span><span class="tooltip-notes-text">${notes}</span></div>` : ""}
                 ${actionsHtml}
             </div>
         </div>
     `;
 
-    const tooltipWidth = 375;
+    const tooltipWidth = 360;
     const tooltipCardEl = tooltip.querySelector(".tooltip-card");
     const tooltipHeight = tooltipCardEl ? tooltipCardEl.offsetHeight : 210;
 
@@ -433,7 +440,7 @@ function showUnavailableTooltip(cell) {
             </div>
         </div>
     `;
-    const tooltipWidth = 375;
+    const tooltipWidth = 360;
     const tooltipHeight = 120; // можно скорректировать
     const middleY = rect.top + rect.height / 2 + window.scrollY;
     const leftX = rect.left + window.scrollX - tooltipWidth - 10;
