@@ -5685,6 +5685,7 @@ class ProductCategoryAdmin(admin.ModelAdmin):
 class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
     import_template_name = "admin/products/import.html"
     list_display = (
+        "image_thumb",
         "name",
         "category",
         "sku",
@@ -5699,12 +5700,14 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
     list_filter = ("is_active", "category", LowStockFilter)
     search_fields = ("name", "sku", "brand", "supplier")
     ordering = ("name",)
-    readonly_fields = ("created_at", "updated_at")
+    list_display_links = ("name",)
+    readonly_fields = ("created_at", "updated_at", "image_preview")
     fieldsets = (
         (
             None,
             {"fields": ("name", "sku", "category", "brand", "supplier", "description", "is_active")},
         ),
+        ("Media", {"fields": ("image", "image_alt_text", "image_preview")}),
         ("Measure", {"fields": ("measure_type", "measure_value")}),
         (
             "Pricing & Inventory",
@@ -5716,6 +5719,26 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
     @admin.display(description="Low stock", boolean=True)
     def low_stock_indicator(self, obj):
         return obj.is_low_on_stock
+
+    @admin.display(description="Image")
+    def image_thumb(self, obj):
+        if getattr(obj, "image", None):
+            return format_html(
+                '<img src="{}" alt="{}" style="height:48px;width:48px;object-fit:cover;border-radius:6px; box-shadow:0 0 0 1px rgba(0,0,0,0.04);" />',
+                obj.image.url,
+                obj.image_alt,
+            )
+        return "—"
+
+    @admin.display(description="Preview")
+    def image_preview(self, obj):
+        if getattr(obj, "image", None):
+            return format_html(
+                '<img src="{}" alt="{}" style="max-width:260px;max-height:260px;object-fit:contain;border-radius:8px;border:1px solid #e5e7eb;padding:6px;background:#fff;" />',
+                obj.image.url,
+                obj.image_alt,
+            )
+        return "—"
 
     def get_urls(self):
         urls = super().get_urls()
@@ -5973,7 +5996,7 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
         if not product_id:
             return JsonResponse({"error": "Missing product id"}, status=400)
         try:
-            product = Product.objects.only("price").get(pk=product_id)
+            product = Product.objects.only("price", "image", "image_alt_text", "name").get(pk=product_id)
         except Product.DoesNotExist:
             return JsonResponse({"error": "Product not found"}, status=404)
         price_value = product.price if product.price is not None else Decimal("0.00")  # // CHANGED
@@ -5983,7 +6006,23 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
         except (InvalidOperation, TypeError, ValueError):  # // CHANGED
             price_normalized = Decimal("0.00")  # // CHANGED
         price_str = format(price_normalized, "f")  # // CHANGED
-        return JsonResponse({"unit_price": price_str, "price": price_str})  # // CHANGED
+        image_url = ""
+        image_alt = ""
+        try:
+            if getattr(product, "image", None):
+                image_url = product.image.url
+                image_alt = getattr(product, "image_alt", "") or product.name
+        except Exception:
+            image_url = ""
+            image_alt = product.name
+        return JsonResponse(
+            {
+                "unit_price": price_str,
+                "price": price_str,
+                "image_url": image_url,
+                "image_alt": image_alt,
+            }
+        )  # // CHANGED
 
     def _export_all_xlsx_view(self, request):
         queryset = (

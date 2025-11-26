@@ -77,6 +77,43 @@
             border-radius:10px;
             width: 100%;
         }
+        .ab-product-field .select2-container{width:100%!important}
+        .ab-product-preview{
+            margin-top:8px;
+            display:flex;
+            align-items:center;
+            gap:10px;
+            padding:10px 12px;
+            border:1px dashed #e5e7eb;
+            border-radius:10px;
+            background:#f9fafb;
+            transition: border-color .15s ease, background-color .15s ease;
+        }
+        .ab-product-preview.has-image{
+            border-color:#d1d5db;
+            background:#fff;
+        }
+        .ab-product-preview__thumb{
+            width:72px;
+            height:72px;
+            border-radius:10px;
+            overflow:hidden;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            background:#f3f4f6;
+            box-shadow:inset 0 0 0 1px rgba(0,0,0,0.04);
+        }
+        .ab-product-preview__thumb img{
+            width:100%;
+            height:100%;
+            object-fit:cover;
+            display:block;
+        }
+        .ab-product-preview__placeholder{
+            color:#6b7280;
+            font-size:13px;
+        }
 
         .ab-field--start-time{grid-column:1 / -1;}
         .ab-datetime{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
@@ -768,9 +805,17 @@
                                     {% for h in f.hidden_fields %}{{ h }}{% endfor %}
 
                                     <div class="ab-row">
-                                        <div class="ab-field">
+                                        <div class="ab-field ab-product-field">
                                             {{ f.product.label_tag }}{{ f.product }}
                                             {% if f.product.errors %}<div class="ab-err">{{ f.product.errors }}</div>{% endif %}
+                                            <div class="ab-product-preview" data-product-preview>
+                                                <div class="ab-product-preview__thumb" data-preview-thumb hidden>
+                                                    <img data-preview-image alt="" loading="lazy">
+                                                </div>
+                                                <div class="ab-product-preview__placeholder" data-preview-placeholder>
+                                                    Product image will appear here after selection.
+                                                </div>
+                                            </div>
                                         </div>
                                         <div class="ab-field">
                                             {{ f.quantity.label_tag }}{{ f.quantity }}
@@ -846,8 +891,16 @@
                                     {% for h in f.hidden_fields %}{{ h.as_widget }}{% endfor %}
 
                                     <div class="ab-row">
-                                        <div class="ab-field">
+                                        <div class="ab-field ab-product-field">
                                             {{ f.product.label_tag }}{{ f.product }}
+                                            <div class="ab-product-preview" data-product-preview>
+                                                <div class="ab-product-preview__thumb" data-preview-thumb hidden>
+                                                    <img data-preview-image alt="" loading="lazy">
+                                                </div>
+                                                <div class="ab-product-preview__placeholder" data-preview-placeholder>
+                                                    Product image will appear here after selection.
+                                                </div>
+                                            </div>
                                         </div>
                                         <div class="ab-field">
                                             {{ f.quantity.label_tag }}{{ f.quantity }}

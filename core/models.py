@@ -50,6 +50,17 @@ def service_image_upload_to(instance, filename: str) -> str:
     ext = ext.lower() or ".jpg"
     service_id = instance.pk or uuid.uuid4()
     return f"services/{service_id}/{normalized}{ext}"
+
+
+def product_image_upload_to(instance, filename: str) -> str:
+    """
+    Deterministic upload path per product to avoid orphaned files on S3/local storage.
+    """
+    base, ext = os.path.splitext(filename)
+    normalized = slugify(base) or "image"
+    ext = ext.lower() or ".jpg"
+    product_id = instance.pk or uuid.uuid4()
+    return f"products/{product_id}/{normalized}{ext}"
 # --- 1. ROLES ---
 
 class Role(models.Model):
@@ -2143,6 +2154,17 @@ class Product(models.Model):
     )
     brand = models.CharField(max_length=120, blank=True)
     supplier = models.CharField(max_length=120, blank=True)
+    image = models.ImageField(
+        upload_to=product_image_upload_to,
+        blank=True,
+        null=True,
+        help_text="Visible to staff in product lists and appointment selection.",
+    )
+    image_alt_text = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Optional description for the product image; defaults to the product name.",
+    )
     cost_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -2181,6 +2203,10 @@ class Product(models.Model):
         if not self.low_stock_threshold:
             return False
         return self.quantity_in_stock <= self.low_stock_threshold
+
+    @property
+    def image_alt(self) -> str:
+        return self.image_alt_text or self.name
 
     def __str__(self):
         return self.name

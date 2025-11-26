@@ -1533,7 +1533,10 @@
         if (!endpointRaw) return; // CHANGED
 
         const jq = (window.django && window.django.jQuery) || window.jQuery || null; // CHANGED
-        let requestSeq = 0; // CHANGED
+        let priceRequestSeq = 0; // CHANGED
+        const previewRequestSeq = Object.create(null); // CHANGED
+        const productMetaCache = Object.create(null); // CHANGED
+        const pendingMeta = new Set(); // CHANGED
 
         function normalizePrice(value) {
             const raw = String(value ?? "").trim();
@@ -1581,6 +1584,93 @@
             dispatchRecalc(); // CHANGED
         }
 
+        function normalizeProductId(rawId) { // CHANGED
+            const value = String(rawId || "").trim(); // CHANGED
+            if (!value) return ""; // CHANGED
+            const match = value.match(/([0-9a-fA-F-]+)$/); // CHANGED
+            return match ? match[1] : value; // CHANGED
+        } // CHANGED
+
+        function rememberMeta(productId, payload) { // CHANGED
+            const normalizedId = normalizeProductId(productId); // CHANGED
+            if (!normalizedId) return; // CHANGED
+            const meta = productMetaCache[normalizedId] || {}; // CHANGED
+            const url = payload?.image_url || payload?.imageUrl; // CHANGED
+            const alt = payload?.image_alt || payload?.imageAlt || payload?.name; // CHANGED
+            if (url) meta.imageUrl = url; // CHANGED
+            if (alt) meta.imageAlt = alt; // CHANGED
+            productMetaCache[normalizedId] = meta; // CHANGED
+        } // CHANGED
+
+        function applyOptionImage(optionEl, meta) { // CHANGED
+            if (!optionEl || !meta || !meta.imageUrl) return; // CHANGED
+            if (optionEl.getAttribute("role") !== "option") return; // CHANGED
+            if (optionEl.getAttribute("aria-disabled") === "true") return; // CHANGED
+            let thumb = optionEl.querySelector("[data-option-thumb]"); // CHANGED
+            if (!thumb) { // CHANGED
+                thumb = document.createElement("span"); // CHANGED
+                thumb.setAttribute("data-option-thumb", "1"); // CHANGED
+                thumb.style.display = "inline-flex"; // CHANGED
+                thumb.style.width = "28px"; // CHANGED
+                thumb.style.height = "28px"; // CHANGED
+                thumb.style.borderRadius = "6px"; // CHANGED
+                thumb.style.overflow = "hidden"; // CHANGED
+                thumb.style.marginRight = "8px"; // CHANGED
+                thumb.style.verticalAlign = "middle"; // CHANGED
+                thumb.style.boxShadow = "inset 0 0 0 1px rgba(0,0,0,0.06)"; // CHANGED
+                thumb.style.background = "#f3f4f6"; // CHANGED
+                optionEl.prepend(thumb); // CHANGED
+            } // CHANGED
+            let img = thumb.querySelector("img"); // CHANGED
+            if (!img) { // CHANGED
+                img = document.createElement("img"); // CHANGED
+                img.style.width = "100%"; // CHANGED
+                img.style.height = "100%"; // CHANGED
+                img.style.objectFit = "cover"; // CHANGED
+                img.loading = "lazy"; // CHANGED
+                thumb.appendChild(img); // CHANGED
+            } // CHANGED
+            img.src = meta.imageUrl; // CHANGED
+            img.alt = meta.imageAlt || "Product image"; // CHANGED
+            optionEl.classList.add("has-thumb"); // CHANGED
+        } // CHANGED
+
+        function applyPreview(payload) {
+            const preview = row.querySelector("[data-product-preview]");
+            if (!preview) return;
+            const thumb = preview.querySelector("[data-preview-thumb]");
+            const img = preview.querySelector("[data-preview-image]");
+            const placeholder = preview.querySelector("[data-preview-placeholder]");
+            const payloadObj = (payload && typeof payload === "object") ? payload : {};
+            const url = payloadObj.image_url || payloadObj.imageUrl || "";
+            const alt =
+                payloadObj.image_alt ||
+                payloadObj.imageAlt ||
+                (productField && productField.options && productField.selectedIndex >= 0
+                    ? (productField.options[productField.selectedIndex].textContent || "").trim()
+                    : "") ||
+                "Product image";
+
+            if (url) {
+                if (img) {
+                    img.src = url;
+                    img.alt = alt || "Product image";
+                    img.loading = img.loading || "lazy";
+                }
+                if (thumb) thumb.hidden = false;
+                if (placeholder) placeholder.hidden = true;
+                preview.classList.add("has-image");
+            } else {
+                if (img) {
+                    img.removeAttribute("src");
+                    img.alt = "";
+                }
+                if (thumb) thumb.hidden = true;
+                if (placeholder) placeholder.hidden = false;
+                preview.classList.remove("has-image");
+            }
+        }
+
         function buildUrl(productId) {
             try {
                 const url = new URL(endpointRaw, window.location.origin);
@@ -1592,9 +1682,26 @@
             }
         }
 
-        async function fetchAndApplyPrice(productId, seq) {
+        function nextPreviewSeq(productId) { // CHANGED
+            const key = normalizeProductId(productId) || "_"; // CHANGED
+            const current = previewRequestSeq[key] || 0; // CHANGED
+            const next = current + 1; // CHANGED
+            previewRequestSeq[key] = next; // CHANGED
+            return next; // CHANGED
+        } // CHANGED
+
+        function isLatestPreview(productId, seq) { // CHANGED
+            const key = normalizeProductId(productId) || "_"; // CHANGED
+            return seq === previewRequestSeq[key]; // CHANGED
+        } // CHANGED
+
+        async function fetchAndApplyPrice(productId, seq, options = {}) {
+            const normalizedId = normalizeProductId(productId); // CHANGED
             const url = buildUrl(productId);
             if (!url) return;
+            const shouldApplyPrice = options.applyPrice !== false;
+            const kind = options.kind || "price"; // CHANGED
+            const onMeta = typeof options.onMeta === "function" ? options.onMeta : null; // CHANGED
             try {
                 const response = await fetch(url, {
                     credentials: "same-origin",
@@ -1615,21 +1722,38 @@
                         payload = textPayload; // CHANGED
                     } // CHANGED
                 } // CHANGED
-                if (seq !== requestSeq) {
-                    return;
-                }
+                const isLatest =
+                    kind === "preview" ? isLatestPreview(productId, seq) : seq === priceRequestSeq; // CHANGED
+                if (kind === "preview" && normalizedId) { // CHANGED
+                    pendingMeta.delete(normalizedId); // CHANGED
+                } // CHANGED
+                if (!isLatest) return; // CHANGED
                 let value = null; // CHANGED
                 if (typeof payload === "number" || typeof payload === "string") { // CHANGED
                     value = payload; // CHANGED
                 } else if (payload && typeof payload === "object") { // CHANGED
                     value = payload.unit_price ?? payload.price ?? payload.value ?? null; // CHANGED
                 } // CHANGED
-                if (value !== null && value !== undefined && value !== "") {
+                rememberMeta(productId, payload); // CHANGED
+                if (kind === "preview" && normalizedId) { // CHANGED
+                    pendingMeta.delete(normalizedId); // CHANGED
+                } // CHANGED
+                if (onMeta) onMeta(payload, productId); // CHANGED
+                if (shouldApplyPrice && value !== null && value !== undefined && value !== "") {
                     applyPrice(value);
                 }
+                applyPreview(payload || {});
+                productField.dataset.salePreviewInitialized = "1";
             } catch (error) {
-                if (seq === requestSeq) {
+                const isLatest =
+                    kind === "preview" ? isLatestPreview(productId, seq) : seq === priceRequestSeq; // CHANGED
+                if (kind === "preview" && normalizedId) { // CHANGED
+                    pendingMeta.delete(normalizedId); // CHANGED
+                } // CHANGED
+                if (isLatest) { // CHANGED
                     console.warn("Unable to auto-fill product price", error);
+                    applyPreview({});
+                    productField.dataset.salePreviewInitialized = productField.dataset.salePreviewInitialized || "1";
                 }
             }
         }
@@ -1645,6 +1769,7 @@
             const productId = (productField.value || "").trim();
             const previousProductId = productField.dataset.salePriceLastProduct || ""; // CHANGED
             const wasInitialized = productField.dataset.salePriceInitialized === "1"; // CHANGED
+            const previewInitialized = productField.dataset.salePreviewInitialized === "1";
             const productChanged = productId !== previousProductId; // CHANGED
             const hasUserValue = !!(unitPriceInput.value && unitPriceInput.value.trim()); // CHANGED
 
@@ -1656,20 +1781,33 @@
             productField.dataset.salePriceInitialized = "1"; // CHANGED
 
             if (!productId) {
-                if (force || productChanged) { // CHANGED
+                if (force || productChanged || !previewInitialized) { // CHANGED
                     clearPrice();
+                    applyPreview(null);
+                    productField.dataset.salePreviewInitialized = "";
                 }
                 return;
             }
-            if (!wasInitialized && !force && hasUserValue) { // CHANGED
+            let allowPriceUpdate = !shouldSkipAutoFill(force, productChanged);
+            if (!wasInitialized && !force && hasUserValue) {
+                allowPriceUpdate = false;
+            }
+            const shouldFetchPreview = productChanged || force || !previewInitialized;
+            const shouldFetchPrice = allowPriceUpdate || productChanged || !wasInitialized;
+
+            if (!wasInitialized && !force && hasUserValue && !shouldFetchPreview) { // CHANGED
                 return; // CHANGED
             } // CHANGED
-            if (shouldSkipAutoFill(force, productChanged)) { // CHANGED
-                return;
-            }
-            requestSeq += 1;
-            const seq = requestSeq;
-            fetchAndApplyPrice(productId, seq);
+            if (!shouldFetchPreview && !shouldFetchPrice) { // CHANGED
+                return; // CHANGED
+            } // CHANGED
+            priceRequestSeq += 1; // CHANGED
+            const seq = priceRequestSeq; // CHANGED
+            fetchAndApplyPrice(productId, seq, { applyPrice: allowPriceUpdate, kind: "price" }); // CHANGED
+            if (shouldFetchPreview) { // CHANGED
+                const previewSeq = nextPreviewSeq(productId); // CHANGED
+                fetchAndApplyPrice(productId, previewSeq, { applyPrice: false, kind: "preview" }); // CHANGED
+            } // CHANGED
         }
 
         const handleSelection = () => syncPrice(true); // CHANGED
@@ -1677,6 +1815,117 @@
         productField.addEventListener("input", handleSelection);
 
         let detachJq = null; // CHANGED
+        let detachHover = null; // CHANGED
+        let detachResultObserver = null; // CHANGED
+
+        function hydrateOptionImages(optionsList) { // CHANGED
+            if (!optionsList) return; // CHANGED
+            const optionEls = optionsList.querySelectorAll('.select2-results__option[role="option"]'); // CHANGED
+            optionEls.forEach((opt) => { // CHANGED
+                const rawId = opt.getAttribute("data-select2-id") || opt.getAttribute("id"); // CHANGED
+                const normalizedId = normalizeProductId(rawId); // CHANGED
+                if (!normalizedId) return; // CHANGED
+                const meta = productMetaCache[normalizedId]; // CHANGED
+                if (meta && meta.imageUrl) { // CHANGED
+                    applyOptionImage(opt, meta); // CHANGED
+                    return; // CHANGED
+                } // CHANGED
+                if (pendingMeta.has(normalizedId)) return; // CHANGED
+                pendingMeta.add(normalizedId); // CHANGED
+                const seq = nextPreviewSeq(normalizedId); // CHANGED
+                fetchAndApplyPrice(normalizedId, seq, { // CHANGED
+                    applyPrice: false, // CHANGED
+                    kind: "preview", // CHANGED
+                    onMeta: () => { // CHANGED
+                        pendingMeta.delete(normalizedId); // CHANGED
+                        const cached = productMetaCache[normalizedId]; // CHANGED
+                        if (cached) applyOptionImage(opt, cached); // CHANGED
+                    }, // CHANGED
+                }); // CHANGED
+            }); // CHANGED
+        } // CHANGED
+
+        function bindDropdownImages(dropdownEl) { // CHANGED
+            if (!dropdownEl) return; // CHANGED
+            const resultsList = dropdownEl.querySelector(".select2-results__options"); // CHANGED
+            hydrateOptionImages(resultsList); // CHANGED
+            if (detachResultObserver) detachResultObserver(); // CHANGED
+            const observer = new MutationObserver(() => hydrateOptionImages(resultsList)); // CHANGED
+            if (resultsList) { // CHANGED
+                observer.observe(resultsList, { childList: true, subtree: true }); // CHANGED
+                detachResultObserver = () => observer.disconnect(); // CHANGED
+            } else { // CHANGED
+                detachResultObserver = null; // CHANGED
+            } // CHANGED
+        } // CHANGED
+
+        function bindHoverPreview($field) { // CHANGED
+            const ns = ".salePreviewHover"; // CHANGED
+            const cleanup = () => { // CHANGED
+                if (detachHover) { // CHANGED
+                    detachHover(); // CHANGED
+                    detachHover = null; // CHANGED
+                } // CHANGED
+            }; // CHANGED
+            $field.off(`select2:open${ns} select2:close${ns}`); // CHANGED
+            $field.on(`select2:close${ns}`, () => { // CHANGED
+                cleanup(); // CHANGED
+                productField.dataset.salePreviewHoverId = ""; // CHANGED
+                if (detachResultObserver) { // CHANGED
+                    detachResultObserver(); // CHANGED
+                    detachResultObserver = null; // CHANGED
+                } // CHANGED
+                const selectedId = (productField.value || "").trim(); // CHANGED
+                if (selectedId) { // CHANGED
+                    const seq = nextPreviewSeq(selectedId); // CHANGED
+                    fetchAndApplyPrice(selectedId, seq, { applyPrice: false, kind: "preview" }); // CHANGED
+                } else { // CHANGED
+                    applyPreview(null); // CHANGED
+                } // CHANGED
+            }); // CHANGED
+            $field.on(`select2:open${ns}`, () => { // CHANGED
+                cleanup(); // CHANGED
+                const dropdown = document.querySelector(".select2-container--open"); // CHANGED
+                bindDropdownImages(dropdown); // CHANGED
+                // Delay to allow dropdown to render // CHANGED
+                setTimeout(() => { // CHANGED
+                    const dropdown = document.querySelector(".select2-container--open"); // CHANGED
+                    const results = dropdown ? dropdown.querySelector(".select2-results__options") : null; // CHANGED
+                    if (!results) return; // CHANGED
+                    const handleHover = (event) => { // CHANGED
+                        const option = event.target ? event.target.closest(".select2-results__option") : null; // CHANGED
+                        if (!option) return; // CHANGED
+                        const data = (jq && typeof jq === "function") ? jq(option).data("data") || {} : {}; // CHANGED
+                        const productId = (data && (data.id || data.pk)) || option.getAttribute("data-select2-id") || ""; // CHANGED
+                        const normalizedId = normalizeProductId(productId); // CHANGED
+                        if (!normalizedId || normalizedId === productField.value) return; // CHANGED
+                        if (normalizedId === productField.dataset.salePreviewHoverId) return; // CHANGED
+                        productField.dataset.salePreviewHoverId = normalizedId; // CHANGED
+                        const seq = nextPreviewSeq(normalizedId); // CHANGED
+                        fetchAndApplyPrice(normalizedId, seq, { // CHANGED
+                            applyPrice: false, // CHANGED
+                            kind: "preview", // CHANGED
+                            onMeta: () => { // CHANGED
+                                const cached = productMetaCache[normalizedId]; // CHANGED
+                                if (cached) applyOptionImage(option, cached); // CHANGED
+                            }, // CHANGED
+                        }); // CHANGED
+                    }; // CHANGED
+                    const handleLeave = () => { // CHANGED
+                        productField.dataset.salePreviewHoverId = ""; // CHANGED
+                    }; // CHANGED
+                    results.addEventListener("mousemove", handleHover); // CHANGED
+                    results.addEventListener("mouseenter", handleHover); // CHANGED
+                    results.addEventListener("mouseleave", handleLeave); // CHANGED
+                    detachHover = () => { // CHANGED
+                        results.removeEventListener("mousemove", handleHover); // CHANGED
+                        results.removeEventListener("mouseenter", handleHover); // CHANGED
+                        results.removeEventListener("mouseleave", handleLeave); // CHANGED
+                    }; // CHANGED
+                }, 0); // CHANGED
+            }); // CHANGED
+        } // CHANGED
+
         if (jq && typeof jq === "function") { // CHANGED
             const $field = jq(productField); // CHANGED
             const events = ["select2:select", "autocompleteLightSelect", "autocompleteLightChange"]; // CHANGED
@@ -1684,9 +1933,19 @@
                 events.forEach(eventName => $field.on(eventName, handleSelection)); // CHANGED
                 $field.data("salePriceBindingAttached", true); // CHANGED
             } // CHANGED
+            bindHoverPreview($field); // CHANGED
             detachJq = () => { // CHANGED
                 events.forEach(eventName => $field.off(eventName, handleSelection)); // CHANGED
                 $field.removeData("salePriceBindingAttached"); // CHANGED
+                $field.off(".salePreviewHover"); // CHANGED
+                if (detachHover) { // CHANGED
+                    detachHover(); // CHANGED
+                    detachHover = null; // CHANGED
+                } // CHANGED
+                if (detachResultObserver) { // CHANGED
+                    detachResultObserver(); // CHANGED
+                    detachResultObserver = null; // CHANGED
+                } // CHANGED
             }; // CHANGED
         }
 
