@@ -1783,18 +1783,41 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         if not search_term:
             return queryset, False
 
-        text_q = (
-            Q(first_name__icontains=search_term)
-            | Q(last_name__icontains=search_term)
-            | Q(email__icontains=search_term)
-            | Q(username__icontains=search_term)
-        )
-        digits = self._normalize_phone_digits(search_term)
-        if digits:
-            regex_pattern = self._phone_regex_for_digits(digits)
-            text_q |= Q(userprofile__phone__iregex=regex_pattern)
+        tokens = [token for token in re.split(r"[\s,]+", search_term) if token]
+        text_tokens = []
+        digit_fragments = []
 
-        return queryset.filter(text_q), False
+        for token in tokens:
+            if re.search(r"[A-Za-z]", token):
+                text_tokens.append(token)
+                continue
+
+            digits_only = self._normalize_phone_digits(token)
+            if digits_only:
+                digit_fragments.append(digits_only)
+
+        conditions = []
+        for token in text_tokens:
+            conditions.append(
+                Q(first_name__icontains=token)
+                | Q(last_name__icontains=token)
+                | Q(email__icontains=token)
+                | Q(username__icontains=token)
+            )
+
+        phone_digits = "".join(digit_fragments)
+        if phone_digits:
+            regex_pattern = self._phone_regex_for_digits(phone_digits)
+            conditions.append(Q(userprofile__phone__iregex=regex_pattern))
+
+        if not conditions:
+            return queryset, False
+
+        combined_query = Q()
+        for condition in conditions:
+            combined_query &= condition
+
+        return queryset.filter(combined_query), False
 
     def get_ordering(self, request):
         user_order = getattr(request, "_user_order_choice", None) or request.GET.get("user_order")
