@@ -162,14 +162,23 @@ WSGI_APPLICATION = 'booking.wsgi.application'
 # }
 
 
+# DATABASES = {
+#     "default": dj_database_url.parse(
+#         os.environ["DATABASE_URL"],
+#         conn_max_age=600,
+#         ssl_require=False,
+#     )
+# }
 DATABASES = {
-    "default": dj_database_url.parse(
-        os.environ["DATABASE_URL"],
-        conn_max_age=600,
-        ssl_require=False,
-    )
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'appdb', # Change to your local DB name
+        'USER': 'appuser', # Change to your local user name
+        'PASSWORD': 'strong_password', # Change to your local user password
+        'HOST': 'localhost',
+        'PORT': '5432',
+    }
 }
-
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 

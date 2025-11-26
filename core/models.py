@@ -2282,6 +2282,7 @@ class ProductSale(models.Model):
 
         update_fields = kwargs.get("update_fields")
         restrict_update = update_fields is not None
+        previous_appt_id = None
 
         with transaction.atomic():
             product = Product.objects.select_for_update().get(pk=self.product_id)
@@ -2293,6 +2294,7 @@ class ProductSale(models.Model):
                 product.save(update_fields=["quantity_in_stock", "updated_at"])
             else:
                 prev = type(self).objects.select_for_update().get(pk=self.pk)
+                previous_appt_id = getattr(prev, "appointment_id", None)
                 if prev.product_id != self.product_id:
                     raise ValidationError({"product": "Changing product on an existing sale is not supported."})
                 delta = self.quantity - prev.quantity
@@ -2308,12 +2310,22 @@ class ProductSale(models.Model):
 
             super().save(*args, **kwargs)
 
+            affected_appt_ids = {previous_appt_id, self.appointment_id} - {None}
+            if affected_appt_ids:
+                for appt in Appointment.objects.select_for_update().filter(pk__in=affected_appt_ids):
+                    appt.recompute_totals(save=True)
+
     def delete(self, *args, **kwargs):
+        appt_id = getattr(self, "appointment_id", None)
         with transaction.atomic():
             product = Product.objects.select_for_update().get(pk=self.product_id)
             product.quantity_in_stock += self.quantity
             product.save(update_fields=["quantity_in_stock", "updated_at"])
             super().delete(*args, **kwargs)
+            if appt_id:
+                appt = Appointment.objects.select_for_update().filter(pk=appt_id).first()
+                if appt:
+                    appt.recompute_totals(save=True)
 
     def __str__(self):
         return f"{self.product} × {self.quantity} on {timezone.localtime(self.sold_at).strftime('%Y-%m-%d')}"
