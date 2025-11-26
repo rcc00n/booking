@@ -1597,6 +1597,13 @@
             const meta = productMetaCache[normalizedId] || {}; // CHANGED
             const url = payload?.image_url || payload?.imageUrl; // CHANGED
             const alt = payload?.image_alt || payload?.imageAlt || payload?.name; // CHANGED
+            const stockRaw = payload?.quantity_in_stock ?? payload?.stock ?? payload?.quantity; // CHANGED
+            if (Number.isFinite(stockRaw)) { // CHANGED
+                meta.stock = Number(stockRaw); // CHANGED
+            } else if (typeof stockRaw === "string" && stockRaw.trim().length) { // CHANGED
+                const parsed = Number(stockRaw); // CHANGED
+                if (Number.isFinite(parsed)) meta.stock = parsed; // CHANGED
+            } // CHANGED
             if (url) meta.imageUrl = url; // CHANGED
             if (alt) meta.imageAlt = alt; // CHANGED
             productMetaCache[normalizedId] = meta; // CHANGED
@@ -1633,6 +1640,31 @@
             img.src = meta.imageUrl; // CHANGED
             img.alt = meta.imageAlt || "Product image"; // CHANGED
             optionEl.classList.add("has-thumb"); // CHANGED
+            let stockBadge = optionEl.querySelector("[data-option-stock]"); // CHANGED
+            if (!stockBadge) { // CHANGED
+                stockBadge = document.createElement("span"); // CHANGED
+                stockBadge.setAttribute("data-option-stock", "1"); // CHANGED
+                stockBadge.style.marginLeft = "6px"; // CHANGED
+                stockBadge.style.padding = "3px 8px"; // CHANGED
+                stockBadge.style.borderRadius = "999px"; // CHANGED
+                stockBadge.style.fontSize = "12px"; // CHANGED
+                stockBadge.style.fontWeight = "600"; // CHANGED
+                stockBadge.style.background = "#eef2ff"; // CHANGED
+                stockBadge.style.color = "#4338ca"; // CHANGED
+                stockBadge.style.verticalAlign = "middle"; // CHANGED
+                optionEl.appendChild(stockBadge); // CHANGED
+            } // CHANGED
+            if (meta.stock !== undefined) { // CHANGED
+                const out = Number(meta.stock) <= 0; // CHANGED
+                stockBadge.textContent = out ? "Out of stock" : `${meta.stock} in stock`; // CHANGED
+                stockBadge.style.background = out ? "#fef2f2" : "#eef2ff"; // CHANGED
+                stockBadge.style.color = out ? "#b91c1c" : "#4338ca"; // CHANGED
+                if (out) { // CHANGED
+                    optionEl.style.backgroundColor = "#fff7f7"; // CHANGED
+                } else { // CHANGED
+                    optionEl.style.backgroundColor = ""; // CHANGED
+                } // CHANGED
+            } // CHANGED
         } // CHANGED
 
         function applyPreview(payload) {
@@ -1641,6 +1673,7 @@
             const thumb = preview.querySelector("[data-preview-thumb]");
             const img = preview.querySelector("[data-preview-image]");
             const placeholder = preview.querySelector("[data-preview-placeholder]");
+            const stockNode = preview.querySelector("[data-preview-stock]");
             const payloadObj = (payload && typeof payload === "object") ? payload : {};
             const url = payloadObj.image_url || payloadObj.imageUrl || "";
             const alt =
@@ -1669,6 +1702,22 @@
                 if (placeholder) placeholder.hidden = false;
                 preview.classList.remove("has-image");
             }
+            if (stockNode) { // CHANGED
+                const stockRaw = payloadObj.quantity_in_stock ?? payloadObj.stock ?? payloadObj.quantity; // CHANGED
+                const stock = Number(stockRaw); // CHANGED
+                if (Number.isFinite(stock)) { // CHANGED
+                    const out = stock <= 0; // CHANGED
+                    stockNode.textContent = out ? "Out of stock" : `${stock} in stock`; // CHANGED
+                    if (out) { // CHANGED
+                        stockNode.classList.add("is-out"); // CHANGED
+                    } else { // CHANGED
+                        stockNode.classList.remove("is-out"); // CHANGED
+                    } // CHANGED
+                } else { // CHANGED
+                    stockNode.textContent = "—"; // CHANGED
+                    stockNode.classList.remove("is-out"); // CHANGED
+                } // CHANGED
+            } // CHANGED
         }
 
         function buildUrl(productId) {

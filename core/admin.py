@@ -6021,6 +6021,7 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 "price": price_str,
                 "image_url": image_url,
                 "image_alt": image_alt,
+                "quantity_in_stock": getattr(product, "quantity_in_stock", None),
             }
         )  # // CHANGED
 

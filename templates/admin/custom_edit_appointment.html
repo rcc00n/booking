@@ -114,6 +114,27 @@
             color:#6b7280;
             font-size:13px;
         }
+        .ab-product-preview__meta{
+            display:flex;
+            gap:8px;
+            align-items:center;
+            font-size:12px;
+            color:#6b7280;
+        }
+        .ab-product-preview__stock{
+            padding:4px 8px;
+            border-radius:999px;
+            background:#eef2ff;
+            color:#4338ca;
+            font-weight:600;
+            display:inline-flex;
+            align-items:center;
+            gap:6px;
+        }
+        .ab-product-preview__stock.is-out{
+            background:#fef2f2;
+            color:#b91c1c;
+        }
 
         .ab-field--start-time{grid-column:1 / -1;}
         .ab-datetime{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
@@ -815,6 +836,9 @@
                                                 <div class="ab-product-preview__placeholder" data-preview-placeholder>
                                                     Product image will appear here after selection.
                                                 </div>
+                                                <div class="ab-product-preview__meta" data-preview-meta>
+                                                    <span class="ab-product-preview__stock" data-preview-stock>—</span>
+                                                </div>
                                             </div>
                                         </div>
                                         <div class="ab-field">
@@ -899,6 +923,9 @@
                                                 </div>
                                                 <div class="ab-product-preview__placeholder" data-preview-placeholder>
                                                     Product image will appear here after selection.
+                                                </div>
+                                                <div class="ab-product-preview__meta" data-preview-meta>
+                                                    <span class="ab-product-preview__stock" data-preview-stock>—</span>
                                                 </div>
                                             </div>
                                         </div>
