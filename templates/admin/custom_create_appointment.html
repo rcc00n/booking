@@ -84,6 +84,19 @@
         .ab-field select:disabled,
         .combo.is-disabled .combo-input{background:var(--ab-gray-100);color:#9ca3af}
 
+        .ab-service-grid{
+            display:grid;
+            grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+            gap:10px;
+            align-items:start;
+        }
+        .ab-service-col{display:flex;flex-direction:column;gap:4px}
+        .ab-service-sub{
+            font-size:12px;
+            color:var(--ab-muted);
+            margin:0 0 2px 2px;
+        }
+
         .ab-field--timeslots{grid-column:1 / -1;}
 
         /* “Duration” — абсолютная подсказка под полем Service, не влияет на раскладку */
@@ -376,8 +389,8 @@
             {% csrf_token %}
             <input type="hidden" name="return_to_date" value="{{ return_to_date|default:'' }}">
 
-            <h2>Создание записи</h2>
-            <p class="ab-sub">Сначала выберите клиента, затем добавьте одну или несколько услуг.</p>
+            <h2>Create Booking</h2>
+            <p class="ab-sub">Select a client first, then add one or more services.</p>
 
             {# Глобальные ошибки (если пришли с бэка) #}
             {% if form_errors %}
@@ -433,7 +446,7 @@
                     {% if field_errors.client %}
                         {% for e in field_errors.client %}<div class="ab-field-error">{{ e }}</div>{% endfor %}
                     {% endif %}
-                    <div class="hint">После выбора клиента ниже станет доступно добавление услуг.</div>
+                    <div class="hint">Add-on services become available after a client is selected.</div>
                 </div>
             </div>
 
@@ -541,6 +554,19 @@
             const SERVICES_BY_MASTER = JSON.parse(document.getElementById('ab-services-by-master').textContent || '{}');
             const INITIAL_FIRST = JSON.parse(document.getElementById('ab-initial-first').textContent || '{}');
             const SERVICE_FORMS = JSON.parse(document.getElementById('ab-service-forms').textContent || '{}');
+            const SERVICE_INDEX = (() => {
+                const map = new Map();
+                Object.values(SERVICES_BY_MASTER || {}).forEach(list => {
+                    (list || []).forEach(svc => {
+                        if (!svc || svc.id == null) return;
+                        const key = String(svc.id);
+                        if (!map.has(key)){
+                            map.set(key, svc);
+                        }
+                    });
+                });
+                return map;
+            })();
             const INTAKE_FORMS = JSON.parse(document.getElementById('ab-intake-forms').textContent || '{}');
             const GST_PERCENT = Number(JSON.parse(document.getElementById('ab-gst-percent').textContent || '"5.0"')) || 5;
             const GST_ENABLED = Boolean(JSON.parse(document.getElementById('ab-gst-enabled').textContent || 'true'));
@@ -973,69 +999,142 @@
                 select.appendChild(buildOption('', '---------'));
                 masters.forEach(m => select.appendChild(buildOption(String(m.id), m.label)));
             }
-            function populateServices(select, masterId, options){
+            function normalizeCategoryLabel(value){
+                const label = (value == null ? '' : String(value)).trim();
+                return label || 'Other';
+            }
+
+            function getServicesForMaster(masterId){
+                const mid = IS_MASTER && CURRENT_MASTER_ID
+                    ? CURRENT_MASTER_ID
+                    : (masterId !== undefined && masterId !== null ? String(masterId) : '');
+                const list = SERVICES_BY_MASTER[String(mid)];
+                return Array.isArray(list) ? list : [];
+            }
+
+            function collectCategories(masterId){
+                const seen = new Set();
+                const categories = [];
+                getServicesForMaster(masterId).forEach(svc => {
+                    const label = normalizeCategoryLabel(svc && svc.category);
+                    if (!seen.has(label)){
+                        seen.add(label);
+                        categories.push(label);
+                    }
+                });
+                return categories.sort((a, b) => a.localeCompare(b));
+            }
+
+            function toggleComboDisabled(select, disabled){
+                if (!select) return;
+                select.disabled = !!disabled;
+                const wrapper = select.closest('.combo');
+                if (wrapper){
+                    wrapper.classList.toggle('is-disabled', !!disabled);
+                    const input = wrapper.querySelector('.combo-input');
+                    if (input){
+                        input.disabled = !!disabled;
+                    }
+                }
+            }
+
+            function populateCategories(select, masterId, options){
+                if (!select) return [];
                 const opts = options || {};
                 const previous = opts.resetSelection ? '' : select.value;
-
+                const categories = collectCategories(masterId);
                 select.innerHTML = '';
-                select.appendChild(buildOption('', '---------'));
-
-                const mid = IS_MASTER && CURRENT_MASTER_ID ? CURRENT_MASTER_ID : String(masterId || '');
-                const list = SERVICES_BY_MASTER[String(mid)] || [];
-                const grouped = new Map();
-                list.forEach(svc => {
-                    const cat = ((svc.category || '') + '').trim() || 'Other';
-                    if (!grouped.has(cat)){
-                        grouped.set(cat, []);
-                    }
-                    grouped.get(cat).push(svc);
-                });
-
-                Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b)).forEach(cat => {
-                    const grp = document.createElement('optgroup');
-                    grp.label = cat;
-                    grouped.get(cat).forEach(svc => {
-                        const o = buildOption(String(svc.id), svc.name);
-                        o.dataset.price = svc.base_price;
-                        o.dataset.duration = svc.duration_min;
-                        if (svc.total_duration_min != null) {
-                            o.dataset.totalDuration = svc.total_duration_min;
-                        }
-                        o.dataset.isTaxable = svc.is_taxable ? "1" : "0";
-                        o.dataset.category = cat;
-                        grp.appendChild(o);
-                    });
-                    select.appendChild(grp);
-                });
-
-                if (!opts.resetSelection && previous){
+                const hasMaster = masterId !== undefined && masterId !== null && String(masterId).trim() !== '';
+                const placeholder = hasMaster ? 'Select category...' : 'Select master first';
+                select.appendChild(buildOption('', placeholder));
+                categories.forEach(cat => select.appendChild(buildOption(cat, cat)));
+                if (!opts.resetSelection && previous && categories.includes(previous)){
                     select.value = previous;
-                } else if (opts.resetSelection){
+                } else {
+                    select.value = '';
+                }
+                const disabled = categories.length === 0 || !hasMaster;
+                toggleComboDisabled(select, disabled);
+                const combo = opts.combo;
+                if (combo && typeof combo.rebuildFromSelect === 'function'){
+                    combo.rebuildFromSelect();
+                    if (disabled && typeof combo.clear === 'function'){
+                        combo.clear();
+                    } else if (typeof combo.syncFromSelect === 'function'){
+                        combo.syncFromSelect();
+                    }
+                }
+                return categories;
+            }
+
+            function populateServices(select, masterId, category, options){
+                if (!select) return [];
+                const opts = options || {};
+                const previous = opts.resetSelection ? '' : select.value;
+                const list = getServicesForMaster(masterId);
+                const hasCategory = category !== undefined && category !== null && String(category).trim() !== '';
+                const targetCategory = normalizeCategoryLabel(category);
+                select.innerHTML = '';
+                const placeholder = hasCategory ? 'Select service...' : 'Select a category first';
+                select.appendChild(buildOption('', placeholder));
+                if (!hasCategory){
+                    select.value = '';
+                    toggleComboDisabled(select, true);
+                    const combo = opts.combo;
+                    if (combo && typeof combo.clear === 'function'){
+                        combo.clear();
+                    }
+                    return [];
+                }
+                const filtered = list
+                    .filter(svc => normalizeCategoryLabel(svc && svc.category) === targetCategory)
+                    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+                filtered.forEach(svc => {
+                    const o = buildOption(String(svc.id), svc.name);
+                    o.dataset.price = svc.base_price;
+                    o.dataset.duration = svc.duration_min;
+                    if (svc.total_duration_min != null) {
+                        o.dataset.totalDuration = svc.total_duration_min;
+                    }
+                    o.dataset.isTaxable = svc.is_taxable ? "1" : "0";
+                    o.dataset.category = normalizeCategoryLabel(svc.category);
+                    select.appendChild(o);
+                });
+
+                const hasPrevious = filtered.some(svc => String(svc.id) === String(previous));
+                if (!opts.resetSelection && previous && hasPrevious){
+                    select.value = previous;
+                } else {
                     select.value = '';
                 }
 
-                select.disabled = list.length === 0;
+                const disabled = filtered.length === 0 || !hasCategory;
+                toggleComboDisabled(select, disabled);
 
                 const combo = opts.combo;
                 if (combo && typeof combo.rebuildFromSelect === 'function'){
                     combo.rebuildFromSelect();
-                    if (opts.resetSelection && typeof combo.clear === 'function'){
-                        combo.clear();
-                    } else if (!opts.resetSelection && typeof combo.syncFromSelect === 'function'){
+                    if (opts.resetSelection || disabled){
+                        if (typeof combo.clear === 'function'){
+                            combo.clear();
+                        }
+                    } else if (typeof combo.syncFromSelect === 'function'){
                         combo.syncFromSelect();
                     }
-                } else if (opts.resetSelection){
-                    select.value = '';
                 }
-
-                const wrapper = select.closest('.combo');
-                if (wrapper){
-                    wrapper.classList.toggle('is-disabled', select.disabled);
-                    const input = wrapper.querySelector('.combo-input');
-                    if (input){
-                        input.disabled = select.disabled;
-                    }
+                return filtered;
+            }
+            function detectCategoryForService(serviceId, masterId){
+                if (!serviceId) return null;
+                const mid = masterId != null ? masterId : CURRENT_MASTER_ID;
+                const scoped = getServicesForMaster(mid);
+                const match = scoped.find(svc => String(svc.id) === String(serviceId));
+                if (match){
+                    return normalizeCategoryLabel(match.category);
                 }
+                const fallback = SERVICE_INDEX.get(String(serviceId));
+                return fallback ? normalizeCategoryLabel(fallback.category) : null;
             }
             function updateRowSummary(row){
                 const priceInput = row.querySelector('.js-price');
@@ -1768,6 +1867,12 @@
                     wrap.appendChild(list);
                 }
                 selectEl.classList.add('ab-hidden');
+                if (selectEl.disabled){
+                    wrap.classList.add('is-disabled');
+                    if (input){
+                        input.disabled = true;
+                    }
+                }
 
                 function collectGroups(){
                     const groups = [];
@@ -2039,13 +2144,24 @@
         <div class="ab-field-error js-err-master"></div>
       </div>
 
-      <div class="ab-field" data-field="service">
+      <div class="ab-field ab-field--service" data-field="service">
         <label>Service <span style="color:#ef4444">*</span></label>
-        <select class="js-service" required disabled>
-          <option value="">---------</option>
-        </select>
-        <!-- фиксированная подсказка; не двигает селект -->
-        <div class="hint hint--duration js-service-hint" aria-live="polite"></div>
+        <div class="ab-service-grid">
+          <div class="ab-service-col">
+            <span class="ab-service-sub">Category</span>
+            <select class="js-category" disabled>
+              <option value="">Select master first</option>
+            </select>
+          </div>
+          <div class="ab-service-col">
+            <span class="ab-service-sub">Service</span>
+            <select class="js-service" required disabled>
+              <option value="">Select a category first</option>
+            </select>
+            <!-- fixed hint; does not shift layout -->
+            <div class="hint hint--duration js-service-hint" aria-live="polite"></div>
+          </div>
+        </div>
         <div class="ab-field-error js-err-service"></div>
       </div>
 
@@ -2144,6 +2260,7 @@
             function hookRow(row, idx){
                 const name = (suffix)=> `items-${idx}-${suffix}`;
                 const masterSel = row.querySelector('.js-master');
+                const categorySel = row.querySelector('.js-category');
                 const serviceSel= row.querySelector('.js-service');
                 const dateInp   = row.querySelector('.js-date');
                 const timeInp   = row.querySelector('.js-time');
@@ -2161,6 +2278,20 @@
                     const taxable = !!(opt && opt.dataset && opt.dataset.isTaxable === "1");
                     row.dataset.taxable = taxable ? "1" : "0";
                     return taxable;
+                };
+
+                const resetServiceFields = ({ resetDiscount = false } = {}) => {
+                    if (hint) hint.textContent = '';
+                    if (priceInp) priceInp.value = '';
+                    if (durationInp) {
+                        durationInp.value = '';
+                        durationInp.dataset.auto = '1';
+                    }
+                    if (resetDiscount && discountInp) {
+                        discountInp.value = '';
+                    }
+                    row.dataset.finalPrice = "0.00";
+                    syncTaxableMeta();
                 };
 
                 resetPromoSelect(promoSel, { disabled: true });
@@ -2240,42 +2371,96 @@
                     validationToggle,
                 });
 
+                const categoryCombo = makeComboFromSelect(categorySel, 'Type to search category...');
                 let serviceCombo = makeComboFromSelect(serviceSel, 'Type to search service...');
+
+                const repopulateCategories = ({ resetSelection = false } = {}) => {
+                    return populateCategories(categorySel, masterSel.value, { combo: categoryCombo, resetSelection });
+                };
+
+                const repopulateServices = ({ resetSelection = false } = {}) => {
+                    const categoryValue = categorySel ? categorySel.value : '';
+                    return populateServices(serviceSel, masterSel.value, categoryValue, { combo: serviceCombo, resetSelection });
+                };
+
+                const ensureCategoryMatchesService = () => {
+                    if (!categorySel || !serviceSel.value) return null;
+                    const detected = detectCategoryForService(serviceSel.value, masterSel.value);
+                    if (!detected) return null;
+                    const known = collectCategories(masterSel.value);
+                    if (known.length && !known.includes(detected)){
+                        populateCategories(categorySel, masterSel.value, { combo: categoryCombo });
+                    }
+                    categorySel.value = detected;
+                    if (categoryCombo && typeof categoryCombo.syncFromSelect === 'function'){
+                        categoryCombo.syncFromSelect();
+                    }
+                    return detected;
+                };
 
                 // режим мастера: фиксируем мастера
                 if (IS_MASTER && CURRENT_MASTER_ID){
                     masterSel.value = CURRENT_MASTER_ID;
                     masterSel.setAttribute('disabled', 'disabled');
                     ensureHiddenClone(masterSel);
-                    populateServices(serviceSel, CURRENT_MASTER_ID, { combo: serviceCombo });
-                } else {
-                    populateServices(serviceSel, masterSel.value, { combo: serviceCombo });
                 }
+                repopulateCategories({ resetSelection: true });
+                repopulateServices({ resetSelection: true });
                 syncTaxableMeta();
 
                 masterSel.addEventListener('change', () => {
-                    populateServices(serviceSel, masterSel.value, { combo: serviceCombo, resetSelection: true });
-                    hint.textContent = ''; priceInp.value = '';
-                    if (durationInp) {
-                        durationInp.value = '';
-                        durationInp.dataset.auto = '1';
+                    const preserveTime = !!(timeInp && timeInp.value);
+                    repopulateCategories({ resetSelection: true });
+                    if (categoryCombo && typeof categoryCombo.clear === 'function'){
+                        categoryCombo.clear();
                     }
-                    if (discountInp) {
-                        discountInp.value = '';
+                    if (categorySel) {
+                        categorySel.value = '';
                     }
-                    syncTaxableMeta();
+                    repopulateServices({ resetSelection: true });
+                    if (serviceCombo && typeof serviceCombo.clear === 'function'){
+                        serviceCombo.clear();
+                    }
+                    serviceSel.value = '';
+                    resetServiceFields({ resetDiscount: true });
                     recalcGrandTotal();
                     renderIntakeForms();
-                    const preserveTime = !!(timeInp && timeInp.value);
                     if (availability) availability.refresh({ preserveSelection: preserveTime });
                     refreshPromos({ selected: '' });
                 });
+
+                if (categorySel){
+                    categorySel.addEventListener('change', () => {
+                        const preserveTime = !!(timeInp && timeInp.value);
+                        repopulateServices({ resetSelection: true });
+                        if (serviceCombo && typeof serviceCombo.clear === 'function'){
+                            serviceCombo.clear();
+                        }
+                        serviceSel.value = '';
+                        resetServiceFields({ resetDiscount: true });
+                        recalcGrandTotal();
+                        renderIntakeForms();
+                        if (availability) availability.refresh({ preserveSelection: preserveTime });
+                        refreshPromos({ selected: '' });
+                    });
+                }
 
                 serviceSel.addEventListener('change', () => {
                     const opt = serviceSel.selectedOptions[0];
                     const price = opt && opt.dataset ? opt.dataset.price : '';
                     const dur   = opt && opt.dataset ? opt.dataset.duration : '';
                     const totalDur = opt && opt.dataset ? (opt.dataset.totalDuration || dur) : '';
+                    if (opt && opt.dataset && categorySel){
+                        const cat = opt.dataset.category;
+                        if (cat && categorySel.value !== cat){
+                            categorySel.value = cat;
+                            if (categoryCombo && typeof categoryCombo.syncFromSelect === 'function'){
+                                categoryCombo.syncFromSelect();
+                            }
+                        }
+                    } else {
+                        ensureCategoryMatchesService();
+                    }
                     priceInp.value = price || '';
                     if (durationInp) {
                         const autoMode = durationInp.dataset.auto !== '0';
@@ -2306,7 +2491,7 @@
                 refreshPromos({ preserve: true });
 
                 // вернём наружу, чтобы синхронизировать при префилле
-                return { serviceCombo, availability, refreshPromos, syncTaxableMeta };
+                return { serviceCombo, categoryCombo, availability, refreshPromos, syncTaxableMeta };
             }
 
             function addRow(prefill){
@@ -2323,6 +2508,7 @@
                 const ref = hookRow(row, idx);
 
                 const masterSel = row.querySelector('.js-master');
+                const categorySel= row.querySelector('.js-category');
                 const serviceSel= row.querySelector('.js-service');
                 const dateInp   = row.querySelector('.js-date');
                 const timeInp   = row.querySelector('.js-time');
@@ -2333,6 +2519,7 @@
                 const validationToggle = row.querySelector('.js-validation-toggle');
                 
                 const comboRef = ref && ref.serviceCombo ? ref.serviceCombo : null;
+                const categoryCombo = ref && ref.categoryCombo ? ref.categoryCombo : null;
                 let resolvedMaster = masterSel.value;
                 if (IS_MASTER && CURRENT_MASTER_ID){
                     resolvedMaster = CURRENT_MASTER_ID;
@@ -2343,7 +2530,24 @@
                     resolvedMaster = String(prefill.master);
                     masterSel.value = resolvedMaster;
                 }
-                populateServices(serviceSel, resolvedMaster, { combo: comboRef });
+                populateCategories(categorySel, resolvedMaster, { combo: categoryCombo, resetSelection: true });
+
+                let resolvedCategory = '';
+                if (prefill && prefill.service){
+                    resolvedCategory = detectCategoryForService(String(prefill.service), resolvedMaster) || '';
+                }
+                if (resolvedCategory && categorySel){
+                    const exists = Array.from(categorySel.options || []).some(opt => opt.value === resolvedCategory);
+                    if (!exists){
+                        categorySel.appendChild(buildOption(resolvedCategory, resolvedCategory));
+                    }
+                    categorySel.value = resolvedCategory;
+                    if (categoryCombo && typeof categoryCombo.syncFromSelect === 'function'){
+                        categoryCombo.syncFromSelect();
+                    }
+                }
+
+                populateServices(serviceSel, resolvedMaster, categorySel ? categorySel.value : resolvedCategory, { combo: comboRef, resetSelection: true });
 
                 if (prefill && prefill.service){
                     serviceSel.value = String(prefill.service);
