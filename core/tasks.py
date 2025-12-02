@@ -320,7 +320,7 @@ def _process_reminder_window(now, ahead: timedelta, label: str) -> int:
             continue
 
         start_local = timezone.localtime(appt.start_time).strftime("%d %b %Y, %H:%M")
-        remaining, subj_suffix = _humanize_remaining(appt.start_time - now)
+        remaining, subj_suffix = _humanize_remaining(appt.start_time - now - timedelta(hours=1))
         service_name, master_name = _label_service_master(appt)
         items_lines = _items_summary_lines(appt)
 
