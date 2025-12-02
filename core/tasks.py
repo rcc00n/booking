@@ -320,7 +320,9 @@ def _process_reminder_window(now, ahead: timedelta, label: str) -> int:
             continue
 
         start_local = timezone.localtime(appt.start_time).strftime("%d %b %Y, %H:%M")
-        remaining, subj_suffix = _humanize_remaining(appt.start_time - now - timedelta(hours=1))
+        # Subtract the window tolerance so we don't round up when the cron fires a bit early.
+        delta_for_display = appt.start_time - now - timedelta(minutes=WINDOW_MINUTES)
+        remaining, subj_suffix = _humanize_remaining(delta_for_display)
         service_name, master_name = _label_service_master(appt)
         items_lines = _items_summary_lines(appt)
 
