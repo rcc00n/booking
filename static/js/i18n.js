@@ -471,25 +471,25 @@
           openCart: 'Open cart'
         },
         hero: {
-          badge: 'Luxury wellness',
+          badge: 'Премиальный велнес',
           title: 'Запишитесь за 2 клика',
           subtitle: 'Выберите услугу, мастера и время — остальное сделаем мы.',
-          description: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
+          description: 'Выберите услугу, специалиста и время — остальное сделаем мы.',
           cta: 'Смотреть услуги ↓',
-          ctaPrimary: 'Book now',
-          ctaSecondary: 'Explore categories',
+          ctaPrimary: 'Записаться сейчас',
+          ctaSecondary: 'Смотреть категории',
           stats: {
             clients: {
               value: '3.2K+',
-              label: 'Happy clients this month'
+              label: 'Довольные клиенты за месяц'
             },
             specialists: {
               value: '42',
-              label: 'Verified specialists online'
+              label: 'Проверенных специалистов онлайн'
             },
             speed: {
               value: '2 clicks',
-              label: 'Average booking time'
+              label: 'Среднее время записи'
             }
           }
         },
@@ -503,17 +503,17 @@
           title: 'Услуги'
         },
         filters: {
-          searchLabel: 'Search service',
-          categoryLabel: 'Category',
-          searchPlaceholder: 'Найти услугу…',
+          searchLabel: 'Поиск услуги',
+          categoryLabel: 'Категория',
+          searchPlaceholder: 'Найдите услугу…',
           allCategories: 'Все категории',
-          submit: 'Найти',
+          submit: 'Искать',
           reset: 'Сбросить'
         },
         categories: {
-          title: 'Popular Services',
-          subtitle: 'Discover trending treatments curated by Malva.',
-          all: 'All Services'
+          title: 'Популярные услуги',
+          subtitle: 'Откройте трендовые процедуры, отобранные Malva.',
+          all: 'Все услуги'
         },
         search: {
           liveTitle: 'Результаты поиска',
@@ -882,25 +882,25 @@
           openCart: 'Open cart'
         },
         hero: {
-          badge: 'Luxury wellness',
+          badge: 'लक्ज़री वेलनेस',
           title: 'सिर्फ 2 क्लिक में अपॉइंटमेंट बुक करें',
           subtitle: 'सेवा, विशेषज्ञ और समय चुनें — बाकी हम सम्भालेंगे।',
-          description: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
+          description: 'सेवा, विशेषज्ञ और समय चुनें — बाकी हम संभाल लेंगे।',
           cta: 'सेवाएँ देखें ↓',
-          ctaPrimary: 'Book now',
-          ctaSecondary: 'Explore categories',
+          ctaPrimary: 'अभी बुक करें',
+          ctaSecondary: 'श्रेणियाँ देखें',
           stats: {
             clients: {
               value: '3.2K+',
-              label: 'Happy clients this month'
+              label: 'इस महीने के खुश ग्राहक'
             },
             specialists: {
               value: '42',
-              label: 'Verified specialists online'
+              label: 'सत्यापित विशेषज्ञ ऑनलाइन'
             },
             speed: {
               value: '2 clicks',
-              label: 'Average booking time'
+              label: 'औसत बुकिंग समय'
             }
           }
         },
@@ -914,17 +914,17 @@
           title: 'सेवाएँ'
         },
         filters: {
-          searchLabel: 'Search service',
-          categoryLabel: 'Category',
+          searchLabel: 'सेवा खोजें',
+          categoryLabel: 'श्रेणी',
           searchPlaceholder: 'सेवा खोजें…',
           allCategories: 'सभी श्रेणियाँ',
           submit: 'खोजें',
           reset: 'रीसेट'
         },
         categories: {
-          title: 'Popular Services',
-          subtitle: 'Discover trending treatments curated by Malva.',
-          all: 'All Services'
+          title: 'लोकप्रिय सेवाएँ',
+          subtitle: 'Malva द्वारा चुने गए ट्रेंडिंग उपचार खोजें।',
+          all: 'सभी सेवाएँ'
         },
         search: {
           liveTitle: 'खोज परिणाम',
@@ -1293,25 +1293,25 @@
           openCart: 'Open cart'
         },
         hero: {
-          badge: 'Luxury wellness',
+          badge: 'Преміальний велнес',
           title: 'Запишіться за 2 кліки',
           subtitle: 'Обирайте послугу, майстра та час — решту зробимо ми.',
-          description: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
+          description: 'Обирайте послугу, спеціаліста та час — решту зробимо ми.',
           cta: 'Переглянути послуги ↓',
-          ctaPrimary: 'Book now',
-          ctaSecondary: 'Explore categories',
+          ctaPrimary: 'Записатися',
+          ctaSecondary: 'Переглянути категорії',
           stats: {
             clients: {
               value: '3.2K+',
-              label: 'Happy clients this month'
+              label: 'Щасливі клієнти цього місяця'
             },
             specialists: {
               value: '42',
-              label: 'Verified specialists online'
+              label: 'Підтверджені спеціалісти онлайн'
             },
             speed: {
               value: '2 clicks',
-              label: 'Average booking time'
+              label: 'Середній час бронювання'
             }
           }
         },
@@ -1325,17 +1325,17 @@
           title: 'Послуги'
         },
         filters: {
-          searchLabel: 'Search service',
-          categoryLabel: 'Category',
-          searchPlaceholder: 'Знайти послугу…',
+          searchLabel: 'Пошук послуги',
+          categoryLabel: 'Категорія',
+          searchPlaceholder: 'Знайдіть послугу…',
           allCategories: 'Усі категорії',
-          submit: 'Знайти',
+          submit: 'Шукати',
           reset: 'Скинути'
         },
         categories: {
-          title: 'Popular Services',
-          subtitle: 'Discover trending treatments curated by Malva.',
-          all: 'All Services'
+          title: 'Популярні послуги',
+          subtitle: 'Відкрийте трендові процедури, підібрані Malva.',
+          all: 'Усі послуги'
         },
         search: {
           liveTitle: 'Результати пошуку',
@@ -1692,25 +1692,25 @@
           title: 'Malva Booking — Services'
         },
         hero: {
-          badge: 'Luxury wellness',
+          badge: 'Bien-être haut de gamme',
           title: 'Réservez votre rendez-vous en 2 clics',
           subtitle: 'Choisissez une prestation, un expert et un horaire — nous nous occupons du reste.',
-          description: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
+          description: 'Choisissez un service, un spécialiste et un horaire — nous nous occupons du reste.',
           cta: 'Voir les services ↓',
-          ctaPrimary: 'Book now',
-          ctaSecondary: 'Explore categories',
+          ctaPrimary: 'Réserver maintenant',
+          ctaSecondary: 'Explorer les catégories',
           stats: {
             clients: {
               value: '3.2K+',
-              label: 'Happy clients this month'
+              label: 'Clients satisfaits ce mois-ci'
             },
             specialists: {
               value: '42',
-              label: 'Verified specialists online'
+              label: 'Spécialistes vérifiés en ligne'
             },
             speed: {
               value: '2 clicks',
-              label: 'Average booking time'
+              label: 'Temps moyen de réservation'
             }
           }
         },
@@ -1724,17 +1724,17 @@
           title: 'Services'
         },
         filters: {
-          searchLabel: 'Search service',
-          categoryLabel: 'Category',
+          searchLabel: 'Rechercher un service',
+          categoryLabel: 'Catégorie',
           searchPlaceholder: 'Rechercher un service…',
           allCategories: 'Toutes les catégories',
           submit: 'Rechercher',
           reset: 'Réinitialiser'
         },
         categories: {
-          title: 'Popular Services',
-          subtitle: 'Discover trending treatments curated by Malva.',
-          all: 'All Services'
+          title: 'Services populaires',
+          subtitle: 'Découvrez les soins tendance sélectionnés par Malva.',
+          all: 'Tous les services'
         },
         search: {
           liveTitle: 'Résultats de recherche',
@@ -2115,25 +2115,25 @@
           openCart: 'Open cart'
         },
         hero: {
-          badge: 'Luxury wellness',
+          badge: 'رفاهية فاخرة',
           title: 'احجز موعدك خلال خطوتين',
           subtitle: 'اختر الخدمة، الخبير، والوقت — ونحن سنتولى الباقي.',
-          description: 'Pick a service, a specialist, and a time — we’ll handle the rest.',
+          description: 'اختر الخدمة، الأخصائي والوقت — وسنتولى الباقي.',
           cta: 'استعراض الخدمات ↓',
-          ctaPrimary: 'Book now',
-          ctaSecondary: 'Explore categories',
+          ctaPrimary: 'احجز الآن',
+          ctaSecondary: 'استكشاف الفئات',
           stats: {
             clients: {
               value: '3.2K+',
-              label: 'Happy clients this month'
+              label: 'عملاء سعداء هذا الشهر'
             },
             specialists: {
               value: '42',
-              label: 'Verified specialists online'
+              label: 'متخصصون موثوقون متصلون'
             },
             speed: {
               value: '2 clicks',
-              label: 'Average booking time'
+              label: 'متوسط وقت الحجز'
             }
           }
         },
@@ -2147,17 +2147,17 @@
           title: 'الخدمات'
         },
         filters: {
-          searchLabel: 'Search service',
-          categoryLabel: 'Category',
+          searchLabel: 'البحث عن خدمة',
+          categoryLabel: 'الفئة',
           searchPlaceholder: 'ابحث عن خدمة…',
           allCategories: 'كل الفئات',
           submit: 'بحث',
           reset: 'إعادة التعيين'
         },
         categories: {
-          title: 'Popular Services',
-          subtitle: 'Discover trending treatments curated by Malva.',
-          all: 'All Services'
+          title: 'الخدمات الشائعة',
+          subtitle: 'اكتشف العلاجات الرائجة التي اختارتها مالفا.',
+          all: 'كل الخدمات'
         },
         search: {
           liveTitle: 'نتائج البحث',
