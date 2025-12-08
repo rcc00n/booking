@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
+import requests
 from django.conf import settings
 
 from core.models import Service, ServiceCategory, TranslationCache
@@ -22,6 +23,8 @@ SUPPORTED_LANGS = getattr(
 DEFAULT_SOURCE_LANG = "en"
 MAX_TEXT_LENGTH = 1200  # guardrail for large descriptions
 MAX_ITEMS_PER_BATCH = 50
+REMOTE_FALLBACK_ENABLED = getattr(settings, "TRANSLATION_REMOTE_FALLBACK", True)
+REMOTE_FALLBACK_TIMEOUT = getattr(settings, "TRANSLATION_REMOTE_TIMEOUT", 5)
 
 _TRANSLATOR_CACHE: dict[tuple[str, str], Callable[[str], str] | None] = {}
 _MISSING_TRANSLATORS: set[tuple[str, str]] = set()
@@ -127,19 +130,44 @@ def _translate_batch(items: list[_TextItem], target_lang: str) -> dict[str, str]
     Translate a batch of items using an offline Argos model.
     """
     translator = _get_argos_translator(DEFAULT_SOURCE_LANG, target_lang)
-    if not translator:
-        return {}
-
     translated: dict[str, str] = {}
+    if translator:
+        for item in items:
+            try:
+                result = translator(item.text)
+            except Exception:
+                logger.warning("Translation failed for key=%s", item.key, exc_info=True)
+                continue
+            if not result:
+                continue
+            translated[item.source_hash] = str(result).strip()
+
+    if translated or not REMOTE_FALLBACK_ENABLED:
+        return translated
+
+    # Fallback to a lightweight, network-based translator (Google public endpoint).
     for item in items:
         try:
-            result = translator(item.text)
+            resp = requests.get(
+                "https://translate.googleapis.com/translate_a/single",
+                params={
+                    "client": "gtx",
+                    "sl": DEFAULT_SOURCE_LANG,
+                    "tl": target_lang,
+                    "dt": "t",
+                    "q": item.text,
+                },
+                timeout=REMOTE_FALLBACK_TIMEOUT,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            translated_value = data[0][0][0] if data and data[0] and data[0][0] else ""
+            if translated_value:
+                translated[item.source_hash] = str(translated_value).strip()
         except Exception:
-            logger.warning("Translation failed for key=%s", item.key, exc_info=True)
+            logger.warning("Remote translation failed for key=%s", item.key, exc_info=True)
             continue
-        if not result:
-            continue
-        translated[item.source_hash] = str(result).strip()
+
     return translated
 
 
