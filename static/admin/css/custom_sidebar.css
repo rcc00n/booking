@@ -101,16 +101,18 @@ body.sidebar-hover .main-footer {
 }
 
 /* List styling */
-.icon-sidebar ul {
+.icon-sidebar > ul {
+    display: flex;
+    flex-direction: column;
     list-style: none;
     padding: 0 0 2rem;
     margin: 0;
     overflow-y: auto;
     flex: 1;
 }
-.sidebar-footer {
+.sidebar-footer-item {
+    margin-top: auto;
     padding: 1rem 1.3vh 1.6rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 .sidebar-footer__link {
     display: flex;

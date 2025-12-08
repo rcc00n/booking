@@ -150,13 +150,13 @@
                     </ul>
                 </li>
                 {% endif %}
+                <li class="sidebar-footer-item">
+                    <a href="{% url 'admin:core_sitebranding_changelist' %}" class="sidebar-footer__link">
+                        <img src="{% static 'admin/icons/logo.png' %}" alt="Branding settings">
+                        <span class="sidebar-label">Branding</span>
+                    </a>
+                </li>
             </ul>
-            <div class="sidebar-footer">
-                <a href="{% url 'admin:core_sitebranding_changelist' %}" class="sidebar-footer__link">
-                    <img src="{% static 'admin/icons/logo.png' %}" alt="Branding settings">
-                    <span class="sidebar-label">Branding</span>
-                </a>
-            </div>
         </aside>
     <main class="main-content">
         <style>
