@@ -6,7 +6,6 @@ amqp==5.3.1
 annotated-types==0.7.0
 asgiref==3.9.1
 attrs==25.3.0
-argostranslate==1.9.1
 billiard==4.2.1
 boto3==1.39.4
 botocore==1.39.4
