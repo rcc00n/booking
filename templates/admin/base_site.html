@@ -151,7 +151,7 @@
                 </li>
                 {% endif %}
             </ul>
-            {% if request.user.has_perm('core.change_sitebranding') %}
+            {% if perms.core.change_sitebranding %}
             <div class="sidebar-footer">
                 <a href="{% url 'admin:core_sitebranding_changelist' %}" class="sidebar-footer__link">
                     <img src="{% static 'admin/icons/logo.png' %}" alt="Branding settings">
