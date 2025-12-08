@@ -7,7 +7,7 @@ from django.db.models import Prefetch, Q
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
-from django.views.decorators.csrf import csrf_exempt, csrf_protect
+from django.views.decorators.csrf import csrf_exempt, csrf_protect, ensure_csrf_cookie
 from django.views.generic import TemplateView
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
@@ -159,6 +159,7 @@ def _build_catalog_context(request):
         "uncategorized": services_qs.filter(category__isnull=True),
     }
 
+@ensure_csrf_cookie
 def public_mainmenu(request):
     """
     Публичная главная страница (каталог). Доступна всем.
