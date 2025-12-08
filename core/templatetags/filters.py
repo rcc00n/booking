@@ -181,6 +181,7 @@ def service_payload(service):
         "id": str(getattr(service, "pk", "")),
         "name": getattr(service, "name", "") or "",
         "category": getattr(getattr(service, "category", None), "name", "") or "",
+        "category_id": getattr(service, "category_id", None) or "",
         "description": description,
         "duration_min": getattr(service, "duration_min", 0) or 0,
         "extra_time_min": getattr(service, "extra_time_min", 0) or 0,

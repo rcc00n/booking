@@ -200,6 +200,16 @@ USE_I18N = True
 
 USE_TZ = True
 
+# UI languages supported on the public catalog and dashboard.
+SUPPORTED_UI_LANGS = (
+    "en",
+    "ru",
+    "uk",
+    "fr",
+    "ar",
+    "hi",
+)
+
 # Сессия истекает через 1 час (3600 секунд)
 SESSION_COOKIE_AGE = 3600
 

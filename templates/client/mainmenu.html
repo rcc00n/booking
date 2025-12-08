@@ -173,7 +173,10 @@
               <select name="cat">
                 <option value="" data-i18n="services.filters.allCategories">All categories</option>
                 {% for c in filter_categories %}
-                  <option value="{{ c.id }}" {% if active_category == c.id|stringformat:'s' %}selected{% endif %}>{{ c.name }}</option>
+                  <option value="{{ c.id }}"
+                          data-category-id="{{ c.id }}"
+                          data-category-name-original="{{ c.name|escape }}"
+                          {% if active_category == c.id|stringformat:'s' %}selected{% endif %}>{{ c.name }}</option>
                 {% endfor %}
               </select>
             </div>
@@ -201,7 +204,9 @@
            data-i18n="services.categories.all">All Services</a>
         {% for c in filter_categories %}
           <a href="?cat={{ c.id }}#services"
-             class="category-pill{% if active_category == c.id|stringformat:'s' %} is-active{% endif %}">{{ c.name }}</a>
+             class="category-pill{% if active_category == c.id|stringformat:'s' %} is-active{% endif %}"
+             data-category-id="{{ c.id }}"
+             data-category-name-original="{{ c.name|escape }}">{{ c.name }}</a>
         {% endfor %}
       </div>
     </section>
@@ -228,7 +233,7 @@
                 {% endif %}
                 {% if s.category or s.get_active_discount %}
                   <div class="service-card__tags">
-                    {% if s.category %}<span class="service-card__tag">{{ s.category.name }}</span>{% endif %}
+                    {% if s.category %}<span class="service-card__tag" data-category-id="{{ s.category.id }}" data-category-name-original="{{ s.category.name|escape }}">{{ s.category.name }}</span>{% endif %}
                     {% with disc=s.get_active_discount %}
                       {% if disc %}
                         <span class="service-card__tag service-card__tag--accent" data-i18n="services.cards.tagPopular">Popular</span>
@@ -271,7 +276,7 @@
         <section class="category-section">
           <div class="category-headline">
             <div>
-              <h3>{{ c.name }}</h3>
+              <h3 data-category-id="{{ c.id }}" data-category-name-original="{{ c.name|escape }}">{{ c.name }}</h3>
             </div>
           </div>
           <div class="services-grid">
@@ -287,7 +292,7 @@
                   {% endif %}
                   {% if c.name or s.get_active_discount %}
                     <div class="service-card__tags">
-                      {% if c.name %}<span class="service-card__tag">{{ c.name }}</span>{% endif %}
+                      {% if c.name %}<span class="service-card__tag" data-category-id="{{ c.id }}" data-category-name-original="{{ c.name|escape }}">{{ c.name }}</span>{% endif %}
                       {% with disc=s.get_active_discount %}
                         {% if disc %}
                           <span class="service-card__tag service-card__tag--accent" data-i18n="services.cards.tagPopular">Popular</span>
@@ -678,4 +683,3 @@
 <script defer src="{% static 'js/mainmenu.js' %}"></script>
 </body>
 </html>
-

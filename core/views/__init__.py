@@ -40,6 +40,11 @@ from core.models import (
     ProductSale,
     SupportDocument,
 )
+from core.services.translation import (
+    normalize_lang,
+    translate_categories,
+    translate_services,
+)
 from core.services.booking import (
     get_available_slots,
     get_service_masters,
@@ -1031,6 +1036,8 @@ def api_appointment_reschedule(request, appt_id):
 def service_search(request):
     q = (request.GET.get('q') or '').strip()
     cat = request.GET.get('cat') or ''
+    requested_lang = normalize_lang(request.GET.get("lang"))
+
     qs = (
         Service.objects.filter(is_active=True)
         .select_related('category')
@@ -1047,20 +1054,37 @@ def service_search(request):
     if cat:
         qs = qs.filter(category_id=cat)
 
-    qs = qs.order_by('name')[:60]  # ограничим выдачу
+    services = list(qs.order_by('name')[:60])  # ограничим выдачу
+
+    translations = {}
+    category_translations = {}
+    if requested_lang != "en":
+        translations = translate_services(services, requested_lang)
+        category_ids = {srv.category_id for srv in services if srv.category_id}
+        if category_ids:
+            categories = ServiceCategory.objects.filter(pk__in=category_ids)
+            category_translations = translate_categories(categories, requested_lang)
 
     results = []
-    for s in qs:
+    for s in services:
         disc = s.get_active_discount()
         price = str(s.get_discounted_price()) if disc else str(s.base_price)
         image_url = s.card_image_url
         if image_url:
             image_url = request.build_absolute_uri(image_url)
+        srv_id = str(s.id)
+        cat_id = str(s.category_id or "") if s.category_id else ""
+        translated = translations.get(srv_id, {})
+        translated_category = category_translations.get(cat_id, {}) if cat_id else {}
         results.append({
-            "id": str(s.id),
+            "id": srv_id,
             "name": s.name,
+            "translated_name": translated.get("name"),
             "category": s.category.name if s.category_id else "",
+            "category_id": cat_id,
+            "translated_category": translated.get("category") or translated_category.get("name"),
             "description": (s.description or "")[:280],
+            "translated_description": translated.get("description"),
             "base_price": str(s.base_price),
             "price": price,
             "discount_percent": disc.discount_percent if disc else None,
@@ -1078,6 +1102,43 @@ def service_search(request):
             ],
         })
     return JsonResponse({"results": results})
+
+
+@require_POST
+def service_translations_api(request):
+    """
+    Translate service names/descriptions and categories on demand.
+    Accepts JSON payload: {"lang": "hi", "services": ["id1", ...], "categories": ["id2", ...]}.
+    Uses offline translation models only (Argos); if models are missing, returns empty translations.
+    """
+    try:
+        payload = json.loads(request.body.decode("utf-8") if request.body else "{}")
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    requested_lang = normalize_lang(payload.get("lang"))
+    if requested_lang == "en":
+        return JsonResponse({"services": {}, "categories": {}})
+
+    service_ids = payload.get("services") or []
+    category_ids = payload.get("categories") or []
+    MAX_IDS = 120
+    if len(service_ids) > MAX_IDS or len(category_ids) > MAX_IDS:
+        return JsonResponse({"error": "Too many items requested"}, status=400)
+
+    services = Service.objects.filter(is_active=True, pk__in=service_ids).select_related("category")
+    categories = ServiceCategory.objects.filter(pk__in=category_ids)
+
+    service_translations = translate_services(services, requested_lang)
+    category_translations = translate_categories(categories, requested_lang)
+
+    return JsonResponse(
+        {
+            "services": service_translations,
+            "categories": category_translations,
+        }
+    )
+
 
 @require_GET
 @staff_member_required

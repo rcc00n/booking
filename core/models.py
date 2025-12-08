@@ -543,6 +543,27 @@ class Service(models.Model):
         return self.pre_appointment_forms.filter(is_active=True)
 
 
+class TranslationCache(models.Model):
+    """
+    Caches machine translations for dynamic catalog content (service names, descriptions, categories).
+    Uses a hash of the English source to invalidate cache when copy changes.
+    """
+
+    language = models.CharField(max_length=8, db_index=True)
+    source_language = models.CharField(max_length=8, default="en")
+    source_hash = models.CharField(max_length=64, db_index=True)
+    source_text = models.TextField()
+    translated_text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("language", "source_hash")
+        indexes = [
+            models.Index(fields=["language", "source_hash"]),
+        ]
+        ordering = ["-created_at"]
+
+
 class ClientIntakeAssignmentQuerySet(models.QuerySet):
     def pending(self):
         return self.filter(
