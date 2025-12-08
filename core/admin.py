@@ -5664,6 +5664,60 @@ class SupportDocumentAdmin(admin.ModelAdmin):
 
 
 # -----------------------------
+# Site branding admin
+# -----------------------------
+@admin.register(SiteBranding)
+class SiteBrandingAdmin(admin.ModelAdmin):
+    list_display = ("logo_preview", "logo_width", "logo_width_mobile", "is_active", "updated_at")
+    readonly_fields = ("logo_preview", "created_at", "updated_at")
+    fieldsets = (
+        ("Logo", {"fields": ("logo", "logo_preview", "logo_alt_text")}),
+        ("Sizing", {"fields": ("logo_width", "logo_width_mobile")}),
+        ("Status", {"fields": ("is_active",)}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+    def has_add_permission(self, request):
+        if SiteBranding.objects.exists():
+            return False
+        return super().has_add_permission(request)
+
+    def changelist_view(self, request, extra_context=None):
+        existing = SiteBranding.objects.order_by("-updated_at", "-id").first()
+        if existing:
+            return HttpResponseRedirect(
+                reverse("admin:core_sitebranding_change", args=[existing.pk])
+            )
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if obj.is_active:
+            SiteBranding.objects.exclude(pk=obj.pk).update(is_active=False)
+
+    @admin.display(description="Preview")
+    def logo_preview(self, obj):
+        if not obj:
+            return ""
+        url = ""
+        try:
+            if obj.logo and getattr(obj.logo, "url", ""):
+                url = obj.logo.url
+        except Exception:
+            url = ""
+        if not url:
+            url = static("img/malva-dashboard-logo.png")
+        alt_text = obj.logo_alt_text or "Site logo"
+        return format_html(
+            '<div style="padding:8px;border:1px solid #e5e7eb;border-radius:8px;max-width:260px;">'
+            '<img src="{}" alt="{}" style="max-width:240px;max-height:120px;object-fit:contain;display:block;margin:0 auto;" />'
+            "</div>",
+            url,
+            alt_text,
+        )
+
+
+# -----------------------------
 # Retail products & sales
 # -----------------------------
 

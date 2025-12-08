@@ -108,6 +108,34 @@ body.sidebar-hover .main-footer {
     overflow-y: auto;
     flex: 1;
 }
+.sidebar-footer {
+    padding: 1rem 1.3vh 1.6rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sidebar-footer__link {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 1.3vh;
+    padding: 1vh;
+    border-radius: 6px;
+    text-decoration: none;
+    color: var(--sidebar-text) !important;
+    font-size: 0 !important;
+    transition: background 0.2s ease, font-size 0.3s ease;
+}
+.sidebar-footer__link:hover {
+    background-color: var(--sidebar-hover-accent);
+}
+.icon-sidebar:hover .sidebar-footer__link {
+    font-size: 1.6vh !important;
+}
+.sidebar-footer__link img {
+    width: 2.2vh;
+    height: 2.2vh;
+    filter: invert(100%);
+    flex-shrink: 0;
+}
 
 /* List items */
 .icon-sidebar li {

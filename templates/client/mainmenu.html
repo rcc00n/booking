@@ -11,13 +11,16 @@
 
   <link rel="stylesheet" href="{% static 'css/mainmenu.css' %}">
 </head>
-<body {% if request.user.is_authenticated %}data-autofill-user="{{ request.user.pk }}" data-autofill-payment-endpoint="{% url 'api-autofill-payment' %}"{% endif %}>
+{% with desktop_logo_size=site_branding.logo_size|default:46 mobile_logo_size=site_branding.logo_size_mobile|default:42 %}
+<body {% if request.user.is_authenticated %}data-autofill-user="{{ request.user.pk }}" data-autofill-payment-endpoint="{% url 'api-autofill-payment' %}"{% endif %} style="--site-logo-size: {{ desktop_logo_size }}px; --site-logo-mobile-size: {{ mobile_logo_size }}px;">
 
   <!-- header -->
   <header class="site-header">
     <div class="container site-header__inner">
       <a href="{% url 'client-dashboard' %}" class="brand">
-        <span class="brand__mark">MB</span>
+        <span class="brand__mark brand__mark--image">
+          <img src="{{ site_branding.logo_url }}" alt="{{ site_branding.logo_alt|default:'Brand logo' }}">
+        </span>
         <span class="brand__copy">
           <strong data-i18n="common.brand">Malva Booking</strong>
           <small data-i18n="services.header.tagline">Beauty & Wellness Studio</small>
@@ -682,4 +685,5 @@
 {% endwith %}
 <script defer src="{% static 'js/mainmenu.js' %}"></script>
 </body>
+{% endwith %}
 </html>

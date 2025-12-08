@@ -61,6 +61,54 @@ def product_image_upload_to(instance, filename: str) -> str:
     ext = ext.lower() or ".jpg"
     product_id = instance.pk or uuid.uuid4()
     return f"products/{product_id}/{normalized}{ext}"
+
+
+def branding_logo_upload_to(instance, filename: str) -> str:
+    """
+    Keep branding assets in a predictable folder with timestamped names
+    to avoid browser cache collisions after updates.
+    """
+    base, ext = os.path.splitext(filename)
+    normalized = slugify(base) or "logo"
+    ext = ext.lower() or ".png"
+    timestamp = timezone.now().strftime("%Y%m%d%H%M%S")
+    unique = uuid.uuid4().hex[:8]
+    return f"branding/{normalized}-{timestamp}-{unique}{ext}"
+# --- Branding ---
+
+class SiteBranding(models.Model):
+    """
+    Single record that stores the public-facing logo and its preferred sizes.
+    """
+
+    logo = models.ImageField(upload_to=branding_logo_upload_to, null=True, blank=True)
+    logo_alt_text = models.CharField(max_length=255, default="Site logo", blank=True)
+    logo_width = models.PositiveIntegerField(
+        default=44,
+        validators=[MinValueValidator(16), MaxValueValidator(512)],
+        help_text="Desktop logo size in pixels (width & height).",
+    )
+    logo_width_mobile = models.PositiveIntegerField(
+        default=42,
+        validators=[MinValueValidator(12), MaxValueValidator(512)],
+        help_text="Mobile/compact logo size in pixels.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Uncheck while drafting a new logo without replacing the live one.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Site branding"
+        verbose_name_plural = "Site branding"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return "Branding"
+
+
 # --- 1. ROLES ---
 
 class Role(models.Model):
