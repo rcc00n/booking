@@ -17,7 +17,7 @@
   <!-- Мини-стили для горизонтального дейтпикера (в модалке) -->
   <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
 </head>
-<body class="dashboard-body" data-autofill-user="{{ request.user.pk }}" data-autofill-payment-endpoint="{% url 'api-autofill-payment' %}">
+<body class="dashboard-body" data-autofill-user="{{ request.user.pk }}" data-autofill-payment-endpoint="{% url 'api-autofill-payment' %}" style="--dashboard-logo-size: {{ site_branding.logo_size|default:44 }}px; --dashboard-logo-mobile-size: {{ site_branding.logo_size_mobile|default:42 }}px;">
 <div class="dashboard-backdrop" data-nav-backdrop></div>
 <div class="dashboard-shell">
 
@@ -25,7 +25,7 @@
   <aside class="dashboard-sidebar flex flex-col">
     <div class="sidebar-brand">
       <span class="mark">
-        <img src="{% static 'img/malva-dashboard-logo.png' %}" alt="Malva Booking logo" class="sidebar-brand__logo">
+        <img src="{{ site_branding.logo_url }}" alt="{{ site_branding.logo_alt|default:'Site logo' }}" class="sidebar-brand__logo">
       </span>
       <span data-i18n="common.brand">Malva Booking</span>
     </div>
@@ -150,7 +150,7 @@
               aria-label="Open menu"
               data-i18n-attr="aria-label:services.header.openMenu">☰</button>
       <div class="dashboard-mobile-logo" aria-hidden="true">
-        <img src="{% static 'img/malva-dashboard-logo.png' %}" alt="Malva Booking logo">
+        <img src="{{ site_branding.logo_url }}" alt="{{ site_branding.logo_alt|default:'Site logo' }}">
       </div>
       {% with user_display=request.user.first_name|default:request.user.username %}
         <div class="dashboard-mobile-user">

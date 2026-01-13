@@ -42,6 +42,29 @@ class TelegramBotSettings(models.Model):
         default=True,
         help_text="Allow /today command for admin chats.",
     )
+    ai_is_enabled = models.BooleanField(
+        default=False,
+        help_text="Toggle the internal AI assistant for staff Telegram chats.",
+    )
+    ai_openai_api_key = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="OpenAI API key used for the assistant. Stored encrypted at rest.",
+    )
+    ai_model = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Model for final answers (e.g. gpt-4o-mini).",
+    )
+    ai_router_model = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Optional smaller model for intent routing. Leave blank to reuse AI model.",
+    )
+    ai_max_history = models.PositiveSmallIntegerField(
+        default=8,
+        help_text="How many recent exchanges to share with the model (1-20).",
+    )
     locked_by = models.ForeignKey(
         User,
         null=True,
@@ -86,6 +109,21 @@ class TelegramBotSettings(models.Model):
         env_passphrase = getattr(settings, "TELEGRAM_ADMIN_PASSPHRASE", "")
         if env_passphrase:
             defaults.setdefault("admin_passphrase", env_passphrase)
+        env_ai_key = getattr(settings, "OPENAI_API_KEY", "")
+        if env_ai_key:
+            defaults.setdefault("ai_openai_api_key", env_ai_key)
+        env_ai_enabled = getattr(settings, "TELEGRAM_AI_ENABLED", False)
+        if env_ai_enabled:
+            defaults.setdefault("ai_is_enabled", True)
+        env_ai_model = getattr(settings, "TELEGRAM_AI_MODEL", "")
+        if env_ai_model:
+            defaults.setdefault("ai_model", env_ai_model)
+        env_ai_router = getattr(settings, "TELEGRAM_AI_ROUTER_MODEL", "")
+        if env_ai_router:
+            defaults.setdefault("ai_router_model", env_ai_router)
+        env_ai_history = getattr(settings, "TELEGRAM_AI_MAX_HISTORY", 0)
+        if env_ai_history:
+            defaults.setdefault("ai_max_history", env_ai_history)
 
         obj, _ = cls.objects.get_or_create(pk=cls.SINGLETON_PK, defaults=defaults)
         return obj
@@ -93,6 +131,23 @@ class TelegramBotSettings(models.Model):
     @property
     def token(self) -> str:
         return (self.bot_token or "").strip() or getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+
+    def ai_config(self) -> dict[str, str | int | bool]:
+        """Return effective AI assistant configuration with environment fallbacks."""
+
+        api_key = (self.ai_openai_api_key or "").strip() or getattr(settings, "OPENAI_API_KEY", "")
+        model = (self.ai_model or "").strip() or getattr(settings, "TELEGRAM_AI_MODEL", "gpt-4o-mini")
+        router_model = (self.ai_router_model or "").strip() or getattr(settings, "TELEGRAM_AI_ROUTER_MODEL", model) or model
+        history_limit = self.ai_max_history or getattr(settings, "TELEGRAM_AI_MAX_HISTORY", 8) or 8
+        history_limit = max(1, min(20, history_limit))
+        enabled = bool(self.ai_is_enabled and api_key)
+        return {
+            "enabled": enabled,
+            "api_key": api_key,
+            "model": model,
+            "router_model": router_model,
+            "max_history": history_limit,
+        }
 
     def fallback_chat_ids(self) -> list[int]:
         """Parsed fallback chat ID list from DB field and env list."""
@@ -150,6 +205,14 @@ class TelegramChatSubscription(models.Model):
         related_name="telegram_chats",
         help_text="Staff profile used to attribute Telegram commands.",
     )
+    client_profile = models.ForeignKey(
+        "core.UserProfile",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="telegram_client_chats",
+        help_text="Client profile linked to this chat for booking flows.",
+    )
 
     class Meta:
         ordering = ["-is_admin_channel", "-last_interaction_at"]
@@ -195,3 +258,83 @@ class TelegramBroadcast(models.Model):
         self.sent_at = timezone.now() if not error else None
         fields = ["is_sent", "last_error", "sent_at"]
         self.save(update_fields=fields)
+
+
+class TelegramBookingSession(models.Model):
+    """Stores per-chat state for the conversational booking flow."""
+
+    STATE_IDLE = "idle"
+    STATE_CLIENT = "client"
+    STATE_SERVICE = "service"
+    STATE_MASTER = "master"
+    STATE_DATE = "date"
+    STATE_TIME = "time"
+    STATE_CONFIRM = "confirm"
+    STATE_CHOICES = [
+        (STATE_IDLE, "Idle"),
+        (STATE_CLIENT, "Choosing client"),
+        (STATE_SERVICE, "Choosing service"),
+        (STATE_MASTER, "Choosing master"),
+        (STATE_DATE, "Choosing date"),
+        (STATE_TIME, "Choosing time"),
+        (STATE_CONFIRM, "Confirm"),
+    ]
+
+    subscription = models.OneToOneField(
+        TelegramChatSubscription,
+        on_delete=models.CASCADE,
+        related_name="booking_session",
+    )
+    state = models.CharField(max_length=20, choices=STATE_CHOICES, default=STATE_IDLE)
+    payload = models.JSONField(default=dict, blank=True)
+    context_log = models.JSONField(default=list, blank=True)
+    active_message_id = models.BigIntegerField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Telegram booking session"
+        verbose_name_plural = "Telegram booking sessions"
+
+    def reset(self, *, keep_defaults: bool = True) -> None:
+        defaults = self.payload.get("last_selection", {}) if keep_defaults else {}
+        self.payload = {"last_selection": defaults}
+        self.state = self.STATE_IDLE
+        self.active_message_id = None
+        self.last_error = ""
+
+    def append_context(self, role: str, text: str, *, limit: int = 10) -> None:
+        history = list(self.context_log or [])
+        history.append({"role": role, "text": text, "ts": timezone.now().isoformat()})
+        self.context_log = history[-limit:]
+
+
+class TelegramStaffAssistantSession(models.Model):
+    """Conversation history for staff AI assistant chats."""
+
+    subscription = models.OneToOneField(
+        TelegramChatSubscription,
+        on_delete=models.CASCADE,
+        related_name="assistant_session",
+    )
+    context_log = models.JSONField(default=list, blank=True)
+    last_error = models.TextField(blank=True)
+    last_interaction_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Telegram AI assistant session"
+        verbose_name_plural = "Telegram AI assistant sessions"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"Assistant session for chat {self.subscription.chat_id}"
+
+    def append_context(self, role: str, content: str, *, limit: int = 12) -> None:
+        history = list(self.context_log or [])
+        history.append({"role": role, "text": content, "ts": timezone.now().isoformat()})
+        self.context_log = history[-limit:]
+
+    def reset(self) -> None:
+        self.context_log = []
+        self.last_error = ""

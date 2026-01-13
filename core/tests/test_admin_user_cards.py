@@ -206,6 +206,13 @@ class UserAdminCardsTests(TestCase):
         usernames = self._usernames_from_response(response)
         self.assertSetEqual(usernames, {phone_user.username})
 
+    def test_search_full_name_across_fields(self):
+        search_user, _ = self._create_search_users()
+        response = self.client.get(self.url, {"q": "Marina Lopez"}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        usernames = self._usernames_from_response(response)
+        self.assertSetEqual(usernames, {search_user.username})
+
     def test_search_empty_term_returns_all(self):
         self._create_search_users()
         response = self.client.get(self.url, {"q": "   "}, follow=True)

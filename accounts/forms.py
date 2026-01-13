@@ -290,6 +290,11 @@ class AccountSetPasswordForm(SetPasswordForm):
     Provides consistent styling for the password reset confirm step.
     """
 
+    error_messages = {
+        **SetPasswordForm.error_messages,
+        "password_no_change": "Your new password must be different from your current password.",
+    }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for field in ("new_password1", "new_password2"):
@@ -300,6 +305,28 @@ class AccountSetPasswordForm(SetPasswordForm):
                         "autocomplete": "new-password",
                     }
                 )
+
+    def clean(self):
+        """
+        Disallow reusing the current password to avoid a noop reset and confusion.
+        """
+        cleaned_data = super().clean()
+        new_password = cleaned_data.get("new_password2") or cleaned_data.get("new_password1")
+        if (
+            new_password
+            and "new_password2" not in self.errors
+            and self.user
+            and self.user.has_usable_password()
+            and self.user.check_password(new_password)
+        ):
+            self.add_error(
+                "new_password2",
+                forms.ValidationError(
+                    self.error_messages["password_no_change"],
+                    code="password_no_change",
+                ),
+            )
+        return cleaned_data
 
 
 # ---------- Profile edit ----------

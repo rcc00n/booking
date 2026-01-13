@@ -67,6 +67,7 @@ from core.tasks import (
     send_item_cancellation_email,
 )
 from core.services.item_status import record_item_status
+from core.services.intake_assignments import ensure_universal_assignments_for_profile
 
 PAID_BADGE_ICON_URL = static("admin/icons/paid.png")
 PARTIAL_BADGE_ICON_URL = static("admin/icons/partially-paid.png")
@@ -1394,7 +1395,10 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             'postal_code', 'how_heard', 'email_marketing_consent'
         )}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
-        ('Files', {'fields': ('files',)}),
+        ('Files', {
+            'fields': ('files', 'files_kind', 'files_appointment', 'files_description'),
+            'description': "Upload documents or Before/After photos and link them to specific appointments.",
+        }),
         ('Notes', {'fields': ('notes',)}),
         ('Health', {
             'classes': ('collapse', 'wide'),
@@ -1408,6 +1412,24 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         }),
     )
 
+    def get_form(self, request, obj=None, **kwargs):
+        form_class = super().get_form(request, obj, **kwargs)
+        if not isinstance(form_class, type):
+            return form_class
+        if not issubclass(form_class, CustomUserChangeForm):
+            return form_class
+        if getattr(form_class, "_request_injected", False):
+            return form_class
+
+        class RequestAwareUserForm(form_class):
+            _request_injected = True
+
+            def __init__(self, *args, **inner_kwargs):
+                inner_kwargs.setdefault("request", request)
+                super().__init__(*args, **inner_kwargs)
+
+        return RequestAwareUserForm
+
     def password_change_link(self, obj):
         if not obj or not getattr(obj, "pk", None):
             return _("Change password after saving the user.")
@@ -1419,10 +1441,161 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
 
     password_change_link.short_description = _("Password")
 
+    @staticmethod
+    def _format_user_display(user):
+        if not user:
+            return "—"
+        full_name = getattr(user, "get_full_name", lambda: "")() or ""
+        if full_name.strip():
+            return full_name
+        username = getattr(user, "get_username", lambda: "")() or ""
+        if username.strip():
+            return username
+        email = getattr(user, "email", "") or ""
+        if email:
+            return email
+        return str(user)
+
+    @staticmethod
+    def _safe_reverse(url_name, *args):
+        try:
+            return reverse(url_name, args=args)
+        except NoReverseMatch:
+            return ""
+
+    def _build_client_intake_context(self, profile):
+        ensure_universal_assignments_for_profile(profile)
+
+        submissions_prefetch = Prefetch(
+            "submissions",
+            queryset=(
+                ClientIntakeFormSubmission.objects.filter(client=profile)
+                .select_related("submitted_by", "appointment")
+                .order_by("-submitted_at")[:1]
+            ),
+            to_attr="prefetched_submissions",
+        )
+
+        assignment_qs = (
+            ClientIntakeAssignment.objects.for_client(profile)
+            .select_related("form", "assigned_by", "completed_by")
+            .prefetch_related(submissions_prefetch)
+            .annotate(submission_count=Count("submissions", distinct=True))
+        )
+
+        pending_assignments = []
+        completed_assignments = []
+        now = timezone.now()
+        future_anchor = now + timedelta(days=3650)
+
+        for assignment in assignment_qs:
+            submissions = list(getattr(assignment, "prefetched_submissions", []))
+            for submission in submissions:
+                submission.admin_url = self._safe_reverse(
+                    "admin:core_clientintakeformsubmission_change",
+                    submission.pk,
+                )
+                if submission.appointment_id:
+                    submission.appointment_admin_url = self._safe_reverse(
+                        "admin:core_appointment_change",
+                        submission.appointment_id,
+                    )
+                else:
+                    submission.appointment_admin_url = ""
+                if submission.assignment_id:
+                    submission.assignment_admin_url = self._safe_reverse(
+                        "admin:core_clientintakeassignment_change",
+                        submission.assignment_id,
+                    )
+                else:
+                    submission.assignment_admin_url = ""
+                submission.submitted_by_display = self._format_user_display(submission.submitted_by)
+
+            assignment.form_admin_url = (
+                self._safe_reverse("admin:core_clientintakeform_change", assignment.form_id)
+                if assignment.form_id
+                else ""
+            )
+            assignment.assignment_admin_url = self._safe_reverse(
+                "admin:core_clientintakeassignment_change",
+                assignment.pk,
+            )
+            assignment.assigned_by_display = self._format_user_display(assignment.assigned_by)
+            assignment.completed_by_display = self._format_user_display(assignment.completed_by)
+            assignment.latest_submission = submissions[0] if submissions else None
+            assignment.total_submissions = getattr(assignment, "submission_count", len(submissions))
+
+            if assignment.is_completed:
+                completed_assignments.append(assignment)
+            else:
+                pending_assignments.append(assignment)
+
+        pending_assignments.sort(
+            key=lambda item: (
+                item.due_at or future_anchor,
+                item.assigned_at or future_anchor,
+            )
+        )
+        completed_assignments.sort(
+            key=lambda item: (
+                item.completed_at or item.assigned_at or now,
+            ),
+            reverse=True,
+        )
+
+        submissions_base_qs = ClientIntakeFormSubmission.objects.filter(client=profile)
+        submissions_total = submissions_base_qs.count()
+        recent_submissions = list(
+            submissions_base_qs.select_related("form", "submitted_by", "appointment", "assignment")
+            .order_by("-submitted_at")[:10]
+        )
+        for submission in recent_submissions:
+            submission.admin_url = self._safe_reverse(
+                "admin:core_clientintakeformsubmission_change",
+                submission.pk,
+            )
+            submission.submitted_by_display = self._format_user_display(submission.submitted_by)
+            submission.assignment_admin_url = (
+                self._safe_reverse("admin:core_clientintakeassignment_change", submission.assignment_id)
+                if submission.assignment_id
+                else ""
+            )
+            submission.appointment_admin_url = (
+                self._safe_reverse("admin:core_appointment_change", submission.appointment_id)
+                if submission.appointment_id
+                else ""
+            )
+            submission.form_admin_url = (
+                self._safe_reverse("admin:core_clientintakeform_change", submission.form_id)
+                if submission.form_id
+                else ""
+            )
+
+        return {
+            "client_intake_panel_visible": True,
+            "client_intake_pending": pending_assignments,
+            "client_intake_completed": completed_assignments,
+            "client_intake_recent_submissions": recent_submissions,
+            "client_intake_counts": {
+                "pending": len(pending_assignments),
+                "completed": len(completed_assignments),
+                "recent": len(recent_submissions),
+                "recent_total": submissions_total,
+            },
+        }
+
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
         context = dict(context or {})
         context.setdefault("client_files", None)
         context.setdefault("client_files_total", 0)
+        context.setdefault("client_intake_pending", [])
+        context.setdefault("client_intake_completed", [])
+        context.setdefault("client_intake_recent_submissions", [])
+        context.setdefault(
+            "client_intake_counts",
+            {"pending": 0, "completed": 0, "recent": 0, "recent_total": 0},
+        )
+        context.setdefault("client_intake_panel_visible", False)
 
         if add and (request.GET.get(IS_POPUP_VAR) or request.POST.get(IS_POPUP_VAR)):
             if request.GET.get("_from_custom_appt") or request.POST.get("_from_custom_appt"):
@@ -1434,7 +1607,9 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             profile = getattr(obj, "userprofile", None)
             if profile:
                 files_qs = (
-                    ClientFile.objects.filter(user=profile)
+                    ClientFile.objects.filter(
+                        Q(user=profile) | Q(appointment__client=profile)
+                    )
                     .select_related("appointment", "uploaded_by_user")
                     .order_by("-uploaded_at", "-id")
                 )
@@ -1455,6 +1630,7 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
                     files.append(file_obj)
                 context["client_files"] = files
                 context["client_files_total"] = len(files)
+                context.update(self._build_client_intake_context(profile))
         return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
 
     def get_urls(self):
@@ -1483,7 +1659,8 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
             messages.error(request, "Client profile is missing.")
             return redirect("admin:auth_user_change", user_id)
 
-        file_obj = get_object_or_404(ClientFile, pk=file_id, user=profile)
+        file_qs = ClientFile.objects.filter(Q(user=profile) | Q(appointment__client=profile))
+        file_obj = get_object_or_404(file_qs, pk=file_id)
         try:
             file_obj.delete()
         except Exception as exc:  # pylint: disable=broad-except
@@ -1606,18 +1783,41 @@ class CustomUserAdmin(ExportCsvMixin ,BaseUserAdmin):
         if not search_term:
             return queryset, False
 
-        text_q = (
-            Q(first_name__icontains=search_term)
-            | Q(last_name__icontains=search_term)
-            | Q(email__icontains=search_term)
-            | Q(username__icontains=search_term)
-        )
-        digits = self._normalize_phone_digits(search_term)
-        if digits:
-            regex_pattern = self._phone_regex_for_digits(digits)
-            text_q |= Q(userprofile__phone__iregex=regex_pattern)
+        tokens = [token for token in re.split(r"[\s,]+", search_term) if token]
+        text_tokens = []
+        digit_fragments = []
 
-        return queryset.filter(text_q), False
+        for token in tokens:
+            if re.search(r"[A-Za-z]", token):
+                text_tokens.append(token)
+                continue
+
+            digits_only = self._normalize_phone_digits(token)
+            if digits_only:
+                digit_fragments.append(digits_only)
+
+        conditions = []
+        for token in text_tokens:
+            conditions.append(
+                Q(first_name__icontains=token)
+                | Q(last_name__icontains=token)
+                | Q(email__icontains=token)
+                | Q(username__icontains=token)
+            )
+
+        phone_digits = "".join(digit_fragments)
+        if phone_digits:
+            regex_pattern = self._phone_regex_for_digits(phone_digits)
+            conditions.append(Q(userprofile__phone__iregex=regex_pattern))
+
+        if not conditions:
+            return queryset, False
+
+        combined_query = Q()
+        for condition in conditions:
+            combined_query &= condition
+
+        return queryset.filter(combined_query), False
 
     def get_ordering(self, request):
         user_order = getattr(request, "_user_order_choice", None) or request.GET.get("user_order")
@@ -2247,6 +2447,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     # NOTE: если хочешь отдельный шаблон для календаря — задай его здесь
     change_list_template = "admin/appointments_calendar.html"  # твой базовый шаблон списка
     change_form_template = "admin/custom_edit_appointment.html"
+    PHOTO_UPLOAD_FORM_PREFIX = "photo_upload"
 
 
     @staticmethod
@@ -2837,7 +3038,7 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
                 .order_by("-sent_at", "-id")
             )
 
-        photo_upload_form = AppointmentPhotoUploadForm()
+        photo_upload_form = AppointmentPhotoUploadForm(prefix=self.PHOTO_UPLOAD_FORM_PREFIX)
         photo_kind_labels = dict(ClientFile.KIND_CHOICES)
         photo_groups: list[dict[str, Any]] = []
         photo_total_count = 0
@@ -2977,21 +3178,23 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         obj.full_clean()  # вызывает Appointment.clean()
         super().save_model(request, obj, form, change)
         new_status = form.cleaned_data.get("current_status")
-        if not new_status:
-            return
-
-        last = (AppointmentStatusHistory.objects
+        if new_status:
+            last = (
+                AppointmentStatusHistory.objects
                 .filter(appointment=obj)
                 .order_by("-set_at")             # или -created_at
                 .values_list("status_id", flat=True)
-                .first())
-        if last != new_status.id:
-            AppointmentStatusHistory.objects.create(
-                appointment=obj,
-                status=new_status,
-                set_by=self._actor(request.user),
-                set_at=timezone.now(),
+                .first()
             )
+            if last != new_status.id:
+                AppointmentStatusHistory.objects.create(
+                    appointment=obj,
+                    status=new_status,
+                    set_by=self._actor(request.user),
+                    set_at=timezone.now(),
+                )
+
+        self._maybe_process_embedded_photo_uploads(request, obj)
 
     def _actor(self, user):
         # Подгони под свой профиль:
@@ -3213,6 +3416,79 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
     def _redirect_to_change_view(self, request, appointment, *, anchor: str | None = None) -> HttpResponseRedirect:
         return redirect(self._change_view_url(appointment, request, anchor=anchor))
 
+    def _photo_upload_field_name(self, field_name: str) -> str:
+        prefix = getattr(self, "PHOTO_UPLOAD_FORM_PREFIX", "") or ""
+        return f"{prefix}-{field_name}" if prefix else field_name
+
+    def _emit_photo_upload_errors(self, request, form: AppointmentPhotoUploadForm) -> None:
+        for field, errors in form.errors.items():
+            label = form.fields.get(field).label if field in form.fields else field
+            for message_text in errors:
+                if field == "__all__":
+                    messages.error(request, message_text)
+                else:
+                    messages.error(request, f"{label}: {message_text}")
+
+    def _persist_photo_uploads(self, request, appointment, form: AppointmentPhotoUploadForm) -> bool:
+        if not appointment or not getattr(appointment, "pk", None):
+            return False
+        if not form.is_valid():
+            self._emit_photo_upload_errors(request, form)
+            return False
+
+        uploaded_files = form.cleaned_data["files"]
+        if not uploaded_files:
+            messages.warning(request, "No files were uploaded.")
+            return False
+
+        kind = form.cleaned_data["kind"]
+        description = (form.cleaned_data.get("description") or "").strip()
+        uploader_flag = ClientFile.ADMIN if getattr(request.user, "is_staff", False) else ClientFile.USER
+        uploader_user = request.user if getattr(request.user, "is_authenticated", False) else None
+        created = 0
+        try:
+            with transaction.atomic():
+                for uploaded in uploaded_files:
+                    instance = ClientFile(
+                        user=getattr(appointment, "client", None),
+                        appointment=appointment,
+                        file=uploaded,
+                        kind=kind,
+                        description=description,
+                        uploaded_by=uploader_flag,
+                        uploaded_by_user=uploader_user,
+                    )
+                    instance.save()
+                    created += 1
+        except ValidationError as exc:
+            message = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+            messages.error(request, message)
+            return False
+        except Exception as exc:  # pylint: disable=broad-except
+            messages.error(request, f"Could not upload photos: {exc}")
+            return False
+
+        if created == 1:
+            messages.success(request, "Photo uploaded.")
+        elif created > 1:
+            messages.success(request, f"{created} photos uploaded.")
+        else:
+            messages.warning(request, "No files were uploaded.")
+        return True
+
+    def _maybe_process_embedded_photo_uploads(self, request, appointment) -> None:
+        if not appointment or not getattr(appointment, "pk", None):
+            return
+        files_field = self._photo_upload_field_name("files")
+        if not request.FILES.getlist(files_field):
+            return
+        form = AppointmentPhotoUploadForm(
+            request.POST,
+            request.FILES,
+            prefix=self.PHOTO_UPLOAD_FORM_PREFIX,
+        )
+        self._persist_photo_uploads(request, appointment, form)
+
     def before_after_upload_view(self, request, appointment_id):
         if request.method != "POST":
             return HttpResponseBadRequest("POST required")
@@ -3221,50 +3497,12 @@ class AppointmentAdmin(ExportXlsxMixin, admin.ModelAdmin):
         if not self.has_change_permission(request, appointment):
             raise PermissionDenied
 
-        form = AppointmentPhotoUploadForm(request.POST, request.FILES)
-        if form.is_valid():
-            uploaded_files = form.cleaned_data["files"]
-            kind = form.cleaned_data["kind"]
-            description = (form.cleaned_data.get("description") or "").strip()
-            uploader_flag = ClientFile.ADMIN if request.user.is_staff else ClientFile.USER
-            uploader_user = request.user if request.user.is_authenticated else None
-            created = 0
-            try:
-                with transaction.atomic():
-                    for uploaded in uploaded_files:
-                        instance = ClientFile(
-                            user=appointment.client,
-                            appointment=appointment,
-                            file=uploaded,
-                            kind=kind,
-                            description=description,
-                            uploaded_by=uploader_flag,
-                            uploaded_by_user=uploader_user,
-                        )
-                        instance.save()
-                        created += 1
-            except ValidationError as exc:
-                messages.error(
-                    request,
-                    "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc),
-                )
-            except Exception as exc:  # pylint: disable=broad-except
-                messages.error(request, f"Could not upload photos: {exc}")
-            else:
-                if created == 1:
-                    messages.success(request, "Photo uploaded.")
-                elif created > 1:
-                    messages.success(request, f"{created} photos uploaded.")
-                else:
-                    messages.warning(request, "No files were uploaded.")
-        else:
-            for field, errors in form.errors.items():
-                label = form.fields.get(field).label if field in form.fields else field
-                for message_text in errors:
-                    if field == "__all__":
-                        messages.error(request, message_text)
-                    else:
-                        messages.error(request, f"{label}: {message_text}")
+        form = AppointmentPhotoUploadForm(
+            request.POST,
+            request.FILES,
+            prefix=self.PHOTO_UPLOAD_FORM_PREFIX,
+        )
+        self._persist_photo_uploads(request, appointment, form)
 
         return self._redirect_to_change_view(request, appointment, anchor="before-after")
 
@@ -5426,6 +5664,60 @@ class SupportDocumentAdmin(admin.ModelAdmin):
 
 
 # -----------------------------
+# Site branding admin
+# -----------------------------
+@admin.register(SiteBranding)
+class SiteBrandingAdmin(admin.ModelAdmin):
+    list_display = ("logo_preview", "logo_width", "logo_width_mobile", "is_active", "updated_at")
+    readonly_fields = ("logo_preview", "created_at", "updated_at")
+    fieldsets = (
+        ("Logo", {"fields": ("logo", "logo_preview", "logo_alt_text")}),
+        ("Sizing", {"fields": ("logo_width", "logo_width_mobile")}),
+        ("Status", {"fields": ("is_active",)}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+    def has_add_permission(self, request):
+        if SiteBranding.objects.exists():
+            return False
+        return super().has_add_permission(request)
+
+    def changelist_view(self, request, extra_context=None):
+        existing = SiteBranding.objects.order_by("-updated_at", "-id").first()
+        if existing:
+            return HttpResponseRedirect(
+                reverse("admin:core_sitebranding_change", args=[existing.pk])
+            )
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if obj.is_active:
+            SiteBranding.objects.exclude(pk=obj.pk).update(is_active=False)
+
+    @admin.display(description="Preview")
+    def logo_preview(self, obj):
+        if not obj:
+            return ""
+        url = ""
+        try:
+            if obj.logo and getattr(obj.logo, "url", ""):
+                url = obj.logo.url
+        except Exception:
+            url = ""
+        if not url:
+            url = static("img/malva-dashboard-logo.png")
+        alt_text = obj.logo_alt_text or "Site logo"
+        return format_html(
+            '<div style="padding:8px;border:1px solid #e5e7eb;border-radius:8px;max-width:260px;">'
+            '<img src="{}" alt="{}" style="max-width:240px;max-height:120px;object-fit:contain;display:block;margin:0 auto;" />'
+            "</div>",
+            url,
+            alt_text,
+        )
+
+
+# -----------------------------
 # Retail products & sales
 # -----------------------------
 
@@ -5470,6 +5762,7 @@ class ProductCategoryAdmin(admin.ModelAdmin):
 class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
     import_template_name = "admin/products/import.html"
     list_display = (
+        "image_thumb",
         "name",
         "category",
         "sku",
@@ -5484,12 +5777,14 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
     list_filter = ("is_active", "category", LowStockFilter)
     search_fields = ("name", "sku", "brand", "supplier")
     ordering = ("name",)
-    readonly_fields = ("created_at", "updated_at")
+    list_display_links = ("name",)
+    readonly_fields = ("created_at", "updated_at", "image_preview")
     fieldsets = (
         (
             None,
             {"fields": ("name", "sku", "category", "brand", "supplier", "description", "is_active")},
         ),
+        ("Media", {"fields": ("image", "image_alt_text", "image_preview")}),
         ("Measure", {"fields": ("measure_type", "measure_value")}),
         (
             "Pricing & Inventory",
@@ -5501,6 +5796,26 @@ class ProductAdmin(ExportXlsxMixin, admin.ModelAdmin):
     @admin.display(description="Low stock", boolean=True)
     def low_stock_indicator(self, obj):
         return obj.is_low_on_stock
+
+    @admin.display(description="Image")
+    def image_thumb(self, obj):
+        if getattr(obj, "image", None):
+            return format_html(
+                '<img src="{}" alt="{}" style="height:48px;width:48px;object-fit:cover;border-radius:6px; box-shadow:0 0 0 1px rgba(0,0,0,0.04);" />',
+                obj.image.url,
+                obj.image_alt,
+            )
+        return "—"
+
+    @admin.display(description="Preview")
+    def image_preview(self, obj):
+        if getattr(obj, "image", None):
+            return format_html(
+                '<img src="{}" alt="{}" style="max-width:260px;max-height:260px;object-fit:contain;border-radius:8px;border:1px solid #e5e7eb;padding:6px;background:#fff;" />',
+                obj.image.url,
+                obj.image_alt,
+            )
+        return "—"
 
     def get_urls(self):
         urls = super().get_urls()
@@ -5758,7 +6073,7 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
         if not product_id:
             return JsonResponse({"error": "Missing product id"}, status=400)
         try:
-            product = Product.objects.only("price").get(pk=product_id)
+            product = Product.objects.only("price", "image", "image_alt_text", "name").get(pk=product_id)
         except Product.DoesNotExist:
             return JsonResponse({"error": "Product not found"}, status=404)
         price_value = product.price if product.price is not None else Decimal("0.00")  # // CHANGED
@@ -5768,7 +6083,24 @@ class ProductSaleAdmin(ExportXlsxMixin, admin.ModelAdmin):
         except (InvalidOperation, TypeError, ValueError):  # // CHANGED
             price_normalized = Decimal("0.00")  # // CHANGED
         price_str = format(price_normalized, "f")  # // CHANGED
-        return JsonResponse({"unit_price": price_str, "price": price_str})  # // CHANGED
+        image_url = ""
+        image_alt = ""
+        try:
+            if getattr(product, "image", None):
+                image_url = product.image.url
+                image_alt = getattr(product, "image_alt", "") or product.name
+        except Exception:
+            image_url = ""
+            image_alt = product.name
+        return JsonResponse(
+            {
+                "unit_price": price_str,
+                "price": price_str,
+                "image_url": image_url,
+                "image_alt": image_alt,
+                "quantity_in_stock": getattr(product, "quantity_in_stock", None),
+            }
+        )  # // CHANGED
 
     def _export_all_xlsx_view(self, request):
         queryset = (

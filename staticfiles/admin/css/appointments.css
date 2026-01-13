@@ -590,12 +590,12 @@ html, body {
   justify-content:space-between;
 }
 
-/* тело — даём место справа и снизу под блок цен */
+/* тело — гибкая колонка без абсолютов */
 #apptTooltip .tooltip-body{
   position:relative;
-  display:block;
+  display:flex;
+  flex-direction:column;
   padding:1.8vh 2.2vh;
-  padding-bottom:5.2vh;        /* зарезервировано под цены снизу */
   gap:1.4vh;
 }
 
@@ -612,77 +612,50 @@ html, body {
 #apptTooltip .tooltip-client-phone{ font-size:1.6vh; color:#777; }
 
 /* ---------- Детали услуги ---------- */
-#apptTooltip .tooltip-footer-row{ display:block !important; margin-top:1.2vh; }
-#apptTooltip .tooltip-details{ display:flex; flex-direction:column; gap:0.8vh; }
+#apptTooltip .tooltip-footer-row{
+  display:flex !important;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:1.4vh;
+  flex-wrap:wrap;
+  margin-top:1.2vh;
+}
+#apptTooltip .tooltip-details{
+  display:flex;
+  flex-direction:column;
+  gap:0.8vh;
+  flex:1 1 auto;
+  min-width:0;
+}
 #apptTooltip .tooltip-service-name{
-  font-size:1.85vh; font-weight:600; color:#1c1c1c; margin-top:0.2vh;
+  font-size:1.85vh; font-weight:600; color:#1c1c1c; margin:0.4vh 0 0;
+  word-break: break-word;
 }
-#apptTooltip .tooltip-meta{ font-size:1.5vh; color:#777; }
+#apptTooltip .tooltip-meta{
+  font-size:1.5vh;
+  color:#777;
+  margin-top:0.4vh;
+  position:static;
+}
 
-/* ---------- Цены: фиксируем в правом-нижнем углу ---------- */
+/* ---------- Цены ---------- */
 #apptTooltip .tooltip-price-block{
-  position:absolute !important;
-  right:2.2vh; bottom:1.8vh;
-  text-align:right;
-  display:flex; flex-direction:column; gap:0.45vh; align-items:flex-end;
-  max-width:14.5vh;            /* чтобы строки красиво переносились */
+  position:static !important;
+  text-align:center;
+  display:flex; flex-direction:column; gap:0.45vh; align-items:center;
+  flex:0 0 auto;
+  max-width:45%;
+  min-width:14vh;
 }
-
 #apptTooltip .tooltip-price-line{
-  display:flex; align-items:center; gap:0.6vh; justify-content:flex-end;
+  display:flex; align-items:center; gap:0.6vh; justify-content:center;
   color:#222; flex-wrap:wrap;
 }
 #apptTooltip .tooltip-price-label{ font-weight:600; color:#555; }
 #apptTooltip .tooltip-price-value{ display:flex; align-items:center; gap:0.45vh; }
 #apptTooltip .tooltip-price-old{ text-decoration:line-through; opacity:.6; }
-#apptTooltip .tooltip-price-current{ font-weight:600; }
-#apptTooltip .tooltip-price-arrow{ font-weight:600; color:#555; }
-
-#apptTooltip .tooltip-body{
-  position: relative;
-  padding-bottom: 6.2vh;   /* больше места, т.к. слева внизу будет meta */
-}
-
-/* --- Сервис остаётся под блоком клиента --- */
-#apptTooltip .tooltip-footer-row{ display:block !important; margin-top:1.2vh; }
-#apptTooltip .tooltip-details{ display:block; }
-#apptTooltip .tooltip-service-name{
-  font-size:1.85vh; font-weight:600; color:#1c1c1c; margin:0.4vh 0 0;
-}
-
-/* --- Мету (мастер · длительность) фиксируем в ЛЕВОМ НИЖНЕМ углу --- */
-#apptTooltip .tooltip-meta{
-  position: absolute;
-  left: 2.2vh;
-  bottom: 1.8vh;
-  font-size: 1.5vh;
-  color: #777;
-  margin: 0;               /* чтобы не смещалась */
-}
-
-/* --- Прайс остаётся в ПРАВОМ НИЖНЕМ углу --- */
-#apptTooltip .tooltip-price-block{
-  position:absolute !important;
-  right:2.2vh; bottom:1.8vh;
-  text-align:right;
-  display:flex; flex-direction:column; gap:0.45vh; align-items:flex-end;
-  max-width:20vh;
-}
-#apptTooltip .tooltip-price-line{
-  display:flex; align-items:center; gap:0.6vh; justify-content:flex-end;
-  color:#222; flex-wrap:wrap;
-}
-#apptTooltip .tooltip-price-label{ font-weight:600; color:#555; }
-
-/* --- Убираем стрелку полностью --- */
-#apptTooltip .tooltip-price-arrow{ display:none !important; }
-
-/* --- Старая цена перечёркнута, новая справа --- */
-#apptTooltip .tooltip-price-value{
-  display:flex; align-items:center; gap:0.45vh;
-}
-#apptTooltip .tooltip-price-old{ text-decoration:line-through; opacity:.6; }
 #apptTooltip .tooltip-price-current{ font-weight:700; }
+#apptTooltip .tooltip-price-arrow{ display:none !important; }
 #apptTooltip .tooltip-actions{
   margin-top:1.8vh;
   display:flex;

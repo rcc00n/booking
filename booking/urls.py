@@ -14,6 +14,7 @@ from core.autocomplete import ServiceAutocomplete, MasterUserProfileAutocomplete
 from django.views.generic import RedirectView
 from core.views import (
     service_search,
+    service_translations_api,
     service_price,
     service_promocodes_api,
     terminal_connection_token,
@@ -26,6 +27,7 @@ from core.payments.stripe_api import stripe_webhook
 from core.admin import stats_view
 from accounts.views import health_view, health_edit
 from core.models import SupportDocument
+from booking.api import AvailabilityView, AppointmentCreateView, AppointmentItemStatusView
 urlpatterns = [
     path("admin/api/appointment-items/<uuid:item_id>/status/", admin_item_status_update, name="admin-item-status-update"),
     path("admin/api/appointment-items/<uuid:item_id>/reschedule/", admin_item_reschedule, name="admin-item-reschedule"),
@@ -38,6 +40,13 @@ path("", include("core.urls")),
     path("autocomplete/master/", MasterUserProfileAutocomplete.as_view(), name="master-userprofile-autocomplete"),  # // CHANGED
     path("admin/stats/", admin.site.admin_view(stats_view), name="admin-stats"),
     path("api/service/<uuid:pk>/price/", service_price, name="service-price"),
+    path("api/availability/", AvailabilityView.as_view(), name="api-availability"),
+    path("api/appointments/", AppointmentCreateView.as_view(), name="api-appointments"),
+    path(
+        "api/items/<uuid:item_id>/status/",
+        AppointmentItemStatusView.as_view(),
+        name="api-item-status",
+    ),
     path(
         "accounts/api/services/<slug:service_id>/promocodes/",
         service_promocodes_api,
@@ -47,6 +56,7 @@ path("", include("core.urls")),
     path("", RedirectView.as_view(pattern_name="client-dashboard", permanent=False)),
     # Ничего из core тут не монтируем, чтобы не перехватывать /accounts/
     path('accounts/api/services/search/', service_search, name='service-search'),
+    path('accounts/api/services/translations/', service_translations_api, name='service-translations'),
 
     path("health/edit/", health_edit, name="health-edit"),
     path("health/", health_view, name="health-view"),

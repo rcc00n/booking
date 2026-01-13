@@ -222,6 +222,43 @@ class AccountFormStylingTests(TestCase):
         )
 
 
+class AccountSetPasswordFormValidationTests(TestCase):
+    def setUp(self) -> None:
+        self.user = get_user_model().objects.create_user(
+            username="reuse@example.com",
+            email="reuse@example.com",
+            password="OldPassword123!",
+        )
+
+    def test_reusing_current_password_is_rejected(self) -> None:
+        form = AccountSetPasswordForm(
+            user=self.user,
+            data={
+                "new_password1": "OldPassword123!",
+                "new_password2": "OldPassword123!",
+            },
+        )
+
+        self.assertFalse(form.is_valid())
+        error = form.errors["new_password2"].as_data()[0]
+        self.assertEqual(error.code, "password_no_change")
+        self.assertIn("different from your current password", str(error))
+
+    def test_setting_new_password_succeeds(self) -> None:
+        form = AccountSetPasswordForm(
+            user=self.user,
+            data={
+                "new_password1": "FreshPassword456!",
+                "new_password2": "FreshPassword456!",
+            },
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("FreshPassword456!"))
+
+
 class ClientProfileFormTests(TestCase):
     def setUp(self) -> None:
         self.user = get_user_model().objects.create_user(

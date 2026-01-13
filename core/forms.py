@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from dal import autocomplete
 from django import forms
+from django.contrib import messages
 from django.contrib.admin import TabularInline
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import (
@@ -217,6 +218,54 @@ class AppointmentProductSaleForm(ProductSaleAdminForm):
         if notes:
             notes.widget.attrs.setdefault("rows", 2)
 
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("DELETE"):
+            return cleaned
+
+        product = cleaned.get("product") or getattr(self.instance, "product", None)
+        quantity = cleaned.get("quantity")
+
+        if not product or quantity in (None, ""):
+            return cleaned
+
+        try:
+            requested_qty = int(quantity)
+        except (TypeError, ValueError):
+            return cleaned
+
+        existing_qty = 0
+        if getattr(self.instance, "pk", None) and getattr(self.instance, "product_id", None) == getattr(product, "pk", None):
+            try:
+                existing_qty = int(getattr(self.instance, "quantity", 0) or 0)
+            except (TypeError, ValueError):
+                existing_qty = 0
+
+        try:
+            in_stock = int(getattr(product, "quantity_in_stock", 0) or 0)
+        except (TypeError, ValueError):
+            in_stock = 0
+
+        allowed_qty = max(in_stock + existing_qty, 0)
+
+        if requested_qty > allowed_qty:
+            if allowed_qty <= 0:
+                availability_note = f"{product} is out of stock."
+            else:
+                unit_label = "unit" if allowed_qty == 1 else "units"
+                availability_note = f"Only {allowed_qty} {unit_label} available."
+
+            message = (
+                f"Cannot attach {product} to this appointment. {availability_note} "
+                "Reduce the quantity or restock before saving."
+            )
+            self.add_error("quantity", message)
+            self.add_error(None, message)
+            if getattr(self, "request", None):
+                messages.error(self.request, message)
+
+        return cleaned
+
 
 def _normalize_phone(value: str) -> str:
     """Bring phone number to E.164, default country +1."""
@@ -390,7 +439,7 @@ class AppointmentPhotoUploadForm(forms.Form):
                 "accept": "image/*",
             }
         ),
-        help_text="Upload one or more images to attach to this appointment.",
+        help_text="Upload one or more images to attach to this appointment. Selecting files will start the upload immediately.",
     )
     description = forms.CharField(
         label="Description",
@@ -404,7 +453,8 @@ class AppointmentPhotoUploadForm(forms.Form):
     )
 
     def clean_files(self):
-        uploaded_files = self.files.getlist("files")
+        files_key = self.add_prefix("files")
+        uploaded_files = self.files.getlist(files_key)
         if not uploaded_files:
             raise forms.ValidationError("Select at least one file to upload.")
         for file_obj in uploaded_files:
@@ -1110,10 +1160,34 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         choices=[("", "—")] + list(HowHeard.choices)
     )
     notes = forms.CharField(required=False, widget=forms.Textarea)
-    files = forms.FileField(
+    files = forms.Field(
         required=False,
-        widget=forms.ClearableFileInput(attrs={'multiple': False}),
-        label="Upload files"
+        widget=MultiFileInput(
+            attrs={
+                "accept": "image/*,.pdf,.doc,.docx",
+            }
+        ),
+        label="Upload files",
+        help_text="Attach supporting documents or Before/After photos. You can select multiple files.",
+    )
+    files_kind = forms.ChoiceField(
+        required=False,
+        label="File category",
+        choices=ClientFile.KIND_CHOICES,
+        initial=ClientFile.KIND_BEFORE,
+        help_text="Choose the category so staff can distinguish Before/After photos from other documents.",
+    )
+    files_appointment = forms.ModelChoiceField(
+        required=False,
+        label="Link to appointment",
+        queryset=Appointment.objects.none(),
+        help_text="Optional: pick the appointment this upload belongs to. Required for Before/After photos.",
+    )
+    files_description = forms.CharField(
+        required=False,
+        max_length=255,
+        label="Internal note",
+        widget=forms.TextInput(attrs={"placeholder": "Visible to staff only"}),
     )
     class Meta:
         model = User
@@ -1133,6 +1207,9 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
             'email_marketing_consent',
             'notes',
             'files',
+            'files_kind',
+            'files_appointment',
+            'files_description',
             'personal_discount_percent',
 
 
@@ -1142,6 +1219,7 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         """
         Populate form with data from related UserProfile and UserRole
         """
+        self.request = kwargs.pop("request", None)
         super().__init__(*args, **kwargs)
 
         password_field = self.fields.get('password')
@@ -1163,6 +1241,36 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
             self.fields['notes'].initial = self.instance.userprofile.notes
             self.fields['postal_code'].initial = getattr(up, 'postal_code', "")
             self.fields['address'].initial = getattr(up, 'address', "")
+            files_appt_field = self.fields.get("files_appointment")
+            if files_appt_field:
+                files_appt_field.queryset = (
+                    Appointment.objects.filter(client=up)
+                    .order_by("-start_time", "-created_at")
+                )
+                files_appt_field.empty_label = "No appointment (store on profile)"
+        else:
+            files_appt_field = self.fields.get("files_appointment")
+            if files_appt_field:
+                files_appt_field.queryset = Appointment.objects.none()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        uploaded_files = cleaned_data.get("files") or []
+        files_kind = cleaned_data.get("files_kind") or ClientFile.KIND_OTHER
+        cleaned_data["files_kind"] = files_kind
+        appointment = cleaned_data.get("files_appointment")
+        if uploaded_files and files_kind in {ClientFile.KIND_BEFORE, ClientFile.KIND_AFTER} and not appointment:
+            self.add_error("files_appointment", "Before/After photos must be linked to an appointment.")
+        return cleaned_data
+
+    def clean_files(self):
+        uploaded_files = self.files.getlist("files")
+        if not uploaded_files:
+            return []
+        for file_obj in uploaded_files:
+            if not getattr(file_obj, "name", None):
+                raise forms.ValidationError("One of the selected files is missing a filename.")
+        return uploaded_files
 
     def clean_postal_code(self):
         val = self.cleaned_data.get("postal_code", "").strip()
@@ -1207,16 +1315,26 @@ class CustomUserChangeForm(HealthFieldsMixin, UserChangeForm):
         profile.address = address
         profile.save()
 
-        uploaded_files = self.files.getlist('files')
+        uploaded_files = self.cleaned_data.get("files") or []
         if uploaded_files:
             with transaction.atomic():
+                files_kind = self.cleaned_data.get("files_kind") or ClientFile.KIND_OTHER
+                appointment = self.cleaned_data.get("files_appointment")
+                description = (self.cleaned_data.get("files_description") or "").strip()
+                uploader_user = getattr(getattr(self, "request", None), "user", None)
+                if not getattr(uploader_user, "is_authenticated", False):
+                    uploader_user = None
                 for f in uploaded_files:
                     if not f or not getattr(f, "name", None):
                         continue
                     ClientFile.objects.create(
                         user=profile,
+                        appointment=appointment,
                         file=f,
+                        kind=files_kind,
+                        description=description,
                         uploaded_by=ClientFile.ADMIN,
+                        uploaded_by_user=uploader_user,
                     )
         return user
 

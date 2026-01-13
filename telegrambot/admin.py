@@ -69,6 +69,18 @@ class TelegramBotSettingsAdmin(RestrictedBotAdminMixin, admin.ModelAdmin):
             },
         ),
         (
+            "AI assistant",
+            {
+                "fields": (
+                    "ai_is_enabled",
+                    "ai_openai_api_key",
+                    "ai_model",
+                    "ai_router_model",
+                    "ai_max_history",
+                )
+            },
+        ),
+        (
             "Access control",
             {
                 "fields": (

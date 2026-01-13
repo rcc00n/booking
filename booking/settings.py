@@ -39,6 +39,12 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["malvabeauty.duckdns.org", "127.0.0.1", "localhost"]
 
+_default_public_host = ALLOWED_HOSTS[0].lstrip(".") if ALLOWED_HOSTS else "localhost"
+PUBLIC_ROOT_URL = env(
+    "PUBLIC_ROOT_URL",
+    default=f"https://{_default_public_host}",
+)
+
 
 def _build_csrf_trusted_origins(hosts: list[str]) -> list[str]:
     """
@@ -88,6 +94,7 @@ INSTALLED_APPS = [
     'accounts',
     'core',
     'telegrambot',
+    'rest_framework',
     'dal',
     'dal_select2',
     'storages',
@@ -123,12 +130,13 @@ TEMPLATES = [
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
-            ],
-        },
+            'django.template.context_processors.request',
+            'django.contrib.auth.context_processors.auth',
+            'django.contrib.messages.context_processors.messages',
+            'core.context_processors.site_branding',
+        ],
     },
+},
 ]
 
 WSGI_APPLICATION = 'booking.wsgi.application'
@@ -193,6 +201,16 @@ USE_I18N = True
 
 USE_TZ = True
 
+# UI languages supported on the public catalog and dashboard.
+SUPPORTED_UI_LANGS = (
+    "en",
+    "ru",
+    "uk",
+    "fr",
+    "ar",
+    "hi",
+)
+
 # Сессия истекает через 1 час (3600 секунд)
 SESSION_COOKIE_AGE = 3600
 
@@ -205,6 +223,11 @@ TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
 TELEGRAM_NOTIFICATIONS_ENABLED = env.bool("TELEGRAM_NOTIFICATIONS_ENABLED", default=False)
 TELEGRAM_ADMIN_CHAT_IDS = env.list("TELEGRAM_ADMIN_CHAT_IDS", default=[])
 TELEGRAM_ADMIN_PASSPHRASE = env("TELEGRAM_ADMIN_PASSPHRASE", default="")
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+TELEGRAM_AI_ENABLED = env.bool("TELEGRAM_AI_ENABLED", default=bool(OPENAI_API_KEY))
+TELEGRAM_AI_MODEL = env("TELEGRAM_AI_MODEL", default="gpt-4o-mini")
+TELEGRAM_AI_ROUTER_MODEL = env("TELEGRAM_AI_ROUTER_MODEL", default=TELEGRAM_AI_MODEL)
+TELEGRAM_AI_MAX_HISTORY = env.int("TELEGRAM_AI_MAX_HISTORY", default=8)
 
 # Опционально — продлевать сессию при активности пользователя
 SESSION_SAVE_EVERY_REQUEST = True

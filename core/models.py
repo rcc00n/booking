@@ -50,6 +50,65 @@ def service_image_upload_to(instance, filename: str) -> str:
     ext = ext.lower() or ".jpg"
     service_id = instance.pk or uuid.uuid4()
     return f"services/{service_id}/{normalized}{ext}"
+
+
+def product_image_upload_to(instance, filename: str) -> str:
+    """
+    Deterministic upload path per product to avoid orphaned files on S3/local storage.
+    """
+    base, ext = os.path.splitext(filename)
+    normalized = slugify(base) or "image"
+    ext = ext.lower() or ".jpg"
+    product_id = instance.pk or uuid.uuid4()
+    return f"products/{product_id}/{normalized}{ext}"
+
+
+def branding_logo_upload_to(instance, filename: str) -> str:
+    """
+    Keep branding assets in a predictable folder with timestamped names
+    to avoid browser cache collisions after updates.
+    """
+    base, ext = os.path.splitext(filename)
+    normalized = slugify(base) or "logo"
+    ext = ext.lower() or ".png"
+    timestamp = timezone.now().strftime("%Y%m%d%H%M%S")
+    unique = uuid.uuid4().hex[:8]
+    return f"branding/{normalized}-{timestamp}-{unique}{ext}"
+# --- Branding ---
+
+class SiteBranding(models.Model):
+    """
+    Single record that stores the public-facing logo and its preferred sizes.
+    """
+
+    logo = models.ImageField(upload_to=branding_logo_upload_to, null=True, blank=True)
+    logo_alt_text = models.CharField(max_length=255, default="Site logo", blank=True)
+    logo_width = models.PositiveIntegerField(
+        default=44,
+        validators=[MinValueValidator(16), MaxValueValidator(512)],
+        help_text="Desktop logo size in pixels (width & height).",
+    )
+    logo_width_mobile = models.PositiveIntegerField(
+        default=42,
+        validators=[MinValueValidator(12), MaxValueValidator(512)],
+        help_text="Mobile/compact logo size in pixels.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Uncheck while drafting a new logo without replacing the live one.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Site branding"
+        verbose_name_plural = "Site branding"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return "Branding"
+
+
 # --- 1. ROLES ---
 
 class Role(models.Model):
@@ -530,6 +589,27 @@ class Service(models.Model):
         if prefetched and "pre_appointment_forms" in prefetched:
             return [form for form in prefetched["pre_appointment_forms"] if form.is_active]
         return self.pre_appointment_forms.filter(is_active=True)
+
+
+class TranslationCache(models.Model):
+    """
+    Caches machine translations for dynamic catalog content (service names, descriptions, categories).
+    Uses a hash of the English source to invalidate cache when copy changes.
+    """
+
+    language = models.CharField(max_length=8, db_index=True)
+    source_language = models.CharField(max_length=8, default="en")
+    source_hash = models.CharField(max_length=64, db_index=True)
+    source_text = models.TextField()
+    translated_text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("language", "source_hash")
+        indexes = [
+            models.Index(fields=["language", "source_hash"]),
+        ]
+        ordering = ["-created_at"]
 
 
 class ClientIntakeAssignmentQuerySet(models.QuerySet):
@@ -2143,6 +2223,17 @@ class Product(models.Model):
     )
     brand = models.CharField(max_length=120, blank=True)
     supplier = models.CharField(max_length=120, blank=True)
+    image = models.ImageField(
+        upload_to=product_image_upload_to,
+        blank=True,
+        null=True,
+        help_text="Visible to staff in product lists and appointment selection.",
+    )
+    image_alt_text = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Optional description for the product image; defaults to the product name.",
+    )
     cost_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -2181,6 +2272,10 @@ class Product(models.Model):
         if not self.low_stock_threshold:
             return False
         return self.quantity_in_stock <= self.low_stock_threshold
+
+    @property
+    def image_alt(self) -> str:
+        return self.image_alt_text or self.name
 
     def __str__(self):
         return self.name
@@ -2282,6 +2377,7 @@ class ProductSale(models.Model):
 
         update_fields = kwargs.get("update_fields")
         restrict_update = update_fields is not None
+        previous_appt_id = None
 
         with transaction.atomic():
             product = Product.objects.select_for_update().get(pk=self.product_id)
@@ -2293,6 +2389,7 @@ class ProductSale(models.Model):
                 product.save(update_fields=["quantity_in_stock", "updated_at"])
             else:
                 prev = type(self).objects.select_for_update().get(pk=self.pk)
+                previous_appt_id = getattr(prev, "appointment_id", None)
                 if prev.product_id != self.product_id:
                     raise ValidationError({"product": "Changing product on an existing sale is not supported."})
                 delta = self.quantity - prev.quantity
@@ -2308,12 +2405,22 @@ class ProductSale(models.Model):
 
             super().save(*args, **kwargs)
 
+            affected_appt_ids = {previous_appt_id, self.appointment_id} - {None}
+            if affected_appt_ids:
+                for appt in Appointment.objects.select_for_update().filter(pk__in=affected_appt_ids):
+                    appt.recompute_totals(save=True)
+
     def delete(self, *args, **kwargs):
+        appt_id = getattr(self, "appointment_id", None)
         with transaction.atomic():
             product = Product.objects.select_for_update().get(pk=self.product_id)
             product.quantity_in_stock += self.quantity
             product.save(update_fields=["quantity_in_stock", "updated_at"])
             super().delete(*args, **kwargs)
+            if appt_id:
+                appt = Appointment.objects.select_for_update().filter(pk=appt_id).first()
+                if appt:
+                    appt.recompute_totals(save=True)
 
     def __str__(self):
         return f"{self.product} × {self.quantity} on {timezone.localtime(self.sold_at).strftime('%Y-%m-%d')}"

@@ -373,15 +373,16 @@ body.nav-open .dashboard-backdrop {
 }
 
 .sidebar-brand .mark {
-  width: 44px;
-  height: 44px;
-  border-radius: 16px;
+  --logo-size: var(--dashboard-logo-size, 44px);
+  width: var(--logo-size);
+  height: var(--logo-size);
+  border-radius: calc(var(--logo-size) * 0.36);
   background: var(--dash-accent);
   box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 6px;
+  padding: calc(var(--logo-size) * 0.14);
   overflow: hidden;
   box-shadow: 0 22px 40px rgba(15, 63, 45, .35);
 }
@@ -393,11 +394,12 @@ body.nav-open .dashboard-backdrop {
 }
 
 .dashboard-mobile-logo {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
+  --logo-size: var(--dashboard-logo-mobile-size, var(--dashboard-logo-size, 42px));
+  width: var(--logo-size);
+  height: var(--logo-size);
+  border-radius: calc(var(--logo-size) * 0.34);
   background: var(--dash-accent);
-  padding: 6px;
+  padding: calc(var(--logo-size) * 0.14);
   display: flex;
   align-items: center;
   justify-content: center;

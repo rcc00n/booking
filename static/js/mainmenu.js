@@ -379,6 +379,10 @@
       const getLocale = () => (I18N && typeof I18N.getLocale === 'function'
         ? I18N.getLocale()
         : (navigator.languages && navigator.languages[0]) || navigator.language || 'en');
+      const getCurrentLang = () => (I18N && typeof I18N.getCurrent === 'function'
+        ? I18N.getCurrent()
+        : (document.documentElement && document.documentElement.getAttribute('lang')) || 'en');
+      const isEnglish = (lang) => !lang || lang === 'en';
       const translateServiceNameText = (name) => {
         if (!name) return '';
         if (I18N && typeof I18N.translateServiceName === 'function') {
@@ -452,6 +456,150 @@
         } catch (err) {
           console.warn('[mainmenu] Failed to parse service payload', err);
           return null;
+        }
+      };
+      const translationEndpoint = '/accounts/api/services/translations/';
+      let translationRequest = null;
+
+      const collectVisibleIds = () => {
+        const serviceIds = new Set();
+        const categoryIds = new Set();
+        document.querySelectorAll('[data-service-card]').forEach((card) => {
+          const payload = readServicePayload(card);
+          if (payload && payload.id) {
+            serviceIds.add(String(payload.id));
+          }
+          if (payload && payload.category_id) {
+            categoryIds.add(String(payload.category_id));
+          }
+        });
+        document.querySelectorAll('[data-category-id]').forEach((el) => {
+          const cid = el.getAttribute('data-category-id');
+          if (cid) {
+            categoryIds.add(cid);
+          }
+        });
+        return {
+          services: Array.from(serviceIds),
+          categories: Array.from(categoryIds),
+        };
+      };
+
+      const applyCategoryLabels = (lang, categoryTranslations) => {
+        const categoryMap = categoryTranslations || {};
+        document.querySelectorAll('[data-category-id][data-category-name-original]').forEach((el) => {
+          const cid = el.getAttribute('data-category-id');
+          const original = el.getAttribute('data-category-name-original') || el.textContent || '';
+          if (isEnglish(lang)) {
+            el.textContent = original;
+            return;
+          }
+          const translated = (cid && categoryMap[cid] && categoryMap[cid].name) ? categoryMap[cid].name : '';
+          el.textContent = translated || original;
+        });
+      };
+
+      const renderCardFromPayload = (card, payload, lang) => {
+        if (!card || !payload) return;
+        const nameEl = card.querySelector('[data-service-name-original]');
+        const descEl = card.querySelector('.service-card__desc');
+        const categoryTag = card.querySelector('[data-category-name-original]');
+
+        const localizedName = isEnglish(lang)
+          ? (payload.name || translateServiceNameText(payload.name) || translate('common.service', null, 'Service'))
+          : (payload.translated_name || translateServiceNameText(payload.name) || payload.name || translate('common.service', null, 'Service'));
+        if (nameEl) {
+          nameEl.textContent = localizedName;
+        }
+
+        if (descEl) {
+          const descSource = isEnglish(lang)
+            ? (payload.description || '')
+            : (payload.translated_description || payload.description || '');
+          descEl.textContent = descSource ? truncateWords(descSource, 16) : '';
+        }
+
+        if (categoryTag) {
+          const cid = categoryTag.getAttribute('data-category-id') || payload.category_id || '';
+          const original = categoryTag.getAttribute('data-category-name-original') || payload.category || '';
+          const translatedCategory = payload.translated_category || original;
+          categoryTag.textContent = isEnglish(lang) ? original : (translatedCategory || original);
+          if (cid) {
+            categoryTag.setAttribute('data-category-id', cid);
+          }
+        }
+      };
+
+      const applyTranslationsToDom = (lang, data) => {
+        const servicesTranslations = (data && data.services) || {};
+        const categoryTranslations = (data && data.categories) || {};
+        document.querySelectorAll('[data-service-card]').forEach((card) => {
+          const payload = readServicePayload(card);
+          if (!payload || !payload.id) return;
+          const key = String(payload.id);
+          if (isEnglish(lang)) {
+            payload.translated_name = '';
+            payload.translated_description = '';
+            payload.translated_category = '';
+          } else {
+            const entry = servicesTranslations[key] || {};
+            if (entry.name) payload.translated_name = entry.name;
+            if (entry.description) payload.translated_description = entry.description;
+            if (entry.category) payload.translated_category = entry.category;
+            if (!payload.translated_category && payload.category_id) {
+              const catEntry = categoryTranslations[payload.category_id];
+              if (catEntry && catEntry.name) {
+                payload.translated_category = catEntry.name;
+              }
+            }
+          }
+          renderCardFromPayload(card, payload, lang);
+        });
+
+        applyCategoryLabels(lang, categoryTranslations);
+        if (activeServiceDetail && activeServiceDetail.payload) {
+          hydrateServiceDetail(activeServiceDetail.payload);
+        }
+      };
+
+      const refreshTranslations = async (lang) => {
+        const targetLang = lang || getCurrentLang();
+        if (isEnglish(targetLang)) {
+          applyTranslationsToDom('en', { services: {}, categories: {} });
+          return;
+        }
+        const { services, categories } = collectVisibleIds();
+        if (!services.length && !categories.length) {
+          return;
+        }
+        const payload = JSON.stringify({
+          lang: targetLang,
+          services,
+          categories,
+        });
+        const request = fetch(translationEndpoint, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrftoken,
+          },
+          body: payload,
+        });
+        translationRequest = request;
+        try {
+          const response = await request;
+          if (!response.ok) {
+            throw new Error(`Translation request failed: ${response.status}`);
+          }
+          const data = await response.json();
+          applyTranslationsToDom(targetLang, data);
+        } catch (err) {
+          console.warn('[mainmenu] translation fetch failed', err);
+        } finally {
+          if (translationRequest === request) {
+            translationRequest = null;
+          }
         }
       };
       const formatPriceDisplay = (value) => {
@@ -1640,7 +1788,7 @@ function updateCartUI(data){
         remove.className='cart-remove';
         remove.dataset.removeId=item.id;
         const img = document.createElement('img');
-        img.src = '../static/admin/icons/delete.svg';      // path to the remove icon asset
+        img.src = '/static/admin/icons/delete.svg';        // absolute path to the remove icon asset
         img.alt = '';                                      // keep aria-label on button instead of the image
         img.width = 24;                                    // icon size
         img.height = 24;
@@ -2230,12 +2378,17 @@ async function confirmPayment(){
 
       function hydrateServiceDetail(payload){
         if (!payload) return;
-        const resolvedName = translateServiceNameText(payload.name) || payload.name || translate('common.service', null, 'Service');
+        const lang = getCurrentLang();
+        const resolvedName = isEnglish(lang)
+          ? (payload.name || translateServiceNameText(payload.name) || translate('common.service', null, 'Service'))
+          : (payload.translated_name || translateServiceNameText(payload.name) || payload.name || translate('common.service', null, 'Service'));
         if (detailName) {
           detailName.textContent = resolvedName;
         }
         const categoryFallback = translate('services.detail.unknownCategory', null, 'Uncategorized');
-        const categoryLabel = payload.category || categoryFallback;
+        const categoryLabel = isEnglish(lang)
+          ? (payload.category || categoryFallback)
+          : (payload.translated_category || payload.category || categoryFallback);
         if (detailCategory) {
           clearTextKey(detailCategory);
           detailCategory.textContent = categoryLabel;
@@ -2247,7 +2400,10 @@ async function confirmPayment(){
         if (detailDescription) {
           if (payload.description) {
             clearTextKey(detailDescription);
-            detailDescription.textContent = payload.description;
+            const descriptionText = isEnglish(lang)
+              ? payload.description
+              : payload.translated_description || payload.description;
+            detailDescription.textContent = descriptionText || payload.description || '';
           } else {
             setTextKey(detailDescription, 'services.detail.descriptionFallback');
           }
@@ -3030,7 +3186,11 @@ async function confirmPayment(){
           const ctx = activeServiceDetail;
           closeServiceDetail();
           window.setTimeout(()=>{
-            openModal(ctx.payload.id, ctx.payload.name || translate('common.service', null, 'Service'), ctx.trigger || detailBook);
+            openModal(
+              ctx.payload.id,
+              ctx.payload.translated_name || ctx.payload.name || translate('common.service', null, 'Service'),
+              ctx.trigger || detailBook
+            );
           }, 150);
         });
       }
@@ -3200,7 +3360,10 @@ async function confirmPayment(){
       function cardHTML(s){
         const hasDisc = Number.isFinite(+s.discount_percent) && +s.discount_percent > 0;
         const rawName = s.name || '';
-        const translatedName = translateServiceNameText(rawName) || rawName || translate('common.service', null, 'Service');
+        const lang = getCurrentLang();
+        const translatedName = isEnglish(lang)
+          ? (translateServiceNameText(rawName) || rawName || translate('common.service', null, 'Service'))
+          : (s.translated_name || translateServiceNameText(rawName) || rawName || translate('common.service', null, 'Service'));
         const fallbackImgLabel = translate('services.cards.noImage', null, 'Preview coming soon');
         const imageAlt = s.image_alt || rawName || translate('services.cards.imageAltFallback', null, 'Service preview');
         const imageClasses = ['service-card__img'];
@@ -3209,8 +3372,11 @@ async function confirmPayment(){
           ? `<img src=\"${escapeHtml(s.image)}\" alt=\"${escapeHtml(imageAlt)}\" loading=\"lazy\">`
           : `<span>${escapeHtml(fallbackImgLabel)}</span>`;
         const tags = [];
+        const categoryLabel = isEnglish(lang)
+          ? (s.category || '')
+          : (s.translated_category || s.category || '');
         if (s.category) {
-          tags.push(`<span class=\"service-card__tag\">${escapeHtml(s.category)}</span>`);
+          tags.push(`<span class=\"service-card__tag\" data-category-id=\"${escapeHtml(s.category_id || '')}\" data-category-name-original=\"${escapeHtml(s.category)}\">${escapeHtml(categoryLabel)}</span>`);
         }
         if (hasDisc) {
           tags.push(`<span class=\"service-card__tag service-card__tag--accent\">${translate('services.cards.tagPopular', null, 'Popular')}</span>`);
@@ -3219,14 +3385,19 @@ async function confirmPayment(){
         const priceBlock = hasDisc
           ? `<span class=\"old\">$${escapeHtml(s.base_price)}</span><strong>$${escapeHtml(s.price)}</strong><span class=\"badge\">-${escapeHtml(String(s.discount_percent))}%</span>`
           : `<strong>$${escapeHtml(s.price || s.base_price)}</strong>`;
-        const descText = truncateWords(s.description, 16);
+        const descSource = isEnglish(lang) ? (s.description || '') : (s.translated_description || s.description || '');
+        const descText = truncateWords(descSource, 16);
         const desc = descText ? `<p class=\"service-card__desc\">${escapeHtml(descText)}</p>` : '';
         const durationLabel = escapeHtml(formatMinutes(s.duration_min || 0));
         const ariaLabel = translate('services.detail.openLabel', { name: rawName }, `View details for ${rawName}`);
         const payload = {
           id: String(s.id || ''),
           name: rawName,
+          translated_name: s.translated_name || '',
+          translated_description: s.translated_description || '',
+          translated_category: s.translated_category || '',
           category: s.category || '',
+          category_id: s.category_id || '',
           description: (s.description || '').trim(),
           duration_min: Number(s.duration_min || 0),
           extra_time_min: Number(s.extra_time_min || 0),
@@ -3269,6 +3440,8 @@ async function confirmPayment(){
         const params = new URLSearchParams();
         if (q)   params.set('q', q);
         if (cat) params.set('cat', cat);
+        const lang = getCurrentLang();
+        if (!isEnglish(lang)) params.set('lang', lang);
         const queryString = params.toString();
         const url = queryString ? `/accounts/api/services/search/?${queryString}` : '/accounts/api/services/search/';
         try{
@@ -3308,6 +3481,9 @@ async function confirmPayment(){
               document.dispatchEvent(evt);
             }
             attachServiceCardBindings(liveGrid);
+          }
+          if (!isEnglish(getCurrentLang())) {
+            refreshTranslations(getCurrentLang());
           }
           queueRefresh();
         }catch(e){
@@ -3360,6 +3536,17 @@ async function confirmPayment(){
           if (servicesSection && typeof servicesSection.scrollIntoView === 'function') {
             servicesSection.scrollIntoView({behavior:'smooth', block:'start'});
           }
+        });
+      }
+      refreshTranslations(getCurrentLang());
+      if (I18N && typeof I18N.onChange === 'function') {
+        I18N.onChange((lang) => {
+          refreshTranslations(lang);
+        });
+      } else {
+        document.addEventListener('malva:lang-change', (event) => {
+          const lang = event && event.detail && event.detail.lang;
+          refreshTranslations(lang);
         });
       }
       window.DEBUG_checkoutCart = checkoutCart;

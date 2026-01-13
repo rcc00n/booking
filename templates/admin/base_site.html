@@ -150,6 +150,12 @@
                     </ul>
                 </li>
                 {% endif %}
+                <li>
+                    <a href="{% url 'admin:core_sitebranding_changelist' %}">
+                        <img src="{% static 'admin/icons/logo.png' %}" alt="Branding settings">
+                        <span class="sidebar-label">Branding</span>
+                    </a>
+                </li>
             </ul>
         </aside>
     <main class="main-content">
