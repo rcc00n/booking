@@ -1,159 +1,97 @@
-### Commands:
+<p align="center">
+  <img src="docs/assets/banner-dark.svg#gh-dark-mode-only" alt="MALVA Booking — appointments, client care and payments" width="100%">
+  <img src="docs/assets/banner-light.svg#gh-light-mode-only" alt="MALVA Booking — appointments, client care and payments" width="100%">
+</p>
 
+<p align="center">
+  <a href="#capabilities">Capabilities</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#local-development">Local development</a> ·
+  <a href="#source-map">Source map</a>
+</p>
 
-Kill the port:
+A Django booking and operations application for a salon or spa. It connects customer
+self-service, staff schedules, client intake and payment records, with a back office
+for the people running the service business.
+
+## Capabilities
+
+- **Scheduling:** services, staff and room availability, booking carts, multi-item
+  appointments, rescheduling and cancellation workflows.
+- **Client care:** customer profiles, intake assignments, documents, reviews and
+  email verification.
+- **Payments:** Stripe checkout and webhook handling, saved-card flows, staff payment
+  records, refunds, no-show handling and receipt generation.
+- **Staff operations:** role-oriented dashboards, work days, time off, service
+  assignments, product sales and reporting views.
+- **Background work:** Celery workers and scheduled tasks for operational workflows.
+- **Telegram:** a separate bot worker, subscriptions and operational commands, with
+  an optional staff assistant that requires provider configuration.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  Client[Customer portal] --> Django[Django views and APIs]
+  Staff[Staff admin] --> Django
+  Django --> DB[(PostgreSQL)]
+  Django --> Stripe[Stripe payment integration]
+  Tasks[Celery worker and scheduler] --> DB
+  Tasks --> Redis[(Redis)]
+  Bot[Telegram worker] --> DB
+  Bot --> Telegram[Telegram]
 ```
-fuser -k 8000/tcp
-```
 
-Command to activate the enviroment and install dependencies:
+| Layer | Implementation |
+| --- | --- |
+| Application | Python 3.12, Django 5.2, Django REST Framework |
+| Interface | Django templates, Jazzmin, autocomplete widgets |
+| Persistence and tasks | PostgreSQL, Redis, Celery |
+| Integrations | Stripe, Telegram, configurable email/SMS and S3 storage |
+| Documents | WeasyPrint, xhtml2pdf, receipt templates |
+
+## Local development
+
+Start from a fresh checkout with an empty local PostgreSQL database. Configure
+`SECRET_KEY` and `DATABASE_URL` using your own local values. Full setup and optional
+provider settings are in [the development guide](docs/DEVELOPMENT.md).
+
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-Command to start the server:
-```bash
-python manage.py runserver
-```
-
-Command to make migration:
-```bash
-python manage.py makemigrations
-```
-
-Command to migrate:
-```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+# Configure the local environment and empty PostgreSQL database first.
 python manage.py migrate
-```
-
-Command to add superuser to the Admin panel:
-```bash
 python manage.py createsuperuser
+python manage.py runserver 127.0.0.1:8000
 ```
 
-Pages:
+Open [the staff admin](http://127.0.0.1:8000/admin/) or
+[customer login](http://127.0.0.1:8000/accounts/login/). Create your own local user;
+this documentation provides no shared account credentials.
 
-http://127.0.0.1:8000/admin/ - admin panel login
+Payment, SMS, email, AI and Telegram providers are separately configured. Use test
+accounts and explicitly selected local recipients. The commands above are source
+entry points, not a claim of a newly verified deployment or running provider service.
 
-http://127.0.0.1:8000/accounts/login/ - general login
+## Source map
 
+| Area | Code and documentation |
+| --- | --- |
+| Project settings, routes and Celery | [booking/](booking/) |
+| Customer and staff portal | [accounts/](accounts/) |
+| Scheduling, models, payments and tasks | [core/](core/) |
+| Stripe integration | [core/payments/stripe_api.py](core/payments/stripe_api.py) |
+| Telegram worker and assistant | [telegrambot/](telegrambot/) |
+| Setup and persistent uploads | [Development](docs/DEVELOPMENT.md) |
+| Payments, webhooks and messaging | [Integrations](docs/INTEGRATIONS.md) |
 
-Test accounts:
+## Scope and licence
 
-  Admin:
-  
-    UN: Vadim
-    
-    P: 7238523qwQW!
-    
-  User:
-  
-    UN: user
-    
-P: useruser!!!
+Use a dedicated local database and configuration when working with a checkout.
+Payment and notification features require configured providers; PDF rendering also
+depends on its native system libraries. Do not treat local development defaults as
+a production security baseline.
 
-### Persistent media storage (Dokku)
-
-Uploads now live under `/app/storage/media` (configurable via `STORAGE_ROOT`, `MEDIA_ROOT`, and `STATIC_ROOT`). Mount a persistent volume in Dokku once so rebuilds no longer wipe user files:
-
-1. `dokku storage:ensure-directory malva-storage`
-2. `dokku storage:mount malva /var/lib/dokku/data/storage/malva-storage:/app/storage`
-3. `dokku ps:rebuild malva`
-
-Replace `malva`/`malva-storage` with your Dokku app name if it differs. After the mount, existing and future uploads survive deploys.
-
-### Stripe payments
-
-Add these variables to your `.env` (or environment) before running the server:
-
-```
-STRIPE_PUBLIC_KEY=pk_live_or_test
-STRIPE_SECRET_KEY=sk_live_or_test
-STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_CURRENCY=cad
-STRIPE_PAYMENT_METHOD_TYPES=card
-```
-
-Run migrations to apply the new payment fields:
-
-```
-python manage.py migrate
-```
-
-Expose the webhook endpoint when running locally, e.g. with Stripe CLI:
-
-```
-stripe listen --forward-to localhost:8000/stripe/webhook/
-```
-
-Client checkout now requires Stripe.js. The cart checkout API returns a PaymentIntent client secret; the portal will open a secure modal where the customer can finish payment.
-## Stripe Integration
-
-### Environment Variables
-Configure the following keys (e.g. in `.env`):
-
-- `STRIPE_PUBLIC_KEY`
-- `STRIPE_SECRET_KEY`
-- `STRIPE_WEBHOOK_SECRET`
-- `STRIPE_CURRENCY` (default `cad`)
-- `STRIPE_API_VERSION` (default `2024-06-20`)
-
-### Stripe CLI Webhooks
-```bash
-stripe login
-stripe listen --forward-to localhost:8000/stripe/webhook/
-```
-
-### Test Cards
-- Success: `4242 4242 4242 4242`
-- 3DS required: `4000 0027 6000 3184`
-- Insufficient funds: `4000 0000 0000 9995`
-
-### Useful cURL
-Replay a webhook event:
-```bash
-stripe events resend <event_id> --forward-to localhost:8000/stripe/webhook/
-```
-
-Charge a no-show appointment (staff session cookie required):
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -b "sessionid=<staff_session>" \
-  -d '{"appointment_id": "<uuid>"}' \
-  http://localhost:8000/accounts/api/payments/no-show/charge/
-```
-
-### Admin Pay Flow
-
-- Editing an appointment in Django Admin now shows a `Pay ▾` split button next to Save/Cancel.
-- Choose **Cash** or **E-transfer** to jump to the “Add payment” admin form with appointment, amount, and method pre-filled.
-- Choose **Credit card** or **Debit card** after taking payment on the physical terminal; this applies the 3% + $0.50 Stripe fee (stored on the appointment) so totals and receipts stay accurate while the Stripe webhook finalizes the charge.
-- Appointments created through the public cart automatically flag the card fee so online self-bookings match Stripe totals, while admin-created appointments stay fee-free until credit/debit is selected.
-
-### Telegram bot alerts
-
-1. Install dependencies and run migrations (`python manage.py migrate`) to create the Telegram tables.
-2. Configure the bot via environment variables:
-   - `TELEGRAM_BOT_TOKEN=123456:ABC` (token from BotFather)
-   - `TELEGRAM_NOTIFICATIONS_ENABLED=True`
-   - `TELEGRAM_ADMIN_PASSPHRASE=<secret>` (used with `/subscribe <secret>`)
-   - Optional safety net: `TELEGRAM_ADMIN_CHAT_IDS=12345,-67890` to force-send alerts even when no chats subscribed yet.
-3. Scale the new worker locally with `python manage.py run_telegram_bot` or on Dokku using `dokku ps:scale telegrambot=1`.
-4. The first admin who edits the Telegram bot settings becomes the owner; only the owner (or staff members listed under “Allowed admins”) can modify any bot data once it’s locked.
-5. If the original owner is unavailable, visit **Telegram bot → Recovery** in Django admin and enter `superpasswordadmintgbot137camrose1923goodbot` to transfer control to your staff account.
-6. In Telegram, run `/subscribe <secret>` from any chat that should receive alerts, `/today` for the on-demand dashboard, and `/unsubscribe` to silence a channel.
-
-### Telegram AI assistant
-
-1. Open **Admin → Telegram bot settings** and scroll to **AI assistant**.
-2. Paste your `sk-...` OpenAI API key, optionally override the model IDs, then enable the toggle. The server stores the key in the database so you no longer need to redeploy for changes.
-3. Save the form; the worker reloads the configuration the next time `/assistant` runs.
-4. In Telegram, make sure the chat is marked as admin (`/subscribe <token>`) and linked to a staff profile using `/link <email>`.
-5. Ask natural-language questions with `/assistant <prompt>` (alias `/ai`). Examples:  
-   - `/assistant Summarize today's KPIs and unpaid balances.`  
-   - `/assistant What does tomorrow's schedule look like for Anna?`  
-   - `/assistant Show payment status for appointment 54821.`  
-6. The model only runs for admin chats and never sees client conversations. `/assistant` answers always stay in English and cite which dataset they used (“Today's KPIs”, “Schedule overview”, etc.).
+The repository's existing [CC0 1.0 Universal dedication](LICENSE) is preserved.
+Bundled third-party assets retain their own licence notices.
