@@ -59,7 +59,7 @@ service. The GitHub `business-postgres` job runs the same command on its isolate
 service container; it does not deploy and requires no repository secrets.
 
 The expanded PostgreSQL suite exposed and fixes NULL-status-history filtering in
-room/master conflicts. Missing history remains active; stored records, database
+room/master conflicts and availability. Missing history remains active; stored records, database
 constraints and refund arithmetic are unchanged. The staged cancellation helper
 test no longer inserts a conflicting active row before cancellation; the existing
 unconditional database exclusion is documented in the engineering case study.

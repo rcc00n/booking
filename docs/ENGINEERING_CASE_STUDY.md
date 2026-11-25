@@ -24,8 +24,8 @@ SQLite helper test does not prove exclusion or transaction behavior.
 
 A new appointment can have no status-history row. A subquery then returns SQL
 `NULL`; applying only `NOT status = cancelled` can silently remove it from the
-availability query. Explicit `IS NULL OR NOT cancelled` predicates keep those
-appointments active. The PostgreSQL allocation and master-overlap tests caught
+availability query. Both room and master availability must retain these rows. Explicit `IS NULL OR NOT cancelled` predicates keep those
+appointments active. The PostgreSQL allocation, availability and master-overlap tests caught
 this defect when the business suite was first enabled; the fix changes neither
 stored history nor database constraints.
 
@@ -60,3 +60,11 @@ focused source checks remain separate; neither job claims all-module coverage.
 This is a supporting scheduling/commerce example. Client ownership, coauthor
 attribution and third-party licences are preserved; no production data or live
 payment demonstration is published.
+
+## Follow-up boundaries
+
+The scoped consistency review found similar negative status-subquery patterns in
+`MasterAvailability.clean`, the reminder window query and admin metrics. Those
+paths are not changed or claimed covered here; they need their own fixtures and
+behavior review. This change covers allocation, conflict validation and the
+room/master slot-availability service.
