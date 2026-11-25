@@ -20,4 +20,3 @@ modified or skipped by this setup.
 
 The GitHub workflow also checks Python syntax. It does not deploy or use repository secrets. A failing check remains a failing
 job; no passing badge or coverage percentage is asserted by this document.
-
