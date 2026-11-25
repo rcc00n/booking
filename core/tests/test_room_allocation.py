@@ -16,6 +16,7 @@ from core.models import (
     Appointment,
     AppointmentItem,
     AppointmentItemStatus,
+    AppointmentStatusHistory,
     MasterProfile,
     MasterWorkDay,
     MasterRoom,
@@ -91,6 +92,9 @@ class RoomAllocationTests(TransactionTestCase):
         appt_two = self._make_appointment(start)
 
         first_item = self._create_item(appt_one, service, master_one, start)
+        # New appointments have no appointment-status history yet. NULL history
+        # must remain active instead of disappearing from SQL overlap checks.
+        self.assertFalse(AppointmentStatusHistory.objects.filter(appointment=appt_one).exists())
         second_item = self._create_item(appt_two, service, master_two, start + timedelta(minutes=15))
 
         self.assertEqual(first_item.room, room_a)
@@ -453,8 +457,8 @@ class AppointmentAdminRoomValidationTests(ServiceRoomTestMixin, TestCase):
         )
         cancelled_item.full_clean()
         cancelled_item.save()
-        active_item.full_clean()
-        active_item.save()
+        # This helper validates staged form rows. Do not persist an overlapping
+        # active row: the database exclusion still protects the occupied room.
         cancelled_item.status = self.cancelled_status
         cancelled_item.save(update_fields=["status"])
         cancelled_item.current_status_code = "CANCELLED"

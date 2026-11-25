@@ -1912,7 +1912,10 @@ class AppointmentItem(models.Model):
             if latest_appt_status_sq is not None:
                 master_conflicts_qs = master_conflicts_qs.annotate(
                     _latest_appt_status=Subquery(latest_appt_status_sq)
-                ).exclude(_latest_appt_status__iexact="Cancelled")
+                ).filter(
+                    Q(_latest_appt_status__isnull=True)
+                    | ~Q(_latest_appt_status__iexact="Cancelled")
+                )
             if self.pk:
                 master_conflicts_qs = master_conflicts_qs.exclude(pk=self.pk)
 
@@ -2015,7 +2018,10 @@ class AppointmentItem(models.Model):
             if latest_appt_status_sq is not None:
                 qs = qs.annotate(
                     _latest_appt_status=Subquery(latest_appt_status_sq)
-                ).exclude(_latest_appt_status__iexact="Cancelled")
+                ).filter(
+                    Q(_latest_appt_status__isnull=True)
+                    | ~Q(_latest_appt_status__iexact="Cancelled")
+                )
             if self.pk:
                 qs = qs.exclude(pk=self.pk)
             return list(qs.select_related("service", "appointment", "master"))
