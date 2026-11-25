@@ -25,3 +25,8 @@ The Linux runner installs FreeType and JPEG development headers before the exist
 Python requirements. The pinned xhtml2pdf dependency builds ReportLab 3.x from
 source on Python 3.12; its native build requires those headers. This does not change
 application dependency pins or the project's Python version.
+
+The dependency build explicitly uses `-std=gnu17`: ReportLab 3.x contains C
+identifiers that conflict with the newer GNU23 default. This follows the
+[GCC compatibility guidance](https://gcc.gnu.org/gcc-15/porting_to.html#c23)
+and does not disable a test, renderer extension or compiler diagnostic.
