@@ -20,3 +20,8 @@ modified or skipped by this setup.
 
 The GitHub workflow also checks Python syntax. It does not deploy or use repository secrets. A failing check remains a failing
 job; no passing badge or coverage percentage is asserted by this document.
+
+The Linux runner installs FreeType and JPEG development headers before the existing
+Python requirements. The pinned xhtml2pdf dependency builds ReportLab 3.x from
+source on Python 3.12; its native build requires those headers. This does not change
+application dependency pins or the project's Python version.
