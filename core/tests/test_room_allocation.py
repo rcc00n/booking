@@ -16,6 +16,8 @@ from core.models import (
     Appointment,
     AppointmentItem,
     AppointmentItemStatus,
+    AppointmentStatusHistory,
+    AppointmentStatus,
     MasterProfile,
     MasterWorkDay,
     MasterRoom,
@@ -91,6 +93,9 @@ class RoomAllocationTests(TransactionTestCase):
         appt_two = self._make_appointment(start)
 
         first_item = self._create_item(appt_one, service, master_one, start)
+        # New appointments have no appointment-status history yet. NULL history
+        # must remain active instead of disappearing from SQL overlap checks.
+        self.assertFalse(AppointmentStatusHistory.objects.filter(appointment=appt_one).exists())
         second_item = self._create_item(appt_two, service, master_two, start + timedelta(minutes=15))
 
         self.assertEqual(first_item.room, room_a)
@@ -324,6 +329,52 @@ class AppointmentItemCleanTests(ServiceRoomTestMixin, TestCase):
             overlapping.full_clean()
         self.assertIn("start_time", ctx.exception.message_dict)
 
+    def test_availability_keeps_no_history_reservation_busy_for_other_master(self):
+        from core.services.booking import _room_busy_intervals, get_available_slots
+
+        self.service.allowed_rooms.set([self.room_a])
+        reserved_master = self._make_master("availability-reserved")
+        other_master = self._make_master("availability-other")
+        appointment = self._appointment(self.base_start)
+        item = self._create_item(appointment, reserved_master, self.base_start)
+        self.assertFalse(AppointmentStatusHistory.objects.filter(appointment=appointment).exists())
+
+        blocks = _room_busy_intervals([self.room_a.pk], self.base_start)
+        self.assertEqual(blocks[self.room_a.pk], [(item.start_time, item.end_time)])
+        slots = get_available_slots(self.service, self.base_start, master=other_master)
+        self.assertNotIn(self.base_start, slots[other_master.pk])
+        self.assertIn(item.end_time, slots[other_master.pk])
+
+    def test_availability_keeps_no_history_master_busy_when_another_room_is_free(self):
+        from core.services.booking import _appointment_intervals, get_available_slots
+
+        # Ensure the cancelled-status branch runs even though this appointment
+        # has no history. An unused second room must not free the occupied master.
+        AppointmentStatus.objects.get_or_create(name="Cancelled")
+        master = self._make_master("availability-master")
+        appointment = self._appointment(self.base_start)
+        item = self._create_item(appointment, master, self.base_start)
+        self.assertFalse(AppointmentStatusHistory.objects.filter(appointment=appointment).exists())
+
+        self.assertIn((item.start_time, item.end_time), _appointment_intervals(master, self.base_start))
+        slots = get_available_slots(self.service, self.base_start, master=master)
+        self.assertNotIn(self.base_start, slots[master.pk])
+        self.assertIn(item.end_time, slots[master.pk])
+
+    def test_availability_still_ignores_explicit_cancelled_history(self):
+        from core.services.booking import _appointment_intervals, _room_busy_intervals
+
+        master = self._make_master("availability-cancelled")
+        appointment = self._appointment(self.base_start)
+        item = self._create_item(appointment, master, self.base_start)
+        cancelled, _ = AppointmentStatus.objects.get_or_create(name="Cancelled")
+        AppointmentStatusHistory.objects.create(
+            appointment=appointment, status=cancelled, set_by=self.client_profile,
+        )
+
+        self.assertEqual(_appointment_intervals(master, self.base_start), [])
+        self.assertEqual(_room_busy_intervals([item.room_id], self.base_start)[item.room_id], [])
+
     def test_clean_respects_working_hours(self):
         master = self._make_master("hours-master")
         self._ensure_workweek(master, start_hour=10, end_hour=18)
@@ -453,8 +504,8 @@ class AppointmentAdminRoomValidationTests(ServiceRoomTestMixin, TestCase):
         )
         cancelled_item.full_clean()
         cancelled_item.save()
-        active_item.full_clean()
-        active_item.save()
+        # This helper validates staged form rows. Do not persist an overlapping
+        # active row: the database exclusion still protects the occupied room.
         cancelled_item.status = self.cancelled_status
         cancelled_item.save(update_fields=["status"])
         cancelled_item.current_status_code = "CANCELLED"

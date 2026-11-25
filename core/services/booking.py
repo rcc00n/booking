@@ -110,7 +110,7 @@ def _appointment_intervals(master: MasterProfile, day: datetime) -> List[Slot]:
         )
     )
     if cancelled:
-        qs = qs.exclude(last_status=cancelled.id)
+        qs = qs.filter(Q(last_status__isnull=True) | ~Q(last_status=cancelled.id))
 
     blocks: List[Slot] = []
     for item in qs:
@@ -151,7 +151,10 @@ def _room_busy_intervals(room_ids: List[int], day: datetime) -> Dict[int, List[S
         )
         .annotate(_latest_appt_status=Subquery(latest_appt_status_sq))
         .filter(Q(current_status_code__isnull=True) | ~Q(current_status_code__iexact="CANCELLED"))  # CHANGED: continue counting items lacking status history
-        .exclude(_latest_appt_status__iexact="Cancelled")
+        .filter(
+            Q(_latest_appt_status__isnull=True)
+            | ~Q(_latest_appt_status__iexact="Cancelled")
+        )
     )
 
     busy: Dict[int, List[Slot]] = {room_id: [] for room_id in room_ids}

@@ -14,6 +14,14 @@ A Django booking and operations application for a salon or spa. It connects cust
 self-service, staff schedules, client intake and payment records, with a back office
 for the people running the service business.
 
+## Review the engineering
+
+- [Scheduling and refunds case](docs/ENGINEERING_CASE_STUDY.md): half-open room
+  reservations, conflict handling and allocation of refundable payment balances.
+- [PostgreSQL business regressions](ci/README.md#postgresql-business-regressions):
+  overlap constraints, room assignment, refunds and payment/webhook contracts,
+  with mocked providers and isolated test records.
+
 ## Capabilities
 
 - **Scheduling:** services, staff and room availability, booking carts, multi-item

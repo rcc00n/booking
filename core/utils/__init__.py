@@ -57,8 +57,9 @@ def pick_free_room(service: "Service", start: datetime, end: datetime) -> "Maste
             .filter(time_overlaps_q(start, end))
         )
         if latest_appt_status_sq is not None:
-            qs = qs.annotate(_latest_appt_status=Subquery(latest_appt_status_sq)).exclude(
-                _latest_appt_status__iexact="Cancelled"
+            qs = qs.annotate(_latest_appt_status=Subquery(latest_appt_status_sq)).filter(
+                Q(_latest_appt_status__isnull=True)
+                | ~Q(_latest_appt_status__iexact="Cancelled")
             )
         qs = qs.filter(active_status_q)
 
